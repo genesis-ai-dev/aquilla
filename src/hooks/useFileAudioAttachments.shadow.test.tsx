@@ -53,6 +53,7 @@ import {
   injectOptimisticAudioAttachment,
   injectOptimisticAudioPlace,
   injectOptimisticAudioRemove,
+  injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
 
@@ -456,6 +457,72 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// 2026-09-28 (Sam, Mark 1:3): a line with no imported source clip switches to
+// its generated voice by EMPTYING the recording slot — nothing to park it on.
+describe("optimistic overlay — emptying a slot", () => {
+  it("empties the slot while queued, keeps every take listed, across stale reads", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected()) // the server still has LONG selected
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const entry = entryOf(result)
+    expect(entry?.selectedAudioId).toBeNull()
+    expect(entry?.attachments[LONG.audioId]).toBeDefined()
+    expect(entry?.attachments[SHORT.audioId]).toBeDefined()
+  })
+
+  it("a later selection in that slot wins", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    queued("evt-select")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
+  it("yields to the server once it reads the slot empty", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-deselect")
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    delivered("evt-deselect")
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: LONG, [SHORT.audioId]: SHORT } }))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBeNull()
+    // Confirmed, so it is gone: a later server selection is not overridden.
+    fetchMock.mockResolvedValue(serverShortSelected())
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
+  it("a quarantined one yields at once — the recording really is still selected", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    act(() => injectOptimisticAudioDeselect("f1", "c1", "recording", "evt-deselect"))
+    quarantined("evt-deselect")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId)
   })
 })
 

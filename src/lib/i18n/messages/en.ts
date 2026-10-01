@@ -42,6 +42,7 @@ import { billing } from "../namespaces/billing"
 import { knowledgeBase } from "../namespaces/knowledgeBase"
 import { settings } from "../namespaces/settings"
 import { agent } from "../namespaces/agent"
+import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
 import type { MessageValue } from "../plurals"
@@ -70,6 +71,7 @@ export const en = {
   ...knowledgeBase.keys,
   ...settings.keys,
   ...agent.keys,
+  ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
 } as const

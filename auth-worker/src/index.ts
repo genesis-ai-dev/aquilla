@@ -73,6 +73,9 @@ import invitesRoutes from "./routes/invites"
 import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
+import meRoutes from "./routes/me"
+import accessRoutes from "./routes/access"
+import orgAccessRoutes from "./routes/org-access"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
@@ -83,6 +86,7 @@ import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
+import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -97,6 +101,7 @@ import agentMemoryRoutes from "./routes/agent-memory"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
+import teamRoutes from "./routes/team"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
@@ -108,7 +113,8 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
-import { sweepStrandedContextualRuns } from "./routes/contextual"
+import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
+import { runReactSweep } from "./lib/react-loop"
 import {
   deploymentEnvironmentError,
   scheduledDeploymentEnvironmentError,
@@ -117,6 +123,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
@@ -242,6 +249,7 @@ app.get("/", (c) =>
       "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
       "/api/v1/ai/seams/classify",
+      "/api/v1/ai/passage-tags/classify",
     ],
   }),
 )
@@ -258,6 +266,9 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/users", accessRoutes)
+app.route("/api/v2/me", meRoutes)
+app.route("/api/v2/orgs", orgAccessRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -292,6 +303,10 @@ app.route("/api/v2/projects", contextualRoutes)
 // Decision routes — the agent → user channel's HTTP surface (seam design
 // §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
 app.route("/api/v2/projects", contextualDecisionsRoutes)
+// Durable team channel — the shared, project-scoped message store behind the
+// one-channel agent workspace (routes/team.ts). Sibling router, same base as
+// contextual.ts; the autopilot tick writes activity into it server-side.
+app.route("/api/v2/projects", teamRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
@@ -361,6 +376,11 @@ app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
 // batches a window of cell boundaries into one Jev decision call and falls back
 // to punctuation whenever the model is unavailable or unconfident.
 app.route("/api/v1/ai/seams", aiSeamsRoutes)
+// AQU-657: document-understanding tags over AQU-1387's passage spine. Same
+// session auth, same Jev batching and same heuristic fallback as the seam
+// route; answers who is in a passage, whether it opens a scene, whether it is
+// speech, and which passages it leans on.
+app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
@@ -429,6 +449,8 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // AQU-1352 P1: resolveProjectRoleShared (internal AI routes) reads the mode off this handle.
+  setAccessGrantsMode(shim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
   // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their
@@ -448,8 +470,13 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   }
 }) as typeof app.fetch
 
-// Cron (wrangler.toml [triggers], every 5 minutes): flush Monday board links
-// whose push was debounced (dirty_at set), oldest first, capped at 20 per run.
+// Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
+// of work, each isolated so one failing cannot take the others down:
+//   1. flush Monday board links whose push was debounced (dirty_at set),
+//      oldest first, capped at 20 per run;
+//   2. sweep stranded contextual runs (dead driver / parked with spans left);
+//   3. the v3 react watcher — projects with agentMode.react on react to human
+//      expert input that landed in the event log.
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
@@ -504,6 +531,22 @@ const scheduled = async (
       }
     } catch (err) {
       console.error("[contextual cron] sweep failed:", err)
+    }
+    // React watcher (v3): projects with agentMode.react on respond to human
+    // expert input landing in the event log. Same contract as the sweep above
+    // — bounded, best-effort, and NEVER allowed to fail the cron; its driver
+    // promise joins sweepDone so the shared connection outlives the runs it
+    // starts.
+    try {
+      const react = await runReactSweep(runEnv, { startRun: startReactionRun, wakeRun: wakeReactionRun })
+      const previous = sweepDone
+      sweepDone = Promise.allSettled([previous, react.done]).then(() => {})
+      if (react.reactions.length > 0) {
+        console.log(`[react cron] started ${react.reactions.length} reaction run(s)`)
+        ctx.waitUntil(react.done)
+      }
+    } catch (err) {
+      console.error("[react cron] sweep failed:", err)
     }
   } finally {
     if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))

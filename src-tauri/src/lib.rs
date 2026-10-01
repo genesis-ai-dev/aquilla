@@ -85,6 +85,7 @@ pub fn run() {
                     llm_proxy::set_llm_config,
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
+                    shutdown_guard::restart_app,
                 ]
             }
             #[cfg(not(feature = "e2e-webdriver"))]
@@ -108,6 +109,7 @@ pub fn run() {
                     llm_proxy::set_llm_config,
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
+                    shutdown_guard::restart_app,
                 ]
             }
         })

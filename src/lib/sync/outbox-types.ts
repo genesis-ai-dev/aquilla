@@ -336,7 +336,10 @@ export interface OutboxEventPayloads {
     targetLang?: string
   }
   "cell.audio.select": {
-    audioId: string
+    /** null: leave the slot with nothing selected (2026-09-28) — how a line
+     *  with no imported source clip hands its recording slot over so its
+     *  generated voice is the one that plays. */
+    audioId: string | null
     /** Scopes the sibling-deselect only; it is never written onto the row, so
      *  select cannot move a clip between slots. Open string — see attach. */
     slot: string

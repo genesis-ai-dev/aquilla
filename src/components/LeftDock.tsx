@@ -15,9 +15,8 @@
  */
 
 import {
-  useState,
+  useEffect,
   useCallback,
-  useRef,
   type ReactNode,
 } from "react"
 import {
@@ -30,6 +29,7 @@ import {
 import { cn } from "@/lib/utils"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
+import { useDockTabs } from "@/hooks/useDockTabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -75,6 +75,8 @@ export interface LeftDockProps {
   defaultTab?: DockTab
   /** Externally controlled active tab (useful for "open chat" button in header) */
   activeTab?: DockTab | null
+  /** Controlled owners retain this across responsive dock unmounts. */
+  restoreTab?: DockTab
   onActiveTabChange?: (tab: DockTab | null) => void
 }
 
@@ -186,9 +188,11 @@ export function LeftDock({
   searchPanel,
   voicesPanel,
   agentBadge,
+  defaultTab = "files",
   surfaceTab,
   onSurfaceTabToggle,
   activeTab: controlledTab,
+  restoreTab,
   onActiveTabChange,
 }: LeftDockProps) {
   const t = useT()
@@ -197,20 +201,22 @@ export function LeftDock({
 
   // ---- collapsed / expanded ------------------------------------------------
   // null = dock is collapsed (rail only), string = expanded with that tab active
-  const [internalTab, setInternalTab] = useState<DockTab | null>("files")
+  const {
+    activeTab: internalTab,
+    lastOpenTab,
+    setActiveTab: setInternalTab,
+  } = useDockTabs(controlledTab ?? defaultTab)
+  useEffect(() => {
+    if (controlledTab != null && restoreTab === undefined) setInternalTab(controlledTab)
+  }, [controlledTab, restoreTab, setInternalTab])
 
   const activeTab = controlledTab !== undefined ? controlledTab : internalTab
-  const lastOpenTabRef = useRef<DockTab>(activeTab ?? "files")
-  if (activeTab) lastOpenTabRef.current = activeTab
   const setActiveTab = useCallback(
     (t: DockTab | null) => {
-      if (onActiveTabChange) {
-        onActiveTabChange(t)
-      } else {
-        setInternalTab(t)
-      }
+      if (controlledTab === undefined) setInternalTab(t)
+      onActiveTabChange?.(t)
     },
-    [onActiveTabChange],
+    [controlledTab, onActiveTabChange, setInternalTab],
   )
 
   const isOpen = activeTab !== null
@@ -240,6 +246,8 @@ export function LeftDock({
   }
   // Only surface tabs whose panel slot is provided (Voices is conditional).
   const visibleTabs = TAB_META.filter((t) => panels[t.id] != null)
+  const rememberedTab = restoreTab ?? lastOpenTab
+  const tabToRestore = panels[rememberedTab] != null ? rememberedTab : visibleTabs[0]?.id
 
   // Collapse (when open) lives next to the logo at the top of the rail — see
   // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
@@ -251,7 +259,8 @@ export function LeftDock({
         variant="ghost"
         size="icon-sm"
         aria-label={t("nav.dock.expandSidebar")}
-        onClick={() => setActiveTab(lastOpenTabRef.current)}
+        disabled={!tabToRestore}
+        onClick={() => { if (tabToRestore) setActiveTab(tabToRestore) }}
         className="mt-3"
       >
         <PanelLeftOpen className="h-3.5 w-3.5" />

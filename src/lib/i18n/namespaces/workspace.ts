@@ -41,9 +41,9 @@ export const workspace = defineNamespace({
     "workspace.offline.conflictDismiss": "Dismiss",
     "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
     // Tauri offline mode: the local store's leader worker stopped persisting
-    // writes (src/lib/offline/leader-watchdog.ts). A reload restarts it.
-    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Reload to fix this — changes made since it started may be lost.",
-    "workspace.offline.leaderStalledReload": "Reload",
+    // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
+    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
+    "workspace.offline.leaderStalledRestart": "Restart app",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -461,6 +461,10 @@ export const workspace = defineNamespace({
 
     // -- voice/CastGutterVoice --
     "workspace.castGutterVoice.applyToAllLines": "Apply to all «{name}» lines",
+    "workspace.castGutterVoice.applyToAllLinesCount": plural({
+      one: "Apply to the {count} «{name}» line",
+      other: "Apply to all {count} «{name}» lines",
+    }),
 
     // -- hooks/useOpenWorkspace --
     "workspace.openWorkspace.openingProject": "Opening project",
@@ -538,14 +542,14 @@ export const workspace = defineNamespace({
         description:
           "Title of a persistent warning toast in the Tauri desktop app when the " +
           "on-device storage stops saving edits (its background worker died). " +
-          "Paired with a 'Reload' action (workspace.offline.leaderStalledReload). " +
+          "Paired with a 'Restart app' action (workspace.offline.leaderStalledRestart). " +
           "Two full sentences with periods. Plain language — no 'worker', 'store' " +
           "or 'sync' jargon.",
       },
-      "workspace.offline.leaderStalledReload": {
+      "workspace.offline.leaderStalledRestart": {
         description:
-          "Action button on the 'changes aren't being saved' toast; reloads the " +
-          "app window. Short imperative verb.",
+          "Action button on the 'changes aren't being saved' toast; quits and " +
+          "relaunches the desktop app. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -1961,6 +1965,15 @@ export const workspace = defineNamespace({
           "wrapped in guillemets by the template — keep some form of visual " +
           "quoting around it.",
         placeholders: { name: "The diarized/VTT speaker (character) name." },
+      },
+      "workspace.castGutterVoice.applyToAllLinesCount": {
+        description:
+          "The same checkbox label, saying how many lines in the file share the " +
+          "character and would all change (Sam, 2026-09-28). Off by default.",
+        placeholders: {
+          name: "The diarized/VTT speaker (character) name.",
+          count: "How many lines share that name; it also selects the plural form.",
+        },
       },
 
       "workspace.openWorkspace.openingProject": {

@@ -92,7 +92,9 @@ export class Dashboard {
     // org setup checklist. They all open the same create dialog, so scope to the
     // first (the header) to avoid a strict-mode violation.
     await this.page.getByRole("button", { name: /new project/i }).first().click()
-    const dialog = this.page.getByRole("dialog")
+    // By name, not bare role: AQU-1352's "Created … in …" success toast is also
+    // role="dialog", so a bare lookup matches two elements once create succeeds.
+    const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     return dialog
   }

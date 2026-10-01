@@ -8,10 +8,11 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { NavHistoryProvider } from "@/context/NavHistoryContext"
 
 const originalMatchMedia = window.matchMedia
 
@@ -67,6 +68,32 @@ function renderShell(main: React.ReactNode, initialEntries = ["/a"]) {
 }
 
 describe("AppShell main-content error containment", () => {
+  it("stacks history and footer controls in a collapsed project rail", () => {
+    render(
+      <MemoryRouter initialEntries={["/project/p1/editor"]}>
+        <I18nProvider>
+          <NavHistoryProvider>
+            <AppShell
+              logoSlot={<span>Aquilla</span>}
+              header={<div>header</div>}
+              statusBar={null}
+              leftDock={<div>dock</div>}
+              railCollapsed
+              main={<div>main</div>}
+            />
+          </NavHistoryProvider>
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole("group", { name: "Page history" })).toHaveClass("flex-col")
+    const back = screen.getByRole("button", { name: "Back" })
+    expect(back.closest("[data-slot=button-group]")).toHaveAttribute("data-orientation", "vertical")
+    const language = screen.getByRole("button", { name: "Quick language switch" })
+    expect(language.parentElement).toHaveClass("flex-col")
+    expect(language.closest('[data-slot="app-shell-sidebar-footer"]')).toHaveClass("flex-col")
+    expect(screen.getByRole("button", { name: "Copy build info" }).closest('[data-slot="app-shell-sidebar-release-row"]')).toHaveClass("max-w-full")
+  })
+
   it("renders main content normally when nothing throws", () => {
     renderShell(<div data-testid="content">hello</div>)
     expect(screen.getByTestId("content")).toBeInTheDocument()
@@ -216,10 +243,16 @@ describe("AppShell main-content error containment", () => {
     const trigger = await screen.findByRole("button", { name: "Quick language switch" })
     expect(trigger).toBeInTheDocument()
     const footer = trigger.closest('[data-slot="app-shell-sidebar-footer"]')
-    expect(footer).toHaveClass("justify-between", "px-2", "pb-2")
+    // AQU-1523: the footer stacks two rows; `justify-between` moved onto the
+    // release row that still holds build, Help and localization.
+    expect(footer).toHaveClass("flex-col", "px-2", "pb-2")
+    const utilityRow = trigger.closest('[data-slot="app-shell-sidebar-utility-row"]')
+    expect(utilityRow).toHaveClass("justify-between")
     const version = screen.getByRole("button", { name: "Copy build info" })
-    expect(version.parentElement).not.toHaveClass("flex-1")
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
+    // The build label owns its row; Help and localization are on the next one.
+    expect(version.closest('[data-slot="app-shell-sidebar-release-row"]')).not.toBeNull()
+    expect(version.closest('[data-slot="app-shell-sidebar-utility-row"]')).toBeNull()
     const help = screen.getByRole("button", { name: /help & community/i })
     expect(footer).toContainElement(help)
     expect(help.nextElementSibling).toBe(trigger)
@@ -253,7 +286,10 @@ describe("AppShell main-content error containment", () => {
     const language = await screen.findByRole("button", { name: "Quick language switch" })
     const version = screen.getByRole("button", { name: "Copy build info" })
     const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
-    expect(footer).toHaveClass("justify-between")
+    expect(footer).toHaveClass("flex-col")
+    expect(language.closest('[data-slot="app-shell-sidebar-utility-row"]')).toHaveClass(
+      "justify-between",
+    )
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
     const help = screen.getByRole("button", { name: /help & community/i })
     expect(footer).toContainElement(help)
@@ -266,6 +302,107 @@ describe("AppShell main-content error containment", () => {
     expect(homepage.closest("[data-side]")).toHaveAttribute("data-side", "top")
     expect(homepage.closest("[data-align]")).toHaveAttribute("data-align", "start")
     expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
+  })
+
+  // AQU-1523: AQU-1028's labelled Feedback button and AQU-1023's build label
+  // shared one 224px row, and the build label lost — it truncated to zero
+  // width, so a support screenshot no longer carried the release it came from.
+  it("gives Feedback its own footer row above the build/Help/language row", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={<div data-testid="status-bar">status</div>}
+            sidebar={<div data-testid="sidebar">sidebar</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    const feedback = await screen.findByRole("button", { name: "Feedback" })
+    const version = screen.getByRole("button", { name: "Copy build info" })
+    const help = screen.getByRole("button", { name: /help & community/i })
+    const language = screen.getByRole("button", { name: "Quick language switch" })
+
+    const feedbackRow = feedback.closest('[data-slot="app-shell-sidebar-feedback-row"]')
+    const releaseRow = version.closest('[data-slot="app-shell-sidebar-release-row"]')
+    const utilityRow = help.closest('[data-slot="app-shell-sidebar-utility-row"]')
+    expect(feedbackRow).not.toBeNull()
+    expect(releaseRow).not.toBeNull()
+    expect(utilityRow).not.toBeNull()
+
+    // The regression, stated as the invariant that failed the preview walk:
+    // NOTHING shares the build label's row. Feedback starved it first; with
+    // Feedback moved, the environment badge plus Help plus localization still
+    // left it 13px of fitted text. The label's row holds the label alone.
+    expect(releaseRow).not.toContainElement(feedback)
+    expect(releaseRow).not.toContainElement(help)
+    expect(releaseRow).not.toContainElement(language)
+    expect(releaseRow?.querySelectorAll("button")).toHaveLength(1)
+    // Help and localization keep each other's company one row down.
+    expect(utilityRow).toContainElement(language)
+
+    // Order: account row (end of the sidebar content) → Feedback → build label
+    // → connectivity/Help/localization.
+    const footer = feedback.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toContainElement(version)
+    expect(feedbackRow?.nextElementSibling).toBe(releaseRow)
+    expect(releaseRow?.nextElementSibling).toBe(utilityRow)
+    expect(footer?.previousElementSibling).toContainElement(screen.getByTestId("sidebar"))
+  })
+
+  // AQU-1523: the label is the row's reason to exist, so it must be allowed to
+  // use the whole width. A fixed or content-sized label would re-create the
+  // starvation the preview walk measured, just with a different culprit.
+  it("lets the build label span the whole footer width", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={null}
+            sidebar={<div data-testid="sidebar">sidebar</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    const version = await screen.findByRole("button", { name: "Copy build info" })
+    expect(version).toHaveClass("w-full", "min-w-0")
+    // Truncation stays the degradation for a narrower-than-default rail.
+    expect(version.querySelector("span")).toHaveClass("truncate")
+    // The environment badge stacks above the label rather than beside it.
+    const block = version.closest('[data-slot="version-tag"]')
+    expect(block).toHaveClass("flex-col", "w-full")
+  })
+
+  it("keeps Feedback an icon-only control in the collapsed dock rail", async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div>header</div>}
+            statusBar={null}
+            leftDock={<div data-testid="left-dock">dock</div>}
+            logoSlot={<span>logo</span>}
+            railCollapsed
+            main={<div>main</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    // Icon-only in a 40px rail, so the tooltip text carries the name.
+    const feedback = await screen.findByRole("button", {
+      name: "Send feedback to the Aquilla team",
+    })
+    const footer = container.querySelector('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toContainElement(feedback)
+    expect(footer).toHaveClass("w-10", "flex-col")
+    expect(feedback.closest('[data-slot="app-shell-sidebar-release-row"]')).toBeNull()
   })
 })
 
@@ -330,5 +467,42 @@ describe("AppShell mobile sidebar sheet", () => {
     expect(chrome).not.toHaveClass("w-10", "flex-col")
     expect(sheet.querySelector('[data-testid="left-dock"]')).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
+  })
+
+  // Mobile Agent (2026-09-30): picking a conversation from the sheet changes
+  // only ?conversation= while you are already on /agent. The sheet must still
+  // get out of the way, or the chosen conversation opens hidden under it.
+  function DockLinks() {
+    const navigate = useNavigate()
+    return (
+      <>
+        <button type="button" onClick={() => navigate("/project/p1/agent?conversation=team-chat")}>Pick Team chat</button>
+      </>
+    )
+  }
+
+  function renderDockShell() {
+    return render(
+      <MemoryRouter initialEntries={["/project/p1/agent?conversation=questions"]}>
+        <AppShell
+          header={<div data-testid="header">header</div>}
+          statusBar={null}
+          leftDock={<DockLinks />}
+          logoSlot={<span>logo</span>}
+          main={<div data-testid="content">content</div>}
+        />
+      </MemoryRouter>,
+    )
+  }
+
+  it("closes the sheet when a pick navigates by query alone", async () => {
+    stubLgUp(false)
+    renderDockShell()
+    await userEvent.click(screen.getByRole("button", { name: "Open sidebar" }))
+    const sheet = await screen.findByRole("dialog", { name: "Navigation" })
+    await userEvent.click(within(sheet).getByRole("button", { name: "Pick Team chat" }))
+    // The modal sheet hides the page from the a11y tree while open — read the
+    // trigger regardless, and assert on its expanded state.
+    expect(screen.getByRole("button", { name: "Open sidebar", hidden: true })).toHaveAttribute("aria-expanded", "false")
   })
 })

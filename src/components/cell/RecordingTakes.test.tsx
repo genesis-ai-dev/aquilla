@@ -1,0 +1,326 @@
+// The Recording tab as one job (Sam, 2026-09-29): per track, the take that
+// plays on top and the others listed under it; the programme section when no
+// take plays; a heard line's takes last, with their warning and their vote.
+
+import { describe, it, expect, beforeEach, vi } from "vitest"
+import { render, screen, within } from "@testing-library/react"
+
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 3,
+    peaks: null, peaksState: "idle",
+    play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
+    setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+  }),
+}))
+const historyReads: Array<{ enabled: boolean; cellId: string | null }> = []
+vi.mock("@/hooks/useRecordingTextDrift", () => ({
+  useRecordingTextDrift: (opts: { enabled: boolean; cellId: string | null }) => { historyReads.push(opts); return new Map() },
+}))
+vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/peaks-loader")>()),
+  loadPeaksFor: vi.fn(async () => null),
+}))
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioAttach: vi.fn(async () => "e"), emitCellAudioTrim: vi.fn(async () => "e"),
+  emitCellAudioSelect: vi.fn(async () => "e"), emitCellAudioDeselect: vi.fn(async () => "e"),
+  emitCellAudioRemove: vi.fn(async () => "e"), emitCellAudioRename: vi.fn(async () => "e"),
+  emitCellAudioValidate: vi.fn(async () => "e"), emitCellAudioUnvalidate: vi.fn(async () => "e"),
+}))
+
+import { RecordingTakes } from "./RecordingTakes"
+import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { trackHueVarsFor } from "@/lib/timeline/track-colors"
+import type { CellData } from "@/hooks/useCells"
+import type { ProjectRecord } from "@/lib/parsers/types"
+
+const project = { id: "p1", sourceLanguage: "en", targetLanguage: "es", audioMediaStrategy: "manual", files: [{ id: "f1" }] } as unknown as ProjectRecord
+const audio = (url: string, slot: string, over: Record<string, unknown> = {}) => ({ type: "audio", url, slot, durationMs: 3000, ...over })
+
+function cell(over: Partial<CellData> & { attachments: Record<string, unknown> }): CellData {
+  return { id: "c1", fileId: "f1", original: "", translated: "", ...over } as unknown as CellData
+}
+
+function draw(c: CellData, linkedTakes?: Array<{ cell: CellData; sharedWith: number }>, editable = true) {
+  render(
+    <RecordingTakes
+      project={project} cell={c} linkedTakes={linkedTakes}
+      cellText="Te he llamado por tu nombre" editable={editable} username="dir" session={{ jwt: "j", username: "dir" } as never}
+      onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+    />,
+  )
+}
+
+const REC = "audio-c1-2.wav", GEN = "audio-c1-3.wav", OLD = "audio-c1-1.wav"
+
+beforeEach(() => { historyReads.length = 0 })
+
+describe("RecordingTakes", () => {
+  it("puts the recording that plays on top and lists the other two under it — Cell 6", () => {
+    draw(cell({
+      selectedAudioId: REC, selectedGeneratedVoiceAudioId: GEN,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording", { label: "Take 1" }),
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+        [GEN]: audio("frontier-audio://3", "generatedVoice", { label: "Take 3", voiceId: "maria" }),
+      },
+    }))
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 2")
+    const others = screen.getByTestId("tab-other-takes")
+    expect(within(others).getByText("2 other takes")).toBeInTheDocument()
+    expect(within(others).getByTestId(`take-row-${GEN}`)).toBeInTheDocument()
+    expect(within(others).getByTestId(`take-row-${OLD}`)).toBeInTheDocument()
+    expect(within(others).queryByTestId(`take-row-${REC}`)).toBeNull()
+  })
+
+  // Sam, 2026-09-30: the take that plays is validated here, as from the
+  // line's audio check; the takes listed under it show theirs read-only.
+  it("takes a vote on the line's own playing take, and none from the list", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording", { label: "Take 1" }),
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+      },
+    }))
+    const playing = within(screen.getByTestId("cell-take-block")).getByTestId("audio-validation-button")
+    expect(playing.getAttribute("aria-label")).toMatch(/click to validate/i)
+    const listed = within(screen.getByTestId("tab-other-takes")).getByTestId("audio-validation-button")
+    expect(listed.getAttribute("aria-label")).not.toMatch(/click/i)
+  })
+
+  // Found 2026-09-29, walking the tab as a viewer.
+  it("lets someone who cannot edit only listen", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording", { label: "Take 1" }),
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+      },
+    }), undefined, false)
+    const listed = within(screen.getByTestId("tab-other-takes")).getByTestId(`take-row-${OLD}`)
+    expect(within(listed).getByRole("button", { name: "Use this take" })).toBeDisabled()
+    expect(within(listed).getByRole("button", { name: /delete/i })).toBeDisabled()
+    expect(screen.getByTestId("cell-take-delete")).toBeDisabled()
+  })
+
+  it("puts the generated voice on top once the recording slot is empty", () => {
+    draw(cell({
+      selectedAudioId: undefined, selectedGeneratedVoiceAudioId: GEN,
+      attachments: {
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+        [GEN]: audio("frontier-audio://3", "generatedVoice", { label: "Take 3", voiceId: "maria" }),
+      },
+    }))
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 3")
+    expect(within(screen.getByTestId("tab-other-takes")).getByTestId(`take-row-${REC}`)).toBeInTheDocument()
+  })
+
+  it("gives each track its own section, with the take that plays on each", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      selectedBySlot: { recording: REC, "trk-2": "audio-c1-t2.wav" },
+      attachments: {
+        [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }),
+        "audio-c1-t2.wav": audio("frontier-audio://t2", "trk-2", { label: "Take 1" }),
+      },
+    }))
+    expect(screen.getByTestId("rec-tab-track-target-audio")).toBeInTheDocument()
+    expect(within(screen.getByTestId("rec-tab-track-trk-2")).getByTestId("cell-take-label")).toHaveTextContent("Take 1")
+    expect(screen.getAllByTestId("cell-take-block")).toHaveLength(2)
+  })
+
+  it("shows the programme's section when no take plays on a media line", () => {
+    draw(cell({
+      selectedAudioId: "audio-f1-src.wav",
+      medium: "media", startTime: 2, endTime: 5,
+      attachments: { "audio-f1-src.wav": audio("frontier-audio://src", "recording", { role: "source", durationMs: 60000 }) },
+    } as Partial<CellData> & { attachments: Record<string, unknown> }))
+    expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Source audio")
+    expect(screen.queryByTestId("tab-other-takes")).toBeNull()
+  })
+
+  it("says nothing plays, and offers New take, when every take is set aside", () => {
+    draw(cell({
+      selectedAudioId: undefined, selectedGeneratedVoiceAudioId: undefined,
+      attachments: { [REC]: audio("frontier-audio://2", "recording", { label: "Take 2" }) },
+    }))
+    const none = screen.getByTestId("rec-tab-none-plays")
+    expect(none).toHaveTextContent("No take plays for this line")
+    expect(within(none).getByRole("button", { name: /new take/i })).toBeInTheDocument()
+    expect(within(screen.getByTestId("tab-other-takes")).getByText("1 other take")).toBeInTheDocument()
+  })
+
+  it("reads each cell's take history once, for its playing take and its list together", () => {
+    draw(cell({
+      selectedAudioId: REC,
+      attachments: {
+        [OLD]: audio("frontier-audio://1", "recording"),
+        [REC]: audio("frontier-audio://2", "recording"),
+      },
+    }))
+    const enabled = historyReads.filter((r) => r.enabled)
+    expect(new Set(enabled.map((r) => r.cellId))).toEqual(new Set(["c1"]))
+    // The list's own read stays off: it was handed the tab's.
+    expect(historyReads.some((r) => !r.enabled)).toBe(true)
+  })
+
+  it("lists a heard line's takes last, warns that others change too, and takes its vote", () => {
+    const cue = cell({
+      id: "cue-1", fileId: "cue-sib", startTime: 12.3, endTime: 14.8,
+      selectedAudioId: "audio-cue-1-a.wav",
+      attachments: {
+        "audio-cue-1-a.wav": audio("frontier-audio://a", "recording", { label: "Take 1", validators: [] }),
+        "audio-cue-1-b.wav": audio("frontier-audio://b", "recording", { label: "Take 2", validators: [] }),
+      },
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    draw(cell({ attachments: {} }), [{ cell: cue, sharedWith: 3 }])
+    expect(screen.getByTestId("cell-linked-take")).toHaveTextContent("Heard line")
+    // One warning, under the heard line's time (Sam, 2026-09-29).
+    expect(screen.getByTestId("rec-tab-shared-note")).toHaveTextContent(
+      "Also performs 2 other subtitle lines — a new or different take changes those too.",
+    )
+    // The vote is on the heard line's PLAYING take; its list shows the other
+    // take's validation read-only.
+    const playing = within(screen.getByTestId("cell-take-block")).getByTestId("audio-validation-button")
+    expect(playing.getAttribute("aria-label")).toMatch(/click to validate/i)
+    const listed = within(screen.getByTestId("tab-other-takes")).getByTestId("audio-validation-button")
+    expect(listed.getAttribute("aria-label")).not.toMatch(/click/i)
+  })
+
+  // It said "1 other subtitle lines" (Sam, 2026-09-29).
+  it("says line, not lines, when the heard line performs one other", () => {
+    const cue = cell({
+      id: "cue-1", fileId: "cue-sib", startTime: 1, endTime: 5,
+      selectedAudioId: "audio-cue-1-a.wav",
+      attachments: { "audio-cue-1-a.wav": audio("frontier-audio://a", "recording", { label: "Take 1" }) },
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    draw(cell({ attachments: {} }), [{ cell: cue, sharedWith: 2 }])
+    expect(screen.getByTestId("rec-tab-shared-note")).toHaveTextContent(
+      "Also performs 1 other subtitle line — a new or different take changes it too.",
+    )
+  })
+
+  // Sam, 2026-09-29: one subtitle line split across two heard lines — each
+  // says what it says, and the one nobody has recorded offers New take.
+  it("tells a split line's heard lines apart, and offers the unrecorded one a take", () => {
+    const onOpenRecording = vi.fn()
+    const part1 = cell({
+      id: "cue-a", fileId: "cue-sib", startTime: 3, endTime: 5.5, original: "Bring back some bread,",
+      selectedAudioId: "audio-cue-a-1.wav",
+      attachments: { "audio-cue-a-1.wav": audio("frontier-audio://a", "recording", { label: "Take 1" }) },
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    const part2 = cell({
+      id: "cue-b", fileId: "cue-sib", startTime: 5.5, endTime: 8, original: "and some milk too.",
+      attachments: {},
+    } as Partial<CellData> & { attachments: Record<string, unknown> })
+    render(
+      <RecordingTakes
+        project={project} cell={cell({ attachments: {} })}
+        linkedTakes={[{ cell: part1, sharedWith: 1, hasTake: true }, { cell: part2, sharedWith: 1, hasTake: false }]}
+        cellText="Bring back some bread, and some milk too." editable username="dir" session={{ jwt: "j", username: "dir" } as never}
+        onOpenRecording={onOpenRecording} onUseAsCellText={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByTestId("cell-linked-take-text").map((e) => e.textContent)).toEqual([
+      "“Bring back some bread,”",
+      "“and some milk too.”",
+    ])
+    const empty = screen.getByTestId("rec-tab-no-take")
+    expect(empty).toHaveTextContent("No take yet")
+    within(empty).getByRole("button", { name: /new take/i }).click()
+    expect(onOpenRecording).toHaveBeenCalledWith("cue-b")
+  })
+})
+
+// Sam, 2026-09-30, a heard line of a split line with a take on the dub track
+// and one on an added magenta track: both read "Take 1", the magenta one was
+// drawn green, its length was the file's, and it "differed by 2 words" from a
+// line with no translation.
+describe("RecordingTakes — heard lines, tracks and what a take is checked against", () => {
+  // As the workspace hands it over: the hidden cue sibling is NOT in the
+  // file list. The added track is stored on the subtitle file.
+  const dubbing = {
+    ...project,
+    files: [
+      { id: "subs", trackOverrides: { "trk-2": { kind: "audio", name: "Track", color: "magenta", order: 4, sourceTrackId: "source-audio" } } },
+    ],
+  } as unknown as ProjectRecord
+  const heard = (over: Record<string, unknown> = {}) => cell({
+    id: "cue-a", fileId: "cues", startTime: 3, endTime: 5.5, original: "Bring back some bread,",
+    selectedAudioId: "audio-cue-a-1.wav",
+    selectedBySlot: { recording: "audio-cue-a-1.wav", "trk-2": "audio-cue-a-2.wav" },
+    attachments: {
+      "audio-cue-a-1.wav": audio("frontier-audio://1", "recording", { label: "Take 1", durationMs: 1141 }),
+      "audio-cue-a-2.wav": audio("frontier-audio://2", "trk-2", { label: "Take 1", durationMs: 2560, trimStartMs: 256, trimEndMs: 2320 }),
+    },
+    ...over,
+  } as Partial<CellData> & { attachments: Record<string, unknown> })
+  function drawHeard(
+    linked: { cell: CellData; performs: string[]; partOfSplit: boolean },
+    row: CellData = cell({ id: "line-2", fileId: "subs", attachments: {}, startTime: 3 } as Partial<CellData> & { attachments: Record<string, unknown> }),
+    cellText = "Trae pan",
+    others: Record<string, { translated: string; startTime: number }> = {},
+  ) {
+    const cellStore = { getCellView: (id: string) => others[id] ?? null }
+    render(
+      <EditorActionsProvider value={{ cellStore: cellStore as never }}>
+        <RecordingTakes
+          project={dubbing} cell={row}
+          linkedTakes={[{ ...linked, sharedWith: linked.performs.length, hasTake: true }]}
+          cellText={cellText} editable username="dir" session={null}
+          onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+        />
+      </EditorActionsProvider>,
+    )
+  }
+  const blocks = () => screen.getAllByTestId("cell-take-block")
+
+  it("names each take by its track and its name, in its track's colour", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    const [main, added] = blocks()
+    expect(within(main).getByTestId("cell-take-track")).toHaveTextContent("Target audio")
+    expect(within(added).getByTestId("cell-take-track")).toHaveTextContent("Track")
+    expect(within(added).getByTestId("cell-take-label")).toHaveTextContent("Take 1")
+    // The dot wears the added track's magenta, stored on the SUBTITLE file.
+    const dot = within(added).getByTestId("cell-take-track").querySelector("span[aria-hidden]") as HTMLElement
+    const magenta = document.createElement("span")
+    magenta.style.background = trackHueVarsFor("audio", "magenta")["--tl-track-hue"]
+    expect(dot.style.background).toBe(magenta.style.background)
+  })
+
+  it("gives a trimmed take the length that plays", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    expect(within(blocks()[1]).getByTestId("cell-take-length")).toHaveTextContent("2.1s")
+  })
+
+  it("leaves a part of a split line unchecked", () => {
+    const timed = heard({ audioTimings: { "audio-cue-a-2.wav": [{ word: "some", start: 0, end: 4, t0: 1.4, t1: 1.7 }] } })
+    drawHeard({ cell: timed, performs: ["line-2"], partOfSplit: true })
+    expect(within(blocks()[1]).getByTestId("cell-take-verdict")).toHaveTextContent("Transcribed")
+  })
+
+  it("checks a heard line shared with another line against both lines' text", () => {
+    const timed = heard({
+      audioTimings: { "audio-cue-a-1.wav": [
+        { word: "Trae", start: 0, end: 4, t0: 0, t1: 0.3 },
+        { word: "pan", start: 5, end: 8, t0: 0.3, t1: 0.6 },
+        { word: "y", start: 9, end: 10, t0: 0.6, t1: 0.7 },
+        { word: "leche", start: 11, end: 16, t0: 0.7, t1: 1 },
+      ] },
+    })
+    drawHeard(
+      { cell: timed, performs: ["line-2", "line-3"], partOfSplit: false },
+      undefined,
+      "Trae pan",
+      { "line-3": { translated: "y leche", startTime: 5.5 } },
+    )
+    expect(within(blocks()[0]).getByTestId("cell-take-verdict")).toHaveTextContent("Matches the text")
+  })
+
+  it("opens on the heard line, with no empty section of the row's own above it", () => {
+    drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
+    const first = screen.getByTestId("recording-takes").firstElementChild as HTMLElement
+    expect(within(first).getByTestId("cell-linked-take")).toBeInTheDocument()
+  })
+})

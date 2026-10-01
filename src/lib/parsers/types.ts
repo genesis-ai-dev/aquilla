@@ -893,6 +893,7 @@ export function isSubtitleImportFile(
  * timeline's Source-audio row) reach it explicitly by id.
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
+export const TIMELINE_CONTENT_ROLE = "timeline-content"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -901,6 +902,11 @@ export const AUDIO_CUES_ROLE = "audio-cues"
  */
 export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
   return file?.role === AUDIO_CUES_ROLE
+}
+
+/** Internal cue files appear as tracks in their parent media timeline. */
+export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE
 }
 
 /**

@@ -70,7 +70,7 @@ Design decisions:
 | Client metadata fetch + validation | `auth-worker/src/lib/mcp-oauth/client-metadata.ts` |
 | Consent page | `src/pages/OAuthConsent.tsx` (route `/oauth/consent`) |
 | Organization consent | `src/pages/OAuthConsent.tsx` |
-| Code storage | `0118_mcp_oauth_codes.sql`, `0119_mcp_oauth_org_scope.sql` |
+| Code storage | `0124_mcp_oauth_codes.sql`, `0125_mcp_oauth_org_scope.sql` |
 
 Configuration: `MCP_OAUTH_ISSUER` on the identity worker (production
 `https://api.aquilla.app/identity`, development
@@ -110,7 +110,7 @@ production deployment manifest.
 
 ## Testing it in ChatGPT
 
-1. Deploy this branch to development (migrations `0118` and `0119` first).
+1. Deploy this branch to development (migrations `0124` and `0125` first).
 2. In ChatGPT, turn on Developer Mode (under Settings → Apps & Connectors →
    Advanced; the location varies by plan), then create an app with MCP URL
    `https://api.dev.aquilla.app/sync/api/v1/external/mcp` and OAuth

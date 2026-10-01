@@ -49,7 +49,9 @@ export interface EditorActionsContextValue {
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
+  /** Open the recorder on a line, recording onto `slot` (the main track when
+   *  absent) — the Recording tab's New take names its take's track. */
+  onOpenRecording?: (cellId: string, slot?: string) => void
   /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,
@@ -81,6 +83,12 @@ export interface EditorActionsContextValue {
     opts?: { applyToSpeaker?: boolean },
   ) => void
   /**
+   * How many lines in the file share this cast name — what the gutter
+   * picker's "Apply to all «name» lines" would change (Sam, 2026-09-28).
+   * Asked only when the picker opens, never per row per render.
+   */
+  countCastLines?: (castName: string) => number
+  /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
    * member isn't offered a guaranteed-403 validate on an out-of-scope cell.
@@ -96,6 +104,12 @@ export interface EditorActionsContextValue {
    * identity-stable in the workspace.
    */
   onTakeSaved?: (cellId: string) => void
+  /**
+   * The cell's last recording was deleted from the Recording tab (2026-09-29)
+   * — the same reset of the target row the recorder's delete triggers.
+   * Identity-stable in the workspace, like `onTakeSaved`.
+   */
+  onLastTakeRemoved?: (cellId: string) => void
   /**
    * AQU-646 stage 3f: where this row's audio actually belongs.
    *

@@ -21,13 +21,15 @@ not a micro-spec farm.
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
 | Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
 | Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including hosted Whisper admission and settlement from real client WAVs, charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
-| Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load; imported video automatically links its picture and preserves signed range playback and seeking after reload; YouTube picture plus user caption export persist across reload with unchanged original download | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
 | Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
@@ -164,6 +166,32 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- Unified Agent conversation/document/knowledge navigation and same-task
+  re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
+  The former competing Team/Chat tabs and mandatory three-pane layout are retired.
+- Unsent Agent messages, context chips, and attachment ownership across views,
+  conversations, and accounts: covered in composer draft-store and composer RTL.
+- Focused task-draft review stays on the Agent route, preserves the task language
+  lane and editor Audio/Text preference, and uses the existing contextual approval
+  transport. Navigation and approval wiring are covered in `AgentDraftReview.test.tsx`.
+- Optional paired document context uses the existing cell renderer/commit callbacks
+  in one aligned scrolling surface: covered in `AgentDocumentContext.test.tsx`.
+- Agent Team header, roster/card access, and toolbar identity across tabs:
+  covered in RTL (`TeamThreadsView.test.tsx`, `AgentWorkbench.test.tsx`)
+- Agent task message grouping, routine-activity disclosure, explicit step
+  inspection, Escape priority, and focus return: covered in RTL
+  (`TeamThreadDetail.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent pending-review/question header and links to focused task review:
+  covered in RTL (`TeamConversationHeader.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent chat options, confirmed reset, preserved applied events, and pinned
+  Team chat navigation: covered in RTL (`AgentChatOptions.test.tsx`,
+  `AgentWorkbench.test.tsx`, `AgentDockPanel.test.tsx`)
+- Workspace sidebar hide/show restoration and Agent Back navigation:
+  covered in RTL (`LeftDock.test.tsx`, `useDockTabs.test.ts`,
+  `useWorkspaceDockTabs.test.ts`, `AgentWorkbench.test.tsx`,
+  `workbench-layout.test.ts`)
+- Collapsed-rail history and footer controls: covered in RTL
+  (`NavHistoryControls.test.tsx`, `AppShell.test.tsx`)
 - The Assigned-to-me inbox never reports an answer it does not have: no
   "You have no open assignments." while the scoped read is outstanding (the org
   directory resolves asynchronously, so this is the normal cold-load path), and
@@ -214,7 +242,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
-- Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `agent/AgentModeRoute.test.tsx`).
+- Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
 - AQU-1187 scripture-catalog per-book import: an eBible / Hello AO selection spanning several books emits one source file per book, each carrying `bookCode`, so the files group into OT/NT and order canonically; a single-book selection stays one file and only gains its code. Covered at the import-contract level in `src/lib/import.scripture-books.test.ts` (asserts the real `file.create` bodies, per-book originals, and the re-import collision key) plus `group-by-corpus.test.ts`. The existing `import-ebible-persists-reload.smoke.spec.ts` fixture is a three-verse Genesis corpus, i.e. the single-book path, and stays valid unchanged. The multi-book variant needs a corpus long enough to cross a book boundary (~1.5k lines, generated from the bundled vref list) — worth adding to that spec when a runnable stack is at hand; it was not added blind.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below

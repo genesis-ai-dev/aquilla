@@ -13,6 +13,7 @@ const specs = [
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+  "e2e/specs/editor/import-media-captions.smoke.spec.ts",
   "e2e/specs/editor/comments.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
@@ -24,6 +25,23 @@ const specs = [
 ]
 
 describe("changed-file E2E impact selection", () => {
+  it("selects media publication coverage for media import contracts", () => {
+    for (const file of [
+      "src/lib/import.ts", "src/lib/import/media-cues.ts",
+      "src/components/import/MediaImportPreviewDialog.tsx",
+      "src/lib/sync/bulk-import.ts", "sync-worker/src/events/import-route.ts",
+      "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
+      "sync-worker/src/events/import-track-publication.ts",
+      "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
+      "src/lib/audio/script-alignment.ts",
+      "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
+      "src/lib/parsers/embedded-subtitles.ts", "sync-worker/src/audio.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-media-captions.smoke.spec.ts",
+      )
+    }
+  })
   it("selects billing for catalog, client, and shared-contract changes", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
@@ -39,6 +57,14 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E(["smart-tests/driver.ts"], specs).specs).toContain(
       "e2e/specs/editor/import-and-edit.smoke.spec.ts",
     )
+  })
+  it("maps imported video producers and picture resolution to the import journey", () => {
+    for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
+      "sync-worker/src/events/import-route.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
   })
   it("keeps comment coverage when its no-hover entry point changes", () => {
     expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
@@ -88,6 +114,20 @@ describe("changed-file E2E impact selection", () => {
       "sync-worker/src/events/branching-search-route.ts",
       "src/lib/sync/branching-search-read.ts",
       "src/lib/sync/branching-search-passages-read.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
+    }
+  })
+
+  it("maps the document-understanding tag layer to the AI completion journey", () => {
+    // AQU-657: tags reach a user through retrieval and few-shot selection, so a
+    // change to them must not fall through to the generic shared-runtime sentinel.
+    for (const file of [
+      "src/lib/understanding/passage-tags.ts",
+      "src/lib/understanding/passage-tag-store.ts",
+      "auth-worker/src/routes/ai-passage-tags.ts",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/ai/completion.smoke.spec.ts",

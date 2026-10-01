@@ -67,22 +67,17 @@ describe("TakesStrip — audio validation", () => {
     expect(screen.getAllByTestId("audio-validation-button")).toHaveLength(2)
   })
 
-  it("lets me vote on a take that is not the keeper", async () => {
+  // Sam, 2026-09-29 and -30: a vote is cast only on the take that plays,
+  // where it can be heard. In the recorder that is the CIRCLED take; the
+  // others show their validation read-only.
+  it("takes a vote on the circled take only", async () => {
     draw([
       take({ audioId: "a", validatorCount: 0, validators: [] }),
       take({ audioId: "b", validatorCount: 0, validators: [] }),
     ], "b")
-    await userEvent.click(screen.getAllByTestId("audio-validation-button")[0])
-    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "a" })
-  })
-
-  it("emits a vote naming that take", async () => {
-    draw([take({ audioId: "b", validatorCount: 0, validators: [] })], "b")
-    await userEvent.click(screen.getByTestId("audio-validation-button"))
+    for (const mark of screen.getAllByTestId("audio-validation-button")) await userEvent.click(mark)
     expect(emitValidate).toHaveBeenCalledTimes(1)
-    expect(emitValidate.mock.calls[0][0]).toMatchObject({
-      projectId: "p1", fileId: "f1", cellId: "c1", audioId: "b", author: "ana",
-    })
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "b" })
   })
 
   // The imported programme audio is selected in the recording slot on every
@@ -92,14 +87,19 @@ describe("TakesStrip — audio validation", () => {
     expect(screen.queryByTestId("audio-validation-button")).toBeNull()
   })
 
-  it("withdraws a vote already cast", async () => {
-    draw([take({ audioId: "b", validatorCount: 1, validators: ["ana"] })], "b")
-    await userEvent.click(screen.getByTestId("audio-validation-button"))
+  it("shows a vote already cast on a take not circled, with no way to withdraw it", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 0, validators: [] }),
+      take({ audioId: "b", validatorCount: 1, validators: ["ana"] }),
+    ], "a")
+    const marks = screen.getAllByTestId("audio-validation-button")
+    await userEvent.hover(marks[1])
     // Scoped to the popover: AppTooltip mirrors the label into a portal.
     const list = await screen.findByRole("dialog")
-    await userEvent.click(within(list).getByRole("button", { name: /remove your validation/i }))
-    expect(emitUnvalidate).toHaveBeenCalledTimes(1)
-    expect(emitUnvalidate.mock.calls[0][0]).toMatchObject({ audioId: "b" })
+    expect(within(list).getByText(/ana/)).toBeInTheDocument()
+    expect(within(list).queryByRole("button", { name: /remove your validation/i })).toBeNull()
+    await userEvent.click(marks[1])
+    expect(emitUnvalidate).not.toHaveBeenCalled()
   })
 
   // The role guard is defensive rather than decorative: a keyboard or

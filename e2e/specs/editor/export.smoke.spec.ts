@@ -106,8 +106,10 @@ test("DOCX import records its source and downloads the original structure", asyn
   await ws.waitForEditor()
   await ws.openExportDialog()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog.getByRole("heading", { name: "Export" })).toBeVisible()
+  // By exact name: AQU-1352's "Created DOCX export … in Personal" toast is also
+  // role="dialog" with a heading that contains "Export".
+  const dialog = alice.getByRole("dialog", { name: "Export", exact: true })
+  await expect(dialog.getByRole("heading", { name: "Export", exact: true })).toBeVisible()
   await expect(dialog.locator('input[type="radio"][value="docx"]')).toBeChecked()
   await expect(dialog.getByText(/no source blob recorded/i)).toHaveCount(0)
 

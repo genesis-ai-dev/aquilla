@@ -38,6 +38,8 @@ while four OPSEC passes cited it as a live mitigation.
 | `plan_units` | `rls_plan_units_project_access` | 0089 |
 | `project_settings` | `rls_project_settings_project_access` | 0034 |
 | `scene_briefs` | `rls_scene_briefs_select` / `_insert` / `_update` | 0074 |
+| `team_messages` | `rls_team_messages` | 0122 |
+| `team_threads` | `rls_team_threads` | 0122 |
 
 The 0034-family policies call `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant. The 0074-family (contextual/autopilot) policies additionally require `project_id = current_setting('app.project_id', true)` — exact-project rather than any-accessible-project.
 

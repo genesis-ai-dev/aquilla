@@ -421,7 +421,15 @@ export async function executeDraft(
     }
   }
   if (gen.empty) {
-    return { ok: true, text: `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope.` }
+    // A bare "nothing here" reads as a dead end (2026-08-28 transcript) —
+    // always hand the model a concrete next step to relay to the user.
+    return {
+      ok: true,
+      text:
+        `${gen.notice ? `${gen.notice}\n` : ""}Nothing to draft — no untranslated cells in scope. `
+        + "Suggest a next step to the user: run /check to review the existing "
+        + "translations in this scope, or pick a file that still has untranslated cells.",
+    }
   }
 
   // Stage through the SAME path as a hand emit: role floors, staleness

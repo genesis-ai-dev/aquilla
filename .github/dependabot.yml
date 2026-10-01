@@ -53,6 +53,13 @@ updates:
       - dependency-name: "@tanstack/react-table"
         update-types:
           - "version-update:semver-major"
+      # 4.3.0 bundles onnxruntime-web 1.31.0-dev, whose asyncify WASM is
+      # 25.6 MiB. Workers static assets cap each file at 25 MiB, so the bump
+      # (grouped into #927) failed every preview and deploy build with "Asset
+      # too large". Held at 4.2.0 (22.5 MiB) until the build stops emitting
+      # that file or a release brings it back under the limit.
+      # `scripts/check-app-build.ts` fails `pnpm build` if it regresses.
+      - dependency-name: "@huggingface/transformers"
 
   - package-ecosystem: npm
     directory: "/auth-worker"

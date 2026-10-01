@@ -85,6 +85,57 @@ describe("LaneCombobox", () => {
     expect(screen.queryByTestId("lane-show-archived")).not.toBeInTheDocument()
   })
 
+  // AQU-1530: the popup insets the search box with its own 4px margin and
+  // clips what overflows, so forcing the box to the popup's full width put
+  // its inline-end border and rounded corners outside the popup. These pin
+  // the shape of the dropdown chrome, which happy-dom cannot measure.
+  it("does not force the search box to the popup's full width (AQU-1530)", async () => {
+    const user = userEvent.setup()
+    renderPicker()
+    await user.click(screen.getByRole("combobox", { name: "Lane" }))
+    await screen.findByRole("option", { name: "fr" })
+
+    const popup = document.querySelector("[data-slot=combobox-content]")
+    expect(popup).not.toBeNull()
+    // The popup must not re-impose a width on the box it already margins.
+    expect(popup!.className).not.toContain("data-[slot=input-group]:w-full")
+    // ...so the box keeps its own auto width and fits inside the margins.
+    const inputGroup = popup!.querySelector("[data-slot=input-group]")
+    expect(inputGroup).not.toBeNull()
+    expect(inputGroup!.classList).toContain("w-auto")
+    expect(inputGroup!.classList).not.toContain("w-full")
+  })
+
+  it("has no divider between the search box and the lane list (AQU-1530)", async () => {
+    const user = userEvent.setup()
+    renderPicker()
+    await user.click(screen.getByRole("combobox", { name: "Lane" }))
+    await screen.findByRole("option", { name: "fr" })
+    // With no footer there is no section break anywhere in the popup.
+    expect(document.querySelectorAll("[data-slot=combobox-separator]")).toHaveLength(0)
+  })
+
+  it("keeps the footer divider, below the lane list (AQU-1530)", async () => {
+    const user = userEvent.setup()
+    renderPicker({
+      footer: () => (
+        <button type="button" data-testid="edit-target-language">
+          Change target language…
+        </button>
+      ),
+    })
+    await user.click(screen.getByRole("combobox", { name: "Lane" }))
+    await screen.findByRole("option", { name: "fr" })
+
+    const separators = document.querySelectorAll("[data-slot=combobox-separator]")
+    expect(separators).toHaveLength(1)
+    // The one that remains is the footer's — it follows the list, not the box.
+    expect(separators[0].previousElementSibling).toHaveAttribute(
+      "data-slot",
+      "combobox-list",
+    )
+  })
+
   it("footer action runs and closes the popup without selecting", async () => {
     const user = userEvent.setup()
     const onEdit = vi.fn()

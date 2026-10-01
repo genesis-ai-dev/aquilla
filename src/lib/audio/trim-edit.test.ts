@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { keptLengthSec, moveTrimEnd, moveTrimStart, sameTrim } from "./trim-edit"
+import { formatTrimTime, keptLengthSec, moveTrimEnd, moveTrimStart, sameTrim } from "./trim-edit"
 import { MIN_TARGET_LEN_SEC } from "@/lib/timeline/lane-timing"
 
 const open = { start: null, end: null }
@@ -52,5 +52,15 @@ describe("keptLengthSec / sameTrim", () => {
   it("compares to the millisecond", () => {
     expect(sameTrim({ start: 0.3, end: null }, { start: 0.3004, end: null })).toBe(true)
     expect(sameTrim({ start: 0.3, end: null }, { start: 0.31, end: null })).toBe(false)
+  })
+})
+
+describe("formatTrimTime", () => {
+  it("shows a line's time to the hundredth, so one 10ms nudge always shows", () => {
+    expect(formatTrimTime(0.52)).toBe("0:00.52")
+    expect(formatTrimTime(0.53)).toBe("0:00.53")
+    expect(formatTrimTime(62.3)).toBe("1:02.30")
+    expect(formatTrimTime(59.999)).toBe("1:00.00")
+    expect(formatTrimTime(-1)).toBe("0:00.00")
   })
 })

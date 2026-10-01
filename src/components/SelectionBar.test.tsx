@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { SelectionBar } from "./SelectionBar"
-import { emitCellValidate, emitCellUnvalidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
+import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
@@ -573,6 +573,36 @@ describe("SelectionBar — Validate recordings", () => {
     })
     expect(screen.getByRole("button", { name: /remove my audio validations/i })).toBeDisabled()
     expect(screen.getByRole("button", { name: /^validate audio/i })).toBeEnabled()
+    vi.restoreAllMocks()
+  })
+
+  // Sam, 2026-09-30: in a dubbing file the selected lines' takes live on the
+  // heard lines performing them, so a selection of subtitle lines found none
+  // and the audio buttons never appeared.
+  it("finds the takes on the heard lines performing the selected lines, once each", async () => {
+    selectBoth()
+    vi.mocked(emitCellAudioValidate).mockClear()
+    const heard = {
+      ...makeCell({ id: "cue-a" }),
+      fileId: "cue-file",
+      attachments: {
+        "take-c": { slot: "recording", role: "dub", validatorCount: 0, validators: [], recordedBy: "bob" },
+      },
+      selectedAudioId: "take-c",
+    } as unknown as CellData
+    // One heard line performing BOTH selected lines: one take, one vote.
+    const linked = new Map([
+      ["cell-1", [{ cell: heard, sharedWith: 2, hasTake: true, performs: ["cell-1", "cell-2"], partOfSplit: false }]],
+      ["cell-2", [{ cell: heard, sharedWith: 2, hasTake: true, performs: ["cell-1", "cell-2"], partOfSplit: false }]],
+    ])
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: new Map(), linkedTakesByCell: linked })
+    const button = screen.getByRole("button", { name: /^validate audio/i })
+    expect(button).toHaveTextContent("1")
+    fireEvent.click(button)
+    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    expect(emitCellAudioValidate).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "cue-file", cellId: "cue-a", audioId: "take-c",
+    }))
     vi.restoreAllMocks()
   })
 

@@ -171,7 +171,6 @@ import {
   virtualClockSeek,
 } from "@/lib/timeline/virtual-clock"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
-import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
@@ -3173,7 +3172,12 @@ export function ProjectWorkspace() {
       })
   }, [hydratedProject?.files])
 
-  const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
+  const {
+    audioCues,
+    isLoading: audioCuesLoading,
+    refresh: refreshAudioCues,
+    patchTiming: patchAudioCueTiming,
+  } = useAudioCueCells({
     projectId: project?.id ?? null,
     // AQU-1326: the cue sibling is a second whole-file read. Deferred behind
     // the first cell page so it doesn't race the editor's own stream.
@@ -3221,6 +3225,7 @@ export function ProjectWorkspace() {
     rows: cueLinkRows,
     rejected: cueLinkRejections,
     error: cueLinksError,
+    hasLoaded: cueLinksLoaded,
     setLinkLocally: setCueLinkLocally,
     refresh: refreshCueLinks,
   } = useFileCellLinks({
@@ -3249,11 +3254,19 @@ export function ProjectWorkspace() {
   // is a one-shot read — they are a transcript of a finished film and no event
   // ever edits them). Only their ATTACHMENTS are live, which is exactly what
   // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+  const { byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
   )
+  // A dubbing file's lines are performed by heard lines, whose takes arrive by
+  // three reads of their own, later than the line's own audio: the cue cells
+  // (deferred behind the first page — null until they start), their links to
+  // the subtitle lines, and their recordings. Until all three are back, a
+  // line's audio check cannot say "no audio" — it does not know yet.
+  const heardLinesLoading =
+    audioCueSibling != null &&
+    (audioCues === null || audioCuesLoading || !cueLinksLoaded || !cueAudioLoaded)
   // Dragging a take on a cue: the anchor the drag writes lands in the CUE
   // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
   // transcript, no live sync, nothing to invalidate). Without a local overlay
@@ -3640,6 +3653,12 @@ export function ProjectWorkspace() {
   const handleClearCastVoice = useCallback(
     (cell: CellData, opts?: { applyToSpeaker?: boolean }) => void timelineClearVoiceRef.current(cell, opts),
     [],
+  )
+  // The same set handleTimelineAssignVoice applies "all «name» lines" to.
+  const handleCountCastLines = useCallback(
+    (castName: string) =>
+      getActiveCells().filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName).length,
+    [getActiveCells],
   )
 
   /**
@@ -7779,11 +7798,9 @@ export function ProjectWorkspace() {
   // they've been moved off the row prop bag into EditorActionsContext. All
   // five deps are `[]`-memoized above, so this value's identity is stable —
   // the provider never forces a re-render of the table subtree.
-  // (onAssignVoice/onOpenAudioSetup stay drilled: onAssignVoice's identity is
-  // NOT stable — it closes over project/session state — and both are
-  // entangled with the still-drilled audio-lens prop cluster in EditorRow's
-  // audio section, so pulling just the callback into context wouldn't shrink
-  // that section's prop surface.)
+  // (onOpenAudioSetup stays drilled: it is entangled with the still-drilled
+  // audio-lens prop cluster in EditorRow's audio section, so pulling just the
+  // callback into context wouldn't shrink that section's prop surface.)
   // AQU-646: `ensureTargetRowForTake` is declared further down (it needs
   // `isReadOnly`), and this memo must not churn, so it goes through a ref the
   // same way the cast-assign handler above does. The context sees one identity
@@ -7791,6 +7808,12 @@ export function ProjectWorkspace() {
   const ensureTargetRowForTakeRef = useRef<(cellId: string) => void>(() => {})
   const handleTakeSaved = useCallback((cellId: string) => {
     ensureTargetRowForTakeRef.current(cellId)
+  }, [])
+  // …and its twin for a delete in the Recording tab: the reset and the
+  // cue-to-lines lookup are declared further down too.
+  const lastTakeRemovedRef = useRef<(cellId: string) => void>(() => {})
+  const handleLastTakeRemoved = useCallback((cellId: string) => {
+    lastTakeRemovedRef.current(cellId)
   }, [])
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
@@ -7874,7 +7897,9 @@ export function ProjectWorkspace() {
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
+    countCastLines: handleCountCastLines, // 2026-09-28: "Apply to all «name» lines (N)"
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
+    onLastTakeRemoved: handleLastTakeRemoved, // …and deleting its last one takes that back
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
     cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
@@ -7892,25 +7917,8 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
-  const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
-    if (!audioProject || !frontierSession) return
-    // First assign the voice to this cell in the cast
-    tts.assignCells([cellId], voiceId)
-    // Then synthesise with the newly assigned voice
-    const targetCell = getActiveCell(cellId)
-    if (!targetCell) return
-    const ok = await generateCellVoice({
-      project: audioProject,
-      cell: targetCell,
-      session: frontierSession,
-      username: currentUsername,
-      voiceId,
-      ...(activeLane ? { targetLang: activeLane } : {}),
-    })
-    if (ok) refresh()
-  }, [audioProject, frontierSession, tts.assignCells, getActiveCell, currentUsername, refresh, activeLane])
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
@@ -9623,6 +9631,11 @@ export function ProjectWorkspace() {
       audioCueCells ? [...(cueLinks.textForCue.get(cellId) ?? [])] : [cellId],
     [audioCueCells, cueLinks],
   )
+  // A take on a cue counts as work on the LINES it performs, so the reset goes
+  // to each of them — exactly as the recorder's onLastTakeRemoved does below.
+  lastTakeRemovedRef.current = (cellId: string) => {
+    for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
+  }
 
   const resolveCueReadAloud = useCallback(
     (cueCellId: string) => {
@@ -9797,7 +9810,7 @@ export function ProjectWorkspace() {
    */
   const takeCellsFor = useCallback(
     (cellId: string): readonly CellData[] => {
-      const linked = linkedTakesByCell.get(cellId)
+      const linked = linkedTakesByCell.get(cellId)?.filter((t) => t.hasTake)
       if (linked && linked.length > 0) return linked.map((t) => t.cell)
       const own = audioMergedCells.find((c) => c.id === cellId)
       return own ? [own] : []
@@ -9892,7 +9905,7 @@ export function ProjectWorkspace() {
         cell: merged,
         targetLangs: plan?.targetLangs ?? [],
         commentCount,
-        sharedTakeCount: (linkedTakesByCell.get(cellId) ?? []).filter((t) => t.sharedWith > 1).length,
+        sharedTakeCount: (linkedTakesByCell.get(cellId) ?? []).filter((t) => t.hasTake && t.sharedWith > 1).length,
       })
       if (inventory.isEmpty) {
         void handleRemoveLine(cellId)
@@ -12547,6 +12560,7 @@ export function ProjectWorkspace() {
                   activeLane={activeLane}
                   myScopes={myScopes}
                   audioByCellId={audioValidationByCellId}
+                  linkedTakesByCell={linkedTakesByCell}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
@@ -13345,6 +13359,7 @@ export function ProjectWorkspace() {
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
             linkedTakesByCell={linkedTakesByCell}
+            heardLinesLoading={heardLinesLoading}
             cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
@@ -13375,7 +13390,6 @@ export function ProjectWorkspace() {
             ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
-            onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}

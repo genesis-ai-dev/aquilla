@@ -181,6 +181,23 @@ describe("cell-audio projection", () => {
     expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-y.wav"])
   })
 
+  // 2026-09-28: a line with no imported source clip switches to its generated
+  // voice by emptying the recording slot — there is nothing to park it on.
+  it("select with no take: empties the slot and selects nothing", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.select", { audioId: null, slot: "recording" }),
+      stmts,
+    )
+    expect(touches).toEqual(["cell_audio"])
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain("SET selected = 0")
+    expect(recorded[0].sql).not.toContain("audio_id")
+    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording"])
+  })
+
   it("remove: soft-deletes and deselects", () => {
     const { db, recorded } = makeRecordingDb()
     const stmts: AquillaStatement[] = []

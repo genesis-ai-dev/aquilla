@@ -909,7 +909,7 @@ export const editor = defineNamespace({
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
     "editor.timeline.trackRename": "Rename",
-    "editor.timeline.trackColor": "Colour",
+    "editor.timeline.trackColor": "Color",
     // AQU-646 stage 7: one hue per track, picked from six swatches, so the
     // whole vocabulary of axes, weights and previews is gone with the picker.
     // A colour name and a count is all this menu says now.
@@ -917,8 +917,8 @@ export const editor = defineNamespace({
     // design — Sam is using it to craft a palette, and when the palette exists
     // this dialog and these four keys go with it.
     "editor.timeline.trackColorCount": plural({
-      one: "Colour {count} track",
-      other: "Colour {count} tracks",
+      one: "Color {count} track",
+      other: "Color {count} tracks",
     }),
     "editor.timeline.trackNewFolderFrom": "New folder from this track",
     "editor.timeline.trackNewFolderFromCount": plural({
@@ -1358,13 +1358,30 @@ export const editor = defineNamespace({
 
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
-    "editor.voice.translateFirst": "Translate to voice this line",
     "editor.voice.play": "Play this line",
     "editor.voice.clone": "Clone a voice from this take",
     "editor.voice.voicing": "Voicing…",
-    "editor.voice.clickVoiceToGenerate": "Click a voice to generate",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
+    // Sam, 2026-09-28: the Audio view card — the take, then a row with its voice.
+    "editor.voice.generateWith": "Generate · {voice}",
+    "editor.voice.generateDefaultTooltip": "Nobody chose a character for this line, so it uses the default voice",
+    "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
+    "editor.voice.generatingAs": "Generating as {voice}…",
+    "editor.voice.tryAgain": "Try again",
+    "editor.voice.failedTooltip": "Couldn’t generate: {reason}",
+    "editor.voice.removedVoice": "Removed voice",
+    "editor.voice.takeVoiceDiffers": "This take was voiced by {takeVoice}. The line’s voice is now {lineVoice}.",
+    "editor.voice.takeVoiceRemoved": "This take was voiced by a voice no longer in the project. The line’s voice is now {lineVoice}.",
+    "editor.voice.noAudioYet": "No audio yet",
+    "editor.voice.record": "Record",
+    // Sam, 2026-09-28: marks in the table header naming its narrow columns.
+    "editor.gutter.select": "Select lines for batch actions. Drag up or down the column to select a range.",
+    "editor.gutter.notices": "Notices: open comments, a changed source, lost formatting, a voice that failed",
+    "editor.gutter.verseNumber": "Verse number",
+    "editor.gutter.cellNumber": "Cell number",
+    "editor.gutter.textChecks": "Text validation",
+    "editor.gutter.audioChecks": "Audio validation",
 
     // — Rich-text editor: formatting bubble, conflict banner, IDML guards ——
     "editor.format.bold": "Bold",
@@ -1433,6 +1450,8 @@ export const editor = defineNamespace({
     "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
     "editor.audioValidation.noAudioTooltip": "No audio to validate",
     "editor.audioValidation.ariaNoAudio": "No audio to validate — {ref}.",
+    "editor.audioValidation.checkingTooltip": "Checking for audio…",
+    "editor.audioValidation.ariaChecking": "Checking for audio — {ref}.",
     "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
     "editor.audioValidation.ariaValidated":
       "Audio validated — {ref}. Click to remove your validation.",
@@ -1459,9 +1478,14 @@ export const editor = defineNamespace({
       other: "{count} more validators needed",
     }),
     "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.notRecorded": "Not recorded yet",
+    "editor.audioValidation.partNotRecordedTooltip": "Part of this line is not recorded yet",
+    "editor.audioValidation.ariaPartUnrecorded": "Part of this line is not recorded yet — {ref}.",
     "editor.audioValidation.generatedTake": "Generated voice",
     "editor.audioValidation.defaultTrack": "Main",
-    "editor.audio.addedTrackTakeHint": "Take on an added track",
+    "editor.audioValidation.readOnlyNote": "Only the take that plays for the line can be validated",
+    "editor.audioValidation.readOnlyNone":
+      "Nobody has validated this take. Only the take that plays for the line can be validated.",
 
     // — Row chrome: numbering, selection, paragraph and timing markers ——
     "editor.row.noTimingAria": "No specific timing — ordered by sequence",
@@ -1500,8 +1524,8 @@ export const editor = defineNamespace({
 
     // — Table header, lane switcher and whole-file empty states ——————
     "editor.column.controls": "Controls",
-    "editor.audioLens.trackColorAria": "Audio colour for this file: {color}",
-    "editor.audioLens.trackColorLabel": "Audio colour for this file",
+    "editor.audioLens.trackColorAria": "Audio color: {color}",
+    "editor.audioLens.trackColorLabel": "Audio color",
     "editor.lane.activeAria": "Active translation lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
@@ -1644,19 +1668,35 @@ export const editor = defineNamespace({
 
     // — Expansion tab: recording ————————————————————————————————
     "editor.expansion.recording": "Recording",
-    "editor.voice.synthesizeWith": "Synthesize with {name}",
-    "editor.voice.dropToSynthesize": "Drop to synthesize",
-    "editor.audio.reRecordShort": "Re-record",
     "editor.cell.transcribeShort": "Transcribe",
-    "editor.voice.aiGeneratedHint":
-      "AI generated voice. Drag a voice from the toolbar to regenerate, or:",
-    "editor.audio.recordOver": "Record over",
-    "editor.audio.noAudioYet":
-      "No audio yet. Record below, or drag a voice onto this cell from the " +
-      "toolbar above.",
+    "editor.audio.noAudioYet": "No audio yet.",
     "editor.audio.recordShort": "Record",
     "editor.audio.heardLineAt": "Heard line · {range}",
-    "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
+    "editor.audio.heardLineShared": plural({
+      one: "Also performs {count} other subtitle line — a new or different take changes it too.",
+      other: "Also performs {count} other subtitle lines — a new or different take changes those too.",
+    }),
+
+    // — Recording tab: the take that plays, and the others (2026-09-29) ————
+    "editor.recordingTab.newTake": "New take",
+    "editor.recordingTab.newTakeTooltip": "Open the recorder to record, upload or generate a take",
+    "editor.recordingTab.otherTakes": plural({
+      one: "{count} other take",
+      other: "{count} other takes",
+    }),
+    "editor.recordingTab.matches": "Matches the text",
+    "editor.recordingTab.differs": plural({
+      one: "{count} word differs",
+      other: "{count} words differ",
+    }),
+    "editor.recordingTab.stale": "Transcript out of date",
+    "editor.recordingTab.notTranscribed": "Not transcribed",
+    "editor.recordingTab.transcribedOnly": "Transcribed",
+    "editor.recordingTab.noTextToCompare": "No text to compare",
+    "editor.recordingTab.addedTrack": "Added track",
+    "editor.recordingTab.sourceSection": "Source audio",
+    "editor.recordingTab.noTakeYet": "No take yet",
+    "editor.recordingTab.nonePlays": "No take plays for this line. Use one below, or make a new one.",
 
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
@@ -4939,12 +4979,6 @@ export const editor = defineNamespace({
           "Screen-reader name of the volume slider itself, inside that popover. " +
           "Distinct from common.volume so the two do not read identically.",
       },
-      "editor.voice.translateFirst": {
-        description:
-          "Italic hint shown in place of the voice panel when the cell has no " +
-          "translation yet: there is nothing to speak. 'Voice' is a verb here — " +
-          "produce spoken audio for this line.",
-      },
       "editor.voice.play": {
         description:
           "Tooltip and screen-reader name of the round play button over the " +
@@ -4965,11 +4999,114 @@ export const editor = defineNamespace({
           "'to voice'. Rendered as small as 9px, so keep it very short.",
         maxLength: 12,
       },
-      "editor.voice.clickVoiceToGenerate": {
+      "editor.voice.generateWith": {
         description:
-          "Hint above the cast picker when the line has a translation but no audio " +
-          "yet: choosing a voice immediately synthesizes it. Explains that the " +
-          "picker is also the action.",
+          "Button on an Audio view line that has no audio yet: synthesizes the line in " +
+          "the named voice (the line's character, or the project's default voice).",
+        placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
+        maxLength: 32,
+      },
+      "editor.voice.generateDefaultTooltip": {
+        description:
+          "Tooltip on that Generate button when nobody has chosen a character for the " +
+          "line, so it will use the project's default voice.",
+      },
+      "editor.voice.nothingToReadTooltip": {
+        description:
+          "Tooltip on the greyed-out Generate button when the line has no translation " +
+          "yet: there are no words to synthesize. Says what to do.",
+      },
+      "editor.voice.generatingAs": {
+        description:
+          "Status in an Audio view line's empty slot while its voice is being " +
+          "synthesized, naming the voice.",
+        placeholders: { voice: "The voice's display name." },
+        maxLength: 32,
+      },
+      "editor.voice.tryAgain": {
+        description:
+          "Button that retries synthesizing a line's voice after it failed. Its " +
+          "tooltip gives the reason.",
+        maxLength: 14,
+      },
+      "editor.voice.failedTooltip": {
+        description:
+          "Tooltip on that Try again button: why the last attempt to synthesize the " +
+          "line's voice failed.",
+        placeholders: { reason: "The error message from the voice service." },
+      },
+      "editor.voice.removedVoice": {
+        description:
+          "Small tag on a generated (synthetic) voice's waveform in the Audio view, " +
+          "where the tag normally shows the name of the voice the take was made in: " +
+          "that voice has since been removed from the project.",
+        maxLength: 16,
+      },
+      "editor.voice.takeVoiceDiffers": {
+        description:
+          "Tooltip on a small tag on a generated (synthetic) voice's waveform, shown " +
+          "when the take was made in a different voice from the one the line now has " +
+          "(choosing a voice for a line does not regenerate its audio).",
+        placeholders: {
+          takeVoice: "The name of the voice the take was made in (e.g. 'Mary').",
+          lineVoice: "The name of the voice the line now has (e.g. 'Juan').",
+        },
+      },
+      "editor.voice.takeVoiceRemoved": {
+        description:
+          "The same tooltip when the voice the take was made in has since been removed " +
+          "from the project.",
+        placeholders: { lineVoice: "The name of the voice the line now has (e.g. 'Juan')." },
+      },
+      "editor.voice.noAudioYet": {
+        description:
+          "Shown in an Audio view line's empty slot to someone who can't generate or " +
+          "record: the line has no audio.",
+        maxLength: 24,
+      },
+      "editor.voice.record": {
+        description:
+          "Button in an Audio view line's empty slot that opens the recorder on this " +
+          "line. Imperative verb.",
+        maxLength: 14,
+      },
+      "editor.gutter.select": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above the narrow " +
+          "column of per-line select boxes at the far left. Selected lines get batch " +
+          "actions (such as voicing several lines together); dragging along the " +
+          "column selects several at once.",
+      },
+      "editor.gutter.notices": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above a narrow " +
+          "column that is usually empty and shows an icon when a line has one of " +
+          "these: an open comment, source text that changed since translation, " +
+          "formatting lost on import, or a synthetic voice that failed to generate.",
+      },
+      "editor.gutter.verseNumber": {
+        description:
+          "Tooltip on a small mark (#) in the editing table's header, above the column " +
+          "of numbers, when those numbers are Bible verse numbers.",
+        maxLength: 24,
+      },
+      "editor.gutter.cellNumber": {
+        description:
+          "Tooltip on the same mark when the numbers simply count the cells (the " +
+          "rows of the table) rather than being Bible verse numbers.",
+        maxLength: 24,
+      },
+      "editor.gutter.textChecks": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above the " +
+          "text-validation column; the column beside it is audio validation.",
+        maxLength: 24,
+      },
+      "editor.gutter.audioChecks": {
+        description:
+          "Tooltip on a small mark in the editing table's header, above the " +
+          "audio-validation column, beside text validation.",
+        maxLength: 24,
       },
       "editor.voice.choose": {
         description:
@@ -5337,6 +5474,20 @@ export const editor = defineNamespace({
           ref: "The cell's reference or fallback row number. Do not translate.",
         },
       },
+      "editor.audioValidation.checkingTooltip": {
+        description:
+          "Tooltip on the grey pulsing placeholder in a line's audio-validation slot " +
+          "while the file's recordings are still loading. It is not yet known whether " +
+          "the line has audio. Not an error.",
+      },
+      "editor.audioValidation.ariaChecking": {
+        description:
+          "Screen-reader label for the placeholder shown while a line's recordings are " +
+          "still loading. {ref} is the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
       "editor.audioValidation.ownRecordingTooltip": {
         description:
           "Tooltip when the viewer recorded this take themselves and the project has " +
@@ -5421,18 +5572,48 @@ export const editor = defineNamespace({
         description: "Shown for a take in the popover that nobody has validated yet.",
         maxLength: 36,
       },
+      "editor.audioValidation.notRecorded": {
+        description:
+          "In the list of who validated a line's audio, under one heard line (in dubbing, one " +
+          "recorded performance of part of a subtitle line) that nobody has recorded yet, so " +
+          "there is nothing of it to validate.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.partNotRecordedTooltip": {
+        description:
+          "Tooltip on a line's audio validation check when the line is performed as several " +
+          "heard lines (dubbing) and at least one of them has not been recorded, so the line " +
+          "cannot be fully validated yet.",
+        maxLength: 60,
+      },
+      "editor.audioValidation.ariaPartUnrecorded": {
+        description:
+          "Screen-reader label for a line's audio validation check when part of the line (one " +
+          "of the heard lines performing it, in dubbing) has not been recorded yet. {ref} is " +
+          "the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.readOnlyNote": {
+        description:
+          "Foot of the list of who validated a take, in lists of a line's takes (the " +
+          "recorder's takes list, the Recording tab). Says why nobody can vote there: a " +
+          "vote can only be cast on the take that currently plays for the line. A " +
+          "statement, not an instruction.",
+        maxLength: 60,
+      },
+      "editor.audioValidation.readOnlyNone": {
+        description:
+          "Tooltip on the validation mark of a take in a list of a line's takes when nobody " +
+          "has validated it. First says that, then why it cannot be validated from the list: " +
+          "only the take that currently plays for the line can be.",
+      },
       "editor.audioValidation.generatedTake": {
         description:
           "Labels a take in the popover that was produced by text-to-speech rather than " +
           "recorded by a person. Such takes are never validated automatically.",
         maxLength: 20,
-      },
-      "editor.audio.addedTrackTakeHint": {
-        description:
-          "Header over a take in the Recording tab that lives on an extra "
-          + "target-audio track rather than the line's main track, when the take "
-          + "has no name of its own.",
-        maxLength: 30,
       },
       "editor.audioValidation.defaultTrack": {
         description:
@@ -5618,8 +5799,8 @@ export const editor = defineNamespace({
       },
       "editor.audioLens.trackColorLabel": {
         description:
-          "Small heading at the top of that colour menu, above the six colour names. " +
-          "Says the choice applies to the whole file's audio, not to one line.",
+          "Small heading at the top of that colour menu, above six colour swatches " +
+          "(no names). The colour chosen applies to the whole file's audio.",
         maxLength: 32,
       },
       "editor.lane.activeAria": {
@@ -6212,53 +6393,16 @@ export const editor = defineNamespace({
           "narrow screens.",
         maxLength: 18,
       },
-      "editor.voice.synthesizeWith": {
-        description:
-          "Label inside the drop zone while a voice from the cast toolbar is being " +
-          "dragged over the cell: releasing synthesizes this line in that voice. " +
-          "Imperative.",
-        placeholders: {
-          name:
-            "The dragged voice's own name from the project's cast — user data, so " +
-            "never translate the substituted value.",
-        },
-      },
-      "editor.voice.dropToSynthesize": {
-        description:
-          "The same drop-zone label when the dragged voice cannot be named. " +
-          "Imperative: describes the release gesture and its result.",
-        maxLength: 26,
-      },
-      "editor.audio.reRecordShort": {
-        description:
-          "Small button in the recording tab that re-opens the recording modal to " +
-          "replace the existing take. The short form of editor.cell.reRecord, for a " +
-          "narrow row of buttons.",
-        maxLength: 16,
-      },
       "editor.cell.transcribeShort": {
         description:
-          "Small button in the recording tab that runs speech-to-text on the take. " +
-          "The short form of editor.cell.transcribe, without naming the model.",
+          "Link in the recording tab, after 'Not transcribed', that runs speech-to-text " +
+          "on the take. The short form of editor.cell.transcribe, without naming the model.",
         maxLength: 16,
-      },
-      "editor.voice.aiGeneratedHint": {
-        description:
-          "Line above the buttons in the recording tab when the cell's audio is " +
-          "synthetic. Two parts: what this audio is, then how to change it. The " +
-          "trailing colon leads into the button beside it, so keep it.",
-      },
-      "editor.audio.recordOver": {
-        description:
-          "Small button offering to replace a synthesized voice with a real human " +
-          "recording. Imperative; 'over' carries the replacing sense.",
-        maxLength: 18,
       },
       "editor.audio.noAudioYet": {
         description:
-          "Empty state of the recording tab, offering the two ways to get audio: " +
-          "record it, or drag a synthetic voice onto the cell. 'Below' and 'above' " +
-          "refer to the button under this text and the cast toolbar over the table.",
+          "Empty state of the recording tab: the line has no audio of any kind yet. " +
+          "The Record button under it opens the recorder.",
       },
       "editor.audio.recordShort": {
         description:
@@ -6279,11 +6423,93 @@ export const editor = defineNamespace({
       "editor.audio.heardLineShared": {
         description:
           "Warning under a heard line's recording when that one performance " +
-          "also covers other subtitle lines, so re-recording it changes them " +
-          "as well. Only shown when the count is at least one.",
+          "also covers other subtitle lines, so recording a new take or choosing " +
+          "another of its takes changes them as well. Count-governed; only shown " +
+          "when the count is at least one.",
         placeholders: {
           count: "How many OTHER subtitle lines this heard line performs (never zero).",
         },
+      },
+      "editor.recordingTab.newTake": {
+        description:
+          "Button in the Recording tab that opens the recorder, where a new take is " +
+          "recorded, uploaded or generated. 'Take' as in one recording of a line.",
+        maxLength: 14,
+      },
+      "editor.recordingTab.newTakeTooltip": {
+        description: "Tooltip of the New take button: what the recorder it opens can do.",
+      },
+      "editor.recordingTab.otherTakes": {
+        description:
+          "Heading over the list of a line's takes other than the one that plays, in " +
+          "the Recording tab. Count-governed.",
+        placeholders: { count: "How many other takes the line has. Always 1 or more here." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.matches": {
+        description:
+          "Beside a take in the Recording tab: the words heard in the recording (from its " +
+          "transcript) are the line's text, ignoring case and punctuation.",
+        maxLength: 24,
+      },
+      "editor.recordingTab.differs": {
+        description:
+          "Beside a take in the Recording tab: the words heard in the recording differ from " +
+          "the line's text by this many words (added, dropped or changed). Count-governed.",
+        placeholders: { count: "How many words differ. Always 1 or more." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.stale": {
+        description:
+          "Beside a take in the Recording tab: the take was transcribed before the line's " +
+          "text was edited, so its transcript no longer lines up and should be redone.",
+        maxLength: 26,
+      },
+      "editor.recordingTab.notTranscribed": {
+        description:
+          "Beside a take in the Recording tab: nobody has transcribed it yet, so there is " +
+          "nothing to compare with the text. May be followed by a Transcribe link.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.transcribedOnly": {
+        description:
+          "Beside a take in the Recording tab that has been transcribed but cannot be checked " +
+          "against any text: a heard line (in dubbing, one recorded performance) that says only " +
+          "one part of a subtitle line split across several, so which words it should say is " +
+          "not known.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.noTextToCompare": {
+        description:
+          "Beside a transcribed take in the Recording tab when the line has no translation yet, " +
+          "so there is nothing to compare what the take says with.",
+        maxLength: 26,
+      },
+      "editor.recordingTab.addedTrack": {
+        description:
+          "Name of an audio track a take sits on, when the track has no name this version of " +
+          "the app can read (added by a newer version). Shown before the take's own name, " +
+          "e.g. 'Added track · Take 1'.",
+        maxLength: 20,
+      },
+      "editor.recordingTab.nonePlays": {
+        description:
+          "In the Recording tab, when the line has takes but none of them is chosen to play. " +
+          "Points to the list of takes below (each has a button to use it) and to the New " +
+          "take button beside this text.",
+      },
+      "editor.recordingTab.noTakeYet": {
+        description:
+          "In the Recording tab, under a heard line (one recorded performance of part of a " +
+          "subtitle line, in dubbing) that nobody has recorded yet. A New take button sits " +
+          "beside it.",
+        maxLength: 24,
+      },
+      "editor.recordingTab.sourceSection": {
+        description:
+          "Name shown on the audio at the top of the Recording tab when what plays for the " +
+          "line is its section of the imported programme audio, not a take anyone made.",
+        maxLength: 20,
       },
       "editor.expansion.issues": {
         description:

@@ -16,7 +16,7 @@ import { Pause, Play, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { WaveformRect, type WaveformEdge } from "@/components/audio/WaveformRect"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
-import { TRIM_NUDGE_COARSE_SEC, TRIM_NUDGE_SEC } from "@/lib/audio/trim-edit"
+import { TRIM_NUDGE_COARSE_SEC, TRIM_NUDGE_SEC, formatTrimTime } from "@/lib/audio/trim-edit"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -130,7 +130,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
         key: `cut-${idx}`,
         at: cut / duration,
         label: t("audio.boundaryEditor.dividerLabel", { index: idx + 1 }),
-        valueText: fmt(cut),
+        valueText: formatTrimTime(cut),
         editable: true,
         onDrag: (f: number) => moveCutTo(idx, f * duration),
         onNudge: (dir: -1 | 1, coarse: boolean) =>

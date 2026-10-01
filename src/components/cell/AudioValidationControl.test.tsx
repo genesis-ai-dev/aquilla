@@ -100,6 +100,31 @@ describe("the readout", () => {
     expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
   })
 
+  // Sam, 2026-10-01 (the 3G pass): while the line's recordings are still
+  // being read, an empty set is not "no audio". The slot pulses in the app's
+  // skeleton style instead — not a button, and saying what it waits for.
+  it("holds a placeholder, not the faded mic, while the recordings are being read", () => {
+    draw([], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    const placeholder = screen.getByTestId("audio-validation-checking")
+    expect(placeholder.tagName).toBe("SPAN")
+    expect(placeholder).toHaveAccessibleName(/checking for audio/i)
+    expect(placeholder.querySelector("[data-slot=skeleton]")).not.toBeNull()
+  })
+
+  it("holds the placeholder even over takes it already knows, so no count changes under it", () => {
+    draw([take({ audioId: "a" })], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.getByTestId("audio-validation-checking")).toBeInTheDocument()
+  })
+
+  it("ignores it inline, where it only ever stands beside a take", () => {
+    draw([take({ audioId: "a" })], { checking: true, variant: "inline" })
+    expect(button()).not.toBeNull()
+    expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
+  })
+
   // Sam, 2026-09-21: on a second account, a line somebody else had already
   // validated looked exactly like one nobody had touched. The text control
   // fills its circle for that state; this one only stepped the grey, which is
@@ -438,5 +463,95 @@ describe("the optimistic vote retires when the server answers", () => {
     // …then somewhere else I withdraw it, and the server says so.
     draw2([take({ audioId: "a" })])
     expect(button()).toHaveAccessibleName(/not validated/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Read-only in lists of takes (Sam, 2026-09-29): a vote is cast only on the
+// take that plays, from the line's audio check, because that is the take you
+// can hear. Every other list shows the votes and takes none.
+// ---------------------------------------------------------------------------
+
+describe("read-only", () => {
+  it("draws the same state, and a press casts nothing", async () => {
+    const { onValidationChange } = draw([take({ audioId: "a" })], { readOnly: true })
+    expect(button()).toHaveAccessibleName("Audio not validated — GEN 1:1.")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("says why there is nothing to click on a take nobody has validated", async () => {
+    draw([take({ audioId: "a" })], { readOnly: true })
+    await userEvent.hover(button()!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Nobody has validated this take. Only the take that plays for the line can be validated.",
+    )
+  })
+
+  it("lists who validated, with no way to withdraw, and says why at the foot", async () => {
+    const { onValidationChange } = draw(
+      [take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] })],
+      { readOnly: true, validationRequirement: 2 },
+    )
+    expect(button()).toHaveAccessibleName("Audio validated — GEN 1:1.")
+    expect(button()).not.toHaveAttribute("aria-pressed")
+    await userEvent.hover(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).getByText("bo")).toBeInTheDocument()
+    expect(within(list).queryByRole("button", { name: /remove your validation/i })).toBeNull()
+    expect(within(list).getByTestId("audio-validation-blocked-note"))
+      .toHaveTextContent("Only the take that plays for the line can be validated")
+    await userEvent.click(button()!)
+    expect(onValidationChange).not.toHaveBeenCalled()
+  })
+
+  it("never offers to validate a take from the list", async () => {
+    draw([
+      take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "b", slot: "track-2", validatorCount: 1, validators: ["bo"] }),
+    ], { readOnly: true, validationRequirement: 2 })
+    await userEvent.hover(button()!)
+    const list = await screen.findByRole("dialog")
+    expect(within(list).queryByRole("button", { name: /validate this take/i })).toBeNull()
+  })
+})
+
+// Sam, 2026-09-30: a line split across heard lines, one recorded and one not.
+// The unrecorded part is in the set but is not a take.
+describe("AudioValidationControl — a part of the line not yet recorded", () => {
+  const missing = take({
+    audioId: "unrecorded:cue-b",
+    label: "“and some milk too.”",
+    canValidate: false,
+    blockedReason: "Part of this line is not recorded yet",
+    unrecorded: true,
+  })
+
+  it("never reads fully validated while a part is silent", () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] }), missing])
+    // Validated by me at a threshold of one would be the double check; with a
+    // part missing it is the single one, and the label says why.
+    expect(button()).toHaveAttribute("aria-label", "Part of this line is not recorded yet — GEN 1:1.")
+    expect(fraction()).toBeNull()
+  })
+
+  it("votes on the recorded part only, and counts only it", async () => {
+    const user = userEvent.setup()
+    const { onValidationChange } = draw([
+      take({ audioId: "a" }),
+      take({ audioId: "b" }),
+      missing,
+    ])
+    expect(fraction()).toHaveTextContent("0/2")
+    await user.click(button()!)
+    expect(onValidationChange.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"])
+  })
+
+  it("names the missing part in the list", async () => {
+    const user = userEvent.setup()
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], label: "“Bring back some bread,”" }), missing])
+    await user.hover(button()!)
+    const list = await screen.findByText("“and some milk too.”", {}, { timeout: 2000 })
+    expect(within(list.closest("li")!).getByTestId("audio-validation-unrecorded")).toHaveTextContent("Not recorded yet")
   })
 })

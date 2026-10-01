@@ -461,6 +461,10 @@ export const workspace = defineNamespace({
 
     // -- voice/CastGutterVoice --
     "workspace.castGutterVoice.applyToAllLines": "Apply to all «{name}» lines",
+    "workspace.castGutterVoice.applyToAllLinesCount": plural({
+      one: "Apply to the {count} «{name}» line",
+      other: "Apply to all {count} «{name}» lines",
+    }),
 
     // -- hooks/useOpenWorkspace --
     "workspace.openWorkspace.openingProject": "Opening project",
@@ -1961,6 +1965,15 @@ export const workspace = defineNamespace({
           "wrapped in guillemets by the template — keep some form of visual " +
           "quoting around it.",
         placeholders: { name: "The diarized/VTT speaker (character) name." },
+      },
+      "workspace.castGutterVoice.applyToAllLinesCount": {
+        description:
+          "The same checkbox label, saying how many lines in the file share the " +
+          "character and would all change (Sam, 2026-09-28). Off by default.",
+        placeholders: {
+          name: "The diarized/VTT speaker (character) name.",
+          count: "How many lines share that name; it also selects the plural form.",
+        },
       },
 
       "workspace.openWorkspace.openingProject": {

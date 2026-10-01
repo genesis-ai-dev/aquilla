@@ -22,8 +22,23 @@ export interface TrackColorSource {
   trackOverrides?: PersistedTrackOverrides | null
 }
 
+// THE FILE IS THE TIMELINE'S — the one whose tracks a take's slot names. For
+// a heard line's take that is NOT the file the take lives in: takes on a heard
+// line are stored in the hidden audio-cue sibling, but the tracks (added ones,
+// names, colours) are the subtitle file's, and the sibling is not even in
+// `project.files`. Callers holding a heard line's take pass the subtitle
+// file's id (Sam, 2026-09-30: a take on an added magenta track was drawn in
+// the dub track's green, and named as an unknown track).
 function findFile(files: readonly TrackColorSource[] | null | undefined, fileId: string | null | undefined) {
   return fileId ? files?.find((f) => f.id === fileId) ?? null : null
+}
+
+/** The tracks of a file's timeline, which its takes' slots name. */
+export function tracksForTakesIn(
+  files: readonly TrackColorSource[] | null | undefined,
+  fileId: string | null | undefined,
+) {
+  return deriveTracksForFile(findFile(files, fileId))
 }
 
 /** One track's stored colour token in a file; null means the default hue. */
@@ -44,17 +59,35 @@ export function fileTrackColor(
  * added track's); absent means the file's dub track. A source-audio section is
  * not a take on any dub track, so it wears the source row's fixed colour.
  */
-export function takeTrackVars(input: {
+interface TakeColorInput {
   files: readonly TrackColorSource[] | null | undefined
   fileId: string | null | undefined
   slot?: string | null
   sourceSection?: boolean
-}): Record<string, string> {
-  if (input.sourceSection) return trackHueVarsFor("source-audio", null)
+}
+
+function takeTrack(input: TakeColorInput) {
   const trackId = input.slot ? trackIdForSlot(input.slot) : DEFAULT_TARGET_TRACK_ID
-  const file = findFile(input.files, input.fileId)
-  const track = deriveTracksForFile(file).find((tr) => tr.id === trackId)
+  return deriveTracksForFile(findFile(input.files, input.fileId)).find((tr) => tr.id === trackId)
+}
+
+export function takeTrackVars(input: TakeColorInput): Record<string, string> {
+  if (input.sourceSection) return trackHueVarsFor("source-audio", null)
+  const track = takeTrack(input)
   // A take whose track is gone (deleted, or from a build this one cannot
   // draw) still shows as a take — in the dub track's colour, never grey.
   return trackHueVarsFor(track?.kind ?? "target-audio", track?.color ?? null)
+}
+
+/** The name of the track a take sits on, as the timeline shows it; null for a
+ *  track this build cannot name (a collaborator's newer one). */
+export function takeTrackName(input: Omit<TakeColorInput, "sourceSection">): string | null {
+  return takeTrack(input)?.name || null
+}
+
+/** The colour token a take is drawn in ("amber", …); null is the default
+ *  hue, and a source-audio section's fixed colour. */
+export function takeTrackColor(input: TakeColorInput): string | null {
+  if (input.sourceSection) return null
+  return takeTrack(input)?.color ?? null
 }

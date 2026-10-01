@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type SyntheticEvent } from "rea
 import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
@@ -38,6 +39,12 @@ export interface AudioValidationTake {
   canValidate: boolean
   /** Why not, when `canValidate` is false. Shown as the tooltip. */
   blockedReason?: string
+  /**
+   * Not a take: a heard line performing this line that nobody has recorded
+   * yet (a line split across heard lines, some done). It takes no vote, and
+   * while it is there the line never reads fully validated.
+   */
+  unrecorded?: boolean
 }
 
 interface AudioValidationControlProps {
@@ -54,6 +61,22 @@ interface AudioValidationControlProps {
    * the two line up. "inline" is bare, for the take block and the chips.
    */
   variant?: "gutter" | "inline"
+  /**
+   * Show the take's validation without taking a vote (Sam, 2026-09-29). Only
+   * the take that PLAYS for the line can be validated — where it can be heard:
+   * the line's audio check, the top of the Recording tab, the recorder's
+   * circled take — so every list of takes shows the others' votes read-only.
+   * The icon and the "validated by" list are the same; the press, the
+   * withdraw buttons and "Validate this take" are not there.
+   */
+  readOnly?: boolean
+  /**
+   * The line's recordings have not been read yet (the gutter only). Until they
+   * have, an empty set means "not known", not "nothing recorded", so the slot
+   * holds a placeholder instead of the faded "no audio" mic — and instead of a
+   * partial count that would change as the heard lines' takes arrive.
+   */
+  checking?: boolean
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -68,6 +91,8 @@ export function AudioValidationControl({
   canValidate,
   onValidationChange,
   variant = "gutter",
+  readOnly = false,
+  checking = false,
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -118,7 +143,17 @@ export function AudioValidationControl({
   }), [takes, pending, currentUsername])
 
   const requirement = Math.max(1, validationRequirement)
-  const state = lineState(displayed, currentUsername, requirement)
+  // A heard line nobody has recorded is in the set but is not a take (Sam,
+  // 2026-09-30: a line split across heard lines, one of them done). It takes
+  // no vote and counts toward nothing, but while it is there the line cannot
+  // read fully validated: the double check drops to a single one (yours, or
+  // others'), and the hover names the part still to record.
+  const recorded = displayed.filter((take) => !take.unrecorded)
+  const unrecorded = displayed.filter((take) => take.unrecorded)
+  const recordedState = lineState(recorded, currentUsername, requirement)
+  const state = unrecorded.length > 0 && recordedState === "full"
+    ? (recorded.every((take) => take.validators.includes(currentUsername)) ? "self" : "others")
+    : recordedState
   const mineToGive = displayed.filter(
     (take) => take.canValidate && !take.validators.includes(currentUsername),
   )
@@ -132,10 +167,10 @@ export function AudioValidationControl({
   // says the rest (single check: waiting on others; double: finished). That
   // is also exactly what a click does: give your vote to the tracks without
   // it. The hover list still tells the fuller story per take.
-  const mineDone = displayed.filter((take) => take.validators.includes(currentUsername)).length
-  const showFraction = displayed.length > 1 && state !== "full" && mineToGive.length > 0
-  const allMine = displayed.length > 0 && mineToGive.length === 0
-    && displayed.every((take) => take.validators.includes(currentUsername))
+  const mineDone = recorded.filter((take) => take.validators.includes(currentUsername)).length
+  const showFraction = recorded.length > 1 && state !== "full" && mineToGive.length > 0
+  const allMine = recorded.length > 0 && mineToGive.length === 0
+    && recorded.every((take) => take.validators.includes(currentUsername))
 
   const change = (audioId: string, validated: boolean) => {
     const atRequest = takes
@@ -191,9 +226,12 @@ export function AudioValidationControl({
 
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
-  const tooltip = mineToGive.length > 0
+  const tooltip = readOnly
+    ? t("editor.audioValidation.readOnlyNone")
+    : mineToGive.length > 0
     ? t("editor.audioValidation.notValidatedTooltip")
-    : blocked?.blockedReason
+    : unrecorded[0]?.blockedReason
+      ?? blocked?.blockedReason
       ?? (canValidate
         ? t("editor.audioValidation.outOfScopeTooltip")
         : t("editor.audioValidation.unavailableTooltip"))
@@ -203,14 +241,17 @@ export function AudioValidationControl({
   // beside it is still a single check. Found in the browser: at a threshold of
   // two the button announced "Recording validated" on a line that visibly was
   // not, which is the picture and the words disagreeing.
-  const shortBy = displayed.reduce(
+  const shortBy = recorded.reduce(
     (worst, take) => Math.max(worst, Math.max(0, requirement - take.validatorCount)),
     0,
   )
-  const clickable = mineToGive.length > 0
+  const clickable = !readOnly && mineToGive.length > 0
   // Why the viewer cannot add a vote, for the foot of the list. Nothing when
-  // they can, or when every take already carries theirs.
-  const blockedNote = !clickable && !allMine ? tooltip : null
+  // they can, or when every take already carries theirs. Read-only, it is
+  // why nobody can vote HERE.
+  const blockedNote = readOnly
+    ? t("editor.audioValidation.readOnlyNote")
+    : !clickable && !allMine ? tooltip : null
 
   // THE LABEL IS DERIVED FROM `state`, the same thing the icon is. It used to
   // come from `allMine`, a different question — so a line two other people
@@ -219,7 +260,20 @@ export function AudioValidationControl({
   // last take I was allowed to touch said the same. Four such disagreements
   // were reachable (adversarial review, 2026-09-22); deriving both from one
   // value is what stops a fifth.
-  const ariaLabel = state === "full"
+  const ariaLabel = readOnly
+    // No "click to…" of any kind: there is nothing to click.
+    ? (state === "full" || (state === "self" && shortBy === 0)
+        ? t("editor.audioValidation.ariaValidatedNoAction", { ref: cellRef })
+        : state === "self"
+          ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
+          : state === "others"
+            ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
+            : t("editor.audioValidation.ariaNotValidatedByYou", { ref: cellRef }))
+    // Nothing left to give, and part of the line is not recorded: that is
+    // the news, whatever the recorded parts say.
+    : unrecorded.length > 0 && !clickable
+    ? t("editor.audioValidation.ariaPartUnrecorded", { ref: cellRef })
+    : state === "full"
     // "Click to remove your validation" only when there IS one of mine on
     // every take. A line others finished used to say it to someone who had
     // never voted (Sam, 2026-09-23) — the text control's "by others" twin.
@@ -234,7 +288,7 @@ export function AudioValidationControl({
           : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
       : showFraction
         ? t("editor.audioValidation.ariaPartlyValidated", {
-            done: mineDone, total: displayed.length, ref: cellRef,
+            done: mineDone, total: recorded.length, ref: cellRef,
           })
         : state === "others"
           ? t("editor.audioValidation.ariaOthersValidated", { ref: cellRef, count: Math.max(1, shortBy) })
@@ -259,7 +313,7 @@ export function AudioValidationControl({
       type="button"
       data-showcase="cell.audioValidation"
       data-testid="audio-validation-button"
-      aria-pressed={allMine}
+      aria-pressed={readOnly ? undefined : allMine}
       aria-label={ariaLabel}
       onClick={(event) => {
         if (!onClick) return
@@ -294,7 +348,7 @@ export function AudioValidationControl({
       />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
-          {t("editor.audioValidation.takeFraction", { done: mineDone, total: displayed.length })}
+          {t("editor.audioValidation.takeFraction", { done: mineDone, total: recorded.length })}
         </span>
       )}
     </button>
@@ -306,10 +360,31 @@ export function AudioValidationControl({
   // validated yet". A span, not a disabled button — no tab stop, and it still
   // takes the hover that says why. Inline surfaces (the take block, the chips)
   // only ever mount beside a take, so there it is still nothing.
+  // Still reading the file's recordings (Sam, 2026-10-01, from the 3G pass:
+  // every line said "No audio to validate" for seconds, then changed its
+  // mind). The app's skeleton pulse holds the slot: no click, no tab stop,
+  // and a hover that says what it is waiting for.
+  if (checking && variant === "gutter") {
+    return (
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
+        <AppTooltip key="checking" content={t("editor.audioValidation.checkingTooltip")}>
+          <span
+            role="img"
+            data-testid="audio-validation-checking"
+            aria-label={t("editor.audioValidation.ariaChecking", { ref: cellRef })}
+            className="flex h-6 w-6 cursor-default items-center justify-center"
+          >
+            <Skeleton className="size-3.5 rounded-full" />
+          </span>
+        </AppTooltip>
+      </div>
+    )
+  }
+
   if (state === "empty") {
     if (variant === "inline") return null
     return (
-      <div data-testid="audio-validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
         <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
           <span
             role="img"
@@ -353,7 +428,7 @@ export function AudioValidationControl({
         <ul className="space-y-1">
           {displayed.map((take) => {
             const mine = take.validators.includes(currentUsername)
-            const short = Math.max(0, requirement - take.validatorCount)
+            const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
             return (
               <li key={take.audioId} className="rounded px-1 py-1 text-xs">
                 {displayed.length > 1 && (
@@ -366,7 +441,11 @@ export function AudioValidationControl({
                     )}
                   </div>
                 )}
-                {take.validators.length === 0 ? (
+                {take.unrecorded ? (
+                  <div data-testid="audio-validation-unrecorded" className="text-muted-foreground">
+                    {t("editor.audioValidation.notRecorded")}
+                  </div>
+                ) : take.validators.length === 0 ? (
                   <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
                 ) : (
                   <ul className="space-y-0.5">
@@ -384,7 +463,7 @@ export function AudioValidationControl({
                             that setting afterwards used to strand the vote
                             with no way to remove it here. The bulk predicate
                             already refuses this gate for the same reason. */}
-                        {validator === currentUsername && (
+                        {validator === currentUsername && !readOnly && (
                           <AppTooltip content={t("editor.validation.removeYours")}>
                             <button
                               type="button"
@@ -403,7 +482,7 @@ export function AudioValidationControl({
                     ))}
                   </ul>
                 )}
-                {!mine && take.canValidate && displayed.length > 1 && (
+                {!mine && take.canValidate && !readOnly && displayed.length > 1 && (
                   <button
                     type="button"
                     className="mt-0.5 rounded px-1 py-0.5 text-[11px] text-green-600 hover:bg-muted/60"
@@ -449,7 +528,7 @@ export function AudioValidationControl({
       )
   if (variant === "inline") return wrapped
   return (
-    <div data-testid="audio-validation-gutter" className="flex shrink-0 items-start pt-1">
+    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">
       {wrapped}
     </div>
   )

@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
@@ -140,7 +140,8 @@ describe("EditorTable — AQU-831 row status badges do not collide", () => {
     // 1. All three are present — neither hides the other.
     expect(screen.getByTestId("stale-source-indicator")).not.toBeNull()
     expect(screen.getByTestId("synth-status-error")).not.toBeNull()
-    expect(screen.getByLabelText(/comment/i)).not.toBeNull()
+    // In the row's badge column: the header's notices mark names "open comments" too.
+    expect(within(screen.getByTestId("gutter-status-badges")).getByLabelText(/comment/i)).not.toBeNull()
   })
 
   it("keeps every badge inside the reserved gutter strip, never over the row chrome", async () => {
@@ -186,7 +187,7 @@ describe("EditorTable — AQU-831 row status badges do not collide", () => {
 
     const stale = screen.getByTestId("stale-source-indicator")
     const synth = screen.getByTestId("synth-status-error")
-    const comments = screen.getByLabelText(/comment/i)
+    const comments = within(screen.getByTestId("gutter-status-badges")).getByLabelText(/comment/i)
 
     // Each badge is its own h-5 w-5 slot. Before the fix the stale triangle was
     // a bare h-3 inline span, so it sat off-centre against the h-5 neighbours.

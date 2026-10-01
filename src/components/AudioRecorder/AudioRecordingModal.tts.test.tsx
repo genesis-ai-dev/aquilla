@@ -35,14 +35,18 @@ vi.mock("@/lib/import", () => ({
   probeDurationMsSafe: (...args: unknown[]) => probeSpy(...(args as [])),
 }))
 const injectOptimistic = vi.hoisted(() => vi.fn((..._args: unknown[]) => {}))
+const injectDeselect = vi.hoisted(() => vi.fn((..._args: unknown[]) => {}))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: vi.fn(),
   injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
   injectOptimisticAudioRemove: vi.fn(),
+  injectOptimisticAudioDeselect: (...args: unknown[]) => injectDeselect(...args),
 }))
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
+const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-deselect")
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioValidate: vi.fn(async () => "evt"),
   emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
@@ -231,6 +235,20 @@ describe("AudioRecordingModal — TTS becomes the sounding take (round 8c)", () 
     expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({
       audioId: "audio-f1-100-clip.mp3", slot: "recording",
     }))
+  })
+
+  // Sam, 2026-09-28 (Mark 1:3): a line with no imported source clip had
+  // nothing to hand the slot to, so the new voice was saved and never played.
+  it("with no source clip, empties the recording slot so the new voice sounds", async () => {
+    emitDeselect.mockClear()
+    injectDeselect.mockClear()
+    seedEntry({ "audio-c1-200-take.webm": att("audio-c1-200-take.webm") }, "audio-c1-200-take.webm")
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
+    expect(emitDeselect).toHaveBeenCalledWith(expect.objectContaining({ cellId: "c1", slot: "recording" }))
+    expect(injectDeselect).toHaveBeenCalledWith("f1", "c1", "recording", expect.anything())
+    expect(emitSelect).not.toHaveBeenCalled()
   })
 
   it("no displacement when the source clip already holds the slot", async () => {

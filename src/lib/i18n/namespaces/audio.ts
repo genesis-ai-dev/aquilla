@@ -293,6 +293,11 @@ export const audio = defineNamespace({
     "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
     "audio.recordingModal.trimReset": "Reset trim",
     "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
+    "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
+    "audio.recordingModal.takesDrawerOnDescription": "The takes that fit show under the recorder; the arrow beside Takes brings up the rest.",
+    "audio.recordingModal.takesDrawerOffDescription": "Only the Takes bar shows; the arrow beside it brings up the list.",
+    "audio.recordingModal.takesExpand": "Show all takes",
+    "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -451,6 +456,7 @@ export const audio = defineNamespace({
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
+    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -1318,6 +1324,36 @@ export const audio = defineNamespace({
           "recorded take's trim lines back where they started (the line's own " +
           "start and just after Stop). Nothing is deleted either way.",
         maxLength: 24,
+      },
+      "audio.recordingModal.takesDrawerTitle": {
+        description:
+          "Name of an on/off setting in the recording window's settings menu: whether " +
+          "the list of recorded takes rests open under the recorder, or closed to " +
+          "just its header bar.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.takesDrawerOnDescription": {
+        description:
+          "Hover text for that setting while it is on: some takes show under the " +
+          "recorder, and the small arrow beside 'Takes' shows the rest.",
+      },
+      "audio.recordingModal.takesDrawerOffDescription": {
+        description:
+          "Hover text for that setting while it is off: only the 'Takes' bar shows, " +
+          "and the small arrow beside it shows the list.",
+      },
+      "audio.recordingModal.takesExpand": {
+        description:
+          "Accessible name of the small arrow beside 'Takes' at the bottom of the " +
+          "recording window: pulls the list of takes up over the line and the " +
+          "record button so every take shows at once.",
+        maxLength: 32,
+      },
+      "audio.recordingModal.takesCollapse": {
+        description:
+          "Accessible name of the same arrow once the takes list is pulled up: puts " +
+          "the list back at the bottom of the window.",
+        maxLength: 32,
       },
       "audio.recordingModal.trimHint": {
         description:
@@ -2347,6 +2383,16 @@ export const audio = defineNamespace({
         placeholders: {
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
+      },
+      "audio.castGutter.defaultVoiceLabel": {
+        description:
+          "The voice field under a line's waveform in the Audio view, when nobody " +
+          "chose a character for the line and it falls back to the default voice — " +
+          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
+        placeholders: {
+          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
+        },
+        maxLength: 32,
       },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:

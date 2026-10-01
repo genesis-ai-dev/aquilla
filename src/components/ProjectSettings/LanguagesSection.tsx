@@ -23,11 +23,16 @@ import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
-import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
+import type {
+  ProjectWideSettings,
+  ProjectLaneView,
+  LaneLastChangeResult,
+} from "@/lib/sync/project-settings"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
 
 const MAX_LANE_LENGTH = 64
 
@@ -57,6 +62,10 @@ export interface LanguagesSectionProps {
   onRenameLane?: (laneId: string, name: string) => Promise<"ok" | "duplicate" | "invalid">
   onCreateLane?: (input: { name: string; language: string }) => Promise<"ok" | "duplicate" | "invalid">
   onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
+  /** AQU-1464: reads the lane's newest target edit for the archive confirmation.
+   *  Optional — omitted for a local project, where there is no server to ask;
+   *  the dialog then simply carries no activity line. */
+  onLoadLaneLastChange?: (laneId: string) => Promise<LaneLastChangeResult>
 }
 
 function normalizeLane(lane: string): string {
@@ -107,6 +116,7 @@ export function LanguagesSection({
   onRenameLane,
   onCreateLane,
   onSetLaneArchived,
+  onLoadLaneLastChange,
 }: LanguagesSectionProps) {
   const t = useT()
   const [newLane, setNewLane] = useState("")
@@ -298,10 +308,17 @@ export function LanguagesSection({
                       <span className="shrink-0 text-xs text-muted-foreground">{lane.langCode}</span>
                     )}
                     {pendingArchive === lane.id ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">
-                          {t("projectSettings.languages.archiveConfirm", { lane: lane.name })}
-                        </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-xs text-muted-foreground">
+                            {t("projectSettings.languages.archiveConfirm", { lane: lane.name })}
+                          </span>
+                          {/* AQU-1464: whether the lane is dormant or someone is
+                              working in it right now — archiving locks them out. */}
+                          {onLoadLaneLastChange && (
+                            <LaneLastChangeNote laneId={lane.id} load={onLoadLaneLastChange} />
+                          )}
+                        </div>
                         <Button
                           variant="destructive"
                           disabled={busyLane === lane.id}
@@ -556,5 +573,95 @@ function LaneNameField({
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
+  )
+}
+
+/**
+ * AQU-1464 — the "is anyone still working in this lane?" line inside the archive
+ * confirmation. Mounts with the confirmation and unmounts on cancel, so the
+ * lookup runs once per dialog open; race-guarded per AD-3 (plain useState +
+ * cancelled flag, no React Query).
+ *
+ * This never gates archiving: loading, unknown and failed are all just a line of
+ * text, and the Confirm button beside it is untouched. A FAILED lookup says so
+ * rather than falling back to "no changes in this lane yet" — a PM would read
+ * that as "dormant, safe to archive", which is precisely the wrong conclusion to
+ * draw from a request that never answered.
+ */
+function LaneLastChangeNote({
+  laneId,
+  load,
+}: {
+  laneId: string
+  load: (laneId: string) => Promise<LaneLastChangeResult>
+}) {
+  const t = useT()
+  // `isolate` wraps the date and the username in bidi isolates: both are
+  // Latin/numeric tokens sitting inside prose, so in Arabic the bidi algorithm
+  // would otherwise reorder them against the surrounding sentence (see the
+  // module note in lib/i18n/format.ts).
+  const { date, isolate } = useFormat()
+  const [state, setState] = useState<
+    | { kind: "loading" }
+    | { kind: "error" }
+    | { kind: "ok"; at: number | null; by: string | null }
+  >({ kind: "loading" })
+
+  // No synchronous "reset to loading" here: the component mounts fresh with each
+  // confirmation, so the initial state already IS loading. On the rare re-run
+  // (the bound fetcher's identity changes when the session or project does) the
+  // previous answer stays on screen until the new one lands, which is steadier
+  // than flashing back to "checking…" — and the cancelled flag still makes the
+  // newest run the one that wins.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      let result: LaneLastChangeResult
+      try {
+        result = await load(laneId)
+      } catch (e) {
+        result = { kind: "error", message: e instanceof Error ? e.message : String(e) }
+      }
+      if (cancelled) return
+      if (result.kind !== "ok") {
+        setState({ kind: "error" })
+        return
+      }
+      setState({
+        kind: "ok",
+        at: result.lastChange?.at ?? null,
+        by: result.lastChange?.by ?? null,
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [laneId, load])
+
+  let text: string
+  if (state.kind === "loading") {
+    text = t("projectSettings.languages.lastChangeLoading")
+  } else if (state.kind === "error") {
+    text = t("projectSettings.languages.lastChangeUnavailable")
+  } else if (state.at === null) {
+    text = t("projectSettings.languages.lastChangeNone")
+  } else if (state.by) {
+    text = t("projectSettings.languages.lastChange", {
+      date: isolate(date(state.at)),
+      editor: isolate(state.by),
+    })
+  } else {
+    text = t("projectSettings.languages.lastChangeUnknownEditor", {
+      date: isolate(date(state.at)),
+    })
+  }
+
+  return (
+    <span
+      data-testid={`lane-last-change-${laneId}`}
+      className="text-xs text-muted-foreground"
+    >
+      {text}
+    </span>
   )
 }

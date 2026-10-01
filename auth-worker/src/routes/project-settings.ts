@@ -64,6 +64,7 @@ import {
 } from "../../../db/shared/projects"
 import {
   insertTargetLane,
+  readLaneLastChange,
   renameTargetLane,
   setTargetLaneArchived,
 } from "../../../db/shared/lanes"
@@ -598,6 +599,35 @@ projectSettings.patch(
     return c.json({ lane: result.lane })
   },
 )
+
+// AQU-1464: "is anyone still working in this lane?" — read by the archive
+// confirmation dialog before a PM locks the lane (AQU-1462 / AQU-1463 made
+// archiving a hard write-lock, so archiving a busy lane interrupts a translator
+// mid-session).
+//
+// Gated by the SAME `denyLanguageWrite` floor as archiving itself: whoever may
+// archive a lane may see when it was last touched, and nobody below that floor
+// can read a member's name and activity time out of it. A Contributor gets 403,
+// which is also why the client never has to hide the value itself.
+projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const laneId = c.req.param("laneId") as string
+  const denied = await denyLanguageWrite(c.env, user, projectId)
+  if (denied) return c.json(denied, 403)
+  // Confirm the lane is real first, so an unknown id reads as 404 rather than
+  // as the indistinguishable "this lane has never been edited".
+  const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+  const lane = (current.lanes ?? []).find((row) => row.id === laneId && row.role === "target")
+  if (!lane) return c.json({ error: "lane not found" }, 404)
+  try {
+    const lastChange = await readLaneLastChange(c.env.AQUILLA_PG, projectId, laneId)
+    return c.json({ lastChange })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return c.json({ error: `read failed: ${message}` }, 500)
+  }
+})
 
 projectSettings.post(
   "/:projectId/lanes/:laneId/archive",

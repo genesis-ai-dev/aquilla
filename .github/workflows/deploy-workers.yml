@@ -70,7 +70,7 @@ jobs:
           [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
           [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
-  # Worker deploys are blocked until the target Neon schema is current — the
+  # Every deploy is blocked until the target Neon schema is current — the
   # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was
   # worker code referencing columns whose migration was never applied to Neon.
   # `neon-migrate status` is read-only: it checks the schema_migrations ledger
@@ -78,9 +78,15 @@ jobs:
   # failure, apply pending migrations from a laptop (npm run neon:apply) and
   # re-run the deploy. Requires target-specific NEON_*_PG_* repo secrets for
   # dev and NEON_PG_* for production; fails closed if they're missing.
+  #
+  # AQU-1157: this job is NOT conditioned on the selected surface. It used to
+  # run only for sync/auth, and the web job did not need it, so a dispatch
+  # whose migration guard failed still published the SPA — dev.aquilla.app went
+  # to new front-end code against old Workers and an un-migrated database. A
+  # deployment is one unit: the guard runs for every selection and gates all
+  # three publish jobs.
   schema-guard:
     needs: [target, detect]
-    if: needs.detect.outputs.sync == 'true' || needs.detect.outputs.auth == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -112,8 +118,11 @@ jobs:
           esac
 
   web:
-    needs: [target, detect]
-    if: needs.detect.outputs.web == 'true'
+    # AQU-1157: !failure() && !cancelled() — the SPA publishes only when the
+    # schema guard passed, never when it failed or was cancelled. Without this
+    # the web assets shipped while the Worker deploys were held back.
+    needs: [target, detect, schema-guard]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.target.outputs.github_environment }}

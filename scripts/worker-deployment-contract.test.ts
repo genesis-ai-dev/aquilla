@@ -67,6 +67,70 @@ describe("worker deployment environment contract", () => {
     expect(triggers).not.toContain("push:")
   })
 
+  // AQU-1157: a dev deploy whose pending-migration check failed still published
+  // the web assets, leaving dev.aquilla.app on new front-end code against old
+  // Workers and an un-migrated database. A deployment is one unit: the schema
+  // guard runs for every selected surface and gates web as well as the Workers.
+  it("holds the SPA behind the same Neon schema guard as the Workers", () => {
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+
+    // The slice of the workflow belonging to one job: from its key to the next
+    // two-space job key (jobs are the only keys at that indentation).
+    function job(name: string): string {
+      const start = workflow.indexOf(`\n  ${name}:\n`)
+      expect(start, `job ${name} is declared`).toBeGreaterThan(-1)
+      const rest = workflow.slice(start + 1)
+      const next = rest.slice(1).search(/\n {2}[a-z][a-z0-9-]*:\n/)
+      return next === -1 ? rest : rest.slice(0, next + 1)
+    }
+
+    // The guard is not conditioned on the selected surface — a web-only
+    // dispatch is schema-checked too, and fails closed without the secrets.
+    const guard = job("schema-guard")
+    expect(guard).toContain("needs: [target, detect]")
+    expect(guard).not.toContain("needs.detect.outputs.sync == 'true'")
+    expect(guard).not.toContain("needs.detect.outputs.web")
+
+    // All three publish jobs depend on the guard and skip when it fails.
+    for (const [name, surface] of [
+      ["web", "web"],
+      ["sync-worker", "sync"],
+      ["auth-worker", "auth"],
+    ] as const) {
+      const body = job(name)
+      expect(body).toContain("needs: [target, detect, schema-guard]")
+      expect(body).toContain(
+        `if: \${{ !failure() && !cancelled() && needs.detect.outputs.${surface} == 'true' }}`,
+      )
+    }
+  })
+
+  // AQU-1157: the local deploy path had the same hole — the Worker scripts ran
+  // `neon:status:*` and failed closed while the SPA script built and published
+  // unguarded, so `deploy:aquilla:dev` shipped the site before the Workers were
+  // held back. The gate runs before the build, not after it.
+  it("runs the Neon schema guard before every local deploy publishes", () => {
+    const scripts = (JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>
+    }).scripts
+
+    for (const [target, gate] of [
+      ["aquilla", "npm run neon:status:prod"],
+      ["aquilla:dev", "npm run neon:status:dev"],
+    ] as const) {
+      for (const surface of ["spa", "sync", "auth"] as const) {
+        const command = scripts[`deploy:${target}:${surface}`]
+        expect(command).toContain(gate)
+        expect(command.indexOf(gate))
+          .toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+      }
+
+      // The SPA build is expensive and writes dist/ — hold it behind the gate.
+      const spa = scripts[`deploy:${target}:spa`]
+      expect(spa.indexOf(gate)).toBeLessThan(spa.indexOf("npm run build"))
+    }
+  })
+
   it.each([
     ["workflow_dispatch", "release/2026/09/23", "production", "production", "api.aquilla.app"],
     ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],

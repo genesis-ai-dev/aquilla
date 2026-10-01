@@ -33,8 +33,20 @@ branch; development deploy scripts refuse anything but `dev`. Every surface sele
 `development` explicitly. The shared deployer uploads
 a version, validates its exact ID and bindings, promotes it, reapplies
 routes/triggers, and confirms the same ID owns 100% traffic before public
-verification. Identity and sync deploys also run the target Neon schema guard
-before publishing.
+verification.
+
+**Migrate first, then deploy — a deployment is one unit (AQU-1157).** Apply any
+pending migration to the target Neon branch *before* deploying:
+`pnpm neon:status:dev` / `pnpm neon:status:prod` to see what is pending,
+`pnpm neon:apply:dev` / `pnpm neon:apply:prod` to apply it. Every surface — web
+included, not just identity and sync — runs that read-only schema guard before
+it builds or publishes, and fails closed. So a deploy against an un-migrated
+database publishes *nothing*: the site stays on its current version rather than
+serving new front-end code against old Workers. In
+`.github/workflows/deploy-workers.yml` the `schema-guard` job runs for every
+selected surface and the `web`, `sync-worker` and `auth-worker` jobs all skip
+when it fails. Apply the migration and redeploy; the three then publish
+together.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare

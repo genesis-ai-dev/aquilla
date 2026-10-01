@@ -273,7 +273,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -308,6 +308,8 @@ import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
 import { RenameDialog } from "./RenameDialog"
 import { FileSegmentationDialog } from "./FileSegmentationDialog"
+import { AnalysisReportDialog } from "./analysis/AnalysisReportDialog"
+import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -8366,6 +8368,21 @@ export function ProjectWorkspace() {
   // "File details" modal (sidebar file row ⋯ menu).
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
   const [segmentationFileId, setSegmentationFileId] = useState<string | null>(null)
+  // AQU-1392: file the volume-analysis report is open for, or null.
+  const [analysisFileId, setAnalysisFileId] = useState<string | null>(null)
+  // The dialog restarts its run whenever these change identity, so both are
+  // memoized rather than built inline in the JSX.
+  const analysisFileName = analysisFileId
+    ? project?.files.find((f) => f.id === analysisFileId)?.name ?? ""
+    : ""
+  const analysisFiles = useMemo(
+    () => (analysisFileId ? [{ fileId: analysisFileId, name: analysisFileName }] : []),
+    [analysisFileId, analysisFileName],
+  )
+  const analysisLoadSources = useMemo(
+    () => buildSourceLoader(projectId ?? "", getTokenForFile),
+    [projectId, getTokenForFile],
+  )
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -11671,6 +11688,13 @@ export function ProjectWorkspace() {
       icon: SplitSquareVertical,
       onClick: () => setSegmentationFileId(activeFileId),
     })
+    // AQU-1392: the volume-analysis report for this file.
+    items.push({
+      id: "file-analyze",
+      label: t("workspace.analysis.action"),
+      icon: BarChart3,
+      onClick: () => setAnalysisFileId(activeFileId),
+    })
     items.push({
       id: "file-export",
       label: "Export",
@@ -13960,6 +13984,15 @@ export function ProjectWorkspace() {
         open={segmentationFileId !== null}
         onOpenChange={(v) => { if (!v) setSegmentationFileId(null) }}
         canEdit={currentRoleLevel >= ROLE.PROJECT_LEAD}
+      />
+      {/* AQU-1392: volume-analysis report for the open file. */}
+      <AnalysisReportDialog
+        open={analysisFileId !== null}
+        onClose={() => setAnalysisFileId(null)}
+        scope="file"
+        label={analysisFileName}
+        files={analysisFiles}
+        loadSources={analysisLoadSources}
       />
       <FileDetailsModal
         open={detailsFileId !== null}

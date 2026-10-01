@@ -59,7 +59,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { takeState } from "@/components/cell/audio-validation-state"
+import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -307,15 +308,8 @@ function TargetAudioChip({
   // single check, a met threshold is a double one, and somebody ELSE's lone
   // vote is nothing at all. (The gutter draws that last case as a filled mic;
   // the chip has no idle affordance to fill, so it stays bare.)
-  const chipValidationState = chipTake && (chipTake.role ?? "dub") === "dub"
-    ? takeState(
-        {
-          validatorCount: chipTake.validatorCount ?? 0,
-          validators: chipTake.validators ?? [],
-        },
-        currentUsername,
-        validationRequirementAudio,
-      )
+  const chipValidationState = chipTake
+    ? takeBadgeState(chipTake, currentUsername, validationRequirementAudio)
     : null
 
   // The one span transform shared by preview and commit.
@@ -1014,7 +1008,7 @@ function TargetAudioChip({
               togglePreview()
             }
           }}
-          className="absolute left-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("left")}
         >
           {previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
         </span>
@@ -1039,7 +1033,7 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className="absolute right-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("right")}
         >
           <Mic className="h-2.5 w-2.5" />
         </span>
@@ -1053,7 +1047,7 @@ function TargetAudioChip({
           aria-label={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
-          className="pointer-events-none absolute bottom-1 right-2 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/80 text-green-500 shadow-sm ring-1 ring-border"
+          className={CHIP_VALIDATED_BADGE_CLASS}
         >
           {chipValidationState === "full"
             ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
@@ -1070,7 +1064,7 @@ function TargetAudioChip({
           aria-hidden
           ref={playlineRef}
           data-testid={`tl-target-${cell.id}-playline`}
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-white opacity-0 shadow-[0_0_2px_rgba(0,0,0,0.5)]"
+          className={CHIP_PLAYLINE_CLASS}
         />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does

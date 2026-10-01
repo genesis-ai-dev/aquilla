@@ -502,6 +502,13 @@ export interface TimelineEditorProps {
    */
   onRenameTrack?(trackId: string, name: string): void
   /**
+   * Recolour tracks — one value per track, one write. SEPARATE FROM
+   * `trackEditing` for the same reason as rename (Sam, 2026-09-26): a colour is
+   * how a track looks, the Audio view offers it on projects that never turn
+   * track editing on, and the server treats it as ordinary maintainer work.
+   */
+  onSetTrackColor?(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
+  /**
    * …and everything that RESTRUCTURES the timeline. Present only when the
    * caller has both maintainer clearance and the project's `allowTrackEditing`
    * setting.
@@ -523,9 +530,6 @@ export interface TimelineEditorProps {
     // Stage 2b: every one of these takes a LIST, because the menu acts on the
     // selection. A single right-clicked row is simply a list of one, which
     // keeps one code path rather than a bulk path shadowing a single one.
-    /** Stage 3c: one value PER TRACK — colour is two independent axes now, so
-     *  a bulk change keeps each track's own other half. Still one write. */
-    onSetColor(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
     onLeaveFolder(trackIds: readonly string[]): void
     /** A DRAG that crossed a folder wall: one patch carrying both fields,
      *  because a track arriving in a new scope needs a rank in it and its old
@@ -1080,6 +1084,7 @@ export function TimelineEditor({
   tracks = DEFAULT_TRACKS,
   onReorderTrack,
   onRenameTrack,
+  onSetTrackColor,
   trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
@@ -1184,7 +1189,7 @@ export function TimelineEditor({
   /** Is there anything to put in a track's menu at all? With neither rename
    *  clearance nor the editing setting there is not, and the row renders
    *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || trackEditing)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1291,6 +1296,7 @@ export function TimelineEditor({
       trackMenuScopes({
         targets: menuTargets(trackId),
         canRename: Boolean(onRenameTrack),
+        canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
       }),
     )
@@ -1366,9 +1372,9 @@ export function TimelineEditor({
       targets,
       t,
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
+      onSetColor: onSetTrackColor,
       editing: trackEditing
         ? {
-            onSetColor: trackEditing.onSetColor,
             onLeaveFolder: trackEditing.onLeaveFolder,
             onCreateFolderFrom: (trackIds) => {
               const folderId = trackEditing.onCreateFolderFrom(trackIds)

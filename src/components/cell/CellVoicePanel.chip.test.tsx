@@ -34,11 +34,11 @@ const settings = { voices, defaultVoiceId: "v-mary" } as ProjectTtsSettings
 const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
 
 describe("CellVoicePanel take tools", () => {
-  function renderChip() {
+  function renderChip(p: ProjectRecord = project) {
     return renderWithTooltips(
       <CellVoicePanel
         cell={cell}
-        project={project}
+        project={p}
         projectId="proj-1"
         settings={settings}
         voices={voices}
@@ -50,6 +50,20 @@ describe("CellVoicePanel take tools", () => {
       />,
     )
   }
+
+  // Sam, 2026-09-26: the Audio view brings over the media view's colours — the
+  // take wears its file's dub-track colour, stored with the file.
+  it("wears the file's dub-track colour, a generated voice at its lighter strength", () => {
+    renderChip({ ...project, files: [{ id: "file-1", trackOverrides: { "target-audio": { color: "azure" } } }] } as unknown as ProjectRecord)
+    const card = screen.getByTestId("voice-card-waveform")
+    expect(card.style.getPropertyValue("--tl-track-hue")).toBe("#2489eb")
+    expect(card.className).toContain("bg-[color:var(--tl-track-gen)]")
+  })
+
+  it("is the media view's default green when the file has no colour", () => {
+    renderChip()
+    expect(screen.getByTestId("voice-card-waveform").style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+  })
 
   it("sits beside the voice picker, not over the waveform", () => {
     renderChip()
@@ -63,11 +77,23 @@ describe("CellVoicePanel take tools", () => {
     expect(tools!.compareDocumentPosition(seek) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
-  it("keeps crop, volume, and clone visible without hover", () => {
+  it("keeps volume and clone visible without hover", () => {
     renderChip()
-    expect(screen.getByRole("button", { name: "Crop audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Volume" })).toBeVisible()
     expect(screen.getByRole("button", { name: /clone/i })).toBeVisible()
+  })
+
+  // Sam, 2026-09-25: trim right on the card. The scissors popover is retired.
+  it("trims on the waveform itself, with no crop popover", () => {
+    renderChip()
+    expect(screen.queryByRole("button", { name: "Crop audio" })).toBeNull()
+    expect(screen.getByRole("slider", { name: "Start of the kept audio" })).toBeInTheDocument()
+    expect(screen.getByRole("slider", { name: "End of the kept audio" })).toBeInTheDocument()
+  })
+
+  it("plays from the waveform's corner, not a button over its middle", () => {
+    renderChip()
+    expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
   })
 
   it("makes the narrator select as tall as the take-tool buttons", () => {
@@ -106,9 +132,8 @@ describe("CellVoicePanel take tools", () => {
     expect(volume).toHaveAttribute("aria-expanded", "true")
   })
 
-  it("shows tooltips on crop and volume", async () => {
+  it("shows a tooltip on volume", async () => {
     renderChip()
-    await expectTooltip(screen.getByRole("button", { name: "Crop audio" }), "Crop audio")
     await expectTooltip(screen.getByRole("button", { name: "Volume" }), "Volume")
   })
 

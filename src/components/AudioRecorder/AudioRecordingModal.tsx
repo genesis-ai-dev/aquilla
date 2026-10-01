@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
   RECORDING_SLOT,
@@ -36,7 +37,13 @@ import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
-import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { getActiveAudio, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { useCellAudio } from "@/hooks/useCellAudio"
+import { keptWindowSec } from "@/lib/audio/kept-window"
+import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { TakeWaveform } from "@/components/audio/TakeWaveform"
+import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
@@ -581,6 +588,62 @@ export function AudioRecordingModal({
       .find((a) => a.slot === "recording" && audioIdSeededWith(a.audioId, activeCell?.fileId ?? "")) ?? null,
     [audioEntry, activeCell?.fileId],
   )
+
+  /**
+   * THE SELECTED TAKE, shown before you record over it. (AQU-1217)
+   *
+   * Which one, until Sam's brainstorm on multi-track lines settles it: the take
+   * selected on the track this recorder is recording ONTO. On the default track
+   * that is the recorded (or uploaded) take in the recording slot, falling back
+   * to the generated voice — the ticket's rule, i.e. whichever sounds for the
+   * line today. The imported source clip is never a take.
+   */
+  const readyTakeId = useMemo(() => {
+    if (!audioEntry || !activeCell) return null
+    const take = (id: string | null | undefined): string | null =>
+      id && audioEntry.attachments[id] && !audioIdSeededWith(id, activeCell.fileId) ? id : null
+    if (isDefaultTrackSlot(targetSlot)) {
+      return take(audioEntry.selectedAudioId) ?? take(audioEntry.selectedGeneratedVoiceAudioId)
+    }
+    return take(slotSelections(audioEntry)[targetSlot])
+  }, [audioEntry, activeCell, targetSlot])
+  const readyAtt = readyTakeId ? audioEntry?.attachments[readyTakeId] : undefined
+  const readyCell = useMemo(() => ({
+    metadata: { attachments: audioEntry?.attachments ?? {}, selectedAudioId: readyTakeId ?? undefined },
+  }) as unknown as CodexCell, [audioEntry?.attachments, readyTakeId])
+  const readyAudio = useCellAudio(project, readyCell, activeCell?.fileId ?? "")
+  const readyKept = activeCell && readyTakeId
+    ? keptWindowSec(
+        { id: activeCell.id, medium: activeCell.medium, selectedAudioId: audioEntry?.selectedAudioId ?? undefined, startTime: activeCell.startTime, endTime: activeCell.endTime },
+        readyTakeId,
+        readyAtt as unknown as Pick<CodexCellAttachment, "trimStartMs" | "trimEndMs">,
+      )
+    : null
+  // What the target bar is fed at rest: the part of the selected take that
+  // plays, so an over-long take reads as over before anyone records (trim-aware:
+  // a take trimmed on the timeline shows its trimmed length).
+  const readyKeptMs = readyAtt
+    ? effectiveAttachmentDurationMs(readyAtt as unknown as Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">)
+    : null
+  const readyBadge = readyAtt
+    ? takeBadgeState(readyAtt, username, readValidationCountAudio(project))
+    : null
+  // One sound at a time: playing the waveform silences a Takes-row audition
+  // (which in turn silences the waveform — see TakesStrip).
+  // Countdown, recording, preview and upload own the instrument area: the
+  // selected take stops sounding the moment one of them begins.
+  const readyPause = readyAudio.pause
+  useEffect(() => {
+    if (phase !== "idle" && phase !== "error") readyPause()
+  }, [phase, readyPause])
+  const readyController = {
+    ...readyAudio,
+    play: async () => {
+      const active = getActiveAudio()
+      if (active && active.isPlaying()) active.pause()
+      await readyAudio.play()
+    },
+  }
 
   // Round 8c: takes recorded before the webm-duration fix attached without a
   // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
@@ -1459,6 +1522,9 @@ export function AudioRecordingModal({
 
   const displayPhase: Phase = phase
   const elapsedMs = recorder.elapsedMs
+  // The take on the ready screen wears its own track's colour (Sam,
+  // 2026-09-26), as it does on the timeline and in the Audio view.
+  const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
   const targetOverrun = targetSec != null && elapsedMs / 1000 > targetSec
   const isNearLimit = recorder.isNearLimit
   // From the countdown onwards there is a take being made or already made, and
@@ -1969,8 +2035,36 @@ export function AudioRecordingModal({
             {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
               <div className="space-y-2">
+                {/* AQU-1217: the selected take, drawn as its timeline chip, so
+                    the operator can see and hear what they are about to record
+                    over. Its trim is shown (grey lines), not edited here. */}
+                {readyTakeId && readyAtt && readyKept && (
+                  <div data-testid="rec-ready-take" className="space-y-1">
+                    <p className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+                      {t("audio.recordingModal.readyTakeCaption", {
+                        label: readyAtt.label ?? t("audio.takesStrip.takeFallback"),
+                        // Tenths rounded DOWN, as the target bar below
+                        // prints them — the two must never disagree.
+                        seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
+                      })}
+                    </p>
+                    <TakeWaveform
+                      controller={readyController}
+                      audioId={readyTakeId}
+                      kept={readyKept}
+                      // The film layout's instrument area is compact; the
+                      // strip shrinks rather than push Record out of place.
+                      height={showFilm ? 40 : 56}
+                      kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+                      trackVars={readyTrackVars}
+                      strategy="eager"
+                      validation={readyBadge === "self" || readyBadge === "full" ? readyBadge : null}
+                      testId="rec-ready-waveform"
+                    />
+                  </div>
+                )}
                 {targetSec != null ? (
-                  <DurationBar elapsedMs={0} targetSec={targetSec} />
+                  <DurationBar elapsedMs={readyKeptMs ?? 0} targetSec={targetSec} />
                 ) : (
                   <p className="text-xs text-muted-foreground">{t("audio.recordingModal.noTimedWindow")}</p>
                 )}

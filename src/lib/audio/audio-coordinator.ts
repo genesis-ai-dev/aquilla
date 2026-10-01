@@ -37,6 +37,20 @@ export function getActiveAudio(): ActiveAudioController | null {
 }
 
 /**
+ * Become the active audio AND silence whatever was playing before. (AQU-1217)
+ *
+ * `setActiveAudio` only records who owns the Space shortcut; it deliberately
+ * does not pause the previous holder. Where two players sit side by side and
+ * only one may sound — the recorder's selected-take waveform and a Takes-row
+ * audition — each claims the floor through this instead.
+ */
+export function claimActiveAudio(controller: ActiveAudioController): void {
+  const previous = current
+  if (previous && previous !== controller && previous.isPlaying()) previous.pause()
+  setActiveAudio(controller)
+}
+
+/**
  * Toggle the current active audio. Returns true if a controller was found and
  * acted on, false if there's nothing playable yet.
  */

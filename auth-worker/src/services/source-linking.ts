@@ -95,6 +95,34 @@ function contentHash(text: string): string {
   return (h >>> 0).toString(16).padStart(8, "0")
 }
 
+/**
+ * AQU-1520: a source cell's `metadata` bucket, normalized to a plain object or
+ * `null`.
+ *
+ * `cells.metadata` is JSONB and reaches us as a parsed object through the
+ * shim, but a value that predates the column's current use — or a row written
+ * by an older path — can be a JSON string, an array, or a scalar. Only a plain
+ * object is a usable envelope (`readImportMilestone()` in
+ * `src/lib/milestone-navigation.ts` rejects anything else), so anything else
+ * becomes `null` and the snapshot copies no metadata for that cell rather than
+ * writing a shape the navigator cannot read.
+ */
+function cellMetadata(
+  value: unknown,
+): Record<string, unknown> | null {
+  const decoded = typeof value === "string"
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown
+        } catch {
+          return null
+        }
+      })()
+    : value
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) return null
+  return decoded as Record<string, unknown>
+}
+
 function countWords(text: string): number {
   const trimmed = text.trim()
   return trimmed ? trimmed.split(/\s+/).length : 0
@@ -437,10 +465,17 @@ export async function snapshotSourceCells(
     type: string | null
     canonical_ref: string | null
     anchor_cell_id: string | null
+    metadata: Record<string, unknown> | null
   }> = []
   try {
     const rows = await env.AQUILLA_PG.prepare(
-      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id
+      // AQU-1520: `metadata` carries the import envelope
+      // (`aquillaImport.milestone`) the section navigator builds its titles
+      // from. A clone that copies text/type/ref but not this one shows
+      // app-invented "Part N" divisions where the upstream shows "Acts
+      // Preface" and the named chapter sections.
+      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
+              metadata
          FROM cells
         WHERE project_id = ? AND side = 'source'`,
     )
@@ -453,6 +488,7 @@ export async function snapshotSourceCells(
         type: string | null
         canonical_ref: string | null
         anchor_cell_id: string | null
+        metadata: Record<string, unknown> | null
       }>()
     cells = rows.results ?? []
   } catch {
@@ -472,6 +508,10 @@ export async function snapshotSourceCells(
     // belongs to a different project (or doesn't exist under this one).
     const targetFileId = fileIdMap.get(cell.file_id) ?? cell.file_id
     const id = makeEventId()
+    // AQU-1520: normalized once — the genesis payload below and the `cells`
+    // row it projects to must carry the same envelope, or a log replay would
+    // disagree with the row it rebuilt.
+    const metadata = cellMetadata(cell.metadata)
     try {
       const existing = await env.AQUILLA_PG.prepare(
         `SELECT event_id
@@ -494,6 +534,11 @@ export async function snapshotSourceCells(
             valueHtml: cell.value_html ?? undefined,
             type: cell.type ?? undefined,
             canonicalRef: cell.canonical_ref ?? undefined,
+            // AQU-1520: the import envelope travels with the genesis event, so
+            // a replay of the log rebuilds the clone's section navigation too
+            // — the `cells` insert below is a projection of this payload, not
+            // an independent truth.
+            metadata: metadata ?? undefined,
           })
       const serverSeq = await nextServerSeq(env, args.targetProjectId)
 
@@ -521,6 +566,7 @@ export async function snapshotSourceCells(
 
       const hash = contentHash(cell.value)
       const wordCount = countWords(cell.value)
+      const metadataJson = metadata === null ? null : JSON.stringify(metadata)
       if (existing) {
         await env.AQUILLA_PG.prepare(
           `UPDATE cells
@@ -554,8 +600,10 @@ export async function snapshotSourceCells(
           `INSERT INTO cells (
             project_id, file_id, cell_id, side, value, value_html, type,
             canonical_ref, anchor_cell_id, event_id, source_event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id
+            last_editor, last_edit_at, validated, word_count, content_hash,
+            metadata, lane_id
           ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+                    ?::text::jsonb,
                     (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'source'))`,
         )
           .bind(
@@ -572,6 +620,11 @@ export async function snapshotSourceCells(
             now,
             wordCount,
             hash,
+            // AQU-1520: projects the genesis payload's import envelope, so the
+            // clone's section navigator reads the upstream's real divisions
+            // instead of falling back to "Part N". JSON text + an explicit
+            // cast, the same shape the sync-worker projection binds JSONB with.
+            metadataJson,
             args.targetProjectId,
           )
           .run()

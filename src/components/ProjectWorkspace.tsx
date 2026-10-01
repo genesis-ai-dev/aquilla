@@ -50,7 +50,7 @@ import {
   translateAsReadAttemptKey,
   withTranslateAsReadClaim,
 } from "@/lib/completion/translate-as-read"
-import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
+import { branchingResponseToScoredPairs, fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
@@ -82,7 +82,7 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -779,7 +779,7 @@ export function ProjectWorkspace() {
   const exampleOriginFor = useCallback((fileId: string): ExampleOrigin | undefined => {
     const file = projectFiles.find((f) => f.id === fileId)
     if (!file) return undefined
-    return { fileName: file.name, isTranslationMemory: file.type === "tmx" }
+    return { fileName: file.name, isTranslationMemory: isTranslationMemoryFile(file.type) }
   }, [projectFiles])
 
   // AQU-744: current visible file ids, readable from the long-lived WS
@@ -4892,15 +4892,7 @@ export function ProjectWorkspace() {
           excludeCellId: excludeId,
           targetLang: activeLane,
         })
-        return res.results.map((r) => ({
-          cellId: r.cellId,
-          fileId: "",
-          source: r.sourceText,
-          target: r.targetText,
-          score: 1,
-          matchedTokens: res.provenance[r.cellId] ?? [],
-          coverageWeight: r.queryCoverage,
-        }))
+        return branchingResponseToScoredPairs(res)
       } catch (err) {
         console.warn("[ProjectWorkspace] branching-search fetch failed:", err)
         return []

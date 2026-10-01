@@ -292,6 +292,12 @@ export async function writeOrgBillingOverrides(
  * tenants table show. One query for every org asked about, so a multi-org view
  * does not fan out into a query per row.
  *
+ * "Active" excludes both ways a partner can stand a language down (AQU-1070):
+ * archived projects (`archived_at`) and paused ones (`is_active = false`, the
+ * lifecycle toggle). A paused lane is one nobody is working, so billing it
+ * would leave partners with no way to drop out of a band short of archiving.
+ * Lane-level archival is applied per project by `countDistinctTargetLanes`.
+ *
  * `byOrg` is per-org; `combined` de-duplicates across the whole set, because a
  * language two orgs both translate into is one language, not two — an all-orgs
  * tile that summed `byOrg` would over-report it.
@@ -318,7 +324,9 @@ export async function countTargetLanesByOrg(
                 (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
            FROM project_settings ps
            JOIN projects p ON p.id = ps.project_id
-          WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
+          WHERE p.org_id IN (${placeholders})
+            AND p.archived_at IS NULL
+            AND COALESCE(p.is_active, TRUE)`,
       )
       .bind(...unique)
       .all<{

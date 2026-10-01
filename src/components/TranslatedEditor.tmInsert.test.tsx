@@ -61,9 +61,41 @@ describe("TranslatedEditor — TM insert (AQU-1393)", () => {
 
     expect(replaced).toBe(true)
     expect(surface.editor!.getText()).toBe("Au commencement")
+    // Tagged, so the host can tell it from typing and leave it unvalidated.
     expect(onCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ value: "Au commencement" }),
+      expect.objectContaining({ value: "Au commencement", tmInsert: true }),
     )
+  })
+
+  it("tags only the insert's own commit — a later edit commits as ordinary typing", () => {
+    const onCommit = vi.fn()
+    const handle = createRef<TranslatedEditorHandle>()
+
+    render(
+      <TranslatedEditor
+        ref={handle}
+        cellId="tm-then-edit"
+        initialPlain=""
+        initialHtml="<p></p>"
+        onCommit={onCommit}
+      />,
+    )
+
+    const surface = document.querySelector(".ProseMirror") as EditorSurface
+    act(() => {
+      handle.current!.replacePlainText("Au commencement")
+    })
+    act(() => {
+      surface.editor!.commands.setContent("Au commencement, Dieu")
+    })
+    act(() => {
+      fireEvent.blur(surface)
+    })
+
+    expect(onCommit).toHaveBeenCalledTimes(2)
+    expect(onCommit.mock.calls[0][0]).toMatchObject({ value: "Au commencement", tmInsert: true })
+    expect(onCommit.mock.calls[1][0]).toMatchObject({ value: "Au commencement, Dieu" })
+    expect(onCommit.mock.calls[1][0]).not.toHaveProperty("tmInsert")
   })
 
   it("keeps angle brackets in the inserted text literal rather than parsing markup", () => {
@@ -166,7 +198,7 @@ describe("TranslatedEditor — TM insert (AQU-1393)", () => {
     // Drained, so it cannot leak into a later, unrelated activation.
     expect(pendingReplaceRef.current).toBeNull()
     expect(onCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ value: "Au commencement" }),
+      expect.objectContaining({ value: "Au commencement", tmInsert: true }),
     )
   })
 

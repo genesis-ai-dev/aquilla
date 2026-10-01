@@ -173,6 +173,27 @@ interface FoldedCell {
   metadata?: Record<string, unknown> | null
 }
 
+/**
+ * AQU-1520: the `metadata` bucket off a parsed event payload, or `null`.
+ *
+ * The payload is `JSON.parse`d untrusted text, so anything can be sitting on
+ * the key. A plain object is the only shape `cells.metadata` (JSONB) and the
+ * import-envelope readers accept — an array or a scalar would project as
+ * malformed JSONB and `readImportMilestone()` would reject it anyway, so it is
+ * dropped here rather than mirrored downstream.
+ *
+ * `null` (not `undefined`) so the caller's `?? undefined` in the mirror payload
+ * omits the key, which the projection's `COALESCE(excluded.metadata,
+ * cells.metadata)` upsert reads as "leave the downstream row alone".
+ */
+function payloadMetadata(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const value = payload.metadata
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
 /** Deterministic uuid-shaped hash of an arbitrary key. Not cryptographic —
  *  only needs to be stable + collision-unlikely across its keyspace, which
  *  is what the callers below rely on (events PK idempotency; files PK
@@ -273,6 +294,13 @@ async function loadDelta(
         anchorCellId: typeof payload.anchorCellId === 'string' ? payload.anchorCellId : null,
         startMs: typeof payload.startMs === 'number' ? payload.startMs : null,
         endMs: typeof payload.endMs === 'number' ? payload.endMs : null,
+        // AQU-1520: the import envelope (`metadata.aquillaImport.milestone`) is
+        // what the section navigator builds its titles from. Without it a
+        // mirrored file falls back to app-invented "Part N" divisions even
+        // though the upstream shows "Acts Preface" and the named chapter
+        // sections. It travels with the create, exactly like `type` and
+        // `canonicalRef` do.
+        metadata: payloadMetadata(payload),
       })
     } else if (row.kind === 'source.cell.commit') {
       const prev = cells.get(key)
@@ -289,6 +317,12 @@ async function loadDelta(
         anchorCellId: prev?.anchorCellId ?? null,
         startMs: prev?.startMs ?? null,
         endMs: prev?.endMs ?? null,
+        // AQU-1520: a commit payload carries text only — no import envelope —
+        // so metadata rides the fold the same way `type`/`canonicalRef` do.
+        // `null` when the window holds no create: the payload then omits the
+        // key and the projection's COALESCE-upsert leaves the downstream row's
+        // own metadata alone, rather than erasing it on every text edit.
+        metadata: prev?.metadata ?? null,
       })
     } else if (row.kind === 'source.cell.visibility.set') {
       // AQU-1453: hide/show carries no text, so it can only ADJUST a state,
@@ -331,6 +365,7 @@ async function loadDelta(
         anchorCellId: prev?.anchorCellId ?? null,
         startMs: prev?.startMs ?? null,
         endMs: prev?.endMs ?? null,
+        metadata: prev?.metadata ?? null,
       })
     }
     // cell.retime / cast.assign / file.create: structural-only kinds that
@@ -359,7 +394,7 @@ async function loadDelta(
     const { results: liveRows } = await db
       .prepare(
         `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
-                start_ms, end_ms
+                start_ms, end_ms, metadata
            FROM cells
           WHERE project_id = ? AND side = 'source' AND target_lang = ''
             AND (file_id, cell_id) IN (${placeholders})`,
@@ -375,6 +410,7 @@ async function loadDelta(
         anchor_cell_id: string | null
         start_ms: number | string | null
         end_ms: number | string | null
+        metadata: Record<string, unknown> | null
       }>()
     const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
     for (const v of pending) {
@@ -397,6 +433,9 @@ async function loadDelta(
         anchorCellId: live.anchor_cell_id,
         startMs: live.start_ms == null ? null : Number(live.start_ms),
         endMs: live.end_ms == null ? null : Number(live.end_ms),
+        // AQU-1520: the live row is the whole state here, import envelope
+        // included — a park/unpark must not strip the cell's section title.
+        metadata: live.metadata,
         hidden: v.hidden,
       })
     }

@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { pickSelectOption } from "@/test-utils/select"
+import { pickComboboxOption } from "@/test-utils/combobox"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
 // AQU-1352: the destination picker fetches create-targets on open; submit waits
@@ -117,7 +117,7 @@ async function openLinkedTargetWithUpstream(optionName: RegExp) {
 
   fireEvent.click(screen.getByText("Advanced: project shape"))
   fireEvent.click(screen.getByText(/Linked target/i))
-  await pickSelectOption(/Upstream project/i, optionName)
+  await pickComboboxOption(/Upstream project/i, optionName)
 }
 
 describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)", () => {
@@ -223,7 +223,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     })
     fireEvent.click(screen.getByText("Advanced: project shape"))
     // Self Contained is already checked — pick an upstream to reveal corpus choice.
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     pickCorpusSource()
 
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
@@ -299,7 +299,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     })
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     pickCorpusSource()
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 

@@ -372,8 +372,9 @@ orgs.get("/:orgId/portfolio", async (c) => {
     : null
   // AQU-1071: the active-language count rides along with the rollup the org
   // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same rule billing bills on (distinct active target-language tags,
-  // archived lanes and archived projects excluded), and deliberately org-wide
+  // is the same rule billing bills on (distinct active target-language tags;
+  // archived lanes, archived projects and — AQU-1070 — paused projects
+  // excluded), and deliberately org-wide
   // rather than scoped to `page` or to the caller's visible projects (AQU-745):
   // a partner reading a smaller figure than their invoice is the confusion this
   // ticket exists to remove, and a bare count names no project, so it discloses

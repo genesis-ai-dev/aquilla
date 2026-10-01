@@ -100,6 +100,12 @@ export const projectSettings = defineNamespace({
       "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
+    // AQU-1518: the upstream picker is a searchable combobox, not a
+    // scroll-only dropdown.
+    "projectSettings.create.upstreamProjectSearchPlaceholder": "Search projects…",
+    "projectSettings.create.upstreamProjectSearchAriaLabel": "Search projects",
+    "projectSettings.create.upstreamProjectNoMatches": "No projects match.",
+    "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
     "projectSettings.create.linkConsumesSourceName": "Its Source",
@@ -1530,6 +1536,14 @@ export const projectSettings = defineNamespace({
           "Disabled note in a project Members row menu, shown in place of 'Change role' " +
           "when the viewer may manage membership in general but not THIS member, whose " +
           "current role is at or above the viewer's own.",
+      },
+      "projectSettings.create.upstreamProjectSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the Create New Project dialog's " +
+          "\"Upstream project\" picker (AQU-1518). Screen-reader-only — never rendered " +
+          "as visible text; the visible hint is upstreamProjectSearchPlaceholder. " +
+          "\"Projects\" here means Aquilla translation projects, the same sense as " +
+          "projectSettings.create.upstreamProjectLabel.",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",

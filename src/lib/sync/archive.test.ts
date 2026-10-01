@@ -43,7 +43,7 @@ describe("archiveProjectRemote", () => {
   it("returns forbidden with our keyed message, not the server's text, on 403", async () => {
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ error: "only owners can archive" }), { status: 403 })
+        new Response(JSON.stringify({ error: "maintainer+ required to archive a project" }), { status: 403 })
     ) as typeof fetch
     const r = await archiveProjectRemote("p1", "jwt", API)
     expect(r.kind).toBe("forbidden")

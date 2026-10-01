@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 29 tools each with an input schema', async () => {
+  it('returns all 30 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -209,7 +209,10 @@ describe('MCP tools/list', () => {
         // AQU-1294 skills.
         'get_skill',
         'list_changesets',
-        'list_memory', 'list_orgs', 'list_projects', 'patch_settings', 'prepare_import',
+        'list_memory', 'list_orgs', 'list_projects',
+        // AQU-1175 termbase read.
+        'list_terms',
+        'patch_settings', 'prepare_import',
         'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
         'read_content', 'read_history',
         // AQU-1231 quality reads.
@@ -217,7 +220,7 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(29)
+    expect(body.result.tools).toHaveLength(30)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -438,6 +441,42 @@ describe('MCP tools/call — reads', () => {
     expect((terms.payload as any).onlyDrift).toBe(true)
     // No termbase seeded in this suite — the scan runs and finds nothing.
     expect((terms.payload as any).data).toEqual([])
+  })
+
+  it('list_terms reaches the termbase read and reports matchOptions (AQU-1175)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    // A concept with inflection variants and one without, so the response
+    // distinguishes "configured for variants" from "lemma only".
+    await tdb.pg.query(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, match_options, created_at, updated_at)
+       VALUES ('c-word', $1, 'Боже Слово', $2::jsonb, 'active', 0, $3::jsonb, 1000, 1000),
+              ('c-plain', $1, 'grace', $2::jsonb, 'draft', 0, NULL, 2000, 2000)`,
+      [
+        PROJECT,
+        JSON.stringify([{ rendering: 'Word of God', status: 'preferred' }]),
+        JSON.stringify({ forms: ['Божого Слова'] }),
+      ],
+    )
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 22, method: 'tools/call',
+      params: { name: 'list_terms', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(false)
+    expect((payload as any).termCount).toBe(2)
+    const byId = Object.fromEntries((payload as any).data.map((t: any) => [t.conceptId, t]))
+    expect(byId['c-word'].matchOptions).toEqual({ forms: ['Божого Слова'] })
+    expect(byId['c-plain'].matchOptions).toEqual({})
+
+    // The status filter reaches the route through the tool's query mapping.
+    const draftRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 23, method: 'tools/call',
+      params: { name: 'list_terms', arguments: { projectId: PROJECT, status: 'draft' } },
+    })
+    const draft = toolPayload(((await draftRes.json()) as any).result)
+    expect((draft.payload as any).data.map((t: any) => t.conceptId)).toEqual(['c-plain'])
   })
 
   it('a tool argument error is an isError tool result, not a transport error', async () => {

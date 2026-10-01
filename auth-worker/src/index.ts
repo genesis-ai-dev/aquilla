@@ -86,6 +86,7 @@ import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
+import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -245,6 +246,7 @@ app.get("/", (c) =>
       "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
       "/api/v1/ai/seams/classify",
+      "/api/v1/ai/passage-tags/classify",
     ],
   }),
 )
@@ -362,6 +364,11 @@ app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
 // batches a window of cell boundaries into one Jev decision call and falls back
 // to punctuation whenever the model is unavailable or unconfident.
 app.route("/api/v1/ai/seams", aiSeamsRoutes)
+// AQU-657: document-understanding tags over AQU-1387's passage spine. Same
+// session auth, same Jev batching and same heuristic fallback as the seam
+// route; answers who is in a passage, whether it opens a scene, whether it is
+// speech, and which passages it leans on.
+app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)

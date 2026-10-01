@@ -146,6 +146,7 @@ import { SignedOutWorkspace } from "./SignedOutWorkspace"
 import { AnalysisReportDialog } from "@/components/analysis/AnalysisReportDialog"
 import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
 function ProjectOverviewSkeleton() {
@@ -277,7 +278,7 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -317,7 +318,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
   fillClass: string
   suffix?: string
 }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  const pct = progressPercent(value, total)
   return (
     <div className="flex items-center gap-3">
       <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
@@ -1990,7 +1991,7 @@ export function ProjectOverview() {
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
                               }),
                             ].join(" ")}
                           />
@@ -2051,7 +2052,7 @@ export function ProjectOverview() {
                     <p className="mt-3 text-xs text-muted-foreground">
                       {t("org.projectOverview.audioRecordedSummary", {
                         minutes: recordedMinutes(audio),
-                        percent: bidiIsolate(`${Math.round(audioPct(audio) * 100)}%`),
+                        percent: bidiIsolate(`${progressPercentOfFraction(audioPct(audio))}%`),
                       })}
                     </p>
                   )}
@@ -2368,7 +2369,7 @@ export function ProjectOverview() {
                       ) : (
                         <ul className="space-y-2">
                           {workload.map((w) => {
-                            const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
                             const isSelected = w.username != null && w.username === selectedMemberUsername
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">

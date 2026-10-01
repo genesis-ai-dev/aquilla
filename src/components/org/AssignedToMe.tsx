@@ -19,6 +19,7 @@ import { getPortfolio } from "@/lib/frontier/portfolio"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 /**
  * The lane is always emitted, as an empty `?lane=` for a default-lane
@@ -37,7 +38,7 @@ function assignmentHref(a: MyOrgAssignment): string {
 }
 
 function progressPct(a: MyOrgAssignment): number {
-  return a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
+  return progressPercent(a.cellsDone, a.cellsTotal)
 }
 
 /**

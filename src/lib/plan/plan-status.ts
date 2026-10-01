@@ -18,6 +18,7 @@ import {
   isDeadlineOverdue,
 } from "@/lib/frontier/portfolio"
 import { getBookName, isKnownBookCode, getBookOrdinal } from "@/lib/file-labeling/bible-book-names"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 /** One row of the plan: progress for the active lane plus the PM's marks. */
 export interface PlanUnit {
@@ -678,12 +679,11 @@ export function planSummary(units: readonly PlanUnit[], now: number): PlanSummar
  * "100%" with six verses still untranslated — anything within half a percent
  * of the whole rounds up, which on a 1,200-cell book is six cells — right
  * beside a row saying "6 cells to translate". 100 is reserved for part ===
- * whole and everything short of it stops at 99.
+ * whole and everything short of it stops at 99 — the app-wide rule in
+ * `progressPercent`, which the sidebar and the org tables follow too.
  */
 export function planPct(part: number, whole: number): number {
-  if (whole <= 0) return 0
-  if (part >= whole) return 100
-  return Math.min(99, Math.round((part / whole) * 100))
+  return progressPercent(part, whole)
 }
 
 /** What the reader has narrowed the board to. Both are ephemeral by design. */

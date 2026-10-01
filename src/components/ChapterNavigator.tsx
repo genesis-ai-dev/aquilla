@@ -38,6 +38,7 @@ import { useFormat } from "@/lib/i18n/format"
 import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 export interface MilestoneNavigationItem {
   key: string
@@ -253,9 +254,8 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   return VOCABULARIES.milestone
 }
 
-function percent(part: number, total: number): number {
-  return total > 0 ? Math.round((part / total) * 100) : 0
-}
+// AQU-1493: never 100 while a cell is outstanding.
+const percent = progressPercent
 
 /**
  * One progress line: a marker icon, then the percentage right-aligned in the

@@ -60,6 +60,8 @@ interface ProjectComboboxProps {
   /** Label of the row that returns the field to its empty state. */
   clearText?: string
   invalid?: boolean
+  /** Takes the picker out of play, e.g. while its dialog is working (AQU-1519). */
+  disabled?: boolean
 }
 
 export function ProjectCombobox({
@@ -73,6 +75,7 @@ export function ProjectCombobox({
   emptyText,
   clearText,
   invalid,
+  disabled = false,
 }: ProjectComboboxProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -91,6 +94,7 @@ export function ProjectCombobox({
     <ComboboxPrimitive.Root
       items={rows}
       value={selected}
+      disabled={disabled}
       open={open}
       onOpenChange={(next: boolean) => {
         setOpen(next)

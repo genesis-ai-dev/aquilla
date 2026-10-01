@@ -10,6 +10,11 @@ import { LanguageComboboxInput } from "./LanguageComboboxInput"
  * text on Enter. The real-browser proof lives in
  * `e2e/specs/projects/language-combobox.spec.ts` — these cover the wiring.
  *
+ * AQU-1456 widened the catalog from ISO 639-1 (~184) to the full ISO 639-3
+ * table (~7,900), loaded lazily. Cases below that turn on "this name is the
+ * only match" therefore use a name that is genuinely unique in that catalog;
+ * the French cases cover the opposite — an exact name that has siblings.
+ *
  * AQU-1116 pre-highlights the top-ranked match so type-then-Enter selects it.
  * That narrows, but does not lift, the AQU-988 guarantee: Enter is claimed
  * only while the list has matches, so free text ("Grade 7 English") and a
@@ -164,12 +169,31 @@ describe("LanguageComboboxInput", () => {
   it("leaves Enter alone once the text is exactly a catalog name", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
-    typeInto(input, "Frenc")
+    typeInto(input, "Eastern Arrernt")
     await screen.findByRole("listbox")
     // The list hides itself here (isSettledLanguage), so Enter must not fire a
     // second, duplicate selection.
-    typeInto(input, "French")
+    typeInto(input, "Eastern Arrernte")
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByTestId("committed").textContent).toBe("Eastern Arrernte")
+  })
+
+  it("commits the same name when an exact name still has catalog siblings", async () => {
+    // AQU-1456 — over the full ISO 639-3 catalog "French" is no longer the one
+    // match (Cajun French, French Sign Language, Old French, …), so the list
+    // stays up, exactly as it always has for "Norwegian". The exact match is
+    // still the top row, so Enter commits the typed name unchanged.
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "French")
+    await waitFor(() => {
+      expect(screen.getAllByRole("option")[0]!.textContent).toContain("French")
+    })
+    const options = screen.getAllByRole("option")
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    expect(options.length).toBeGreaterThan(1)
 
     fireEvent.keyDown(input, { key: "Enter" })
     expect(screen.getByTestId("committed").textContent).toBe("French")
@@ -212,11 +236,11 @@ describe("LanguageComboboxInput", () => {
   it("hides the list once the text is already the only match", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
-    typeInto(input, "Frenc")
+    typeInto(input, "Pattani Mala")
     await screen.findByRole("listbox")
 
     // Completing the word leaves nothing to suggest but the word itself.
-    typeInto(input, "French")
+    typeInto(input, "Pattani Malay")
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
   })
 
@@ -249,12 +273,26 @@ describe("LanguageComboboxInput", () => {
   })
 
   it("omits already-chosen languages from the list", async () => {
-    render(<Harness exclude={["French"]} />)
-    typeInto(screen.getByLabelText("Language"), "fren")
+    render(<Harness exclude={["Eastern Arrernte"]} />)
+    typeInto(screen.getByLabelText("Language"), "Eastern Arrernt")
 
     await waitFor(() => {
       expect(screen.queryByRole("listbox")).toBeNull()
     })
+  })
+
+  it("omits only the chosen language, not its catalog siblings", async () => {
+    // AQU-1456 — "French" being excluded must not take Cajun French or French
+    // Sign Language with it; they are different languages.
+    render(<Harness exclude={["French"]} />)
+    typeInto(screen.getByLabelText("Language"), "fren")
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option").length).toBeGreaterThan(0)
+    })
+    const labels = screen.getAllByRole("option").map((option) => option.textContent)
+    expect(labels.some((label) => label?.includes("French Sign Language"))).toBe(true)
+    expect(screen.queryByTestId("language-option-fra")).toBeNull()
   })
 
   /**
@@ -310,7 +348,9 @@ describe("LanguageComboboxInput", () => {
       render(<CommitHarness commits={commits} />)
       typeInto(screen.getByLabelText("Language"), "Spa")
 
-      fireEvent.click(await screen.findByRole("option", { name: /Spanish/ }))
+      // Exact name: the full catalog also has "Old Spanish" / "Spanish Sign
+      // Language", so a loose /Spanish/ matches several rows.
+      fireEvent.click(await screen.findByRole("option", { name: "Spanish spa" }))
 
       expect(commits).toEqual([])
       expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("Spanish")

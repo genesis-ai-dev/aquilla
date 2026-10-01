@@ -186,6 +186,8 @@ describe("runSpan — redraft loop", () => {
     expect(report.ambiguities).toBe(3)
     expect(captured.staged).toHaveLength(1)
     expect(captured.staged[0].cells.map((c) => c.text)).toEqual(["keep me", "keep me too"])
+    // Accepted on the first attempt, unanimously: nothing for a reviewer to see.
+    expect(captured.staged[0].cells.map((c) => c.findings)).toEqual([[], []])
     // Full panel ran twice: construe + summarize + 2×(draft + 3 verifiers) = 10 calls.
     expect(calls).toHaveLength(10)
     expect(report.unitsUsed).toBe(5 + 1 + 2 * (5 + 25 + 25 + 5))
@@ -346,12 +348,20 @@ describe("runSpan — support check", () => {
       (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
       (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
     ])
-    const { deps } = makeDeps(llm, { examples: richExamples })
+    const { deps, captured } = makeDeps(llm, { examples: richExamples })
     const report = await runSpan(deps)
     const labels = calls.map((c) => c.label)
     expect(labels.slice(0, 4)).toEqual(["construe", "summarize", "draft", "support"])
     expect(labels.slice(4).sort()).toEqual(["verify:ambiguity", "verify:force", "verify:naturalness"])
     expect(report.notes.join(" ")).toContain("1 confirmed risky")
+    // The panel approved it, but the reviewer must still see why it was
+    // escalated: the finding travels with the staged cell (PR threads §1).
+    const findings = Object.fromEntries(captured.staged[0].cells.map((c) => [c.cellId, c.findings]))
+    // c2 is the off-corpus line — the only cell code flagged, which the fast
+    // model then confirmed (its "i" indexes the flagged cells).
+    expect(findings.c2).toEqual(["unsupported"])
+    expect(findings.c1).toEqual([])
+    expect(findings.c3).toEqual([])
   })
 
   it("escalates when the fast confirmation is unavailable — fail-safe, and says so", async () => {

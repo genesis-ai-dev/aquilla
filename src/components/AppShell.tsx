@@ -166,7 +166,7 @@ export function AppShell({
   // boundary, clearing its error state. Chrome (sidebar, header, status bar)
   // stays outside the boundary so navigation itself is never blocked by a
   // crash in the main content.
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
   const brand = useContext(BrandContext)
@@ -196,9 +196,14 @@ export function AppShell({
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
 
+  // A pick inside the sheet can navigate by query alone — choosing an Agent
+  // conversation while already on /agent only changes ?conversation=. The
+  // sheet is modal, so a URL change while it is open comes from a pick in it;
+  // close on the query too. (Push vs replace can't be told apart here: App's
+  // `<Routes location=…>` reports every navigation below it as POP.)
   useEffect(() => {
     setNavOpen(false)
-  }, [pathname])
+  }, [pathname, search])
 
   /**
    * Mark the document while this frame is on screen, so the base stylesheet
@@ -375,7 +380,7 @@ export function AppShell({
             exactly that, with the label fitted to 13px ("v0"). */}
         <div
           data-slot="app-shell-sidebar-release-row"
-          className={cn("flex min-w-0 items-center", chromeCollapsed && "w-full")}
+          className={cn("flex min-w-0 max-w-full items-center", chromeCollapsed && "w-full")}
         >
           <VersionTag />
         </div>

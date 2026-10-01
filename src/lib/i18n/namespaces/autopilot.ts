@@ -622,6 +622,16 @@ export const autopilot = defineNamespace({
       other: "Affects {count} later passages.",
     }),
     "autopilot.decisions.answer": "Answer",
+    "autopilot.decisions.context.loading": "Finding the passage…",
+    "autopilot.decisions.context.unavailable": "Couldn't load where this applies.",
+    "autopilot.decisions.context.openInEditor": "Open in editor",
+    "autopilot.decisions.context.showPassage": plural({
+      one: "Show {count} verse",
+      other: "Show {count} verses",
+    }),
+    "autopilot.decisions.context.hidePassage": "Hide verses",
+    "autopilot.decisions.context.showSurrounding": "Show surrounding verses",
+    "autopilot.decisions.context.untranslated": "Not translated yet",
     "autopilot.decisions.answerPlaceholder": "Your decision…",
     "autopilot.decisions.dismiss": "Not needed",
     "autopilot.decisions.assign": "Ask someone else",
@@ -1115,6 +1125,10 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.review.passageDrafts": withPlaceholders(
         "Count badge on one passage group in the expanded backlog.",
         { count: "Number of staged drafts in that passage." },
+      ),
+      "autopilot.decisions.context.showPassage": withPlaceholders(
+        "Button on a question card that expands the verses the question is about.",
+        { count: "Number of verses the question is about." },
       ),
       "autopilot.decisions.blastRadius": withPlaceholders(
         "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",

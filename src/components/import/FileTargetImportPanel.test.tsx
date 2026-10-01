@@ -904,6 +904,20 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     ).toBeInTheDocument()
   })
 
+  it("names both sides when the file is for another book", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("This file is for Exodus 1; the open file is Genesis 1.")).toHaveClass("text-amber-600")
+  })
+
+  it("says nothing of the kind for the right file", async () => {
+    renderPanel()
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByText(/This file is for/)).not.toBeInTheDocument()
+  })
+
   it("lists a spreadsheet's unmatched rows as rows", async () => {
     renderPanel()
     await selectFile(makeFile("ref,target\nGEN 1:1,Uno\n,Sin referencia\n", "genesis.csv"))

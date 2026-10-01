@@ -1149,6 +1149,9 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.looseFitWarning": "Many cues cover only part of their lines. Check the pairings.",
+    "importExport.review.elsewhere": "This file is for {incoming}; the open file is {file}.",
+    "importExport.review.elsewhereNoReferences": "This file is for {incoming}; the open file's lines have no verse " +
+      "references.",
     "importExport.review.matchedCount": "{count} matched",
     "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
@@ -3174,6 +3177,29 @@ export const importExport = defineNamespace({
           "committing.",
         placeholders: {
           count: "Number of ticked lines that will be written into the project.",
+        },
+      },
+      "importExport.review.elsewhere": {
+        description:
+          "Amber note above the match-review list when almost none of the uploaded " +
+          "file's verses belong to the open file — it is for another book or chapter. " +
+          "Names both sides so the user sees at once they picked the wrong file or " +
+          "opened the wrong one. One sentence.",
+        placeholders: {
+          incoming: "The books and chapters the uploaded file covers, already formatted, " +
+            "such as 'Exodus 1' or 'Genesis 1–50' (English book names).",
+          file: "The books and chapters the open file covers, formatted the same way, " +
+            "such as 'Genesis 1'.",
+        },
+      },
+      "importExport.review.elsewhereNoReferences": {
+        description:
+          "Amber note above the match-review list when the uploaded file's rows carry " +
+          "verse references but the open file's lines carry none, so nothing could be " +
+          "matched by reference. One sentence.",
+        placeholders: {
+          incoming: "The books and chapters the uploaded file covers, already formatted, " +
+            "such as 'Exodus 1' (English book names).",
         },
       },
       "importExport.review.looseFitWarning": {

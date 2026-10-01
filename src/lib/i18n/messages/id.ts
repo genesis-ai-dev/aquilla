@@ -4333,6 +4333,8 @@ export const id: Catalog = {
   "importExport.review.deselectAll": "Batalkan semua pilihan",
   "importExport.review.frameRateAdjusted": {"forms":{"other":"Frame rate disesuaikan ({count} baris lagi cocok)"},"countVar":"count"},
   "importExport.review.importCellCount": {"forms":{"other":"Impor {count} sel"},"countVar":"count"},
+  "importExport.review.elsewhere": "File ini untuk {incoming}; file yang terbuka untuk {file}.",
+  "importExport.review.elsewhereNoReferences": "File ini untuk {incoming}; sel di file yang terbuka tidak memiliki rujukan ayat.",
   "importExport.review.looseFitWarning": "Banyak cue hanya sebagian tumpang tindih dengan barisnya. Periksa pasangannya.",
   "importExport.review.matchedCount": "{count} cocok",
   "importExport.review.orderMatchWarning": "Dicocokkan berdasarkan urutan, bukan referensi atau waktu. Periksa teks sumber setiap baris.",

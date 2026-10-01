@@ -4302,6 +4302,8 @@ export const fr: Catalog = {
   "importExport.review.deselectAll": "Tout désélectionner",
   "importExport.review.frameRateAdjusted": {"forms":{"one":"Fréquence d’images ajustée ({count} ligne de plus alignée)","many":"Fréquence d’images ajustée ({count} de lignes de plus alignées)","other":"Fréquence d’images ajustée ({count} lignes de plus alignées)"},"countVar":"count"},
   "importExport.review.importCellCount": {"forms":{"one":"Importer {count} cellule","many":"Importer {count} cellules","other":"Importer {count} cellules"},"countVar":"count"},
+  "importExport.review.elsewhere": "Ce fichier concerne {incoming} ; le fichier ouvert concerne {file}.",
+  "importExport.review.elsewhereNoReferences": "Ce fichier concerne {incoming} ; les cellules du fichier ouvert n'ont pas de références de versets.",
   "importExport.review.looseFitWarning": "De nombreux sous-titres ne chevauchent leurs lignes que partiellement. Vérifiez les associations.",
   "importExport.review.matchedCount": "{count} correspondances",
   "importExport.review.orderMatchWarning": "Associées selon l’ordre, et non selon la référence ou le minutage. Vérifiez le texte source de chaque ligne.",

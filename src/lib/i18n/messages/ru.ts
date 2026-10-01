@@ -4368,6 +4368,8 @@ export const ru: Catalog = {
   "importExport.review.deselectAll": "Снять выбор со всех",
   "importExport.review.frameRateAdjusted": {"forms":{"one":"Частота кадров скорректирована (совпадает ещё {count})","few":"Частота кадров скорректирована (совпадают ещё {count})","many":"Частота кадров скорректирована (совпадают ещё {count})","other":"Частота кадров скорректирована (совпадает ещё {count})"},"countVar":"count"},
   "importExport.review.importCellCount": {"forms":{"one":"Импортировать {count} ячейку","few":"Импортировать {count} ячейки","many":"Импортировать {count} ячеек","other":"Импортировать {count} ячейки"},"countVar":"count"},
+  "importExport.review.elsewhere": "Этот файл относится к {incoming}; открытый файл — к {file}.",
+  "importExport.review.elsewhereNoReferences": "Этот файл относится к {incoming}; у ячеек открытого файла нет ссылок на стихи.",
   "importExport.review.looseFitWarning": "Многие субтитры лишь частично пересекаются со своими строками. Проверьте соответствия.",
   "importExport.review.matchedCount": "сопоставлено: {count}",
   "importExport.review.orderMatchWarning": "Сопоставлено по порядку, а не по ссылке или времени. Проверьте исходный текст каждой строки.",

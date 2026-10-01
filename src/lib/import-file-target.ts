@@ -244,6 +244,19 @@ export interface FileTargetMatchResult {
   /** Too many pairings only loosely overlap their lines — see
    *  `LOOSE_FIT_SHARE`. Set only when true. */
   looseFit?: boolean
+  /** Reference matching found the file is for somewhere else: almost every
+   *  verse it carries lies outside the open file's chapters (AQU-1375). Both
+   *  sides are named so the review can say so in one sentence instead of a
+   *  bare "0 matched". `file` is empty when the open file's lines carry no
+   *  verse references at all. */
+  elsewhere?: { incoming: ChapterSpan[]; file: ChapterSpan[] }
+}
+
+/** A run of chapters of one book, as the review names it ("Exodus 1–3"). */
+export interface ChapterSpan {
+  bookCode: string
+  firstChapter: number
+  lastChapter: number
 }
 
 function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCell[]): UncoveredLine[] {
@@ -314,6 +327,42 @@ function verseLinesByChapter(cells: FileTargetCellRef[]): Map<string, VerseRefer
 }
 
 const verseOrdinal = (verse: string) => parseInt(verse, 10)
+
+/** Say the file is for somewhere else when at least this share of its verses
+ *  lie outside the open file's chapters. Below it the file is the right one
+ *  with gaps or extras, and the unmatched list explains those row by row. */
+const ELSEWHERE_SHARE = 0.8
+
+/** The chapters some verses cover, one span per book in order of first
+ *  appearance; a book's span runs from its lowest chapter to its highest. */
+function chapterSpans(verses: VerseReference[]): ChapterSpan[] {
+  const spans = new Map<string, ChapterSpan>()
+  for (const { bookCode, chapter } of verses) {
+    const span = spans.get(bookCode)
+    if (!span) spans.set(bookCode, { bookCode, firstChapter: chapter, lastChapter: chapter })
+    else {
+      span.firstChapter = Math.min(span.firstChapter, chapter)
+      span.lastChapter = Math.max(span.lastChapter, chapter)
+    }
+  }
+  return [...spans.values()]
+}
+
+/** Both sides, when almost none of the file's verses lie in the open file's
+ *  chapters (see `ELSEWHERE_SHARE`); undefined otherwise. */
+function elsewhereSpans(
+  rows: TargetRow[],
+  lineVerses: Map<string, VerseReference[]>,
+): FileTargetMatchResult["elsewhere"] {
+  const incoming = rows
+    .filter((row) => row.text.trim())
+    .map((row) => parseVerseReference(row.ref))
+    .filter((verse): verse is VerseReference => verse !== null)
+  if (incoming.length === 0) return undefined
+  const outside = incoming.filter((verse) => !lineVerses.has(`${verse.bookCode} ${verse.chapter}`)).length
+  if (outside < ELSEWHERE_SHARE * incoming.length) return undefined
+  return { incoming: chapterSpans(incoming), file: chapterSpans([...lineVerses.values()].flat()) }
+}
 
 /** Why no line carries a reference (AQU-1375): a bridge over verses the file
  *  keeps apart, a verse the file keeps inside a bridge, or simply not there. */
@@ -393,11 +442,13 @@ export function matchTargetRowsByRef(
   })
 
   const uncovered = uncoveredLines(cells, matched)
+  const elsewhere = elsewhereSpans(rows, lineVerses)
   return {
     matched,
     orphans,
     unmatchedSourceCount: uncovered.length,
     uncovered,
+    ...(elsewhere ? { elsewhere } : {}),
   }
 }
 

@@ -28,6 +28,7 @@ import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { cn } from "@/lib/utils"
 import {
   matchTargetRowsByRef,
@@ -36,6 +37,7 @@ import {
   subtitleToTargetRowsWithReport,
   CUE_TARGET_EXTENSIONS,
   vttToTargetRowsWithReport,
+  type ChapterSpan,
   type ContestOverrides,
   type FileTargetCellRef,
   type FileTargetMatchedCell,
@@ -131,6 +133,16 @@ function incomingRowKind(fileName: string): "cue" | "verse" | "row" {
   if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
   if (USFM_EXTENSIONS.has(ext)) return "verse"
   return "row"
+}
+
+/** The books and chapters a file covers, the way the review names them:
+ *  "Exodus 1", "Genesis 1–50", "Exodus 1 and Leviticus 2". More than three
+ *  books are cut short with an ellipsis — the point is which file this is. */
+function formatChapterSpans(spans: ChapterSpan[], locale: string): string {
+  const named = spans.slice(0, 3).map(({ bookCode, firstChapter, lastChapter }) =>
+    `${getBookName(bookCode) ?? bookCode} ${firstChapter === lastChapter ? firstChapter : `${firstChapter}–${lastChapter}`}`)
+  const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(named)
+  return spans.length > 3 ? `${list}…` : list
 }
 
 /** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
@@ -893,7 +905,7 @@ export function FileTargetImportPanel({
 
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
-    const { matched, orphans, uncovered, timebase, looseFit, skippedCues = 0 } = matchResult
+    const { matched, orphans, uncovered, timebase, looseFit, elsewhere, skippedCues = 0 } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // "To check": the rows left unticked for a reason a person has to settle —
@@ -1058,6 +1070,20 @@ export function FileTargetImportPanel({
           )}
           {looseFit && (
             <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
+          )}
+          {/* AQU-1375: a file for another book or chapter used to say only
+              "0 matched". */}
+          {elsewhere && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {elsewhere.file.length > 0
+                ? t("importExport.review.elsewhere", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                    file: formatChapterSpans(elsewhere.file, locale),
+                  })
+                : t("importExport.review.elsewhereNoReferences", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                  })}
+            </p>
           )}
           {offsetLabel && subtitleRows && (
             <label className="mt-1.5 flex items-start gap-2 text-xs text-muted-foreground">

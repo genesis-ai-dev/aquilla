@@ -125,6 +125,53 @@ describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
   })
 })
 
+// AQU-1375: an Exodus file dropped on Genesis said only "0 matched, 3
+// unmatched rows, 5 cells not covered" — the same for the wrong chapter.
+describe("matchTargetRowsByRef — a file for somewhere else (AQU-1375)", () => {
+  const genesis1 = [1, 2, 3, 4, 5].map((v) => cell({ cellId: `g${v}`, canonicalRef: `GEN 1:${v}` }))
+  const verses = (book: string, chapter: number, count: number): TargetRow[] =>
+    Array.from({ length: count }, (_, i) => ({ ref: `${book} ${chapter}:${i + 1}`, text: `${book} ${chapter}:${i + 1}` }))
+
+  it("names both sides when the file is for another book", () => {
+    const rows = usfmToTargetRows("\\id EXO\n\\c 1\n\\v 1 a\n\\v 2 b\n\\v 3 c\n")
+    expect(matchTargetRowsByRef(rows, genesis1).elsewhere).toEqual({
+      incoming: [{ bookCode: "EXO", firstChapter: 1, lastChapter: 1 }],
+      file: [{ bookCode: "GEN", firstChapter: 1, lastChapter: 1 }],
+    })
+  })
+
+  it("names both sides when the file is for another chapter, and spans a whole book", () => {
+    expect(matchTargetRowsByRef(verses("GEN", 2, 4), genesis1).elsewhere?.incoming).toEqual([
+      { bookCode: "GEN", firstChapter: 2, lastChapter: 2 },
+    ])
+    // The whole book on one chapter's file: true, and worth saying.
+    const book = Array.from({ length: 50 }, (_, i) => verses("GEN", i + 1, 5)).flat()
+    expect(matchTargetRowsByRef(book, genesis1).elsewhere?.incoming).toEqual([
+      { bookCode: "GEN", firstChapter: 1, lastChapter: 50 },
+    ])
+  })
+
+  it("says so from four in five verses outside the file's chapters, not from three in five", () => {
+    const fourOutside = [...verses("GEN", 1, 1), ...verses("EXO", 1, 4)]
+    const threeOutside = [...verses("GEN", 1, 2), ...verses("EXO", 1, 3)]
+    expect(matchTargetRowsByRef(fourOutside, genesis1).elsewhere).toBeDefined()
+    expect(matchTargetRowsByRef(threeOutside, genesis1).elsewhere).toBeUndefined()
+  })
+
+  it("names only the incoming side when the open file's lines carry no verse refs", () => {
+    const untimed = [cell({ cellId: "m1" }), cell({ cellId: "m2" })]
+    expect(matchTargetRowsByRef(verses("JON", 1, 3), untimed).elsewhere).toEqual({
+      incoming: [{ bookCode: "JON", firstChapter: 1, lastChapter: 1 }],
+      file: [],
+    })
+  })
+
+  it("says nothing for the right file, gaps and all", () => {
+    expect(matchTargetRowsByRef(verses("GEN", 1, 3), genesis1).elsewhere).toBeUndefined()
+    expect(matchTargetRowsByRef(verses("GEN", 1, 9), genesis1).elsewhere).toBeUndefined()
+  })
+})
+
 // AQU-1375: a reference column is written in whatever spelling the partner's
 // tool or habit uses; an exact-key lookup left `Genesis 1:4` and `GEN 1.5`
 // unmatched beside the very lines they name.

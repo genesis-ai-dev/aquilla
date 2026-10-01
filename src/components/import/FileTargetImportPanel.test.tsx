@@ -979,6 +979,46 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     })
   })
 
+  describe("a spreadsheet with start and end columns matches by timing", () => {
+    const timedLine = (n: number, startMs: number, endMs: number) => ({
+      cellId: `line-${n}`,
+      fileId: "file-1",
+      canonicalRef: null,
+      sourceEventId: `se-${n}`,
+      targetEventId: undefined,
+      translated: "",
+      original: `SOURCE ${n}`,
+      startMs,
+      endMs,
+    })
+    const lines = [timedLine(1, 1000, 2000), timedLine(2, 3000, 4000), timedLine(3, 5000, 6000)]
+
+    it("pairs by time — an extra row in the middle displaces nothing — labelled by timecode", async () => {
+      renderPanel({ cells: lines })
+      await selectFile(makeFile(
+        "id,start,end,translation\n1,00:00:01.000,00:00:02.000,Uno\n2,00:00:02.300,00:00:02.700,Extra\n" +
+          "3,00:00:03.000,00:00:04.000,Dos\n4,00:00:05.000,00:00:06.000,Tres\n",
+        "episode.csv",
+      ))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByText(/matched in order/i)).not.toBeInTheDocument()
+      expect(screen.getByText("Dos").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "line-2")
+      expect(screen.getByText("Tres").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "line-3")
+      // The "id" column was taken as the label, which the timing match shows.
+      expect(within(screen.getByText("Uno").closest<HTMLElement>("[data-review-cell]")!).getByText("1")).toBeInTheDocument()
+      expect(screen.getByText("1 unmatched row")).toBeInTheDocument()
+    })
+
+    it("still matches a verse sheet's references on a file of untimed verses", async () => {
+      renderPanel()
+      await selectFile(makeFile("ref,start,end,target\nGEN 1:2,00:00:09.000,00:00:12.000,Dos\n", "audio-timing.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText("Dos").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
+    })
+  })
+
   it("lists a spreadsheet's unmatched rows as rows", async () => {
     renderPanel()
     await selectFile(makeFile("ref,target\nGEN 1:1,Uno\n,Sin referencia\n", "genesis.csv"))

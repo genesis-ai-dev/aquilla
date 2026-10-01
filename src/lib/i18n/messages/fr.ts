@@ -4263,7 +4263,7 @@ export const fr: Catalog = {
   "importExport.columnMapping.sourceColumnLabel": "Texte source",
   "importExport.columnMapping.startColumnLabel": "Horodatage de début",
   "importExport.columnMapping.targetColumnLabel": "Traduction cible",
-  "importExport.columnMapping.targetModeHint": "Choisissez la colonne contenant les traductions. Mappez une colonne de référence pour faire correspondre par référence, ou la colonne de texte source pour associer les lignes aux cellules par leur source. Sans l'une ni l'autre, les lignes sont associées aux cellules dans l'ordre.",
+  "importExport.columnMapping.targetModeHint": "Choisissez la colonne contenant les traductions. Mappez une colonne de référence pour faire correspondre par référence, des horodatages de début et de fin pour faire correspondre par minutage, ou la colonne de texte source pour associer les lignes aux cellules par leur source. Sans aucune de ces colonnes, les lignes sont associées aux cellules dans l'ordre.",
   "importExport.columnMapping.typeColumnLabel": "Type de contenu",
   "importExport.errors.failedToParseFile": "Échec de l'analyse du fichier",
   "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT ou SBV",

@@ -4293,7 +4293,7 @@ export const id: Catalog = {
   "importExport.columnMapping.sourceColumnLabel": "Teks sumber",
   "importExport.columnMapping.startColumnLabel": "Stempel waktu mulai",
   "importExport.columnMapping.targetColumnLabel": "Terjemahan target",
-  "importExport.columnMapping.targetModeHint": "Pilih kolom yang memuat terjemahannya. Petakan kolom rujukan untuk mencocokkan berdasarkan rujukan, atau kolom teks sumber untuk memasangkan baris ke sel berdasarkan sumbernya. Tanpa keduanya, baris dicocokkan ke sel sesuai urutan.",
+  "importExport.columnMapping.targetModeHint": "Pilih kolom yang memuat terjemahannya. Petakan kolom rujukan untuk mencocokkan berdasarkan rujukan, stempel waktu mulai dan selesai untuk mencocokkan berdasarkan waktu, atau kolom teks sumber untuk memasangkan baris ke sel berdasarkan sumbernya. Tanpa semua itu, baris dicocokkan ke sel sesuai urutan.",
   "importExport.columnMapping.typeColumnLabel": "Jenis isi",
   "importExport.errors.failedToParseFile": "Gagal mengurai file",
   "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, atau SBV",

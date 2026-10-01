@@ -51,6 +51,7 @@ import {
   type SpreadsheetSheet,
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
+import { targetSheetRows } from "@/lib/import/target-sheet-rows"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
@@ -548,6 +549,9 @@ export function FileTargetImportPanel({
               setRematching(null)
               setMatchResult(null)
               setSelectedCellIds(new Set())
+              setSubtitleRows(null)
+              setExpandedRows(new Set())
+              setOverrides(NO_OVERRIDES)
               setError(null)
               setStep("mapping")
             },
@@ -728,13 +732,18 @@ export function FileTargetImportPanel({
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
     const dataRows = hasHeader ? selectedSheet.rows.slice(1) : selectedSheet.rows
-    // Keep empty rows in place — order matching needs every row to hold its slot.
-    // A mapped source column steers order matching (AQU-1375).
-    const rows: TargetRow[] = dataRows.map((r) => ({
-      ref: mapping.labelCol !== null ? (r[mapping.labelCol] ?? "").trim() || undefined : undefined,
-      text: (r[mapping.targetCol!] ?? "").trim(),
-      ...(mapping.sourceCol !== null ? { source: (r[mapping.sourceCol] ?? "").trim() } : {}),
-    }))
+    const { rows, timed } = targetSheetRows(dataRows, mapping)
+    // Start and end columns put a subtitle spreadsheet through the timing
+    // matcher (AQU-1375), shift tickbox and swaps included, as a subtitle file
+    // would go. A reference column still wins unless the open file's lines
+    // are timed too: a verse sheet carrying audio timings keeps matching by
+    // verse on a file of untimed verses.
+    const linesTimed = cells.length > 0 && cells.every((c) => c.startMs !== undefined && c.endMs !== undefined)
+    if (timed && (mapping.labelCol === null || linesTimed)) {
+      setSubtitleRows({ rows, skippedCues: 0 })
+      showReview(matchTargetRowsByOrder(rows, cells), true)
+      return
+    }
     const byOrder = mapping.labelCol === null
     showReview(
       byOrder ? matchTargetRowsByOrder(rows, cells) : matchTargetRowsByRef(rows, cells),

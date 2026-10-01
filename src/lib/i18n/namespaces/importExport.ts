@@ -1085,8 +1085,8 @@ export const importExport = defineNamespace({
     "importExport.columnMapping.startColumnLabel": "Start timestamp",
     "importExport.columnMapping.targetColumnLabel": "Target translation",
     "importExport.columnMapping.targetModeHint": "Pick the column with the translations. Map a ref column to match by " +
-      "reference, or the source text column to pair rows with lines by their source. With neither, rows match " +
-      "lines in order.",
+      "reference, start and end timestamps to match by timing, or the source text column to pair rows with lines " +
+      "by their source. With none of these, rows match lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
     "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
@@ -2879,10 +2879,11 @@ export const importExport = defineNamespace({
         description:
           "Instruction under the column-mapping heading when the spreadsheet is " +
           "being used to fill in translations for lines that already exist. First " +
-          "sentence names the one required choice. The rest explains the two " +
-          "optional columns: a reference column pairs rows with lines by reference; " +
-          "a source text column pairs them by the original text each row was " +
-          "translated from; with neither, rows are paired top to bottom by position.",
+          "sentence names the one required choice. The rest explains the optional " +
+          "columns: a reference column pairs rows with lines by reference; start and " +
+          "end timestamp columns pair them by when they play; a source text column " +
+          "pairs them by the original text each row was translated from; with none " +
+          "of these, rows are paired top to bottom by position.",
       },
       "importExport.columnMapping.typeColumnLabel": {
         description:

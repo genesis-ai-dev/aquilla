@@ -45,9 +45,10 @@ export interface ColumnMappingPanelProps {
   /**
    * "create" (default): full mapping for importing a new file — source required.
    * "target": populate an existing file's target column — target is required
-   * instead; ref is optional (no ref → rows match cells by order), and so is
-   * source (mapped → rows pair with cells by their source text, AQU-1375);
-   * type, cast, and timestamp columns are hidden since they don't apply.
+   * instead; ref is optional (no ref → rows match cells by order), and so are
+   * source (mapped → rows pair with cells by their source text) and start/end
+   * timestamps (mapped → rows match cells by timing) (AQU-1375); type and
+   * cast columns are hidden since they don't apply.
    */
   mode?: "create" | "target"
 }
@@ -222,20 +223,20 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
               value={mapping.castCol}
               onChange={(v) => set("castCol", v)}
             />
-            <ColSelect
-              label={t("importExport.columnMapping.startColumnLabel")}
-              headers={headers}
-              value={mapping.startCol}
-              onChange={(v) => set("startCol", v)}
-            />
-            <ColSelect
-              label={t("importExport.columnMapping.endColumnLabel")}
-              headers={headers}
-              value={mapping.endCol}
-              onChange={(v) => set("endCol", v)}
-            />
           </>
         )}
+        <ColSelect
+          label={t("importExport.columnMapping.startColumnLabel")}
+          headers={headers}
+          value={mapping.startCol}
+          onChange={(v) => set("startCol", v)}
+        />
+        <ColSelect
+          label={t("importExport.columnMapping.endColumnLabel")}
+          headers={headers}
+          value={mapping.endCol}
+          onChange={(v) => set("endCol", v)}
+        />
       </div>
 
       {/* Data preview table */}

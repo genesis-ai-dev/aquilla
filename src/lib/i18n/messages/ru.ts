@@ -4328,7 +4328,7 @@ export const ru: Catalog = {
   "importExport.columnMapping.sourceColumnLabel": "Исходный текст",
   "importExport.columnMapping.startColumnLabel": "Метка времени начала",
   "importExport.columnMapping.targetColumnLabel": "Перевод",
-  "importExport.columnMapping.targetModeHint": "Выберите столбец с переводами. Сопоставьте столбец ссылок, чтобы связывать по ссылке, или столбец исходного текста, чтобы связывать строки с ячейками по исходному тексту. Без них строки связываются с ячейками по порядку.",
+  "importExport.columnMapping.targetModeHint": "Выберите столбец с переводами. Сопоставьте столбец ссылок, чтобы связывать по ссылке, метки времени начала и окончания — чтобы связывать по времени, или столбец исходного текста — чтобы связывать строки с ячейками по исходному тексту. Без них строки связываются с ячейками по порядку.",
   "importExport.columnMapping.typeColumnLabel": "Тип содержимого",
   "importExport.errors.failedToParseFile": "Не удалось разобрать файл",
   "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT или SBV",

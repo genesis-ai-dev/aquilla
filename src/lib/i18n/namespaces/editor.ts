@@ -612,6 +612,8 @@ export const editor = defineNamespace({
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
     "editor.selection.validateAiDrafts":
       "Nothing eligible — untouched AI drafts require individual review",
+    "editor.selection.validateAiDraftsOrgHint":
+      "An organization maintainer can allow this under Settings → Project defaults.",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
@@ -4401,6 +4403,13 @@ export const editor = defineNamespace({
           "untouched AI drafts. Policy: a human must open each AI draft " +
           "individually, so they cannot be approved in bulk. The reason after the " +
           "dash is the important half.",
+      },
+      "editor.selection.validateAiDraftsOrgHint": {
+        description:
+          "Second sentence of that same tooltip: an organization can switch the " +
+          "rule off. 'Settings → Project defaults' names the organization " +
+          "settings page where the switch lives — use this catalog's wording for " +
+          "both names, keeping the arrow.",
       },
       "editor.selection.validateNeedTranslation": {
         description:

@@ -9,7 +9,7 @@
 // visible symptom was a batch that took longer than it should.
 //
 // One predicate, used by both, is what stops that happening again.
-import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
+import { isBulkValidationEligible, type BulkReviewPolicy } from "@/lib/review/review-eligibility"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 
 export interface BulkValidatableCell {
@@ -22,8 +22,9 @@ export function isBulkValidatableByMe(
   username: string,
   myScopes: MemberScope[],
   activeLane: string,
+  policy: BulkReviewPolicy = {},
 ): boolean {
-  if (!isBulkValidationEligible(cell)) return false
+  if (!isBulkValidationEligible(cell, policy)) return false
   // AQU-633: a scoped member's validate on an out-of-scope cell is a
   // guaranteed 403. The server stays authoritative; this only keeps the
   // doomed event out of the outbox.

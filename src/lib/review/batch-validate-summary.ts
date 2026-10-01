@@ -22,6 +22,7 @@
  * same telemetry, and the guard branches are unit-testable without React.
  */
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
+import type { BulkReviewPolicy } from "@/lib/review/review-eligibility"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TVars } from "@/lib/i18n/translate"
@@ -102,12 +103,13 @@ export function batchValidateSkipReason(
   username: string,
   myScopes: MemberScope[],
   activeLane: string,
+  policy: BulkReviewPolicy = {},
 ): BatchValidateSkipReason | null {
-  if (isBulkValidatableByMe(cell, username, myScopes, activeLane)) return null
+  if (isBulkValidatableByMe(cell, username, myScopes, activeLane, policy)) return null
   if (!cell.translated.trim()) return "needsTranslation"
   if (cell.activeValidators?.includes(username)) return "alreadyMine"
   if (!cell.targetEventId) return "notCommitted"
-  if (cell.aiDrafted) return "aiDraft"
+  if (cell.aiDrafted && policy.allowAiDrafts !== true) return "aiDraft"
   if (!isInMemberScope(myScopes, cell.fileId, activeLane)) return "outOfScope"
   // Unreachable while `isBulkValidatableByMe` asks exactly the questions above;
   // kept so a future guard added there degrades to an honest "not committed"
@@ -127,13 +129,18 @@ export interface SummarizeOptions {
   canValidate?: boolean
   /** False when there is no project/file to validate against. */
   hasTarget?: boolean
+  /**
+   * The org's `allowBulkValidateAiDrafts`: true lets untouched AI drafts into
+   * the run instead of skipping them as "aiDraft". Absent means the rule holds.
+   */
+  allowAiDrafts?: boolean
 }
 
 export function summarizeBatchValidate(
   candidates: readonly BatchValidateCandidate[],
   options: SummarizeOptions,
 ): BatchValidateSummary {
-  const { username, myScopes, activeLane, cap, canValidate = true, hasTarget = true } = options
+  const { username, myScopes, activeLane, cap, canValidate = true, hasTarget = true, allowAiDrafts } = options
   const skips = emptySkips()
 
   if (!hasTarget) {
@@ -145,7 +152,7 @@ export function summarizeBatchValidate(
 
   const eligible: BatchValidateCandidate[] = []
   for (const cell of candidates) {
-    const reason = batchValidateSkipReason(cell, username, myScopes, activeLane)
+    const reason = batchValidateSkipReason(cell, username, myScopes, activeLane, { allowAiDrafts })
     if (reason === null) eligible.push(cell)
     else skips[reason]++
   }

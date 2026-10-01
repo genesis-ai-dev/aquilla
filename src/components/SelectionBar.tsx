@@ -102,6 +102,13 @@ interface Props {
    * commit; this closes that gap.
    */
   onValidationCommitted?: () => void
+  /**
+   * The org's `allowBulkValidateAiDrafts`: true lets "Validate text" sign off
+   * untouched AI drafts too. Absent or false keeps the one-at-a-time rule —
+   * the same value reaches the file menu's "Batch validate text…", so the two
+   * bulk paths always agree.
+   */
+  allowBulkValidateAiDrafts?: boolean
 }
 
 type Running =
@@ -111,7 +118,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, allowBulkValidateAiDrafts = false }: Props) {
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -149,8 +156,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   const validatableCount = useMemo(
     // AQU-490: shared with ProjectWorkspace.runBatchValidate, which used to
     // apply neither of these two guards.
-    () => selectedCells.filter((c) => isBulkValidatableByMe(c, username, myScopes, activeLane)).length,
-    [selectedCells, username, myScopes, activeLane],
+    () => selectedCells.filter((c) =>
+      isBulkValidatableByMe(c, username, myScopes, activeLane, { allowAiDrafts: allowBulkValidateAiDrafts }),
+    ).length,
+    [selectedCells, username, myScopes, activeLane, allowBulkValidateAiDrafts],
   )
   const unvalidatableCount = useMemo(
     () => selectedCells.filter(
@@ -163,10 +172,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // drafts needing individual review → cells still lacking a translation.
   const validateDisabledReason = useMemo(() => {
     if (validatableCount > 0) return null
+    const policy = { allowAiDrafts: allowBulkValidateAiDrafts }
     // AQU-633: cells eligible + not-yet-mine but blocked only by scope.
     const outOfScope = selectedCells.filter(
       (c) =>
-        isBulkValidationEligible(c) &&
+        isBulkValidationEligible(c, policy) &&
         !c.activeValidators.includes(username) &&
         !isInMemberScope(myScopes, c.fileId, activeLane),
     ).length
@@ -174,19 +184,30 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       return t("editor.selection.validateOutOfScope")
     }
     const alreadyMine = selectedCells.filter(
-      (c) => isBulkValidationEligible(c) && c.activeValidators.includes(username),
+      (c) => isBulkValidationEligible(c, policy) && c.activeValidators.includes(username),
     ).length
-    const aiDrafts = selectedCells.filter(
+    // Where the org lets drafts through, they are never the reason: a draft
+    // is then held back only by scope or by being already mine, both above.
+    const aiDrafts = allowBulkValidateAiDrafts ? 0 : selectedCells.filter(
       (c) => c.translated.trim() && c.targetEventId && c.aiDrafted,
     ).length
     const needTranslation = selectedCells.filter((c) => !c.translated.trim()).length
     if (alreadyMine > 0 && aiDrafts === 0 && needTranslation === 0) {
       return t("editor.selection.validateAllMine")
     }
-    if (aiDrafts > 0) return t("editor.selection.validateAiDrafts")
+    // The rule is the org's to relax, so say where — a greyed-out button with
+    // no way forward is how this read to Sam on 2026-10-01.
+    if (aiDrafts > 0) {
+      return (
+        <>
+          <span className="block">{t("editor.selection.validateAiDrafts")}</span>
+          <span className="block">{t("editor.selection.validateAiDraftsOrgHint")}</span>
+        </>
+      )
+    }
     if (needTranslation > 0) return t("editor.selection.validateNeedTranslation")
     return t("editor.selection.validateNothingEligible")
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, t])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, allowBulkValidateAiDrafts, t])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -394,6 +415,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         myScopes,
         activeLane,
         hasTarget: Boolean(project.id),
+        allowAiDrafts: allowBulkValidateAiDrafts,
       })
       for (const cell of summary.validatable) {
         void emitCellValidate({
@@ -418,7 +440,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowBulkValidateAiDrafts])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return

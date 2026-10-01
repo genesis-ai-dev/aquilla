@@ -335,6 +335,52 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
+  it("says where an org can allow bulk validation of AI drafts", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true }),
+    ])
+    await expectTooltip(validateButton(), "An organization maintainer can allow this under Settings → Project defaults.")
+    vi.restoreAllMocks()
+  })
+
+  // Sam, 2026-10-01: an org may let bulk validation take untouched AI drafts.
+  // Off is the test above; on, the same five drafts are offered and validated.
+  it("offers and validates untouched AI drafts when the org allows it", async () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const ids = ["d1", "d2", "d3", "d4", "d5"]
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(ids))
+    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, aiDrafted: true }))
+
+    const off = renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
+    expect(validateButton()).toBeDisabled()
+    off.unmount()
+
+    renderBar(makeProject(ROLE.CONTRIBUTOR), drafts, [], "", { allowBulkValidateAiDrafts: true })
+    const btn = validateButton()
+    expect(btn).toBeEnabled()
+    expect(btn).toHaveTextContent(/Validate text\s*5/)
+    await expectTooltip(btn, "Validate 5 cells")
+    fireEvent.click(btn)
+    expect(emitCellValidate).toHaveBeenCalledTimes(5)
+    vi.restoreAllMocks()
+  })
+
+  it("keeps the other guards when the org allows AI drafts", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(
+      makeProject(ROLE.CONTRIBUTOR),
+      [makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true, activeValidators: ["alice"] })],
+      [],
+      "",
+      { allowBulkValidateAiDrafts: true },
+    )
+    const btn = validateButton()
+    expect(btn).toBeDisabled()
+    await expectTooltip(btn, "All selected cells are already validated by you")
+    vi.restoreAllMocks()
+  })
+
   it("disables with a 'need a translation' reason for an untranslated cell", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [makeCell({ id: "cell-1", translated: "" })])

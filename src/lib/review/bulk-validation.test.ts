@@ -42,4 +42,15 @@ describe("isBulkValidatableByMe", () => {
     expect(isBulkValidatableByMe(cell({ activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
     expect(isBulkValidatableByMe(cell({ activeValidators: ["bo"] }), "ana", unscoped, "")).toBe(true)
   })
+
+  // The org setting lifts ONLY the AI-draft rule; scope and already-mine still
+  // apply, so the run never fires a guaranteed 403 or a repeat vote.
+  it("takes an untouched AI draft only when the org allows it, and keeps the other guards", () => {
+    const draft = cell({ aiDrafted: true })
+    expect(isBulkValidatableByMe(draft, "ana", unscoped, "")).toBe(false)
+    expect(isBulkValidatableByMe(draft, "ana", unscoped, "", { allowAiDrafts: true })).toBe(true)
+    const scopes = [{ kind: "file", value: "other" }] as unknown as MemberScope[]
+    expect(isBulkValidatableByMe(draft, "ana", scopes, "", { allowAiDrafts: true })).toBe(false)
+    expect(isBulkValidatableByMe(cell({ aiDrafted: true, activeValidators: ["ana"] }), "ana", unscoped, "", { allowAiDrafts: true })).toBe(false)
+  })
 })

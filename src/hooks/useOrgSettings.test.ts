@@ -828,3 +828,32 @@ describe("orgRules identity (AQU-1104)", () => {
     expect(afterFetch).toEqual([])
   })
 })
+
+// Sam, 2026-10-01: bulk text validation may take untouched AI drafts only when
+// the org says so. Unset is OFF — the opposite default to the two "unset is on"
+// keys beside it — and only a real boolean true turns it on.
+describe("useOrgSettings — allowBulkValidateAiDrafts is opt-in", () => {
+  const withSettings = (settings: Record<string, unknown>): OrgSettingsResponse => ({
+    ...makeResponse(),
+    settings,
+  })
+
+  it("is off in an org that has never set it", async () => {
+    mockFetchResponse = withSettings({})
+    const { result } = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.allowBulkValidateAiDrafts).toBe(false)
+  })
+
+  it("is on only for an explicit true", async () => {
+    mockFetchResponse = withSettings({ allowBulkValidateAiDrafts: true })
+    const on = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(on.result.current.hasFetched).toBe(true))
+    expect(on.result.current.allowBulkValidateAiDrafts).toBe(true)
+
+    mockFetchResponse = withSettings({ allowBulkValidateAiDrafts: "true" })
+    const garbage = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(garbage.result.current.hasFetched).toBe(true))
+    expect(garbage.result.current.allowBulkValidateAiDrafts).toBe(false)
+  })
+})

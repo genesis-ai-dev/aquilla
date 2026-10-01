@@ -260,6 +260,11 @@ export interface UseOrgSettings {
    * org opts out; a project may still override it in either direction.
    */
   autoPropagateRepetitions: boolean
+  /**
+   * Whether bulk text validation may sign off untouched AI drafts. OFF unless
+   * the org opts in, which keeps the one-at-a-time rule for AI drafts.
+   */
+  allowBulkValidateAiDrafts: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -479,6 +484,9 @@ export function useOrgSettings(
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  // `=== true`, the opposite of the two above: unset is OFF, because AI drafts
+  // have always been reviewed one at a time and an org must opt in.
+  const allowBulkValidateAiDrafts = server?.settings?.allowBulkValidateAiDrafts === true
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -626,6 +634,7 @@ export function useOrgSettings(
     countStructuralCells,
     countStructuralOverrides,
     autoPropagateRepetitions,
+    allowBulkValidateAiDrafts,
     resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,

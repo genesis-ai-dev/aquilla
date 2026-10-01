@@ -243,3 +243,24 @@ describe("batchValidateTelemetry — the surface can no longer be invisible", ()
     expect(batchValidateTelemetry(summary, "workspace-action").source).toBe("workspace-action")
   })
 })
+
+// The org setting (Sam, 2026-10-01): with it on, the drafts that used to land
+// in the "aiDraft" bucket are validated instead, and the bucket stays empty.
+describe("summarizeBatchValidate — when the org allows AI drafts in bulk", () => {
+  it("validates untouched AI drafts instead of skipping them", () => {
+    const cells = [cell({ id: "a", aiDrafted: true }), cell({ id: "b", aiDrafted: true }), cell({ id: "c", translated: "" })]
+    const off = summarizeBatchValidate(cells, base)
+    expect(off.validatable).toHaveLength(0)
+    expect(off.skips.aiDraft).toBe(2)
+    const on = summarizeBatchValidate(cells, { ...base, allowAiDrafts: true })
+    expect(on.validatable.map((c) => c.id)).toEqual(["a", "b"])
+    expect(on.skips.aiDraft).toBe(0)
+    expect(on.skips.needsTranslation).toBe(1)
+    expect(on.outcome).toBe("partial")
+  })
+
+  it("still names a draft this user already signed off as theirs", () => {
+    expect(batchValidateSkipReason(cell({ aiDrafted: true, activeValidators: [ME] }), ME, [], "", { allowAiDrafts: true }))
+      .toBe("alreadyMine")
+  })
+})

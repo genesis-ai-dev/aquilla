@@ -4733,6 +4733,9 @@ export function ProjectWorkspace() {
     // AQU-1391: org default for repetition auto-propagation (a project may
     // override it either way).
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
+    // Whether bulk text validation may sign off untouched AI drafts (Sam,
+    // 2026-10-01). Off unless the org opts in; both bulk paths read it.
+    allowBulkValidateAiDrafts,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -9257,8 +9260,9 @@ export function ProjectWorkspace() {
       cap: project?.completionSettings?.validationBatchSize,
       canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
       hasTarget: Boolean(project?.id && activeFileId),
+      allowAiDrafts: allowBulkValidateAiDrafts,
     },
-  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane, allowBulkValidateAiDrafts])
 
   const actionCtx = useMemo(() => ({
     project: project!,
@@ -12724,6 +12728,7 @@ export function ProjectWorkspace() {
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
+                  allowBulkValidateAiDrafts={allowBulkValidateAiDrafts}
                   audioMode={lens === "audio"}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return

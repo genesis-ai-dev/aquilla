@@ -29883,7 +29883,12 @@
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validateAiDraftsOrgHint": "099ae707e2d8328e",
+    "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
+    "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
+    "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35620,7 +35625,12 @@
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validateAiDraftsOrgHint": "099ae707e2d8328e",
+    "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
+    "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
+    "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41266,6 +41276,11 @@
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
     "knowledgeBase.status.stalled": "d8e9d488c1579f94",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validateAiDraftsOrgHint": "099ae707e2d8328e",
+    "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
+    "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
+    "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
   }
 }

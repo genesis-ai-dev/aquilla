@@ -63,6 +63,20 @@ export interface InterlinearAlignmentPanelProps {
   /** Called when the user confirms or invalidates an alignment.
    *  Parent is responsible for persisting and passing a refreshed model. */
   onSeedChange: (seed: AlignmentSeed) => void
+  /**
+   * AQU-1408: may this viewer teach the alignment? Contributor(400)+, the same
+   * rung that may correct a back-translation and the same floor the
+   * `alignmentSeeds` settings carve-out enforces on the server.
+   *
+   * Below it the confirm/reject buttons render DISABLED with an explanation
+   * rather than vanishing or, worse, staying clickable: a click that the role
+   * floor then refuses is a control that does nothing and says nothing, which
+   * is the defect AQU-1408 was filed about in the first place.
+   *
+   * Defaults to true so a caller that does not know the viewer's role — and
+   * every existing caller — behaves exactly as before.
+   */
+  editable?: boolean
 }
 
 /**
@@ -89,6 +103,7 @@ function AlignmentRow({
   confirmed,
   invalidated,
   modelled = true,
+  editable = true,
   onConfirm,
   onInvalidate,
 }: {
@@ -98,6 +113,9 @@ function AlignmentRow({
   /** False for a decided pair the model no longer proposes: there is no
    *  confidence to show, only the decision. */
   modelled?: boolean
+  /** AQU-1408: contributor(400)+ may teach the alignment; below that the
+   *  buttons are disabled with an explanation. */
+  editable?: boolean
   onConfirm: () => void
   onInvalidate: () => void
 }) {
@@ -162,7 +180,7 @@ function AlignmentRow({
       )}
 
       {/* Action buttons — only when not already decided */}
-      {!confirmed && !invalidated && (
+      {!confirmed && !invalidated && editable && (
         <>
           {/* AQU-240: tooltip/aria-label explains that confirming teaches the glosser */}
           <AppTooltip
@@ -197,6 +215,25 @@ function AlignmentRow({
             </Button>
           </AppTooltip>
         </>
+      )}
+      {/* AQU-1408: below contributor the decision cannot be saved, so the
+          controls say so rather than accepting a click they will drop.
+          Disabled-with-a-reason, per 09-design-and-ux "Never disable silently". */}
+      {!confirmed && !invalidated && !editable && (
+        <AppTooltip content={t("workspace.alignment.contributorRequired")} className="max-w-xs">
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              disabled
+              aria-label={t("workspace.alignment.contributorRequired")}
+              className="shrink-0 text-muted-foreground"
+            >
+              <Check />
+            </Button>
+          </span>
+        </AppTooltip>
       )}
       {confirmed && (
         <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
@@ -310,6 +347,7 @@ export function InterlinearAlignmentPanel({
   confirmedSeeds,
   onSeedChange,
   originalWords,
+  editable = true,
 }: InterlinearAlignmentPanelProps) {
   const t = useT()
   // AQU-241: derive whether the model has enough pairs for non-random results.
@@ -492,6 +530,7 @@ export function InterlinearAlignmentPanel({
                 key={rowKey(link)}
                 link={link}
                 modelled={modelled}
+                editable={editable}
                 confirmed={confirmedSet.has(key)}
                 invalidated={invalidatedSet.has(key)}
                 onConfirm={() => handleConfirm(link)}
@@ -522,6 +561,7 @@ export function InterlinearAlignmentPanel({
                 <AlignmentRow
                   key={rowKey(link)}
                   link={link}
+                  editable={editable}
                   confirmed={confirmedSet.has(key)}
                   invalidated={invalidatedSet.has(key)}
                   onConfirm={() => handleConfirm(link)}

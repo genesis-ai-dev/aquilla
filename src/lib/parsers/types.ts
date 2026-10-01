@@ -480,6 +480,20 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
+   * still use `legacyTag` ('' is the default target lane). Absent until the
+   * settings read returns them.
+   */
+  lanes?: {
+    id: string
+    role: "source" | "target"
+    name: string
+    langCode: string | null
+    legacyTag: string | null
+    position: number
+    archivedAt: string | null
+  }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string

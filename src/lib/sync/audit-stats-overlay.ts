@@ -36,7 +36,22 @@ export interface OverlayInput {
   /** Outbox records, oldest-first. Caller passes only events scoped to the
    *  file in question; the helper does not filter by fileId. */
   pending: ReadonlyArray<OutboxRecord>
+  /** AQU-1506: the active target lane ('' = default). A queued commit or
+   *  validate belongs to one lane's row, so it may only overlay that lane's
+   *  view — otherwise a pending validate on `fr` reads as "you validated this"
+   *  on the default lane, the same wrong answer the server read used to give.
+   *  Waivers are deliberately exempt: `cell_waivers` has no lane column, so a
+   *  waiver is per cell and applies in every lane. */
+  lane?: string
 }
+
+/** Event kinds whose outbox record describes ONE lane's target row. */
+const LANE_SCOPED_KINDS: ReadonlySet<string> = new Set([
+  "target.cell.create",
+  "target.cell.commit",
+  "cell.validate",
+  "cell.unvalidate",
+])
 
 export function applyOutboxOverlay(
   input: OverlayInput,
@@ -46,11 +61,20 @@ export function applyOutboxOverlay(
   // also lets downstream audit diffs skip untouched cells by identity.
   const out = new Map(input.base)
   const owned = new Set<string>()
+  const lane = input.lane ?? ""
 
   for (const rec of input.pending) {
     const ev = rec.event
     const cellId = ev.cellId
     if (!cellId) continue
+
+    // Skip before the stub below is synthesized: an off-lane event must leave
+    // no trace on this lane's map at all. `targetLang` is omitted on the wire
+    // for the default lane, so absent means ''.
+    if (LANE_SCOPED_KINDS.has(ev.kind)) {
+      const evLane = (ev.payload as { targetLang?: string } | undefined)?.targetLang ?? ""
+      if (evLane !== lane) continue
+    }
 
     // Synthesize a stub for cells the user touched offline before the projection
     // ever caught up — keeps the map consistent for callers that just lookup by

@@ -20,6 +20,7 @@
  */
 
 import type { RuleInfraction } from "@/lib/parsers/types"
+import { looksLikeUuid } from "@/lib/uuid"
 import type { Concept } from "./types"
 
 export type TerminologyViolationKind = "missing-approved" | "forbidden-present"
@@ -37,6 +38,45 @@ export interface ConceptViolationGroup {
   forbiddenPresentCount: number
   /** The offending infractions, in input order, each tagged with its kind. */
   infractions: Array<RuleInfraction & { kind: TerminologyViolationKind }>
+}
+
+/**
+ * The slice of a cell the violations inbox needs in order to NAME it. Kept
+ * structural rather than importing `CellData` so this module stays a leaf that
+ * a unit test can feed a literal.
+ */
+export interface ViolationCellRefSource {
+  context?: string | null
+  globalReferences?: string[] | null
+  cellLabel?: string | null
+}
+
+/**
+ * AQU-663: resolve a human-meaningful ref for an infringing cell.
+ *
+ * The inbox used to fall back to `inf.cellId` — the raw internal UUID — which
+ * tells the reviewer nothing about WHICH verse is in breach. Prefer the
+ * canonical ref/tag the rest of the app already shows (`context`, then a global
+ * reference; the same order `EditorTable` uses for its row ref), then the
+ * human `cellLabel`.
+ *
+ * Importers also store opaque UUIDs *as* canonical refs, so every candidate is
+ * filtered through `looksLikeUuid` — otherwise the raw id would come straight
+ * back in through `context` and defeat the point.
+ *
+ * Returns `null` when the cell carries nothing nameable (or has not loaded), so
+ * the caller renders a LOCALIZED placeholder. This helper never returns an id.
+ */
+export function violationCellRef(
+  cell: ViolationCellRefSource | null | undefined,
+): string | null {
+  if (!cell) return null
+  const candidates = [cell.context, ...(cell.globalReferences ?? []), cell.cellLabel]
+  for (const candidate of candidates) {
+    const value = candidate?.trim()
+    if (value && !looksLikeUuid(value)) return value
+  }
+  return null
 }
 
 const TERM_PREFIX = "term:"

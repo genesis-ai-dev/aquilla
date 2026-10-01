@@ -235,6 +235,10 @@ export function StaffLanePopover({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
+        // This control is mounted inside the row's actions cell on clickable
+        // tables (OverviewLaneTable), and rows navigate on click. This press
+        // belongs to the popover, not the row.
+        onClick={(event) => event.stopPropagation()}
         render={
           <button
             type="button"
@@ -258,6 +262,12 @@ export function StaffLanePopover({
         data-testid="staff-lane-popover"
         className="w-80 space-y-3 p-3"
         side="bottom"
+        // The popup is portalled out of the table, but React still bubbles its
+        // events along the React tree — through the row. Rows are often
+        // clickable (and navigate away, unmounting this popover), so picking a
+        // name, searching, changing the role or confirming must not also count
+        // as a row click. Mirrors DataTableRowActionsButton's menu guard.
+        onClick={(event) => event.stopPropagation()}
       >
         <div>
           <p className="text-xs font-medium">

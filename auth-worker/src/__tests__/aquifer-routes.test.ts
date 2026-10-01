@@ -196,3 +196,63 @@ describe("POST /api/v1/aquifer/answers", () => {
     expect(body.url).toContain("/qa/")
   })
 })
+
+describe("GET /api/v1/aquifer/tabitha", () => {
+  // WHY: the Verse Resources panel reads TaBiThA through this route. It must
+  // sit behind the same member + bibleResourcesEnabled gate as Aquifer, and
+  // collapse the upstream NDJSON stream into the compact brief the SPA renders.
+  const stream = [
+    JSON.stringify({ type: "step", step: "notes" }),
+    JSON.stringify({
+      type: "brief",
+      verse: { book: "Acts", chapter: 10, verse: 9 },
+      lwc_text: "Peter went up to the roof to pray.",
+      semantic_notes: [
+        { meaning: "Purpose, not result.", check: "Check intent.", quoted_text: "to pray", trigger: { name: "Intent/Result" } },
+      ],
+      tnn_available: false,
+      tnn_notes: [],
+      cultural_background: [],
+    }),
+  ].join("\n")
+
+  it("404 when the project hasn't enabled Bible resources", async () => {
+    await seedWorld({ enabled: false })
+    const jwt = await jwtFor("alice")
+    const res = await app.request(
+      `/api/v1/aquifer/tabitha?projectId=${PROJECT}&book=ACT&chapter=10&verse=9`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it("200 with the parsed brief, fetched by English book name", async () => {
+    await seedWorld({ enabled: true })
+    const jwt = await jwtFor("alice")
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(stream, { status: 200 }))
+    const res = await app.request(
+      `/api/v1/aquifer/tabitha?projectId=${PROJECT}&book=ACT&chapter=10&verse=9`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(200)
+    expect(String(fetchSpy.mock.calls[0][0])).toBe("https://copilot.tabitha.bible/Acts/10/9")
+    const body = (await res.json()) as { available: boolean; notes: { topic: string }[] }
+    expect(body.available).toBe(true)
+    expect(body.notes[0].topic).toBe("Intent/Result")
+  })
+
+  it("400 for a book code that isn't in the allowlist, without calling upstream", async () => {
+    await seedWorld({ enabled: true })
+    const jwt = await jwtFor("alice")
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const res = await app.request(
+      `/api/v1/aquifer/tabitha?projectId=${PROJECT}&book=${encodeURIComponent("../x")}&chapter=1&verse=1`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})

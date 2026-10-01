@@ -58,7 +58,9 @@ import {
   isBiblicaMetaStyle,
   isBiblicaNoteSectionStyle,
   isBiblicaRunningHeadStyle,
+  isBiblicaScriptureCoordinateCharacterStyle,
   isBiblicaScriptureHeadingStyle,
+  isBiblicaSuperscriptionStyle,
   isBiblicaVerseMarkerCharacterStyle,
   isBiblicaStudyTemplateStyle,
   isBiblicaVolumeSectionHeadingStyle,
@@ -74,8 +76,15 @@ import {
 
 export interface BiblicaStudyNote {
   /**
-   * The cell's unit: one sentence of a note line, one whole line, or the whole
-   * paragraph when it holds neither a line break nor a sentence boundary.
+   * `"scripture"` for a cell of the Bible text itself, `"note"` for everything
+   * the study Bible sets around it. Scripture cells only appear when the caller
+   * asks for them (`includeScripture`).
+   */
+  readonly kind: BiblicaCellKind
+  /**
+   * The cell's unit: one sentence of a note line, one whole line, one verse of
+   * a scripture paragraph, or the whole paragraph when it holds neither a line
+   * break nor a sentence boundary.
    */
   readonly unit: IdmlTranslationUnit
   /**
@@ -94,6 +103,24 @@ export interface BiblicaStudyNote {
   readonly chapterLabel?: string
   /** Heading-titled section the cell belongs to, when it is in one. */
   readonly section?: BiblicaNoteSection
+  /**
+   * The verse this cell is keyed to. Set on every scripture cell, and on a
+   * psalm superscription, which carries no verse number of its own but belongs
+   * to the verse it introduces.
+   */
+  readonly verse?: BiblicaVerseKey
+}
+
+export type BiblicaCellKind = "note" | "scripture"
+
+/** The verse a scripture cell holds, as the package's own markers give it. */
+export interface BiblicaVerseKey {
+  /** Absent only while the volume has not named a book yet. */
+  readonly bookCode?: string
+  readonly chapter: string
+  readonly verse: string
+  /** `"GEN 1:1"`, or `"1:1"` when no book has been named. */
+  readonly reference: string
 }
 
 /** A section opened by a heading rather than by the passage the notes follow. */
@@ -111,8 +138,13 @@ export interface BiblicaNoteRejoin {
 
 export interface BiblicaStudyNoteSelection {
   readonly notes: readonly BiblicaStudyNote[]
-  /** Units skipped because they are scripture (verse markers or continuations). */
+  /**
+   * Units skipped because they are scripture (verse markers or continuations)
+   * and produced no cell — every one of them when `includeScripture` is off.
+   */
   readonly verseUnitCount: number
+  /** Scripture units that became verse-keyed cells. Zero unless asked for. */
+  readonly scriptureUnitCount: number
   /** Units skipped because they are neither scripture nor a note (headers, TOC). */
   readonly otherUnitCount: number
 }
@@ -131,6 +163,16 @@ export interface SelectBiblicaStudyNotesOptions {
    * say — they carry no scripture at all.
    */
   readonly frontBackMatter?: boolean
+  /**
+   * Emit the Bible text as verse-keyed scripture cells alongside the notes,
+   * in document order, instead of skipping it.
+   *
+   * A book volume wants this: scripture is content, and a cell is what lets a
+   * translation be swapped in or edited. It is off by default so a caller that
+   * only wants the study apparatus — and the front/back matter volumes, which
+   * hold no scripture at all — keeps the narrower projection.
+   */
+  readonly includeScripture?: boolean
 }
 
 interface UnitScan {
@@ -256,6 +298,113 @@ function verseMarkerCutPoints(
   return cuts
 }
 
+/** Slot positions of a scripture paragraph that carry a coordinate, not words. */
+function scriptureCoordinateSlots(unit: IdmlTranslationUnit): ReadonlySet<number> {
+  const positions = new Set<number>()
+  for (const [position, slot] of unit.slots.entries()) {
+    if (isBiblicaScriptureCoordinateCharacterStyle(slot.characterStyleId)) positions.add(position)
+  }
+  return positions
+}
+
+/** True when a scripture slice holds words of its own, not only coordinates. */
+function hasScriptureText(unit: IdmlTranslationUnit): boolean {
+  return unit.slots.some((slot) => (
+    slot.text.trim().length > 0
+    && !isBiblicaScriptureCoordinateCharacterStyle(slot.characterStyleId)
+    && !isStructuralApostropheSegment(slot.text, slot.characterStyleId)
+  ))
+}
+
+/** Where a scripture walk stands, and what it produced. */
+interface ScriptureWalk {
+  readonly cells: readonly ScriptureCell[]
+  readonly chapter: string
+  /** Verse in effect after the paragraph; null before the first verse number. */
+  readonly verse: string | null
+}
+
+interface ScriptureCell {
+  readonly unit: IdmlTranslationUnit
+  readonly rejoin?: BiblicaNoteRejoin
+  readonly chapter: string
+  readonly verse: string
+}
+
+/**
+ * Cut one scripture paragraph into a cell per verse it holds.
+ *
+ * The coordinates are read in document order, which is the only way to get both
+ * layouts right: Job's drop cap (`[cv:dc 2][cv:v 1] …`) sets the chapter ahead
+ * of the verse it opens, while Psalms sets it after (`[cv:v 3][meta:c 2:] …`).
+ * Reading in order means the chapter in effect when a verse body is reached is
+ * the one the layout put there, so a paragraph that straddles a chapter
+ * boundary keys each of its verses to its own chapter rather than to whichever
+ * anchor came last.
+ *
+ * A paragraph's text before its first verse number continues the verse that was
+ * still open when it began; if none was, the run belongs to no verse and stays
+ * as the publisher set it rather than being keyed to a guess.
+ */
+function scriptureCellsInUnit(
+  unit: IdmlTranslationUnit,
+  chapterAtStart: string,
+  verseAtStart: string | null,
+): ScriptureWalk {
+  let chapter = chapterAtStart
+  let verse = verseAtStart
+  const cells: ScriptureCell[] = []
+
+  // Lines of one paragraph are addressed separately, so each is its own rejoin
+  // group — the same split a note list gets.
+  for (const line of partitionIdmlUnitAtLineBreaks(unit)) {
+    const coordinates = scriptureCoordinateSlots(line)
+    const slices = sliceIdmlUnit(line, verseMarkerCutPoints(line, coordinates))
+    const emitted: { slice: IdmlUnitSlice; chapter: string; verse: string }[] = []
+
+    for (const slice of slices) {
+      const first = slice.ranges[0]
+      if (first !== undefined && coordinates.has(first.slot)) {
+        const style = line.slots[first.slot]?.characterStyleId ?? ""
+        const text = slice.unit.slots.map((slot) => slot.text).join("").trim()
+        // `meta:v` bookends only open and close a body; they name no new
+        // coordinate, so they are read for nothing here.
+        if (isChapterNumberCharacterStyle(style)) {
+          if (/^\d+$/.test(text)) chapter = text
+        } else if (isVerseNumberCharacterStyle(style)) {
+          const match = text.match(/^(\d+)/)
+          if (match) verse = match[1]!
+        } else if (isMetaChapterCharacterStyle(style)) {
+          const match = text.match(/^(\d+)/)
+          if (match) chapter = match[1]!
+        }
+        continue
+      }
+      if (verse === null) continue
+      if (isStructuralOnlyContent(slice.unit.slots.map((slot) => slot.text))) continue
+      if (!hasScriptureText(slice.unit)) continue
+      emitted.push({ slice, chapter, verse })
+    }
+
+    // Every scripture line carries coordinates, so a cell is always a part of
+    // its line and has to record which part — that is what lets the exporter
+    // hand the package back one whole paragraph.
+    const isPartOfLine = emitted.length > 1 || emitted.length !== slices.length
+    for (const [index, entry] of emitted.entries()) {
+      cells.push({
+        unit: entry.slice.unit,
+        chapter: entry.chapter,
+        verse: entry.verse,
+        ...(isPartOfLine
+          ? { rejoin: { index, count: emitted.length, ranges: entry.slice.ranges } }
+          : {}),
+      })
+    }
+  }
+
+  return { cells, chapter, verse }
+}
+
 /** True for a slice that holds delimiters and no words of its own. */
 function isVerseMarkerSlice(slice: IdmlUnitSlice, markers: ReadonlySet<number>): boolean {
   if (!slice.ranges.some((range) => markers.has(range.slot))) return false
@@ -336,13 +485,17 @@ export function selectBiblicaStudyNotes(
 ): BiblicaStudyNoteSelection {
   const splitSentences = options?.splitSentences === true
   const frontBackMatter = options?.frontBackMatter === true
+  const includeScripture = options?.includeScripture === true
   const notes: BiblicaStudyNote[] = []
   let verseUnitCount = 0
+  let scriptureUnitCount = 0
   let otherUnitCount = 0
 
   let currentBook = ""
   let currentChapter = "1"
   let hasEncounteredVerses = false
+  // Verse in effect for scripture cells; null before the book's first verse.
+  let currentVerse: string | null = null
 
   // Chapter-range tracking for note-section labels: the first and latest
   // chapters seen in verse paragraphs since the previous note section.
@@ -369,6 +522,41 @@ export function selectBiblicaStudyNotes(
     return { id: `${sectionCount}:${label}`, label }
   }
 
+  /**
+   * Turn one scripture paragraph into its verse cells, and carry the verse in
+   * effect forward. Returns whether the paragraph produced any cell, which is
+   * what decides whether it counts as scripture imported or as scripture
+   * skipped.
+   *
+   * `chapterAtStart` is the chapter in effect *before* this paragraph, not the
+   * running one: the running chapter has already been moved to the paragraph's
+   * last anchor, which would put the first half of a chapter-straddling
+   * paragraph (LAM 1:22 → 2:1) in the chapter its second half opens.
+   */
+  const emitScripture = (unit: IdmlTranslationUnit, chapterAtStart: string): boolean => {
+    const walk = scriptureCellsInUnit(unit, chapterAtStart, currentVerse)
+    currentVerse = walk.verse
+    for (const cell of walk.cells) {
+      const reference = currentBook
+        ? `${currentBook} ${cell.chapter}:${cell.verse}`
+        : `${cell.chapter}:${cell.verse}`
+      notes.push({
+        kind: "scripture",
+        unit: cell.unit,
+        ...(cell.rejoin ? { rejoin: cell.rejoin } : {}),
+        ...(currentBook ? { bookCode: currentBook } : {}),
+        chapterLabel: cell.chapter,
+        verse: {
+          ...(currentBook ? { bookCode: currentBook } : {}),
+          chapter: cell.chapter,
+          verse: cell.verse,
+          reference,
+        },
+      })
+    }
+    return walk.cells.length > 0
+  }
+
   const updateChapterRange = (chapter: string): void => {
     if (!firstChapterInRange) firstChapterInRange = chapter
     lastChapterInRange = chapter
@@ -388,11 +576,15 @@ export function selectBiblicaStudyNotes(
       openSpanningVerse = null
     }
 
+    // The chapter this paragraph begins in, kept before the running chapter
+    // moves to whatever anchor the paragraph ends on.
+    const chapterAtStart = currentChapter
     const scan = scanUnit(unit, currentChapter)
 
     if (scan.bookCode && scan.bookCode !== currentBook) {
       currentBook = scan.bookCode
       currentChapter = "1"
+      currentVerse = null
       hasEncounteredVerses = false
       firstChapterInRange = null
       lastChapterInRange = null
@@ -416,13 +608,15 @@ export function selectBiblicaStudyNotes(
       if (fallback) currentBook = fallback
     }
 
-    // Scripture paragraph: record which chapters it covered, then skip it.
+    // Scripture paragraph: record which chapters it covered, then either turn
+    // it into verse cells or leave it to the publisher.
     if (scan.verses.length > 0) {
       currentLabel = null
       currentSection = null
       for (const verse of scan.verses) updateChapterRange(verse.chapter)
       openSpanningVerse = opensSpanningVerse(scan) ?? null
-      verseUnitCount += 1
+      if (includeScripture && emitScripture(unit, chapterAtStart)) scriptureUnitCount += 1
+      else verseUnitCount += 1
       continue
     }
 
@@ -434,7 +628,8 @@ export function selectBiblicaStudyNotes(
       if (scan.closesEarlierVerse && scan.metaVerseCounts.has(openSpanningVerse)) {
         openSpanningVerse = null
       }
-      verseUnitCount += 1
+      if (includeScripture && emitScripture(unit, chapterAtStart)) scriptureUnitCount += 1
+      else verseUnitCount += 1
       continue
     }
 
@@ -537,6 +732,7 @@ export function selectBiblicaStudyNotes(
       const isPartOfLine = cells.length > 1 || cells.length !== slices.length
       for (const [index, slice] of cells.entries()) {
         notes.push({
+          kind: "note",
           unit: slice.unit,
           ...(isPartOfLine
             ? { rejoin: { index, count: cells.length, ranges: slice.ranges } }
@@ -550,5 +746,40 @@ export function selectBiblicaStudyNotes(
     }
   }
 
-  return { notes, verseUnitCount, otherUnitCount }
+  if (includeScripture) attachSuperscriptionVerses(notes)
+
+  return { notes, verseUnitCount, scriptureUnitCount, otherUnitCount }
+}
+
+/**
+ * Key each psalm superscription to the verse it introduces.
+ *
+ * A superscription ("A psalm of David") is set in the scripture flow ahead of
+ * the chapter's first verse and carries no verse number of its own, so the only
+ * thing that says which verse it belongs to is what follows it. Walking
+ * backwards makes that the verse of the next scripture cell — and the chapter
+ * and book have to agree, so a superscription at the end of a book never
+ * borrows the first verse of the next one.
+ */
+function attachSuperscriptionVerses(notes: BiblicaStudyNote[]): void {
+  let next: BiblicaVerseKey | undefined
+  for (let index = notes.length - 1; index >= 0; index -= 1) {
+    const entry = notes[index]!
+    if (entry.kind === "scripture") {
+      next = entry.verse
+      continue
+    }
+    if (
+      entry.verse
+      || !next
+      || !isBiblicaSuperscriptionStyle(entry.unit.paragraphStyleId ?? "")
+      || entry.bookCode !== next.bookCode
+      || (entry.chapterLabel !== undefined
+        && /^\d+$/.test(entry.chapterLabel)
+        && entry.chapterLabel !== next.chapter)
+    ) {
+      continue
+    }
+    notes[index] = { ...entry, verse: next }
+  }
 }

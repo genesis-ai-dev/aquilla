@@ -42,6 +42,30 @@ export function isKnownBookCode(code: string): boolean {
   return (code || "").toUpperCase() in NAMES
 }
 
+/** How a book name is compared: case, spaces and periods don't count, so
+ *  "1 Samuel", "1samuel" and "Song of Songs" all find their book. */
+const nameKey = (value: string) => value.toLowerCase().replace(/[\s.]+/g, "")
+
+// Spellings people use that aren't the table's own names (AQU-1375).
+const NAME_ALIASES: ReadonlyArray<readonly [name: string, code: string]> = [
+  ["Psalm", "PSA"], ["Song of Solomon", "SNG"],
+]
+
+const CODE_BY_NAME_KEY = new Map<string, string>([
+  ...CANONICAL_ORDER.map(([code, name]) => [nameKey(name), code] as const),
+  ...NAME_ALIASES.map(([name, code]) => [nameKey(name), code] as const),
+])
+
+/** The USFM code for a book written either as its code in any case ("gen")
+ *  or as its English name ("Genesis", "1 Samuel", "Psalm"). Undefined when
+ *  neither — a spreadsheet's reference column is the main caller, so other
+ *  languages' names and abbreviations such as "Gen." are not guessed at. */
+export function bookCodeFromName(value: string): string | undefined {
+  const trimmed = (value || "").trim()
+  if (isKnownBookCode(trimmed)) return trimmed.toUpperCase()
+  return CODE_BY_NAME_KEY.get(nameKey(trimmed))
+}
+
 /**
  * The USFM book code a file name carries, if any. Strips the extension, then
  * tries a 3-character run at the end of the stem first (handles "40-MAT") and

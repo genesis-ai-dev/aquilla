@@ -79,6 +79,56 @@ describe("matchTargetRowsByRef", () => {
   })
 })
 
+// AQU-1375: a reference column is written in whatever spelling the partner's
+// tool or habit uses; an exact-key lookup left `Genesis 1:4` and `GEN 1.5`
+// unmatched beside the very lines they name.
+describe("matchTargetRowsByRef — reference spellings (AQU-1375)", () => {
+  const cells: FileTargetCellRef[] = [
+    cell({ cellId: "c1", canonicalRef: "GEN 1:1" }),
+    cell({ cellId: "c3", canonicalRef: "GEN 1:3" }),
+    cell({ cellId: "c4", canonicalRef: "GEN 1:4" }),
+    cell({ cellId: "c5", canonicalRef: "GEN 1:5" }),
+    cell({ cellId: "h1", canonicalRef: "GEN 1:s1" }),
+  ]
+
+  it("matches a verse however its reference is spelled, labelled as the file spelled it", () => {
+    const result = matchTargetRowsByRef(
+      [
+        { ref: "Genesis 1:4", text: "four" },
+        { ref: "gen 1:3", text: "three" },
+        { ref: "GEN 1.5", text: "five" },
+        { ref: "genesis 1.1", text: "one" },
+      ],
+      cells,
+    )
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref])).toEqual([
+      ["c4", "four", "Genesis 1:4"],
+      ["c3", "three", "gen 1:3"],
+      ["c5", "five", "GEN 1.5"],
+      ["c1", "one", "genesis 1.1"],
+    ])
+    expect(result.orphans).toEqual([])
+  })
+
+  it("still matches a heading's synthetic ref exactly, and only exactly", () => {
+    const result = matchTargetRowsByRef(
+      [{ ref: "GEN 1:s1", text: "heading" }, { ref: "gen 1:s1", text: "lower-case heading" }],
+      cells,
+    )
+    expect(result.matched.map((m) => m.cellId)).toEqual(["h1"])
+    expect(result.orphans.map((o) => o.text)).toEqual(["lower-case heading"])
+  })
+
+  it("counts two spellings of one verse as the same verse twice", () => {
+    const result = matchTargetRowsByRef(
+      [{ ref: "GEN 1:4", text: "first" }, { ref: "Genesis 1:4", text: "second" }],
+      cells,
+    )
+    expect(result.matched.map((m) => m.incomingText)).toEqual(["first"])
+    expect(result.orphans.map((o) => o.text)).toEqual(["second"])
+  })
+})
+
 describe("matchTargetRowsByOrder", () => {
   const cells: FileTargetCellRef[] = [
     cell({ cellId: "c1", canonicalRef: "GEN 1:1" }),

@@ -29,6 +29,7 @@ import {
 import { extractSbvStrings } from "./parsers/sbv"
 import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { formatVerseReference, parseVerseReference } from "./scripture-reference"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -271,18 +272,37 @@ function toMatchedCell(
   }
 }
 
-/** Match rows to cells by canonical ref (exact, first cell wins on dup refs).
- *  Rows with empty text are ignored — a blank spreadsheet cell must never
- *  clear an existing translation. */
+/** A ref in the app's own spelling when it reads as a verse (`Genesis 1:4`,
+ *  `gen 1.4` → `GEN 1:4`); null for anything else, such as a heading's
+ *  synthetic ref, which only ever matches exactly. */
+function canonicalVerseRef(ref: string | null | undefined): string | null {
+  const verse = parseVerseReference(ref)
+  return verse ? formatVerseReference(verse) : null
+}
+
+/** Match rows to cells by canonical ref (first cell wins on dup refs). A ref
+ *  matches exactly first; failing that, a verse ref matches whichever way it
+ *  is spelled — `Genesis 1:4`, `gen 1:4` and `GEN 1.4` all find `GEN 1:4`
+ *  (AQU-1375). Rows with empty text are ignored — a blank spreadsheet cell
+ *  must never clear an existing translation. */
 export function matchTargetRowsByRef(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
 ): FileTargetMatchResult {
   const byRef = new Map<string, FileTargetCellRef>()
+  const byVerse = new Map<string, FileTargetCellRef>()
   for (const cell of cells) {
     if (cell.canonicalRef && !byRef.has(cell.canonicalRef)) {
       byRef.set(cell.canonicalRef, cell)
     }
+    const verse = canonicalVerseRef(cell.canonicalRef)
+    if (verse && !byVerse.has(verse)) byVerse.set(verse, cell)
+  }
+  const cellForRef = (ref: string) => {
+    const exact = byRef.get(ref)
+    if (exact) return exact
+    const verse = canonicalVerseRef(ref)
+    return verse ? byVerse.get(verse) : undefined
   }
 
   const matched: FileTargetMatchedCell[] = []
@@ -291,7 +311,7 @@ export function matchTargetRowsByRef(
 
   for (const row of rows) {
     if (!row.text.trim()) continue
-    const cell = row.ref ? byRef.get(row.ref) : undefined
+    const cell = row.ref ? cellForRef(row.ref) : undefined
     if (!cell) {
       orphans.push({ ref: row.ref ?? "(no ref)", text: row.text })
       continue

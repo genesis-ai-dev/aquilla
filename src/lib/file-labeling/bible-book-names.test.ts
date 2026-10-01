@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getBookName, isKnownBookCode, compareByCanonicalBookOrder, bookCodeFromFileName } from "./bible-book-names"
+import { getBookName, isKnownBookCode, compareByCanonicalBookOrder, bookCodeFromFileName, bookCodeFromName } from "./bible-book-names"
 
 describe("getBookName", () => {
   it("returns English name for OT book codes", () => {
@@ -78,5 +78,24 @@ describe("bookCodeFromFileName (AQU-1084)", () => {
     expect(bookCodeFromFileName("readme")).toBeUndefined()
     expect(bookCodeFromFileName("World English Bible (eng-engwebp)")).toBeUndefined()
     expect(bookCodeFromFileName("")).toBeUndefined()
+  })
+})
+
+describe("bookCodeFromName", () => {
+  it("reads a code in any case, or the English name however it is spaced", () => {
+    expect(bookCodeFromName("gen")).toBe("GEN")
+    expect(bookCodeFromName("Genesis")).toBe("GEN")
+    expect(bookCodeFromName("1 Samuel")).toBe("1SA")
+    expect(bookCodeFromName("1samuel")).toBe("1SA")
+    expect(bookCodeFromName("song of songs")).toBe("SNG")
+  })
+  it("knows the common alternative names", () => {
+    expect(bookCodeFromName("Psalm")).toBe("PSA")
+    expect(bookCodeFromName("Song of Solomon")).toBe("SNG")
+  })
+  it("guesses nothing else", () => {
+    expect(bookCodeFromName("GNE")).toBeUndefined()
+    expect(bookCodeFromName("Génesis")).toBeUndefined()
+    expect(bookCodeFromName("")).toBeUndefined()
   })
 })

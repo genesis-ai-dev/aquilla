@@ -75,6 +75,14 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    // AQU-657: document-understanding tags (and the route that asks for them)
+    // reach a user through retrieval and few-shot selection, so they select the
+    // AI predict journey rather than falling through to the generic
+    // shared-runtime sentinel.
+    source: /^(?:src\/lib\/understanding|auth-worker\/src\/routes\/ai-passage-tags)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
     // AQU-1025: few-shot retrieval is the AI predict journey, not collab.
     source: /(?:sync-worker\/.*branching-search|src\/lib\/sync\/branching-search)/i,
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],

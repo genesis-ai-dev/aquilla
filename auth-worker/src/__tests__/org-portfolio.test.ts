@@ -826,7 +826,8 @@ describe("plan unit rollup", () => {
  *
  * This is the number the enterprise billing band is read off, so it is counted by
  * the same helper billing counts with (`countTargetLanesByOrg` → the plans.ts
- * rule): distinct language tags, archived lanes and archived projects excluded.
+ * rule): distinct language tags; archived lanes, archived projects and paused
+ * (`is_active = false`, AQU-1070) projects excluded.
  * The org dashboard tile reads it straight from here rather than tallying the
  * lane chips on screen, which would double-count a language two projects share
  * and would count an archived lane that still has progress rows.

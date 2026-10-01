@@ -95,9 +95,25 @@ export interface CatchUpResult {
   rowsChanged: number
 }
 
-function commitChunked(store: OfflineStore, pending: ReturnType<typeof events.cellSynced | typeof events.cellRemoved>[]): void {
-  for (let i = 0; i < pending.length; i += COMMIT_CHUNK) {
-    store.commit(...pending.slice(i, i + COMMIT_CHUNK))
+type SyncedRow = Omit<CellSyncedArgs, "projectId" | "fileId">
+type RemovedCell = { cellId: string; side: Side }
+
+/**
+ * Lands rows as batched events — one per COMMIT_CHUNK rows, not one per row —
+ * so a bulk write leaves the leader a short backlog (see schema.ts).
+ */
+function commitBatched(
+  store: OfflineStore,
+  projectId: string,
+  fileId: string,
+  upserts: readonly SyncedRow[],
+  removals: readonly RemovedCell[],
+): void {
+  for (let i = 0; i < upserts.length; i += COMMIT_CHUNK) {
+    store.commit(events.cellsSynced({ projectId, fileId, rows: upserts.slice(i, i + COMMIT_CHUNK) }))
+  }
+  for (let i = 0; i < removals.length; i += COMMIT_CHUNK) {
+    store.commit(events.cellsRemoved({ projectId, fileId, cells: removals.slice(i, i + COMMIT_CHUNK) }))
   }
 }
 
@@ -130,7 +146,8 @@ function replaceCells(
     else byCell.set(row.cellId, [row])
   }
 
-  const pending: ReturnType<typeof events.cellSynced | typeof events.cellRemoved>[] = []
+  const upserts: SyncedRow[] = []
+  const removals: RemovedCell[] = []
   let skipped = false
   for (const cellId of cellIds) {
     if (queued.has(cellId)) {
@@ -139,19 +156,19 @@ function replaceCells(
     }
     const rows = byCell.get(cellId) ?? []
     for (const row of rows) {
-      const args = toCellSyncedArgs(projectId, fileId, row)
+      const { projectId: _p, fileId: _f, ...args } = toCellSyncedArgs(projectId, fileId, row)
       const existing = local.get(cellRowId(projectId, fileId, cellId, row.side))
-      if (!existing || !sameAsLocal(existing, args)) pending.push(events.cellSynced(args))
+      if (!existing || !sameAsLocal(existing, { projectId, fileId, ...args })) upserts.push(args)
     }
     for (const side of SIDES) {
       if (rows.some((r) => r.side === side)) continue
       if (local.has(cellRowId(projectId, fileId, cellId, side))) {
-        pending.push(events.cellRemoved({ projectId, fileId, cellId, side }))
+        removals.push({ cellId, side })
       }
     }
   }
-  commitChunked(store, pending)
-  return { rowsChanged: pending.length, skipped }
+  commitBatched(store, projectId, fileId, upserts, removals)
+  return { rowsChanged: upserts.length + removals.length, skipped }
 }
 
 function readCursor(store: OfflineStore, projectId: string, fileId: string) {

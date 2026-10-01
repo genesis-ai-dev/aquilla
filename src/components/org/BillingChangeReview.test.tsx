@@ -75,3 +75,16 @@ it('starts plan changes in the workspace’s current billing interval', async ()
   expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/billing/change-rehearsal/review'),
     expect.objectContaining({ body: JSON.stringify({ offer: 'team_20x', interval: 'month', quantity: 1 }) }))
 })
+
+// AQU-1524: same inset rule as the plan review — one card, not a card inside a card.
+it('renders the change review inset inside the Compare new plans card rather than as a nested card', async () => {
+  responses()
+  const user = userEvent.setup()
+  render(<BillingOffers jwt="jwt" orgId={7} changingPlan />)
+  await user.click(await screen.findByRole('button', { name: 'Review Team 20×' }))
+  const region = screen.getByRole('region', { name: 'Review plan change' })
+  expect(await within(region).findByText('$3.65')).toBeVisible()
+  expect(region.querySelector('[data-slot="settings-card"]')).toBeNull()
+  expect(region.closest('[data-slot="settings-card"]')).not.toBeNull()
+  expect(region.className).toContain('px-4')
+})

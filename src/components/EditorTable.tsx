@@ -54,7 +54,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
-import { ExamplePanel } from "./ExamplePanel"
+import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
@@ -811,6 +811,10 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
+  /** AQU-1393: resolves an example pair's origin (file name, and whether the
+   *  file is an imported TMX) for the Examples panel. Omit to render the panel
+   *  without origin lines. */
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   /** AQU-913: forget this cell's inline AI failures — the draft error, the
    *  back-translation error, and the per-cell "error" status behind them.
    *  Called when focus leaves the cell's row so a failure stops following the
@@ -974,7 +978,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors, previews, onClearCellErrors,
+  completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
   onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
@@ -2491,6 +2495,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
           cellExamples={examples.get(cell.id) ?? EMPTY_EXAMPLES}
+          exampleOriginFor={exampleOriginFor}
           completingState={completing.get(cell.id)}
           cellError={errors.get(cell.id)}
           previewText={previews.get(cell.id)}
@@ -3529,6 +3534,8 @@ interface MemoizedRowProps {
    *  row even when only one cell's entry changed. Same reasoning for
    *  `completingState`, `cellError`, and `previewText` below. */
   cellExamples: ScoredPair[]
+  /** AQU-1393: resolves an example pair's file name / TMX flag for the panel. */
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   completingState?: string
   cellError?: string
   previewText?: string
@@ -3660,7 +3667,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, cellExamples, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3804,6 +3811,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         completionPreview={completionPreview}
         loadingPhase={loadingPhase}
         cellExamples={cellExamples}
+        exampleOriginFor={exampleOriginFor}
         highlights={highlights}
         error={error}
         healthRibbonPoint={healthRibbonPoint}
@@ -3965,6 +3973,7 @@ interface EditorRowProps {
    *  placeholder copy ("Looking up examples…" vs "Generating…"). */
   loadingPhase: "searching" | "generating" | null
   cellExamples: ScoredPair[]
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
   healthRibbonPoint: HealthRibbonPoint
@@ -4903,7 +4912,7 @@ function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
-  cellExamples, highlights, error, healthRibbonPoint,
+  cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
@@ -5130,6 +5139,10 @@ function EditorRow({
   // never loses the first character(s). See requestTargetEdit / handleGridRowKeyDown.
   const awaitingEditorFocusRef = useRef(false)
   const pendingActivationInputRef = useRef<string>("")
+  // AQU-1393: an exact-match target the Examples panel asked to insert while the
+  // editor was still a read view. Drained by TranslatedEditor on focus, the same
+  // way the buffered keystrokes above are.
+  const pendingExampleInsertRef = useRef<string | null>(null)
   // AQU-1333: keydown is only one of the ways text enters a cell. CDP
   // `Input.insertText` (browser agents, Playwright `fill`), IME composition, OS
   // dictation and paste deliver text with no keydown at all, and need an
@@ -5521,7 +5534,7 @@ function EditorRow({
   // We emit a `target.cell.commit` event chained off cell.targetEventId
   // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
   // the parent to revalidate useCells so the projection lands.
-  const handleEditorCommit = useCallback(async ({ value, valueHtml }: { value: string; valueHtml: string }): Promise<boolean> => {
+  const handleEditorCommit = useCallback(async ({ value, valueHtml, tmInsert }: { value: string; valueHtml: string; tmInsert?: true }): Promise<boolean> => {
     if (!editable) return false
     if (!project.id) return false
     // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
@@ -5600,7 +5613,12 @@ function EditorRow({
       // server's self-check reads cells.last_editor, which isn't committed yet
       // for this same-action commit+validate, so it can't catch this; the gate
       // has to be here. Default/undefined = allowed, preserving codex behavior.
-      if (shouldAutoValidateHumanEdit({
+      // AQU-1393: an exact-match Insert is the one commit through here that is
+      // not the translator's own wording — it is another cell's translation
+      // dropped in whole. It still lands as an ordinary edit (and so clears any
+      // prior validators), but it stays unvalidated until the translator
+      // validates it or edits it; that later edit commits without the flag.
+      if (!tmInsert && shouldAutoValidateHumanEdit({
         value,
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
@@ -6013,6 +6031,26 @@ function EditorRow({
   // would otherwise leave its listeners and `contenteditable` behind.
   useEffect(() => closeActivationCapture, [closeActivationCapture])
 
+  /**
+   * AQU-1393: put an exact match's existing translation into this cell's target.
+   *
+   * It fills the EDITOR rather than committing behind it, so the insert is the
+   * same write the translator could have typed: they can edit or undo it before
+   * it settles. Unlike typing it carries no validation of its own — the editor
+   * tags the commit `tmInsert` and `handleEditorCommit` skips auto-validation
+   * for it. When the row is still a read view the text is queued and the editor
+   * is opened — TranslatedEditor drains the queue when it focuses.
+   */
+  const handleInsertExampleTarget = useCallback((target: string) => {
+    if (!editable || isLoading || lockHolderLabel || idmlConfiguration) return
+    if (isEditorActive) {
+      translatedEditorRef.current?.replacePlainText(target)
+      return
+    }
+    pendingExampleInsertRef.current = target
+    requestTargetEdit(null)
+  }, [editable, idmlConfiguration, isEditorActive, isLoading, lockHolderLabel, requestTargetEdit])
+
   const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
     onTargetPresenceSelection?.(cell.id, selection)
   }, [cell.id, onTargetPresenceSelection])
@@ -6034,6 +6072,9 @@ function EditorRow({
     // any buffered keys so they can't leak into a later, unrelated activation.
     closeActivationCapture()
     pendingActivationInputRef.current = ""
+    // Same reasoning for the pending TM insert (AQU-1393): an abandoned
+    // activation must not leave a stale target queued for the next one.
+    pendingExampleInsertRef.current = null
     if (editorFocusedRef.current) {
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
@@ -7333,7 +7374,21 @@ function EditorRow({
               />
             )}
             {cellExamples.length > 0 && (
-              <ExamplePanel examples={cellExamples} />
+              <ExamplePanel
+                examples={cellExamples}
+                // AQU-1393: the source the examples were retrieved FOR — what the
+                // match percentages and the word diff are measured against.
+                currentSource={displayedSourceText(cell, sourceDraft?.value)}
+                originFor={exampleOriginFor}
+                // Not offered at all when the row can't take the write — a
+                // button that quietly no-ops is worse than no button
+                // (09-design-and-ux "never disable silently").
+                onInsert={
+                  editable && !idmlConfiguration && !lockHolderLabel
+                    ? handleInsertExampleTarget
+                    : undefined
+                }
+              />
             )}
             {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
                 timecode, and that asymmetry with the lane above is deliberate:
@@ -7453,6 +7508,7 @@ function EditorRow({
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
                     pendingInputRef={pendingActivationInputRef}
+                    pendingReplaceRef={pendingExampleInsertRef}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
                     onSelectionChange={handleTargetPresenceSelection}

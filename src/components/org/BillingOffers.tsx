@@ -3,7 +3,7 @@ import { BillingChangeReview } from './BillingChangeReview'
 import { BillingPlanReview } from './BillingPlanReview'
 import type { BillingPlanSelection } from '@/lib/sync/billing-review'
 import { Button } from '@/components/ui/button'
-import { SettingsGroup, SettingsRow } from '@/components/ui/page'
+import { SettingsBlock, SettingsGroup, SettingsRow } from '@/components/ui/page'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getBillingOffers, type BillingOffers as Offers } from '@/lib/sync/billing'
@@ -36,38 +36,42 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
   const Review = changingPlan ? BillingChangeReview : BillingPlanReview
   return (
     <SettingsGroup label="Compare new plans">
-      <p className="text-sm text-muted-foreground">
-        Compare personal and shared team capacity. Paid checkout is coming soon.
-        Your current workspace plan stays unchanged.
-      </p>
+      <SettingsBlock>
+        <p className="text-sm text-muted-foreground">
+          Compare personal and shared team capacity. Paid checkout is coming soon.
+          Your current workspace plan stays unchanged.
+        </p>
+      </SettingsBlock>
       <Tabs defaultValue="team" onValueChange={() => setSelected(null)}>
-        <TabsList aria-label="Plan audience">
-          <TabsTrigger value="personal">Individual</TabsTrigger>
-          <TabsTrigger value="team">Team &amp; Enterprise</TabsTrigger>
-        </TabsList>
-        <Select value={interval} onValueChange={value => {
-          if (value === 'month' || value === 'year') {
-            setInterval(value)
-            setSelected(null)
-          }
-        }}>
-          <SelectTrigger aria-label="Plan billing period">
-            <SelectValue>{interval === 'year' ? 'Annual' : 'Monthly'}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="year">Annual</SelectItem>
-              <SelectItem value="month">Monthly</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <SettingsBlock className="flex flex-wrap items-center gap-3">
+          <TabsList aria-label="Plan audience">
+            <TabsTrigger value="personal">Individual</TabsTrigger>
+            <TabsTrigger value="team">Team &amp; Enterprise</TabsTrigger>
+          </TabsList>
+          <Select value={interval} onValueChange={value => {
+            if (value === 'month' || value === 'year') {
+              setInterval(value)
+              setSelected(null)
+            }
+          }}>
+            <SelectTrigger aria-label="Plan billing period">
+              <SelectValue>{interval === 'year' ? 'Annual' : 'Monthly'}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="year">Annual</SelectItem>
+                <SelectItem value="month">Monthly</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </SettingsBlock>
         {(['personal', 'team'] as const).map(scope => (
           <TabsContent key={scope} value={scope}>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col">
               {scope === 'personal' && <SettingsRow label="Free" description="Explore Aquilla with basic AI assistance. No card required." />}
-              {!data && !unavailable ? <p role="status">Loading plan prices…</p> : null}
+              {!data && !unavailable ? <SettingsBlock><p role="status">Loading plan prices…</p></SettingsBlock> : null}
               {unavailable || data?.available === false ? (
-                <p role="status">Plan prices are temporarily unavailable. Your current plan and access are unchanged.</p>
+                <SettingsBlock><p role="status">Plan prices are temporarily unavailable. Your current plan and access are unchanged.</p></SettingsBlock>
               ) : null}
               {data?.available && data.offers.filter(offer => offer.scope === scope && offer.interval === interval).map(offer => (
                 <SettingsRow
@@ -99,11 +103,13 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
         jwt={jwt} orgId={orgId} selection={selected.selection}
         onDismiss={() => setSelected(null)}
       />}
-      <p className="text-sm text-muted-foreground">
-        New plans reset AI capacity every seven days, with no rollover.
-        Monthly or annual billing does not change usage resets.
-        Usage varies with the work performed.
-      </p>
+      <SettingsBlock>
+        <p className="text-sm text-muted-foreground">
+          New plans reset AI capacity every seven days, with no rollover.
+          Monthly or annual billing does not change usage resets.
+          Usage varies with the work performed.
+        </p>
+      </SettingsBlock>
     </SettingsGroup>
   )
 }

@@ -283,3 +283,59 @@ export async function setTargetLaneArchived(
     .run()
   return { status: "ok", lane: { ...current, archivedAt } }
 }
+
+/** The newest target-side edit in one lane: epoch-ms and the acting username. */
+export interface LaneLastChange {
+  /** `cells.last_edit_at` — epoch milliseconds. Always > 0. */
+  at: number
+  /**
+   * `cells.last_editor` — the acting user's Aquilla *username* (the same value
+   * `events.author` carries), directly displayable. NULL on rows written before
+   * the column was populated, and on importer-written rows.
+   */
+  by: string | null
+}
+
+/**
+ * AQU-1464: when was this lane last translated in, and by whom?
+ *
+ * Lane-SPECIFIC by product decision (2026-09-29): only `side = 'target'` rows
+ * carrying this `lane_id` count. Edits in another lane, in the default lane, or
+ * on the shared source do not — source rows are lane-agnostic (every lane reads
+ * the same ones), so counting them would make every lane report the same date.
+ *
+ * Returns null when the lane has never been edited — a freshly created lane, or
+ * one whose only rows live in deleted files. Callers must render that as "no
+ * changes yet" rather than formatting a 0 / epoch date.
+ *
+ * Scoped to one project and one lane, `LIMIT 1` off `idx_cells_lane_last_edit`
+ * (migration 0117), so it stays O(1) on the ~16M-row prod `cells` table. The
+ * `files` join drops cells whose file was deleted: those are unreachable, so
+ * they are not evidence that someone is still working in the lane. It probes
+ * `files` in index order and stops at the first live row, which keeps the join
+ * off the hot path in the normal case.
+ */
+export async function readLaneLastChange(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+): Promise<LaneLastChange | null> {
+  const row = await db
+    .prepare(
+      `SELECT c.last_editor, c.last_edit_at
+         FROM cells c
+         JOIN files f ON f.id = c.file_id
+        WHERE c.project_id = ? AND c.lane_id = ? AND c.side = 'target'
+          AND f.deleted_at IS NULL
+        ORDER BY c.last_edit_at DESC
+        LIMIT 1`,
+    )
+    .bind(projectId, laneId)
+    .first<{ last_editor: string | null; last_edit_at: number | string | null }>()
+  if (!row) return null
+  // BIGINT comes back as a string through the shim; coerce and reject a
+  // missing/zero/negative stamp so the UI never formats a 1970 date.
+  const at = Number(row.last_edit_at)
+  if (!Number.isFinite(at) || at <= 0) return null
+  return { at, by: row.last_editor ?? null }
+}

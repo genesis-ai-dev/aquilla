@@ -1044,6 +1044,10 @@ CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang
 -- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
 CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
+-- AQU-1464: newest target edit in ONE lane across every file, for the archive
+-- confirmation's "last change in this lane" lookup. The two indexes above lead
+-- with file_id, so neither serves a project+lane scan (migration 0117).
+CREATE INDEX idx_cells_lane_last_edit ON cells(project_id, lane_id, last_edit_at DESC) WHERE side = 'target';
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);

@@ -22,7 +22,7 @@
 // reads.
 
 import type { Env } from "../types"
-import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
+import { sectionKeyExpr, soleBookSql, unitBookKeyExpr } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
 import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 
@@ -349,7 +349,7 @@ async function readThreshold(
  *
  * `sectionKey` is '' for a file-grain unit and a Bible book code ("GEN") for a
  * sub-file one. A file-grain unit IS the whole file, so it takes no section
- * predicate; a book unit filters on bookKeyExpr, the same expression
+ * predicate; a book unit filters on unitBookKeyExpr, the same expression
  * sync-worker builds file_section_progress's book rows from
  * (db/shared/plan-keys.ts). Deriving membership any other way would let this
  * panel count a different set of cells than the bar directly above it.
@@ -377,8 +377,13 @@ export async function getUnitAssignments(
   ])
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
-  // all. Built as a fragment so the bind only exists when the predicate does.
-  const sectionPredicate = sectionKey === "" ? "" : `AND (${bookKeyExpr("c")}) = ?`
+  // all. Built as a fragment so the binds only exist when the predicate does.
+  // AQU-1493: by the key the projection COUNTS a cell toward, so a line added
+  // with no reference is a person's share of the file's one book here exactly
+  // as it is a cell of that book's bar above.
+  const sectionPredicate = sectionKey === ""
+    ? ""
+    : `AND (${unitBookKeyExpr("c", soleBookSql())}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
     // The audio CTE is lifted from sync-worker's AUDIO_CTE_SQL, verbatim
@@ -480,9 +485,10 @@ export async function getUnitAssignments(
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
     // audio thresholds in the SELECT list, the lane id on the target join, then
-    // the WHERE — and the section key last, only when the fragment above put a
-    // placeholder there. Adding a CTE ahead of another means inserting its
-    // binds ahead of theirs; there is no naming here to catch a mistake.
+    // the WHERE — and the sole-book lookup's (project, file) plus the section
+    // key last, only when the fragment above put placeholders there. Adding a
+    // CTE ahead of another means inserting its binds ahead of theirs; there is
+    // no naming here to catch a mistake.
     .bind(
       projectId,
       projectId,
@@ -492,7 +498,7 @@ export async function getUnitAssignments(
       laneId,
       projectId,
       fileId,
-      ...(sectionKey === "" ? [] : [sectionKey]),
+      ...(sectionKey === "" ? [] : [projectId, fileId, sectionKey]),
     )
     .all<{
       assignment_id: string
@@ -976,7 +982,18 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id = ?
-     ), units AS (${planUnitsSql("f.project_id = ?")})
+     ), units AS (${planUnitsSql("f.project_id = ?")}
+     ), sole_books AS (
+       -- AQU-1493: files whose plan is exactly one book. A line with no
+       -- reference counts toward that book (unitBookKeyExpr), so its assignee
+       -- belongs on the book's row. Read from the units rather than recomputed
+       -- per file from cells: the units ARE the projection's book rows, and
+       -- one book row is exactly the projection's "sole book" answer.
+       SELECT file_id, MIN(section_key) AS book_key
+         FROM units
+        GROUP BY file_id
+       HAVING COUNT(*) = 1 AND MIN(section_key) <> ''
+     )
      SELECT u.file_id           AS file_id,
             u.section_key       AS section_key,
             a.assignee_user_id  AS user_id,
@@ -986,10 +1003,11 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
        JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                    AND c.cell_id = ac.cell_id AND c.side = 'source'
+       LEFT JOIN sole_books sb ON sb.file_id = c.file_id
        -- A file with book units has no '' unit and a file without has only
        -- the '' unit, so this OR is exact rather than lenient.
        JOIN units u ON u.project_id = c.project_id AND u.file_id = c.file_id
-                   AND (u.section_key = '' OR u.section_key = ${bookKeyExpr("c")})
+                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("c", "sb.book_key")})
        LEFT JOIN users usr ON usr.id = a.assignee_user_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL

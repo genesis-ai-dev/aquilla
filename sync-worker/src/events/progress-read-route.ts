@@ -1,6 +1,7 @@
 import { verifyTokenForProject } from '../auth'
 import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
+import { soleBookSql } from '../../../db/shared/plan-keys'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
@@ -540,7 +541,7 @@ export async function readFirstOpenCell(
     : ''
   if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
-  if (unit) binds.push(unit, `${unit} %`)
+  if (unit) binds.push(unit, `${unit} %`, unit, projectId, fileId)
 
   const { results } = await db.prepare(
     `SELECT ${columns.join(`,
@@ -548,7 +549,12 @@ export async function readFirstOpenCell(
        FROM cells s
        ${targetJoin}
       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-        ${unit ? `AND (${key} = ? OR ${key} LIKE ?)` : ''}
+        ${unit
+          // AQU-1493: a line with no reference belongs to the file's one book,
+          // as the projection counts it (`unitBookKeyExpr`). Without this the
+          // board said "3 cells to translate" and its link found none of them.
+          ? `AND (${key} = ? OR ${key} LIKE ? OR (${key} = '' AND ? = ${soleBookSql()}))`
+          : ''}
         ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
         -- AQU-1424: a parked cell is never the NEXT THING TO WORK ON, whatever
         -- state it is in. Unconditional, unlike the structural clause above it:

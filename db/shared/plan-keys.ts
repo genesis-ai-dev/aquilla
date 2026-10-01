@@ -63,3 +63,45 @@ export function bookKeyExpr(alias: string): string {
     ELSE ''
   END`
 }
+
+/**
+ * AQU-1493: the one book a FILE holds, or '' when it holds none or several —
+ * as a scalar subquery that binds (projectId, fileId).
+ *
+ * Exists for the lines nobody gave a reference. A line added in the editor
+ * (`handleAddCell`) carries no canonical_ref, so `bookKeyExpr` puts it in no
+ * book at all: the file's own row counted it, every book and chapter row did
+ * not. Six blank added lines left a book reading 100% and "Nothing left" on
+ * the board while the file's untranslated count said six (ETEN, 2026-09-29).
+ *
+ * In a file that holds ONE book there is no doubt where such a line belongs,
+ * so `unitBookKeyExpr` counts it there. In a file of several books there is,
+ * and nothing here guesses: those lines stay in the file's row only, and the
+ * board says so in words rather than in a number nobody can find.
+ *
+ * Parked cells (`hidden_at`, AQU-1424 — see visibleSourceSql) do not decide
+ * it: the projection drops them before counting anything, and the book rows
+ * it writes have to be the same set this answer is drawn from, or a file whose
+ * only other book is parked would be told it has two.
+ */
+export function soleBookSql(): string {
+  return `(SELECT CASE WHEN COUNT(DISTINCT keyed.book_key) = 1 THEN MIN(keyed.book_key) ELSE '' END
+             FROM (SELECT ${bookKeyExpr('sole')} AS book_key
+                     FROM cells sole
+                    WHERE sole.project_id = ? AND sole.file_id = ? AND sole.side = 'source'
+                      AND sole.hidden_at IS NULL) keyed
+            WHERE keyed.book_key <> '')`
+}
+
+/**
+ * AQU-1493: the book a cell COUNTS toward on the plan — its own book key, or,
+ * for a line with none, the file's one book (`soleBook`, an expression such as
+ * `(SELECT v FROM sole_book)`). The projection's book rows and every reader
+ * that must count the same cells use this, never `bookKeyExpr` alone.
+ *
+ * COALESCE evaluates lazily, so the sole-book lookup is only consulted for
+ * the lines that need it.
+ */
+export function unitBookKeyExpr(alias: string, soleBook: string): string {
+  return `COALESCE(NULLIF(${bookKeyExpr(alias)}, ''), ${soleBook})`
+}

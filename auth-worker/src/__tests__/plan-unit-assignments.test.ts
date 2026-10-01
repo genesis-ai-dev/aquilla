@@ -363,6 +363,51 @@ describe("per-chapter coverage on a unit's assignments", () => {
   })
 })
 
+describe("lines added with no reference (AQU-1493)", () => {
+  // The projection counts a line with no canonical_ref toward the file's ONE
+  // book (unitBookKeyExpr), so the book's bar includes it. A person assigned
+  // that line has to have it counted here too, under the same bar.
+  async function seedAddedLines(): Promise<void> {
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', 'genesis.usfm', 'e-pa')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
+        ('pa','f2','h1','source','s','e-pa',1,'GEN 1:1'),
+        ('pa','f2','h2','source','s','e-pa',1,NULL),
+        ('pa','f1','n1','source','s','e-pa',1,NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
+        ('as-gen-only', 'pa', 2, 'cells', 'Genesis', '', 2, NULL, 1, 2000, NULL, NULL),
+        ('as-two-books', 'pa', 3, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-gen-only','f2','h1'), ('as-gen-only','f2','h2'),
+        ('as-two-books','f1','n1')`,
+    ).run()
+  }
+
+  it("counts the added line toward a one-book file's book", async () => {
+    await seedAddedLines()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", "")
+    expect(anna.assignmentId).toBe("as-gen-only")
+    expect(anna.cellsTotal).toBe(2)
+  })
+
+  it("puts it in no book of a file that holds several", async () => {
+    await seedAddedLines()
+    // f1 holds GEN and EXO: nothing says which book n1 belongs to, so neither
+    // book's panel lists the person whose only line it is.
+    for (const book of ["GEN", "EXO"]) {
+      const rows = await getUnitAssignments(testEnv, "pa", "f1", book, "")
+      expect(rows.map((r) => r.assignmentId)).not.toContain("as-two-books")
+    }
+  })
+})
+
 describe("GET /api/v2/projects/:projectId/assignments/unit", () => {
   it("returns the unit's assignments to a maintainer+ caller", async () => {
     await seedUnit()

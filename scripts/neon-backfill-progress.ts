@@ -31,9 +31,28 @@ async function main(): Promise<void> {
     // every media project done while its audio counts sit at zero forever.
     // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
-    const scoped = missingOnly || missingBooks
+    // AQU-1493: `--unreferenced-lines` re-runs one-book files whose book row is
+    // SMALLER than the file's own row. Before the fix a line with no reference
+    // (one added in the editor) counted in the file and in no book; after it,
+    // every visible line of a one-book file is in that book, so the two totals
+    // are equal and the file drops out of this selector — safe to re-run, and
+    // it reads only progress rows, never the cells. Combines with
+    // --missing-books (the dev stack passes both at boot).
+    const unreferencedLines = process.argv.includes('--unreferenced-lines')
+    const scoped = missingOnly || missingBooks || unreferencedLines
+    const unreferencedSql = `SELECT f.project_id, f.file_id AS id
+             FROM file_section_progress f
+             JOIN file_section_progress b
+               ON b.project_id = f.project_id AND b.file_id = f.file_id
+              AND b.scope = 'book' AND b.target_lang = f.target_lang
+            WHERE f.scope = 'file' AND f.section_key = '' AND f.target_lang = ''
+            GROUP BY f.project_id, f.file_id, f.total_count
+           HAVING COUNT(*) = 1 AND MAX(b.total_count) < f.total_count`
     const { results: files } = await db
-      .prepare(missingBooks
+      .prepare(unreferencedLines && !missingBooks
+        ? `${unreferencedSql}
+            ORDER BY project_id, id`
+        : missingBooks
         ? `SELECT f.project_id, f.id
              FROM files f
             WHERE NOT EXISTS (
@@ -66,7 +85,8 @@ async function main(): Promise<void> {
                       AND p3.scope = 'file' AND p3.audio_count = 0
                  )
                )
-            ORDER BY f.project_id, f.id`
+            ${unreferencedLines ? `UNION ${unreferencedSql}` : ''}
+            ORDER BY 1, 2`
         : missingOnly
         ? `SELECT f.project_id, f.id
              FROM files f

@@ -99,6 +99,42 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
     expect(rows).toHaveLength(4)
   })
 
+  it("puts a person on a one-book file's book for a line added with no reference (AQU-1493)", async () => {
+    // The projection counts such a line toward the file's one book, so whoever
+    // holds it is working on that book. In a file of several books nothing
+    // says which, and they are on no row — as the line is in no book's bar.
+    await seed()
+    const db = testEnv.AQUILLA_PG
+    await seedUser(5, "dana")
+    await seedUser(6, "erin")
+    await db.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f3', 'pa', 'genesis.usfm', 'e-pa')",
+    ).run()
+    await db.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, updated_at) VALUES
+        ('pa','f3','book','GEN','',1), ('pa','f3','file','','',1)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
+        ('pa','f3','h1','source','s','e-pa',1,'GEN 1:1'),
+        ('pa','f3','h2','source','s','e-pa',1,NULL),
+        ('pa','f1','n1','source','s','e-pa',1,NULL)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
+        ('as-dana', 'pa', 5, 'cells', 'added', '', 1, NULL, 1, 2000, NULL, NULL),
+        ('as-erin', 'pa', 6, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-dana','f3','h2'), ('as-erin','f1','n1')`,
+    ).run()
+    const rows = await getProjectUnitAssignees(testEnv, "pa")
+    expect(rows.filter((r) => r.username === "dana").map((r) => `${r.fileId}:${r.sectionKey}`))
+      .toEqual(["f3:GEN"])
+    expect(rows.some((r) => r.username === "erin")).toBe(false)
+  })
+
   it("drops a person whose whole assignment is structural, under the exclude policy", async () => {
     // dana holds only GEN's chapter heading. With the org excluding
     // structural cells, that heading counts for nothing — so dana must not

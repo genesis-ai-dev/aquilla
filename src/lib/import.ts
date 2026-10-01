@@ -80,6 +80,8 @@ import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
 import { parseObsStories } from "./parsers/obs"
+import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
   normalizeTranslatableStrings,
@@ -823,7 +825,7 @@ export async function importEBible(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   const corpusText = await fetchTranslationText(
@@ -845,20 +847,101 @@ export async function importEBible(
   const fileName = `${translation.title} (${translation.id})`
 
   // eBible has no speaker tags — ignore speakerPairs.
-  const { ref } = await emitParsedFile(
-    { name: fileName, strings, rawSource: corpusText, rawSourceFormat: "ebible" },
-    "ebible",
+  return emitScriptureBooks(
+    strings,
+    {
+      fileType: "ebible",
+      singleFileName: fileName,
+      rawSourceFormat: "ebible",
+      wholeRawSource: corpusText,
+      // A book's slice of a vref-aligned corpus is the same one-line-per-verse
+      // shape, so each per-book file gets a valid original of its own rather
+      // than 66 copies of the whole Bible. Same trade the multi-book USFM split
+      // makes: content-only fidelity, per-book skeleton.
+      bookRawSource: (slice) => slice.strings.map((string) => string.original).join("\n"),
+    },
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
+}
+
+/**
+ * Emit parsed scripture cells as one source file per book (AQU-1187).
+ *
+ * The web-catalog scripture importers (eBible, Hello AO) parse a whole
+ * selection in one pass, so the split happens here rather than in the parser.
+ * Books are emitted in parse order — both parsers already produce canonical
+ * order — and each file carries its `bookCode`, which is what lets the sidebar
+ * group them into OT/NT and order them canonically (AQU-1084). Cells the split
+ * cannot attribute to a known book keep the old single-file shape.
+ *
+ * Progress is reported cumulatively across books so the dialog's bar stays
+ * monotonic over a 31k-cell whole-Bible import.
+ */
+async function emitScriptureBooks(
+  strings: TranslatableString[],
+  spec: {
+    fileType: FileType
+    /** Name used when the import is not split (one book, or no book codes). */
+    singleFileName: string
+    rawSourceFormat: SourceArtifactFormat
+    wholeRawSource: string
+    /** The raw original for one book, when the import is split per book. */
+    bookRawSource: (slice: BookSlice) => string
+  },
+  ctx: ImportContext,
+  onCellsEnqueued: (enqueued: number, total: number) => void,
+): Promise<FileReference[]> {
+  const slices = splitStringsByBook(strings)
+  const total = strings.length
+
+  if (slices === null || slices.length === 1) {
+    const { ref } = await emitParsedFile(
+      {
+        name: spec.singleFileName,
+        strings,
+        rawSource: spec.wholeRawSource,
+        rawSourceFormat: spec.rawSourceFormat,
+        // One book still learns its code, so a single-book import groups under
+        // its testament instead of landing in "Ungrouped".
+        ...(slices?.length === 1 ? { bookCode: slices[0].bookCode } : {}),
+      },
+      spec.fileType,
+      { ...ctx, onCellEnqueued: (count) => onCellsEnqueued(count, total) },
+    )
+    return [ref]
+  }
+
+  const refs: FileReference[] = []
+  let enqueuedBefore = 0
+  for (const slice of slices) {
+    const { ref } = await emitParsedFile(
+      {
+        name: getBookName(slice.bookCode) ?? slice.bookCode,
+        strings: slice.strings,
+        rawSource: spec.bookRawSource(slice),
+        rawSourceFormat: spec.rawSourceFormat,
+        bookCode: slice.bookCode,
+        roundTripFidelity: "content-only",
+      },
+      spec.fileType,
+      {
+        ...ctx,
+        onCellEnqueued: (count) => onCellsEnqueued(enqueuedBefore + count, total),
+      },
+    )
+    refs.push(ref)
+    enqueuedBefore += slice.strings.length
+    onCellsEnqueued(enqueuedBefore, total)
+  }
+  return refs
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +1092,7 @@ export async function importHelloao(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   let rawComplete = ""
@@ -1030,25 +1113,31 @@ export async function importHelloao(
 
   const fileName = `${translation.englishName || translation.name} (${translation.id})`
 
-  const { ref } = await emitParsedFile(
+  return emitScriptureBooks(
+    strings,
     {
-      name: fileName,
-      strings,
-      rawSource: rawComplete || JSON.stringify(complete),
+      fileType: "helloao",
+      singleFileName: fileName,
       rawSourceFormat: "helloao",
+      wholeRawSource: rawComplete || JSON.stringify(complete),
+      // Hello AO's payload is already per-book, so a book's original is the
+      // same envelope carrying just that book — valid on its own, and it keeps
+      // a whole-Bible import from storing the bulk payload 66 times.
+      bookRawSource: (slice) => JSON.stringify({
+        ...complete,
+        books: complete.books.filter((book) => book.id.toUpperCase() === slice.bookCode),
+      }),
     },
-    "helloao",
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
 }
 
 /**

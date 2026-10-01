@@ -29,7 +29,7 @@ import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
   planAudioTotal, planOpenKind, planPct, planShortfallParts, planUnitExpectsAudio,
   planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
-  planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
+  planUnitExpectsText, planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
 } from "@/lib/plan/plan-status"
 import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
@@ -50,7 +50,7 @@ import { shortVerses, verseChipLabel } from "./verse-chips"
  */
 export function PlanInspector({
   unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
-  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
+  assignments, audioFiles, textFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
 }: {
   unit: PlanUnit
   now: number
@@ -61,6 +61,13 @@ export function PlanInspector({
    * disagree about the same unit. Absent, the unit's own count stands in.
    */
   audioFiles?: ReadonlySet<string>
+  /**
+   * AQU-955: which FILES carry text work, from `textFileIds` over the WHOLE
+   * board. Judged per file for the same reason `audioFiles` is — an audio-only
+   * file is audio-only for every book in it, including the ones nobody has
+   * started. Absent, the unit's own expectation stands in.
+   */
+  textFiles?: ReadonlySet<string>
   /** MAINTAINER+: may set target dates and mark units done. */
   canPlan: boolean
   showAudio: boolean
@@ -124,12 +131,13 @@ export function PlanInspector({
   const { locale } = useI18n()
   const [confirmingDone, setConfirmingDone] = useState(false)
   const [busy, setBusy] = useState(false)
-  const status = planUnitStatus(unit, now, audioFiles)
-  const note = usePlanStatusNote(unit, now, audioFiles)
+  const hasText = textFiles ? textFiles.has(unit.fileId) : planUnitExpectsText(unit)
+  const status = planUnitStatus(unit, now, audioFiles, textFiles)
+  const note = usePlanStatusNote(unit, now, audioFiles, textFiles)
   // AQU-1278: which note this IS, so the status line can drop the one the
   // Target date section below already answers. Masked rather than skipped —
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
-  const noteKind = planUnitNote(unit, now, audioFiles)?.kind ?? null
+  const noteKind = planUnitNote(unit, now, audioFiles, textFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
   const readoutTips = usePlanReadoutTips()
   const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
@@ -145,7 +153,7 @@ export function PlanInspector({
   // unit's own count, which is the right answer when there is no wider list to
   // consult.
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
-  const shortfall = planUnitShortfall(unit, hasAudio)
+  const shortfall = planUnitShortfall(unit, hasAudio, hasText)
   // AQU-1278: the cue sheet's cell count on a dubbing project, the unit's own
   // everywhere else. See `planAudioTotal`. The bars here are the only place it
   // is needed — the "Assigned to" block is handed its own audio gate by
@@ -156,7 +164,7 @@ export function PlanInspector({
   // under Overdue, and it is precisely the row that needs its shortfall said
   // out loud. `planUnitIsNearlyComplete` asks the same question with the date
   // stripped, so the row and this panel cannot drift apart.
-  const nearlyComplete = planUnitIsNearlyComplete(unit, now, audioFiles)
+  const nearlyComplete = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
   // The same words the row uses, from the same renderer: "3 cells to validate",
   // or "6 to translate · 8 to validate" when two mediums are outstanding. Null
   // means nothing is, which on a unit nobody has marked done is its own news.
@@ -222,7 +230,10 @@ export function PlanInspector({
     // a text-only book as short by all its takes. The panel's own status is
     // judged per FILE two dozen lines up; these two numbers sit on the same
     // screen and must be asked the same question.
-    (s) => planSectionShortfall(s, hasAudio).worst > 0,
+    // `hasText`, not a constant: an audio-only file has no text queue, and
+    // counting every chapter short by cells nobody will ever write made the
+    // "N chapters short" line say the whole book, forever.
+    (s) => planSectionShortfall(s, hasAudio, hasText).worst > 0,
   ).length
 
   // NO SECTIONS, NO BLOCK — AQU-1278, Sam's call 2026-09-16. This used to
@@ -361,17 +372,22 @@ export function PlanInspector({
         <div className="flex flex-col gap-2">
           <Label>{t("org.projectOverview.plan.progress")}</Label>
           <div className="flex flex-col gap-2" data-testid="plan-inspector-bars">
-            <PlanBar
-              label={t("org.projectOverview.plan.textBarLabel")}
-              outer={planPct(unit.filledCount, unit.totalCount)}
-              inner={validatedPct}
-              tone="text"
-              aria={t("org.projectOverview.plan.textBarsAria", {
-                translated: planPct(unit.filledCount, unit.totalCount),
-                validated: validatedPct,
-              })}
-              tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
-            />
+            {/* AQU-955: per FILE, like the audio bar below and the tiles
+                further down. On an audio-only file this bar sat pinned at 0%
+                above a full audio bar and read as the book not being started. */}
+            {hasText && (
+              <PlanBar
+                label={t("org.projectOverview.plan.textBarLabel")}
+                outer={planPct(unit.filledCount, unit.totalCount)}
+                inner={validatedPct}
+                tone="text"
+                aria={t("org.projectOverview.plan.textBarsAria", {
+                  translated: planPct(unit.filledCount, unit.totalCount),
+                  validated: validatedPct,
+                })}
+                tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
+              />
+            )}
             {showAudio && (
               <PlanBar
                 label={t("org.projectOverview.plan.audioBarLabel")}
@@ -463,11 +479,12 @@ export function PlanInspector({
                 glance, and the summary is the one that changes. */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Label>{t(sectionsHeadingKey as never)}</Label>
-              <PlanGridLegend showAudio={hasAudio} />
+              <PlanGridLegend showAudio={hasAudio} showText={hasText} />
             </div>
             <PlanChapterGrid
               sections={sections}
               showAudio={hasAudio}
+              showText={hasText}
               nearlyComplete={nearlyComplete}
               selectedKey={openSectionKey}
               // Pure state. The fetch used to be launched from inside this
@@ -517,6 +534,7 @@ export function PlanInspector({
                 section={openSection}
                 title={openSectionTitle}
                 hasAudio={hasAudio}
+                hasText={hasText}
                 verses={sectionVerses.get(openSection.key)}
                 onOpenCell={onOpenCell}
               />
@@ -663,12 +681,14 @@ export function PlanInspector({
  * they arrive, or if they never do, the title is plain text.
  */
 function PlanChapterCard({
-  section, title, hasAudio, verses, onOpenCell,
+  section, title, hasAudio, hasText = true, verses, onOpenCell,
 }: {
   section: PlanSection
   /** "Chapter 12", or a named section's own label. */
   title: string
   hasAudio: boolean
+  /** AQU-955: false on an audio-only file; the card drops its text bar. */
+  hasText?: boolean
   verses: SectionVersesState | undefined
   onOpenCell?: (cellId: string) => void
 }) {
@@ -676,7 +696,7 @@ function PlanChapterCard({
   const readoutTips = usePlanReadoutTips()
   const rowRef = useRef<HTMLDivElement>(null)
 
-  const shortfall = planSectionShortfall(section, hasAudio)
+  const shortfall = planSectionShortfall(section, hasAudio, hasText)
   // Which queue this chapter is in, and therefore which verses the chips list.
   // `planShortfallParts` has already ordered the terms worst-first with
   // translation ahead of validation, so its first term IS the lead.
@@ -741,21 +761,25 @@ function PlanChapterCard({
           </span>
         )}
       </div>
-      <PlanBar
-        label={t("org.projectOverview.plan.textBarLabel")}
-        outer={planPct(section.filledCount, section.totalCount)}
-        inner={planPct(section.validatedCount, section.totalCount)}
-        tone="text"
-        aria={t("org.projectOverview.plan.textBarsAria", {
-          translated: planPct(section.filledCount, section.totalCount),
-          validated: planPct(section.validatedCount, section.totalCount),
-        })}
-        // Percentages like every other bar, the counts one hover away (Sam,
-        // 2026-09-17, for consistency). "20 of 20 translated · 18 of 20
-        // validated" is what the hover says; the card's own header still
-        // says "2 cells not yet validated" in print.
-        tips={readoutTips("text", section.filledCount, section.validatedCount, section.totalCount)}
-      />
+      {/* AQU-955: no text bar on an audio-only file's chapter — see the unit
+          bars above, and `textFileIds`. */}
+      {hasText && (
+        <PlanBar
+          label={t("org.projectOverview.plan.textBarLabel")}
+          outer={planPct(section.filledCount, section.totalCount)}
+          inner={planPct(section.validatedCount, section.totalCount)}
+          tone="text"
+          aria={t("org.projectOverview.plan.textBarsAria", {
+            translated: planPct(section.filledCount, section.totalCount),
+            validated: planPct(section.validatedCount, section.totalCount),
+          })}
+          // Percentages like every other bar, the counts one hover away (Sam,
+          // 2026-09-17, for consistency). "20 of 20 translated · 18 of 20
+          // validated" is what the hover says; the card's own header still
+          // says "2 cells not yet validated" in print.
+          tips={readoutTips("text", section.filledCount, section.validatedCount, section.totalCount)}
+        />
+      )}
       {hasAudio && (
         <PlanBar
           label={t("org.projectOverview.plan.audioBarLabel")}

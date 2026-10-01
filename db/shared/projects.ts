@@ -16,7 +16,7 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
-import { ensureProjectLaneStmts } from "./lanes"
+import { ensureProjectLaneStmts, listProjectLanes, type ProjectLaneRecord } from "./lanes"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -171,6 +171,8 @@ export interface ProjectSettingsResponse {
   version: number
   updatedAt: string | null
   updatedBy: number | null
+  /** Lane rows for this project. Absent on older writers that only return the settings blob. */
+  lanes?: ProjectLaneRecord[]
 }
 
 export function normalizeSettings(
@@ -294,7 +296,11 @@ export async function loadProjectSettings(
     .bind(projectId)
     .first<ProjectSettingsRow>()
 
-  if (row) return rowToResponse(row)
+  if (row) {
+    const response = rowToResponse(row)
+    response.lanes = await listProjectLanes(db, projectId)
+    return response
+  }
 
   // No row yet — treat as empty defaults at version 0. We don't auto-create
   // the row on read; first write does the upsert.
@@ -304,6 +310,7 @@ export async function loadProjectSettings(
     version: 0,
     updatedAt: null,
     updatedBy: null,
+    lanes: await listProjectLanes(db, projectId),
   }
 }
 

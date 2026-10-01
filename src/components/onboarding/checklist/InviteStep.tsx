@@ -1,7 +1,9 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { callerLevelFromRoster } from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface InviteStepProps {
@@ -23,6 +25,13 @@ export function InviteStep({
   const t = useT()
   const [open, setOpen] = useState(false)
   const { members, addMany } = useProjectMembers(projectId)
+  const { session } = useFrontierSession()
+  // AQU-853: same cap as the settings Members pane — the role picker must not
+  // offer a grant above the caller's own role.
+  const callerLevel = useMemo(
+    () => callerLevelFromRoster(members, session?.username),
+    [members, session?.username],
+  )
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
@@ -44,6 +53,7 @@ export function InviteStep({
         members={members}
         addMany={addMany}
         onAdded={onSharesChanged}
+        callerLevel={callerLevel}
       />
     </div>
   )

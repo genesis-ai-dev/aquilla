@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  getPortfolio,
+  getOrgPortfolioSummary,
   translatedPct,
   validatedPct,
   audioPct,
@@ -42,6 +42,9 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
   const jwt = session?.jwt ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
+  // AQU-1071: distinct active target languages across the org, counted
+  // server-side on the same rule billing bills on (see getOrgPortfolioSummary).
+  const [activeLanguageCount, setActiveLanguageCount] = useState(0)
   const [resolvedScopeKey, setResolvedScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -61,13 +64,14 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
   useEffect(() => {
     if (!jwt || orgId == null) {
       setProjects([])
+      setActiveLanguageCount(0)
       setResolvedScopeKey(null)
       return
     }
     let cancelled = false
     setError(null)
-    getPortfolio(jwt, orgId)
-      .then((list) => {
+    getOrgPortfolioSummary(jwt, orgId)
+      .then(({ projects: list, activeLanguageCount: languages }) => {
         if (!cancelled) {
           setProjects(
             list.map((project) => ({
@@ -76,6 +80,7 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
               orgName: orgName ?? "Workspace",
             })),
           )
+          setActiveLanguageCount(languages)
         }
       })
       .catch((err) => {
@@ -203,6 +208,7 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
     avgTranslatedPct,
     avgValidatedPct,
     avgAudioPct,
+    activeLanguageCount,
     stalledCount,
     overdueCount,
     attentionProjects,

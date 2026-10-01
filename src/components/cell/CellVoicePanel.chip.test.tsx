@@ -111,4 +111,31 @@ describe("CellVoicePanel take tools", () => {
     await expectTooltip(screen.getByRole("button", { name: "Crop audio" }), "Crop audio")
     await expectTooltip(screen.getByRole("button", { name: "Volume" }), "Volume")
   })
+
+  it("plays the row's player so the cell highlight follows this button", async () => {
+    const user = userEvent.setup()
+    const play = vi.fn()
+    renderWithTooltips(
+      <CellVoicePanel
+        cell={cell}
+        project={project}
+        projectId="proj-1"
+        settings={settings}
+        voices={voices}
+        session={{ jwt: "x" } as unknown as never}
+        username="tester"
+        onAssign={() => {}}
+        onAfterGenerate={() => {}}
+        onMakeCharacter={() => {}}
+        controller={{
+          state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 2,
+          peaks: null, peaksState: "idle",
+          play, pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
+          setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+        }}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Play audio" }))
+    expect(play).toHaveBeenCalledOnce()
+  })
 })

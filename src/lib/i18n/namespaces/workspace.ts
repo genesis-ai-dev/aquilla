@@ -40,6 +40,10 @@ export const workspace = defineNamespace({
     }),
     "workspace.offline.conflictDismiss": "Dismiss",
     "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode: the local store's leader worker stopped persisting
+    // writes (src/lib/offline/leader-watchdog.ts). A reload restarts it.
+    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Reload to fix this — changes made since it started may be lost.",
+    "workspace.offline.leaderStalledReload": "Reload",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -159,6 +163,10 @@ export const workspace = defineNamespace({
     "workspace.metrics.weeklyTrendHeading": "Weekly trend",
     "workspace.metrics.filteredTo": "— filtered to {user}",
     "workspace.metrics.noUserData": "No data for this user yet.",
+    "workspace.metrics.byFileHeading": "By file",
+    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for scripture)",
+    "workspace.metrics.fileColumn": "File",
+    "workspace.metrics.acceptedAsIsColumn": "Kept as-is",
     "workspace.metrics.byReviewerHeading": "By reviewer",
     "workspace.metrics.byReviewerHint": "(click a row to filter the trend above)",
     "workspace.metrics.disclosure":
@@ -184,6 +192,11 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
     "workspace.aiConsent.enableAllTooltip": "Also pre-download the local AI models so they're ready next time",
     "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.justThisButton": "Just {model}",
+    "workspace.aiConsent.sizeNote":
+      "One-time download of about {size} MB — it stays on this device.",
+    "workspace.aiConsent.learnMore": "Learn more",
+    "workspace.aiConsent.genericModelName": "AI model",
 
     // -- AiModelDownloadChip --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
@@ -246,6 +259,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    // AQU-1405. Painted over the page for the moment between a stale-chunk
+    // failure and the automatic reload that recovers from it.
+    "workspace.updateNotice.reloading": "Updating {app}…",
 
     // -- GenerateOverwriteDialog --
     "workspace.generateOverwrite.dontAskAgain": "Don't ask again when replacing a translation",
@@ -282,6 +298,8 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    "workspace.alignment.contributorRequired":
+      "Contributor+ required to confirm or reject alignments",
 
     // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
     "workspace.alignment.originalHeading": "Original language",
@@ -308,6 +326,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -450,6 +470,27 @@ export const workspace = defineNamespace({
     "workspace.fileSort.lastUpdated": "Last updated",
     "workspace.fileSort.canonical": "Canonical order",
     "workspace.fileSort.alphabetical": "Alphabetical",
+
+    // -- AQU-1392: volume-analysis report (AnalysisReportDialog) --
+    "workspace.analysis.action": "Analyze word counts",
+    "workspace.analysis.title": "Analysis — {label}",
+    "workspace.analysis.starting": "Reading source text…",
+    "workspace.analysis.progress": "Analyzing file {done} of {total}…",
+    "workspace.analysis.col.band": "Match band",
+    "workspace.analysis.col.segments": "Segments",
+    "workspace.analysis.col.words": "Words",
+    "workspace.analysis.col.pct": "% of words",
+    "workspace.analysis.col.rate": "Rate",
+    "workspace.analysis.col.weighted": "Weighted words",
+    "workspace.analysis.totalSegments": "Segments",
+    "workspace.analysis.totalWords": "Total words",
+    "workspace.analysis.weightedWords": "Weighted words",
+    "workspace.analysis.saving": "Saving",
+    "workspace.analysis.exportCsv": "Export CSV",
+    "workspace.analysis.unpopulatedNote":
+      "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
+    "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
+    "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
   },
   context: {
     _context: {
@@ -492,6 +533,19 @@ export const workspace = defineNamespace({
         placeholders: {
           count: "How many translations couldn't sync.",
         },
+      },
+      "workspace.offline.leaderStalledToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when the " +
+          "on-device storage stops saving edits (its background worker died). " +
+          "Paired with a 'Reload' action (workspace.offline.leaderStalledReload). " +
+          "Two full sentences with periods. Plain language — no 'worker', 'store' " +
+          "or 'sync' jargon.",
+      },
+      "workspace.offline.leaderStalledReload": {
+        description:
+          "Action button on the 'changes aren't being saved' toast; reloads the " +
+          "app window. Short imperative verb.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -692,20 +746,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },
@@ -933,6 +987,29 @@ export const workspace = defineNamespace({
           "Shown instead of the weekly chart when the selected reviewer has no " +
           "weeks with data (edge case after filtering).",
       },
+      "workspace.metrics.byFileHeading": {
+        description: "Heading over the per-file breakdown table of AI post-edit effort.",
+      },
+      "workspace.metrics.byFileHint": {
+        description:
+          "Small parenthetical note after workspace.metrics.byFileHeading, saying " +
+          "the rows are the project's imported files, and that for a scripture " +
+          "project one file is one book — so a reader looking for a per-book " +
+          "breakdown knows this is it.",
+      },
+      "workspace.metrics.fileColumn": {
+        description:
+          "Column header naming the file each row of the per-file table covers. " +
+          "One word; it sits over file names in a narrow column.",
+        maxLength: 14,
+      },
+      "workspace.metrics.acceptedAsIsColumn": {
+        description:
+          "Column header for the count of AI drafts in that file which a reviewer " +
+          "approved without editing. Short — it sits over numbers in a narrow " +
+          "column. 'As-is' means unchanged.",
+        maxLength: 16,
+      },
       "workspace.metrics.byReviewerHeading": {
         description: "Heading over the by-reviewer breakdown table.",
       },
@@ -986,6 +1063,42 @@ export const workspace = defineNamespace({
         description:
           "Button that consents to and starts downloading every local AI " +
           "model at once, instead of just the one the current feature needs.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.justThisButton": {
+        description:
+          "Secondary action on the first-run local-model download prompt: " +
+          "consent to and download only the model named in {model}, not every " +
+          "local model. {model} is the short product name (Whisper, MMS) and " +
+          "stays untranslated.",
+        placeholders: {
+          model: "Short product name of the model being asked about (Whisper or MMS).",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.sizeNote": {
+        description:
+          "Sentence in the compact consent-prompt body stating the one-time " +
+          "download size and that the model stays on this device. Follows the " +
+          "model-specific short explanation. {size} is a whole number of megabytes.",
+        placeholders: {
+          size: "Approximate one-time download size in megabytes, e.g. 140.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.learnMore": {
+        description:
+          "Inline disclosure control on the local-model download prompt. " +
+          "Expands (and collapses) a fuller explanation in place — not a " +
+          "link out and not a second dialog. The expanded state is exposed " +
+          "via aria-expanded; the label does not change.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.genericModelName": {
+        description:
+          "Fallback display name interpolated into workspace.aiConsent." +
+          "downloadTitle when the pending model is unknown (dialog closing). " +
+          "Generic noun phrase, not a product name.",
         screenshot: "confirm-dialog",
       },
 
@@ -1209,6 +1322,16 @@ export const workspace = defineNamespace({
           "that reloads the page.",
       },
 
+      "workspace.updateNotice.reloading": {
+        description:
+          "Full-screen status message shown for the moment between a stale " +
+          "code-chunk load failure (a new version was deployed while this tab " +
+          "was open) and the automatic reload that recovers from it.",
+        placeholders: {
+          app: "The product name for the current brand (e.g. 'Aquilla'), never translated.",
+        },
+      },
+
       "workspace.generateOverwrite.dontAskAgain": {
         description:
           "Checkbox label in the confirm dialog shown before an AI draft " +
@@ -1312,6 +1435,13 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.contributorRequired": {
+        description:
+          "AQU-1408. Tooltip and accessible name on the disabled confirm/reject " +
+          "buttons for a member below the contributor rung, who may read the " +
+          "alignment but not teach it. Mirror editor.bt.contributorRequired; keep " +
+          "the 'or above' sense of the trailing plus.",
+      },
       "workspace.alignment.originalHeading": {
         description:
           "Heading of the section listing the original-language (biblical Hebrew or " +
@@ -1361,6 +1491,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +
@@ -1840,6 +1982,67 @@ export const workspace = defineNamespace({
       },
       "workspace.fileSort.alphabetical": {
         description: "Sort-mode dropdown option: plain A-Z name order.",
+      },
+
+      "workspace.analysis.action": {
+        description:
+          "Menu item / button that opens the volume-analysis report for a file " +
+          "or a project. 'Analyze' here is the translation-industry sense — " +
+          "count how much new vs. repeated work a document holds — not a " +
+          "quality check.",
+      },
+      "workspace.analysis.title": {
+        description:
+          "Heading of the analysis dialog. {label} is the file or project the " +
+          "report covers.",
+        placeholders: { label: "Name of the file or project being analyzed." },
+      },
+      "workspace.analysis.progress": {
+        description:
+          "Status line while the report walks a project's files. Both numbers " +
+          "are file counts, not percentages.",
+        placeholders: {
+          done: "How many files have been analyzed so far.",
+          total: "How many files the report covers in total.",
+        },
+      },
+      "workspace.analysis.col.band": {
+        description:
+          "Column header: the match band a segment fell into (New, Repetitions, " +
+          "Internal fuzzy 75–99%, and the not-yet-filled TM/ICE/MT bands). " +
+          "'Band' is the TMS term for a tier of match quality.",
+        maxLength: 20,
+      },
+      "workspace.analysis.col.pct": {
+        description:
+          "Column header: this band's share of the report's total word count, " +
+          "shown as a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.col.rate": {
+        description:
+          "Column header: the percentage of a word that this band is charged " +
+          "at — a New word counts 100%, a repeated word 30%.",
+        maxLength: 12,
+      },
+      "workspace.analysis.col.weighted": {
+        description:
+          "Column header: words after the band rate is applied — the 'payable' " +
+          "count a project manager quotes from.",
+        maxLength: 18,
+      },
+      "workspace.analysis.saving": {
+        description:
+          "Label for the percentage by which weighting reduced the raw word " +
+          "count (a TMS 'saving on word count'). Shown next to a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.skipped": {
+        description:
+          "Warning under the report when one or more files could not be read, " +
+          "so their words are missing from the totals. {names} is a " +
+          "comma-separated list of file names.",
+        placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
     },
   },

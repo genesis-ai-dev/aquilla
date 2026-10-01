@@ -27,7 +27,7 @@ import { CellWaveform } from "./CellWaveform"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
-import { useCellAudio } from "@/hooks/useCellAudio"
+import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
@@ -78,9 +78,35 @@ export interface CellTakeBlockProps {
   /** Generated voice: no transcribe, no denoise, no correcting — it is not a
    *  performance anybody recorded. */
   readOnlyTranscript?: boolean
+  /**
+   * Play this recording on the row's existing player. The cell highlight reads
+   * that player's clock; a second player here would sound the take without
+   * ever moving the highlight. Omit for a linked take the row does not play.
+   */
+  controller?: UseCellAudioResult
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
-export function CellTakeBlock({
+export function CellTakeBlock(props: CellTakeBlockProps) {
+  if (props.controller) return <CellTakeBlockView {...props} controller={props.controller} />
+  return <CellTakeBlockOwned {...props} />
+}
+
+function CellTakeBlockOwned(props: Omit<CellTakeBlockProps, "controller">) {
+  const selectedAudioId = props.audioId ?? props.owner.selectedAudioId ?? undefined
+  const cellForAudio = useMemo(
+    () =>
+      ({
+        metadata: { attachments: props.owner.attachments, selectedAudioId },
+      }) as unknown as CodexCell,
+    [props.owner.attachments, selectedAudioId],
+  )
+  const controller = useCellAudio(props.project, cellForAudio, props.owner.fileId)
+  return <CellTakeBlockView {...props} controller={controller} />
+}
+
+function CellTakeBlockView({
   project,
   owner,
   audioId,
@@ -95,7 +121,9 @@ export function CellTakeBlock({
   header,
   recordLabel,
   readOnlyTranscript = false,
-}: CellTakeBlockProps) {
+  controller,
+  targetLang,
+}: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
 
@@ -111,20 +139,9 @@ export function CellTakeBlock({
     username,
     onCommitted,
     jwt: session?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
-
-  // The same synthetic-cell shape EditorTable already uses (and
-  // CombinedBoundaryEditor / CellVoicePanel before it): useCellAudio reads only
-  // these two fields, and takes the file to fetch from as its third argument.
-  const cellForAudio = useMemo(
-    () =>
-      ({
-        metadata: { attachments: owner.attachments, selectedAudioId },
-      }) as unknown as CodexCell,
-    [owner.attachments, selectedAudioId],
-  )
-  const controller = useCellAudio(project, cellForAudio, owner.fileId)
 
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
@@ -134,7 +151,7 @@ export function CellTakeBlock({
     // The ASR language follows the AUDIO, by provenance: an imported media
     // segment is source speech, every take voices the target text.
     const language = isSourceSegmentSelected(owner) ? project.sourceLanguage : project.targetLanguage
-    await transcribeCell({ cell: owner, session, projectId: project.id, language })
+    await transcribeCell({ cell: owner, session, projectId: project.id, language, askAgain: true })
     // The transcript rides a queued cell.audio.attach — flush it, then poke the
     // OWNER's file so its attachment read picks the timings up. For a linked
     // take that is the cue sibling, which is exactly the read the row's linked
@@ -175,12 +192,13 @@ export function CellTakeBlock({
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(isSourceSegmentSelected(owner) ? { transcription: corrected } : {}),
+        ...(targetLang ? { targetLang } : {}),
         author: username,
       }).catch((err) => {
         console.warn("[transcript] correct emit failed:", err)
       })
     },
-    [owner, selectedAudioId, timings, attachment, project.id, username],
+    [owner, selectedAudioId, timings, attachment, project.id, username, targetLang],
   )
 
   return (
@@ -272,6 +290,7 @@ export function CellTakeBlock({
                 author={username}
                 session={session}
                 editable={editable}
+                targetLang={targetLang}
               />
             )}
           </>

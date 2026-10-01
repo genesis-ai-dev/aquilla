@@ -115,6 +115,8 @@ export interface AttachAudioFileArgs {
    *  The rail button passes nothing, deliberately: it has no takes list, and
    *  fetching one to label a single icon click isn't worth the request. */
   label?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export interface AttachAudioFileResult {
@@ -185,6 +187,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       mimeType: file.type || undefined,
       durationMs,
       label,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author: username,
     })
   } catch (emitErr) {

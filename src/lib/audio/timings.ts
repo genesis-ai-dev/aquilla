@@ -102,6 +102,26 @@ export function activeWordRange(
 }
 
 /**
+ * Timing covering plain-text offset `plain`, or the next word if the click
+ * landed in a gap. Used by Alt/Option+click seek in both the editor plugin
+ * and the read-only karaoke surface.
+ */
+export function findTimingAtPlainOffset(
+  timings: WordTiming[] | undefined,
+  plain: number,
+): WordTiming | undefined {
+  if (!timings || timings.length === 0) return undefined
+  for (const t of timings) {
+    if (plain >= t.start && plain < t.end) return t
+  }
+  // Gap or padding: prefer the next word (the space before it), else the last.
+  for (const t of timings) {
+    if (t.start >= plain) return t
+  }
+  return timings[timings.length - 1]
+}
+
+/**
  * Find the index of the timing whose [t0, t1) contains `t`. Returns -1 if no
  * word is active at that time. O(log n) — assumes timings are sorted by t0
  * and non-overlapping (which both Whisper and forced aligners produce).

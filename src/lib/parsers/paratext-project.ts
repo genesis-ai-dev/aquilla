@@ -35,8 +35,39 @@ export interface ProjectSourceArtifact {
   bytes(): Promise<ArrayBuffer>
 }
 
+/** An archive member the importer left out before parsing, with the reason —
+ *  reported in the import summary so nothing drops silently (AQU-1406). */
+export interface SkippedProjectEntry {
+  name: string
+  reason: string
+}
+
 export type ProjectEntryCollection = ProjectEntry[] & {
   sourceArtifact?: ProjectSourceArtifact
+  /** Members excluded before parsing (unreadable support files). */
+  skippedEntries?: SkippedProjectEntry[]
+}
+
+/** PTXprint keeps its layout helpers under the project's `shared/ptxprint/`
+ *  folder. They are layout config, not scripture — including the `.sfm`
+ *  fragments it generates there (`FRTlocal.sfm`). */
+const PTXPRINT_HELPER_PATH = /(?:^|\/)shared\/ptxprint\//i
+
+/**
+ * Whether the importer actually needs this archive member: a book file, or the
+ * project metadata `detectParatextProject` reads. Everything else is support
+ * material that a Paratext export happens to carry along (PTXprint helpers,
+ * notes, figures, backups).
+ *
+ * AQU-1406: an export from a machine with PTXprint installed can contain a
+ * helper whose ZIP size metadata is unreadable. Only a member this returns
+ * `true` for may fail an import; the rest are skipped and reported.
+ */
+export function isRequiredProjectEntry(name: string): boolean {
+  if (PTXPRINT_HELPER_PATH.test(name)) return false
+  const b = basename(name).toLowerCase()
+  if (b === "settings.xml" || b === "booknames.xml" || b.endsWith(".ssf")) return true
+  return b.endsWith(".sfm") || b.endsWith(".usfm")
 }
 
 export interface ParatextBook {

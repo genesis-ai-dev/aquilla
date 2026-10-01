@@ -3,6 +3,7 @@ import {
   activeWordRange,
   alignChunks,
   findActiveTimingIndex,
+  findTimingAtPlainOffset,
   tokenizeWords,
   uniformTimings,
 } from "./timings"
@@ -92,6 +93,25 @@ describe("findActiveTimingIndex", () => {
   it("returns -1 for missing timings", () => {
     expect(findActiveTimingIndex(undefined, 1)).toBe(-1)
     expect(findActiveTimingIndex([], 1)).toBe(-1)
+  })
+})
+
+describe("findTimingAtPlainOffset", () => {
+  const timings: WordTiming[] = [
+    { word: "hello", t0: 0, t1: 0.4, start: 0, end: 5 },
+    { word: "world", t0: 0.4, t1: 0.9, start: 6, end: 11 },
+  ]
+  it("returns the word covering the offset", () => {
+    expect(findTimingAtPlainOffset(timings, 0)?.word).toBe("hello")
+    expect(findTimingAtPlainOffset(timings, 4)?.word).toBe("hello")
+    expect(findTimingAtPlainOffset(timings, 6)?.word).toBe("world")
+  })
+  it("snaps a gap (the space) to the nearest word", () => {
+    expect(findTimingAtPlainOffset(timings, 5)?.word).toBe("world")
+  })
+  it("returns undefined when there are no timings", () => {
+    expect(findTimingAtPlainOffset(undefined, 0)).toBeUndefined()
+    expect(findTimingAtPlainOffset([], 0)).toBeUndefined()
   })
 })
 

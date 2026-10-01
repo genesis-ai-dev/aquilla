@@ -24,6 +24,19 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
     import("./livestore.worker?worker"),
     import("@livestore/adapter-web/shared-worker?sharedworker"),
   ])
+  if (import.meta.env.DEV) {
+    const { installLeaderLogCollector, watchLeaderWorker } = await import("./leader-log-bridge")
+    installLeaderLogCollector()
+    return makePersistedAdapter({
+      worker: (options: WorkerOptions) => {
+        const worker = new LiveStoreWorker(options)
+        watchLeaderWorker(worker, options.name ?? "leader")
+        return worker
+      },
+      sharedWorker: LiveStoreSharedWorker,
+      storage: { type: "opfs" },
+    })
+  }
   return makePersistedAdapter({
     worker: LiveStoreWorker,
     sharedWorker: LiveStoreSharedWorker,

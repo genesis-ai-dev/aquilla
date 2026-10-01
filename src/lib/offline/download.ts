@@ -6,13 +6,14 @@
  * row with `status: "ready"` — until this module runs, `sync-manager.ts`
  * (Phase 3) has nothing to react to and stays inert.
  *
- * Field mapping for `cells`/`files` mirrors `sync-adapter.ts`'s `applyRows` —
- * this is the same server data, just fetched by a one-shot HTTP crawl instead
- * of a WS `event.applied` frame.
+ * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping and
+ * lane filter as live frames (`sync-adapter.ts`) and later catch-ups, and it
+ * records each file's first `?since=` cursor.
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { Store } from "@livestore/livestore"
 import { events, tables, type schema } from "./schema"
+import { fullSyncFile } from "./catch-up"
 import {
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
@@ -105,6 +106,7 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
     store.commit(events.fileRemoved({ id: row.id }))
   }
   store.commit(events.projectRemoved({ id: projectId }))
+  store.commit(events.syncCursorsRemoved({ projectId }))
   store.commit(events.offlineProjectRemoved({ projectId }))
 }
 
@@ -170,33 +172,12 @@ export async function downloadProjectOffline(
           sequenceIndex: index,
         }),
       )
-      await deps.streamFileCells(
-        projectId,
-        file.fileId,
-        syncToken,
-        (rows) => {
-          for (const row of rows) {
-            store.commit(
-              events.cellSynced({
-                projectId,
-                fileId: file.fileId,
-                cellId: row.cellId,
-                side: row.side,
-                value: row.value,
-                valueHtml: row.valueHtml,
-                eventId: row.eventId,
-                sourceEventId: row.sourceEventId,
-                validated: row.validated,
-                aiDrafted: row.aiDrafted ?? false,
-                sequenceIndex: row.sequenceIndex ?? 0,
-                canonicalRef: row.canonicalRef,
-              }),
-            )
-          }
-          cellsDone += rows.length
-          setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
-        },
-      )
+      // Same path the catch-up uses, so the first download also mints the
+      // file's `?since=` cursor and later catch-ups can pull deltas.
+      await fullSyncFile(store, projectId, file.fileId, syncToken, deps, (count) => {
+        cellsDone += count
+        setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
+      })
       filesDone = index + 1
       setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
     }

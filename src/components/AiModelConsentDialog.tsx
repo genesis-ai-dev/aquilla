@@ -2,16 +2,21 @@
 // and renders a single dialog whenever any AI feature (TTS, ASR) is about to
 // kick off its first model download for this browser.
 
+import { useEffect, useId, useRef, useState } from "react"
+import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { storeAllFeaturesConsent, usePendingAiConsent } from "@/lib/audio/ai-consent"
 import { prefetchAiModels, type ModelId } from "@/lib/audio/prefetch"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { altClickModifierLabel, isApplePlatform } from "@/lib/platform"
+import { cn } from "@/lib/utils"
 
 const SHORT_LABELS = {
   whisper: "Whisper",
@@ -21,6 +26,19 @@ const SHORT_LABELS = {
 /** User-initiated dismisses. Focus-out / imperative close fire when an action
  *  button is pressed and must not cancel the in-flight generate. */
 const DISMISS_REASONS: ReadonlySet<string> = new Set(["escape-key", "outside-press", "close-press"])
+
+function AltClickModifierKbd() {
+  const apple = isApplePlatform()
+  return (
+    <kbd
+      data-slot="kbd"
+      className="inline-flex h-[1.15em] min-w-[1.15em] items-center justify-center rounded-sm border border-border/80 bg-muted px-1 align-baseline font-sans text-[0.7rem] font-medium text-foreground"
+      aria-label={altClickModifierLabel()}
+    >
+      {apple ? "⌥" : "Alt"}
+    </kbd>
+  )
+}
 
 function prefetchModels(models: ModelId[]): void {
   void prefetchAiModels({
@@ -33,6 +51,16 @@ export function AiModelConsentDialog() {
   const t = useT()
   const pending = usePendingAiConsent()
   const open = pending !== null
+  const [learnMoreOpen, setLearnMoreOpen] = useState(false)
+  const learnMoreId = useId()
+  // Focus the dialog surface, not the first button. A pointer-opened prompt
+  // focuses without a visible ring, so the first Tab would otherwise skip
+  // Learn more and highlight Cancel.
+  const surfaceRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setLearnMoreOpen(false)
+  }, [pending?.model.id])
 
   const handleCancel = () => pending?.resolve(false)
   const handleAccept = () => {
@@ -60,7 +88,9 @@ export function AiModelConsentDialog() {
       }
     })()
   }
-  const justThisLabel = pending ? `Just ${SHORT_LABELS[pending.model.id]}` : "Just this model"
+  const justThisLabel = pending
+    ? t("workspace.aiConsent.justThisButton", { model: SHORT_LABELS[pending.model.id] })
+    : t("workspace.aiConsent.justThisButton", { model: t("workspace.aiConsent.genericModelName") })
 
   return (
     <Dialog
@@ -74,20 +104,20 @@ export function AiModelConsentDialog() {
         pending?.resolve(false)
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent ref={surfaceRef} initialFocus={surfaceRef} className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {t("workspace.aiConsent.downloadTitle", {
-              model: pending ? t(pending.model.labelKey) : "AI model",
+              model: pending ? t(pending.model.labelKey) : t("workspace.aiConsent.genericModelName"),
             })}
           </DialogTitle>
           <DialogDescription>
             {pending
-              ? `${pending.model.rationale} The model is roughly ${pending.model.sizeMb} MB and is cached after the first download.`
+              ? `${t(pending.model.shortKey)} ${t("workspace.aiConsent.sizeNote", { size: pending.model.sizeMb })}`
               : ""}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-2 py-2 text-sm text-muted-foreground">
+        <DialogBody className="space-y-2 py-2 text-sm text-muted-foreground">
           <p className="flex items-center gap-2">
             <Spinner className="size-3.5 opacity-60" />
             <span>
@@ -95,9 +125,49 @@ export function AiModelConsentDialog() {
             </span>
           </p>
           <p>{t("workspace.aiConsent.oncePerBrowser")}</p>
-        </div>
+          {pending && (
+            <div>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto gap-1 px-0 text-foreground"
+                aria-expanded={learnMoreOpen}
+                aria-controls={learnMoreId}
+                onClick={() => setLearnMoreOpen((v) => !v)}
+              >
+                {t("workspace.aiConsent.learnMore")}
+                <ChevronDown className={cn("size-3.5 transition-transform", learnMoreOpen && "rotate-180")} />
+              </Button>
+              {learnMoreOpen && (
+                <div
+                  id={learnMoreId}
+                  role="region"
+                  className="mt-2 whitespace-pre-line text-sm text-muted-foreground"
+                >
+                  <RichMessage
+                    k={pending.model.learnMoreKey}
+                    values={{ modifier: <AltClickModifierKbd /> }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </DialogBody>
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-          <Button type="button" variant="outline" onClick={handleCancel} className="w-full sm:w-auto">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onPointerDown={(event) => {
+              // Same race as Just Whisper: pointer-down settles the decline
+              // before Base UI treats the press as a focus-out dismiss and
+              // swallows the click, which left the prompt on screen.
+              event.preventDefault()
+              handleCancel()
+            }}
+            onClick={handleCancel}
+          >
             {t("common.cancel")}
           </Button>
           <Button

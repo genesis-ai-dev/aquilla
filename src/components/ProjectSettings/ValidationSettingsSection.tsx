@@ -66,6 +66,14 @@ interface Props {
    * has always been.
    */
   structuralCellsRow?: ReactNode
+  /**
+   * AQU-1391: the repetition auto-propagation control. Same slot treatment and
+   * the same reason as `structuralCellsRow` above — it patches the shared
+   * settings blob directly rather than riding this page's draft/baseline
+   * state. It belongs in THIS card because validation is the gesture that
+   * triggers it.
+   */
+  repetitionPropagationRow?: ReactNode
   /** Tooltip shown on hover when disabled is true. */
   disabledTooltip?: ReactNode
   onChange: (
@@ -110,6 +118,7 @@ export function ValidationSettingsSection({
   disabled = false,
   disabledTooltip,
   structuralCellsRow,
+  repetitionPropagationRow,
   onChange,
 }: Props) {
   const t = useT()
@@ -326,6 +335,7 @@ export function ValidationSettingsSection({
         </DisabledFieldTooltip>
       </SettingsRow>
       {structuralCellsRow}
+      {repetitionPropagationRow}
     </SettingsGroup>
   )
 }

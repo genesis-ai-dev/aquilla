@@ -26,6 +26,7 @@ export const error = defineNamespace({
     "error.network.roleRequired": "You are {role} here ({origin}). {required} is required.",
     "error.network.roleRequiredNoOrigin": "You are {role} here. {required} is required.",
     "error.network.roleRequiredNoRole": "You don't have a role here. {required} is required.",
+    "error.network.elevationRequired": "Verify with your admin code, then try again.",
     "error.network.notFound": "That item no longer exists{contextSuffix}.",
     "error.network.conflict": "A conflict occurred{contextSuffix} — please refresh and try again.",
     "error.network.gone": "That item has been permanently removed{contextSuffix}.",
@@ -197,6 +198,11 @@ export const error = defineNamespace({
         placeholders: {
           contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
         },
+      },
+      "error.network.elevationRequired": {
+        description:
+          "AQU-1322: HTTP 403 shown to a platform admin whose change was refused until they " +
+          "complete the emailed admin-code step-up. Tells them what to do next.",
       },
       "error.network.roleRequired": {
         description:

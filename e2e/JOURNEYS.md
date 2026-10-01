@@ -195,6 +195,19 @@ UI chrome that used to be one smoke file per click is covered under
   The migration itself on that subsequent login is unchanged by that work and stays
   covered where it already was.
 - Project settings pane links / toggles (except rename/save persistence smoke)
+- Linking an **established** project to another project's source from Project Settings
+  → Source & sync (AQU-1525): the entry point's role gate, picker contents (every
+  accessible project, never this one, never an archived one), the live/consumes-source
+  shape it posts, the seed self-heal fallback, and the cycle refusal are in
+  `LinkSourceSection.test.tsx`; the pane mounting it in
+  `ProjectSettings.subMenuIA.test.tsx`. That linking is **additive** — the first mirror
+  sync after linking leaves every pre-existing file, translation and validation row
+  byte-identical, and a same-named upstream file lands beside the project's own — is
+  pinned against real Postgres in `sync-worker/src/__tests__/link-sync-additive-established.test.ts`.
+  The cross-layer walk (link from settings in the browser, then assert the mirrored files
+  appear while the pre-existing file's translations survive) is NOT yet a smoke journey —
+  AQU-1525 left it open because it could not be executed where the fix was made; it is
+  the remaining item on that issue's automated-coverage checklist.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

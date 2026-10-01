@@ -625,6 +625,30 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.detachingButton": "Detaching…",
     "projectSettings.sourceLink.detachConfirmButton": "Detach",
 
+    // ── LinkSourceSection.tsx (AQU-1525) ──
+    "projectSettings.linkSource.title": "Link to a source project",
+    "projectSettings.linkSource.description":
+      "This project owns its own source. Link it to another project to read that " +
+      "project's source files here, without recreating this project.",
+    "projectSettings.linkSource.pickerLabel": "Source project",
+    "projectSettings.linkSource.pickerPlaceholder": "Choose a project to link from…",
+    "projectSettings.linkSource.pickerSearchPlaceholder": "Search projects…",
+    "projectSettings.linkSource.pickerSearchAriaLabel": "Search projects",
+    "projectSettings.linkSource.pickerNoMatches": "No projects match.",
+    "projectSettings.linkSource.noProjectsNote": "No other project is available to link to.",
+    "projectSettings.linkSource.additiveNote":
+      "The link is live: the upstream's source files are mirrored in alongside " +
+      "everything this project already holds, and later upstream edits keep " +
+      "flowing through. Existing files, translations and validations are left as " +
+      "they are. Detach later to stop following the upstream.",
+    "projectSettings.linkSource.linkButton": "Link source project",
+    "projectSettings.linkSource.linkingButton": "Linking…",
+    "projectSettings.linkSource.roleGateNote":
+      "Project lead or above required to link a source project.",
+    "projectSettings.linkSource.cycleError":
+      "That project already reads its source from this one, so linking would " +
+      "create a loop. This project is still unlinked — choose a different project.",
+
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
     "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",

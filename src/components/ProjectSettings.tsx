@@ -105,6 +105,7 @@ import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategyS
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
@@ -1273,6 +1274,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
   const ALL_SECTIONS: SettingsSection[] = [
+    // AQU-1525: the counterpart of section-source-link — exactly one of the two
+    // is ever visible, keyed off whether this project already has an upstream.
+    { id: "section-link-source", label: "Link source", keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
@@ -1369,6 +1373,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       icon: Link2,
       hub: "Project",
       sectionIds: [
+        "section-link-source",
         "section-source-link",
         "section-upstream-changes",
         "section-dcs-upstream",
@@ -1484,6 +1489,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const shown = new Set(sectionsToRender.map((s) => s.id))
     // DOM render order of section cards (must stay in sync with JSX below).
     const renderOrder = [
+      "section-link-source",
       "section-source-link",
       "section-upstream-changes",
       "section-dcs-upstream",
@@ -1739,6 +1745,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               ✕
             </button>
           </div>
+        )}
+        {searchGroupLabel("section-link-source")}
+        {!hasSourceLink && sectionsToRender.some((s) => s.id === "section-link-source") && (
+          <LinkSourceSection
+            projectId={id!}
+            onLinked={refresh}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
         )}
         {searchGroupLabel("section-source-link")}
         {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-source-link") && (

@@ -25,14 +25,14 @@ afterEach(() => {
 const stuck: Status = { isSynced: false, pendingCount: 4, localHead: "e0.14", upstreamHead: "e0.10" }
 const synced: Status = { isSynced: true, pendingCount: 0, localHead: "e0.14", upstreamHead: "e0.14" }
 
-function renderWatchdog(reload = vi.fn()) {
+function renderWatchdog(restart = vi.fn()) {
   render(
     <>
       <Toaster />
-      <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} reload={reload} />
+      <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} restart={restart} />
     </>,
   )
-  return reload
+  return restart
 }
 
 describe("OfflineLeaderWatchdog", () => {
@@ -43,11 +43,11 @@ describe("OfflineLeaderWatchdog", () => {
     expect(document.querySelector('[data-slot="toast"]')).toBeNull()
   })
 
-  it("warns once writes stop persisting, and Reload calls reload", async () => {
+  it("warns once writes stop persisting, and Restart app calls restart", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     status = stuck
     const user = userEvent.setup()
-    const reload = renderWatchdog()
+    const restart = renderWatchdog()
 
     expect(await screen.findByText(/aren't being saved on this device/)).toBeInTheDocument()
     expect(console.error).toHaveBeenCalledWith(
@@ -55,8 +55,8 @@ describe("OfflineLeaderWatchdog", () => {
       expect.objectContaining({ pendingCount: 4, upstreamHead: "e0.10" }),
     )
 
-    await user.click(screen.getByRole("button", { name: /reload/i }))
-    expect(reload).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole("button", { name: /restart app/i }))
+    expect(restart).toHaveBeenCalledTimes(1)
   })
 
   it("closes the warning if the leader catches up on its own", async () => {

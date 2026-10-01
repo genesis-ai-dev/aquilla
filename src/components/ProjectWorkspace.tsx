@@ -132,7 +132,6 @@ import {
   trackDeleteGate,
   shouldSelfHealZeroFileLink,
   shouldApplyCheckResult,
-  resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
   buildGlosserSeeds,
@@ -290,9 +289,14 @@ import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
-import { LeftDock, type DockTab } from "./LeftDock"
-import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
+import { LeftDock } from "./LeftDock"
+import { useWorkspaceDockTabs } from "@/hooks/useWorkspaceDockTabs"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import {
+  computeRightRailSurfaces,
+  hasRightRailEdge,
+  hasRightRailPanel,
+} from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -1188,51 +1192,25 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  // FRO-308: left dock active tab (null = collapsed rail only). Last real tab
-  // is restored from localStorage per project so reload returns to Files /
-  // Voices / Agent / Search instead of always landing on Files.
-  const [dockTab, setDockTab] = usePersistedDockTab(projectId)
+  // FRO-308: the last real dock tab is restored per project from localStorage.
+  const {
+    activeTab: dockTab,
+    setActiveTab: setDockTab,
+    lastOpenTab: lastDockTab,
+    selectVisibleTab: selectDockTab,
+    showProgrammatically: showDockTabProgrammatically,
+  } = useWorkspaceDockTabs(centerSurface === "agent", projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
-  // sheet opens onto the files list instead of a 40px icon strip.
+  // sheet opens onto the files list instead of a 40px icon strip. (The Agent
+  // tab is allowed on mobile: the team conversations list is single-column.)
   useEffect(() => {
-    if (!lgUp && (dockTab === null || dockTab === "agent")) setDockTab("files")
+    if (!lgUp && dockTab === null) setDockTab("files")
   }, [lgUp, dockTab])
-  // Agent editor tab is in the strip while the workbench is open. Minimize
-  // and the tab's × dismiss it. Switching to a file tab leaves the surface
-  // but keeps the tab until then.
+  // Back to editor and file-tab navigation retain the Agent tab; only its × closes it.
   const [agentTabOpen, setAgentTabOpen] = useState(
     () => centerSurface === "agent" || readAgentTabOpen(projectId),
   )
-  // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
-  // dock to the rail on entry (a second agent chat beside the workbench is
-  // confusing) and restore the user's tab on exit. Manual reopen still wins —
-  // this only fires on surface transitions.
-  const dockTabBeforeAgentRef = useRef<DockTab | null>("files")
-  const prevSurfaceRef = useRef(centerSurface)
-  useEffect(() => {
-    const prev = prevSurfaceRef.current
-    prevSurfaceRef.current = centerSurface
-    if (centerSurface === "agent" && prev !== "agent") {
-      dockTabBeforeAgentRef.current = dockTab
-      // The file explorer is the workbench's scope picker — open it by
-      // default (the Agent tab itself stays unreachable during the takeover).
-      setDockTab("files")
-    } else if (centerSurface !== "agent" && prev === "agent") {
-      // Entry forces the scope picker ("files"), so treat that forced default
-      // (or a collapsed rail) as "no manual choice" and restore the saved tab.
-      // Any other tab was picked manually mid-takeover — keep it.
-      // Minimize returns to dock mode: if the user expanded from the Agent
-      // panel, restore that panel rather than leaving them on Files.
-      setDockTab((cur) =>
-        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
-      )
-    } else if (centerSurface === "agent" && dockTab === "agent") {
-      // Restore/route paths can re-land the agent tab mid-takeover; collapse.
-      setDockTab(null)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
-  }, [centerSurface])
   // Agent working area (agent-complete follow-up): in the workbench the file
   // explorer doubles as the SCOPE PICKER — clicking a file designates what the
   // agent works on instead of opening the editor. Falls back to the editor's
@@ -1246,24 +1224,27 @@ export function ProjectWorkspace() {
     const id = agentScopeFileId ?? activeFileId
     return id ? projectFiles.find((f) => f.id === id) ?? null : null
   }, [agentScopeFileId, activeFileId, projectFiles])
+  // Thread titles for the workbench's Team tab.
+  const agentFileNames = useMemo(
+    () => new Map(projectFiles.map((f) => [f.id, f.name])),
+    [projectFiles],
+  )
 
   useEffect(() => {
-    setAgentTabOpen(lgUp && (centerSurface === "agent" || readAgentTabOpen(projectId)))
-  }, [projectId, lgUp]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project/viewport
+    setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- remount open-state per project
   useEffect(() => {
-    if (!lgUp) setAgentTabOpen(false)
-    else if (centerSurface === "agent") setAgentTabOpen(true)
-  }, [centerSurface, lgUp])
+    if (centerSurface === "agent") setAgentTabOpen(true)
+  }, [centerSurface])
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
   const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
   const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
-    if (!lgUp) return
     if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
-  }, [lgUp, openOverlay])
+  }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
     setAgentExpandedFromDock(false)
@@ -1275,6 +1256,9 @@ export function ProjectWorkspace() {
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // integrated Agent pane and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
+  // A dock quick-action prompt (Summarize book/chapter) headed for the agent
+  // surface's chat — the dock no longer hosts a composer of its own (v2.2).
+  const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
     openAgentTab("editor")
@@ -6425,7 +6409,7 @@ export function ProjectWorkspace() {
   // Declared after switchLens so it calls the live callback rather than one
   // captured before it exists (react-hooks/immutability).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
+    if (location.pathname.endsWith("/voice")) { switchLens("audio"); selectDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 
@@ -12204,9 +12188,9 @@ export function ProjectWorkspace() {
       lens={lens}
       onLensChange={(l) => {
         switchLens(l)
-        if (l === "audio") setDockTab("voices")
+        if (l === "audio") selectDockTab("voices")
       }}
-      onAgentSelect={lgUp ? () => openAgentTab("editor") : undefined}
+      onAgentSelect={() => openAgentTab("editor")}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -12269,6 +12253,26 @@ export function ProjectWorkspace() {
     />
   ) : null
 
+  // AQU-1316: one decision for both right-rail slots. `aside` renders the
+  // panels, `asideEdge` the collapsed tabs, and each feature's two surfaces are
+  // derived from the same open flag — so a panel and its edge tab can never be
+  // on screen together (the duplicate Parallel Bibles panels in the report) and
+  // closing a panel always gives its edge tab back.
+  const rightRail = computeRightRailSurfaces({
+    inScriptureEditor: parallelBiblesPanelActive,
+    // AQU-461: verse resources ride the same scripture-editor condition, plus
+    // the project's Bible-resources gate (the aquifer routes 404 when it's off,
+    // so an ungated tab would only ever show an error).
+    verseResourcesAvailable:
+      !!project &&
+      resolveBibleResourcesEnabled(
+        project.bibleResourcesEnabled,
+        projectHasScriptureFiles(project.files),
+      ),
+    parallelBiblesOpen,
+    verseResourcesOpen,
+  })
+
   return (
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
@@ -12279,12 +12283,12 @@ export function ProjectWorkspace() {
         dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null && lgUp ? (
-            <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
+            <AppTooltip content={t("nav.dock.hidePanel")} side="bottom">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t("workspace.sidebar.collapse")}
+                aria-label={t("nav.dock.hidePanel")}
                 onClick={() => setDockTab(null)}
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
@@ -12295,26 +12299,16 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
-            // AQU-1079: the Agent workbench lives in the center pane, not the
-            // dock, so the rail used to render its icon inactive and swallow
-            // the click while the workbench was open — the sidebar entry read
-            // as dead. Mark it active while its surface is up, and let the
-            // click toggle that surface off like any other rail tab.
+            restoreTab={lastDockTab}
+            // AQU-1079: the Agent workbench lives in the center pane, so mark
+            // its rail icon active while it is up; clicking it then (with the
+            // conversations panel hidden) closes the workbench.
             surfaceTab={centerSurface === "agent" ? "agent" : null}
             onSurfaceTabToggle={() => closeAgentTab()}
             onActiveTabChange={(t) => {
-              // Agent rail: while the workbench is showing, re-focus it;
-              // otherwise open the compact panel in the dock (even if an
-              // Agent editor tab is still sitting in the strip). The rail's
-              // own click on an active Agent surface no longer lands here —
-              // it goes to onSurfaceTabToggle above — so this branch is now
-              // only the expand affordance restoring its last tab.
-              if (t === "agent") {
-                if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
-                  openAgentTab()
-                  return
-                }
-              }
+              // The Agent rail opens the conversations panel everywhere (v2.2):
+              // beside the workbench it is the conversation list, so no
+              // special case re-focuses the workbench instead.
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -12446,30 +12440,19 @@ export function ProjectWorkspace() {
                 )}
               </div>
             }
-            agentPanel={lgUp ? (
+            agentPanel={
               <AgentDockPanel
-                agent={{
-                  projectId: project.id,
-                  jwt,
-                  author: currentUsername,
-                  roleLevel: currentRoleLevel,
-                  context: {
-                    fileId: activeFileId ?? undefined,
-                    cellId: focusedCellId ?? undefined,
-                    lane: activeLane,
-                  },
-                  rules,
-                  resolveCell: resolveCellById,
-                  onApplied: handleAgentApplied,
-                }}
+                projectId={project.id}
+                author={currentUsername}
+                fileNames={agentFileNames}
                 bibleSummary={bibleSummary}
-                pendingChip={pendingChip}
-                onPendingChipConsumed={() => setPendingChip(null)}
-                credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
+                onSummaryPrompt={(prompt) => {
+                  setPendingAgentPrompt(prompt)
+                  openAgentTab("sidebar")
+                }}
                 onExpand={() => openAgentTab("sidebar")}
-                expanded={centerSurface === "agent"}
               />
-            ) : undefined}
+            }
             searchPanel={
               <SearchDockPanel
                 activeFileId={activeFileId}
@@ -12538,7 +12521,7 @@ export function ProjectWorkspace() {
             onActivate={workspaceTabs.activateTab}
             onClose={handleCloseTab}
             surfaceTabs={[
-              ...(lgUp && agentTabOpen && projectId
+              ...(agentTabOpen && projectId
                 ? [{
                     id: "agent",
                     label: t("nav.dock.agentTab"),
@@ -12799,7 +12782,7 @@ export function ProjectWorkspace() {
               />
             </Suspense>
           </div>
-        ) : centerSurface === "agent" && !lgUp ? null : centerSurface === "agent" ? (
+        ) : centerSurface === "agent" ? (
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
           // same shared session as the dock tab, plus the three-pane
           // Source | Agent | Target working set from the agent-workspace branch.
@@ -12818,16 +12801,20 @@ export function ProjectWorkspace() {
               onApplied: handleAgentApplied,
               pendingChip,
               onPendingChipConsumed: () => setPendingChip(null),
+              pendingPrompt: pendingAgentPrompt,
+              onPendingPromptConsumed: () => setPendingAgentPrompt(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
+            fileNames={agentFileNames}
+            editorHref={editorReturnPath ?? `/project/${project.id}/editor`}
             onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
-            onChooseFile={() => setDockTab("files")}
+            onChooseFile={() => showDockTabProgrammatically("files")}
             editorMode={{
               lens,
               timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
               onLensChange: (next) => {
                 switchLens(next)
-                if (next === "audio") setDockTab("voices")
+                if (next === "audio") selectDockTab("voices")
                 closeAgentTab()
               },
             }}
@@ -13380,7 +13367,7 @@ export function ProjectWorkspace() {
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
-            onAskAiFromSelection={lgUp ? handleAskAiFromSelection : undefined}
+            onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
@@ -13457,21 +13444,8 @@ export function ProjectWorkspace() {
           />
         )}
         aside={(() => {
-          const showParallelBibles =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          // AQU-461: verse resources ride the same scripture-editor condition,
-          // plus the project's Bible-resources gate (the aquifer routes 404
-          // when it's off, so an ungated tab would only ever show an error).
-          const showVerseResources =
-            showParallelBibles &&
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
           const hasRightAside =
-            (showParallelBibles && parallelBiblesOpen) ||
-            (showVerseResources && verseResourcesOpen) ||
+            hasRightRailPanel(rightRail) ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -13486,7 +13460,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {showParallelBibles && parallelBiblesOpen && (
+              {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
                   key={activeFile!.id}
                   trackedRef={trackedCellRef}
@@ -13500,7 +13474,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {showVerseResources && verseResourcesOpen && (
+              {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
                   key={activeFile!.id}
                   projectId={project!.id}
@@ -13666,21 +13640,14 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          const inScriptureEditor =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          if (!inScriptureEditor) return null
           // AQU-461: two collapsed tabs can stack here — bibles and verse
           // resources — each shown only while its own panel is closed.
-          const verseResourcesAvailable =
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
-          if (parallelBiblesOpen && !(verseResourcesAvailable && !verseResourcesOpen)) return null
+          // AQU-1316: both flags come from `rightRail`, the same value `aside`
+          // reads, so a tab can never sit beside its own open panel.
+          if (!hasRightRailEdge(rightRail)) return null
           return (
             <>
-              {!parallelBiblesOpen && (
+              {rightRail.biblesEdge && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-edge`}
                   trackedRef={trackedCellRef}
@@ -13692,7 +13659,7 @@ export function ProjectWorkspace() {
                   }}
                 />
               )}
-              {verseResourcesAvailable && !verseResourcesOpen && (
+              {rightRail.resourcesEdge && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources-edge`}
                   projectId={project!.id}

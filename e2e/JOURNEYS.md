@@ -21,7 +21,7 @@ not a micro-spec farm.
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
 | Agent connection | Browser consent issues a scoped credential; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
-| Agent workbench | The workbench shows the file open in the editor — Source/Target panes list its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
+| Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
@@ -166,6 +166,32 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- Unified Agent conversation/document/knowledge navigation and same-task
+  re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
+  The former competing Team/Chat tabs and mandatory three-pane layout are retired.
+- Unsent Agent messages, context chips, and attachment ownership across views,
+  conversations, and accounts: covered in composer draft-store and composer RTL.
+- Focused task-draft review stays on the Agent route, preserves the task language
+  lane and editor Audio/Text preference, and uses the existing contextual approval
+  transport. Navigation and approval wiring are covered in `AgentDraftReview.test.tsx`.
+- Optional paired document context uses the existing cell renderer/commit callbacks
+  in one aligned scrolling surface: covered in `AgentDocumentContext.test.tsx`.
+- Agent Team header, roster/card access, and toolbar identity across tabs:
+  covered in RTL (`TeamThreadsView.test.tsx`, `AgentWorkbench.test.tsx`)
+- Agent task message grouping, routine-activity disclosure, explicit step
+  inspection, Escape priority, and focus return: covered in RTL
+  (`TeamThreadDetail.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent pending-review/question header and links to focused task review:
+  covered in RTL (`TeamConversationHeader.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent chat options, confirmed reset, preserved applied events, and pinned
+  Team chat navigation: covered in RTL (`AgentChatOptions.test.tsx`,
+  `AgentWorkbench.test.tsx`, `AgentDockPanel.test.tsx`)
+- Workspace sidebar hide/show restoration and Agent Back navigation:
+  covered in RTL (`LeftDock.test.tsx`, `useDockTabs.test.ts`,
+  `useWorkspaceDockTabs.test.ts`, `AgentWorkbench.test.tsx`,
+  `workbench-layout.test.ts`)
+- Collapsed-rail history and footer controls: covered in RTL
+  (`NavHistoryControls.test.tsx`, `AppShell.test.tsx`)
 - The Assigned-to-me inbox never reports an answer it does not have: no
   "You have no open assignments." while the scoped read is outstanding (the org
   directory resolves asynchronously, so this is the normal cold-load path), and
@@ -216,7 +242,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
-- Agent workbench is desktop-only: compact viewports omit Agent entry points and direct Agent URLs return to the editor — covered in RTL (`FileChapterToolbar.test.tsx`, `LeftDock.test.tsx`, `ProjectWorkspaceRoute.test.tsx`). AQU-1496: that guard must not be the only workspace route with a wrapper — `ProjectWorkspaceRoute.test.tsx` also pins that every `/project/:id/...` surface shares it, so a surface hop keeps the workspace (and its open file) mounted.
+- Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
 - AQU-1187 scripture-catalog per-book import: an eBible / Hello AO selection spanning several books emits one source file per book, each carrying `bookCode`, so the files group into OT/NT and order canonically; a single-book selection stays one file and only gains its code. Covered at the import-contract level in `src/lib/import.scripture-books.test.ts` (asserts the real `file.create` bodies, per-book originals, and the re-import collision key) plus `group-by-corpus.test.ts`. The existing `import-ebible-persists-reload.smoke.spec.ts` fixture is a three-verse Genesis corpus, i.e. the single-book path, and stays valid unchanged. The multi-book variant needs a corpus long enough to cross a book boundary (~1.5k lines, generated from the bundled vref list) — worth adding to that spec when a runnable stack is at hand; it was not added blind.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below

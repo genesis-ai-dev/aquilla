@@ -63,16 +63,6 @@ export function shouldApplyCheckResult(
   return resultFileId != null && resultFileId === activeFileId
 }
 
-/** Sidebar Agent rail click: focus the workbench only while it is the
- *  active center surface. A leftover Agent tab in the strip (after
- *  minimize / switching to a file) must not steal the click — that is
- *  dock mode again. */
-export function resolveSidebarAgentClick(
-  workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
-}
-
 /**
  * Reconcile Autopilot's lossy realtime mirrors whenever the project socket
  * opens, including reconnects on the same route. The captured draft scope is

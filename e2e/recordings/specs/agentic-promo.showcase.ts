@@ -68,6 +68,9 @@ test("Agentic hero · the agent drafts, the expert leads", async ({ page }) => {
     // ── AG-02: turn the agent loose ───────────────────────────────────────
     await show.chapter("Meet the agent", "Not a chatbot — a translator that acts.")
     await page.getByRole("button", { name: "Agent", exact: true }).click()
+    // v2.2: the dock is the threads list — the composer lives on the agent
+    // surface, one click further.
+    await page.getByRole("button", { name: "Open agent in editor tab" }).click()
     const composer = page.getByRole("textbox", { name: "Ask the agent" })
     await composer.click()
     await composer.pressSequentially("/draft", { delay: 70 })
@@ -93,8 +96,10 @@ test("Agentic hero · the agent drafts, the expert leads", async ({ page }) => {
     await expect(page.getByText(/6\s*translated|100\s*%/i).first())
       .toBeVisible({ timeout: 20_000 })
     verified = true
-    // The agent dock replaced the Files list in the sidebar — switch back so
-    // the file's now-full progress bar is on screen before we zoom.
+    // The agent surface covered the editor (v2.2) — return to it, then bring
+    // the Files sidebar back so the now-full progress bar is on screen.
+    await page.goto("/project/demo-john/editor")
+    await ws.waitForEditor()
     await page.getByRole("button", { name: "Files", exact: true }).click()
     const fileRow = page.locator('[data-showcase="sidebar.file"]').first()
     await expect(fileRow).toBeVisible({ timeout: 15_000 })

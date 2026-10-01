@@ -2450,7 +2450,6 @@ export const fr: Catalog = {
   "org.teamDetail.deletingButton": "Suppression en cours…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "Définitions des niveaux d’accès",
   "org.teamDetail.addMemberButton": "Ajouter un membre",
-  "org.teamDetail.addMembersDialogTitle": "Ajouter des membres à « {name} »",
   "org.teamDetail.removeAriaLabel": "Retirer {name}",
   "org.teamDetail.allMembersAddedNotice": "Tous les membres de l’organisation sont déjà dans cette équipe.",
   "org.teamDetail.addErrorPrefix": "Impossible d’ajouter : {error}",

@@ -62,6 +62,7 @@ import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
+import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
@@ -80,6 +81,9 @@ const ProjectSettingsDialog = lazy(() =>
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
 // the main content area. These top-level lazy imports are intentionally removed.
+const OrgAccessPage = lazy(() =>
+  import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
+)
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
@@ -395,6 +399,7 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
@@ -415,20 +420,20 @@ function AppRoutes() {
         {/* Project routes stay flat (not nested under /orgs).
             Default work surface is explicit: /project/:id/editor[/file/:fileId].
             Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
-        <Route path="/project/:id/editor" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/editor" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         {/* Rules now live on Living Memory's "Translation quality" pane. */}
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
-        <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory/:section" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/comments" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/memory" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/memory/:section" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

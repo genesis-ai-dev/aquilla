@@ -55,7 +55,7 @@ test("team add member workflow shows new member in members list", async ({ alice
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 3_000 })
-  await expect(dialog.getByRole("heading", { name: new RegExp(`Add members to '${teamName}'`) })).toBeVisible()
+  await expect(dialog.getByRole("heading", { name: new RegExp(`Add people to .*${teamName}`) })).toBeVisible()
 
   // Open the multi-select combobox and pick bob (checkbox + avatar + username option).
   const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })

@@ -137,9 +137,10 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched line's own cue timecode, when it has one. */
   cellRef?: string
   flag?: TargetMatchFlag
-  /** Where the incoming row sits in the uploaded file. Set by overlap
-   *  matching: the review screen's swap pins rows to lines by it. */
-  rowIndex?: number
+  /** Where the incoming row sits in the uploaded file, from 0. The review
+   *  names a row with no label of its own by it ("Row 3", in the reader's
+   *  language — AQU-1375), and its swap pins rows to lines by it. */
+  rowIndex: number
   /** For a `contested` row: which contest it belongs to, numbered from 1 in
    *  the order the review list shows them. Every row, and every unmatched cue,
    *  carrying the same number fought over one line — so with several contests
@@ -194,14 +195,18 @@ export type TargetOrphanReason =
 
 /** An incoming row that was not paired with any line. */
 export interface TargetOrphan {
+  /** The row's own label — its reference, or its cue's timecode. Empty when
+   *  it has none: the review then names the row by `rowIndex`, in the
+   *  reader's language (AQU-1375). A string either way, as `EBibleOrphan`
+   *  requires. */
   ref: string
   text: string
   reason?: TargetOrphanReason
   /** For a `lostItsLine` cue: the contest it lost, matching the number on
    *  the row that holds the line. */
   contest?: number
-  /** Where the cue sits in the uploaded file (overlap matching only). */
-  rowIndex?: number
+  /** Where the row sits in the uploaded file, from 0. */
+  rowIndex: number
   /** The bridge a `bridgeOverSeparateLines` or `partOfBridgedLine` reason is
    *  about: its first and last verse. */
   verses?: { first: string; last: string }
@@ -294,6 +299,10 @@ function uncoveredLines(cells: FileTargetCellRef[], matched: FileTargetMatchedCe
     }))
 }
 
+/** A pairing, before the caller adds where its row sits in the file. `ref` is
+ *  the row's label — its own reference or timecode, else the line's
+ *  reference — and empty when there is neither: the review then names the
+ *  row by its position, in the reader's language (AQU-1375). */
 function toMatchedCell(
   cell: FileTargetCellRef,
   text: string,
@@ -302,7 +311,7 @@ function toMatchedCell(
   /** Show the line's own timecode — only when it disagrees with the cue's. */
   showCellRef = false,
   contest?: number,
-): FileTargetMatchedCell {
+): Omit<FileTargetMatchedCell, "rowIndex"> {
   const currentText = cell.translated ?? ""
   const current = currentText.trim()
   // Re-importing the text a line already holds used to count as a conflict,
@@ -447,22 +456,22 @@ export function matchTargetRowsByRef(
   rows.forEach((row, index) => {
     if (!row.text.trim()) return
     if (!row.ref) {
-      orphans.push({ ref: `Row ${index + 1}`, text: row.text, reason: "noReference" })
+      orphans.push({ ref: "", text: row.text, reason: "noReference", rowIndex: index })
       return
     }
     const cell = cellForRef(row.ref)
     if (!cell) {
-      orphans.push({ ref: row.ref, text: row.text, ...whyNoLineHasRef(row.ref, lineVerses) })
+      orphans.push({ ref: row.ref, text: row.text, ...whyNoLineHasRef(row.ref, lineVerses), rowIndex: index })
       return
     }
     if (matchedCellIds.has(cell.cellId)) {
       // A later row targeting an already-matched ref is an orphan, not a
       // silent overwrite of the earlier row.
-      orphans.push({ ref: row.ref, text: row.text, reason: "refRepeated" })
+      orphans.push({ ref: row.ref, text: row.text, reason: "refRepeated", rowIndex: index })
       return
     }
     matchedCellIds.add(cell.cellId)
-    matched.push(toMatchedCell(cell, row.text, row.ref))
+    matched.push({ ...toMatchedCell(cell, row.text, row.ref), rowIndex: index })
   })
 
   const uncovered = uncoveredLines(cells, matched)
@@ -998,8 +1007,9 @@ function chooseTimebase(rows: TimedRow[], cells: TimedCell[]): TimebaseCorrectio
  *
  *  Review-label priority: the incoming row's `ref` wins (a caller-supplied
  *  label like a VTT cue timecode is the whole point of that field), then the
- *  matched cell's canonical ref, then a bare `Row N`. Spreadsheet+order rows
- *  carry no ref, so this reduces to the previous canonicalRef-first behavior. */
+ *  matched cell's canonical ref, then none — the review names the row by its
+ *  position, in the reader's language (AQU-1375). Spreadsheet+order rows carry
+ *  no ref, so this reduces to the previous canonicalRef-first behavior. */
 function matchRowsPositionally(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
@@ -1012,10 +1022,10 @@ function matchRowsPositionally(
     if (!row.text.trim()) continue
     const cell = cells[i]
     if (!cell) {
-      orphans.push({ ref: row.ref ?? `Row ${i + 1}`, text: row.text })
+      orphans.push({ ref: row.ref ?? "", text: row.text, rowIndex: i })
       continue
     }
-    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${i + 1}`))
+    matched.push({ ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? ""), rowIndex: i })
   }
 
   const uncovered = uncoveredLines(cells, matched)
@@ -1121,7 +1131,7 @@ export function matchTargetRowsByOverlap(
     const cellAt = at === undefined ? undefined : assignment.cellForRow.get(at)
     if (at === undefined || cellAt === undefined) {
       orphans.push({
-        ref: row.ref ?? `Row ${index + 1}`,
+        ref: row.ref ?? "",
         text: row.text,
         reason: backwards.has(index)
           ? "backwardsTimecode"
@@ -1156,7 +1166,7 @@ export function matchTargetRowsByOverlap(
       ...toMatchedCell(
         cell,
         row.text,
-        row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`,
+        row.ref ?? cell.canonicalRef ?? "",
         flag,
         drifted,
         flag === "contested" ? contested.numberOf.get(at) : undefined,
@@ -1385,16 +1395,16 @@ function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileT
   const orphans: TargetOrphan[] = []
   taking.forEach(({ row, index }, at) => {
     if (!row.text.trim()) return
-    const label = row.ref ?? `Row ${index + 1}`
     const lineAt = lineForRow.get(at)
     if (lineAt === undefined) {
-      orphans.push({ ref: label, text: row.text, reason: "sourceNotInFile" })
+      orphans.push({ ref: row.ref ?? "", text: row.text, reason: "sourceNotInFile", rowIndex: index })
       return
     }
     const cell = cells[lineAt]
     const differs = similarity(at, lineAt) < SAME_SOURCE
     matched.push({
-      ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? label, differs ? "sourceDiffers" : undefined),
+      ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? "", differs ? "sourceDiffers" : undefined),
+      rowIndex: index,
       ...(differs ? { incomingSource: row.source ?? "" } : {}),
     })
   })

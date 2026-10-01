@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs } from "@/components/ui/tabs"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
@@ -127,9 +127,11 @@ function sourceArtifactFormat(fileName: string) {
   return "csv" as const
 }
 
-/** What one incoming row is called in the review's lists: a subtitle file's
+/** What one incoming row is called on the review screen: a subtitle file's
  *  cues, a USFM file's verses, a spreadsheet's rows (AQU-1375). */
-function incomingRowKind(fileName: string): "cue" | "verse" | "row" {
+type RowKind = "cue" | "verse" | "row"
+
+function incomingRowKind(fileName: string): RowKind {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
   if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
   if (USFM_EXTENSIONS.has(ext)) return "verse"
@@ -144,6 +146,16 @@ function formatChapterSpans(spans: ChapterSpan[], locale: string): string {
     `${getBookName(bookCode) ?? bookCode} ${firstChapter === lastChapter ? firstChapter : `${firstChapter}–${lastChapter}`}`)
   const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(named)
   return spans.length > 3 ? `${list}…` : list
+}
+
+/** A row's label on the review screen: its own reference or timecode, or —
+ *  when it has none — its place in the file, "Row 3" or "Cue 3" in the
+ *  reader's language (AQU-1375). A USFM verse always has a reference. */
+function rowLabel(t: TFunction, locale: string, kind: RowKind, ref: string, rowIndex: number | undefined): string {
+  if (ref || rowIndex === undefined) return ref
+  return t(kind === "cue" ? "importExport.review.cueNumber" : "importExport.review.rowNumber", {
+    number: formatNumber(rowIndex + 1, locale),
+  })
 }
 
 /** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
@@ -240,6 +252,7 @@ function LazyDetails({ summary, children }: { summary: string; children: () => R
 /** One pairing in the review list. Memoised: ticking one row re-renders only it. */
 const ReviewRow = memo(function ReviewRow({
   m,
+  kind,
   checked,
   onToggle,
   expanded,
@@ -249,6 +262,7 @@ const ReviewRow = memo(function ReviewRow({
   onSwapSameTiming,
 }: {
   m: FileTargetMatchedCell
+  kind: RowKind
   checked: boolean
   onToggle: (cellId: string) => void
   expanded: boolean
@@ -258,7 +272,7 @@ const ReviewRow = memo(function ReviewRow({
   onSwap: (cellId: string, rival: Rival) => void
   onSwapSameTiming: (cellId: string) => void
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   // The label wraps only the tickbox and the text. The pills sit beside it,
   // outside it: a button inside a <label> can tick the row on click in some
   // environments (jsdom does, even with preventDefault).
@@ -278,7 +292,7 @@ const ReviewRow = memo(function ReviewRow({
           />
           <div className="flex-1 min-w-0">
             <p className="font-mono text-[10px] text-muted-foreground">
-              {m.ref}
+              {rowLabel(t, locale, kind, m.ref, m.rowIndex)}
               {m.alreadyThere && (
                 <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
               )}
@@ -353,7 +367,9 @@ const ReviewRow = memo(function ReviewRow({
           {rivals.map((rival) => (
             <div key={rival.rowIndex} data-rival={rival.rowIndex} className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-[10px] text-muted-foreground">{rival.ref}</p>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {rowLabel(t, locale, kind, rival.ref, rival.rowIndex)}
+                </p>
                 <p className="truncate text-xs text-foreground/80">{rival.text}</p>
                 <p className="truncate text-[10px] text-muted-foreground/80">
                   {rival.onLine
@@ -386,6 +402,7 @@ const REVIEW_ROW_ESTIMATE_PX = 64
 
 interface ReviewRowListProps {
   matched: FileTargetMatchedCell[]
+  kind: RowKind
   selected: Set<string>
   onToggle: (cellId: string) => void
   expanded: Set<string>
@@ -411,10 +428,11 @@ function ReviewRowList(props: ReviewRowListProps) {
 }
 
 /** One row, with the list's shared props resolved for it. */
-function ReviewRowFor({ m, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
+function ReviewRowFor({ m, kind, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
   return (
     <ReviewRow
       m={m}
+      kind={kind}
       checked={selected.has(m.cellId)}
       onToggle={onToggle}
       expanded={expanded.has(m.cellId)}
@@ -931,13 +949,17 @@ export function FileTargetImportPanel({
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // "To check": the rows left unticked for a reason a person has to settle —
     // a contest, a shared timing, a source that differs, or text that would be
-    // replaced. Membership
-    // follows the flag, not the tick, so a row never vanishes while being
-    // worked on. "Timing differs" alone is not a reason: the pairing still
-    // holds, and on a shifted file every row has it.
+    // replaced. Membership follows the flag, not the tick, so a row never
+    // vanishes while being worked on. "Timing differs" alone is not a reason:
+    // the pairing still holds, and on a shifted file every row has it.
     const toCheck = matched.filter(
       (m) => m.flag === "contested" || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.hasConflict,
     )
+    // The counts above the list split the pairings the same way (AQU-1375):
+    // "matched" are the ones that need no decision, then those to check, then
+    // conflicts — which are to check too, but already have a count of their
+    // own. "5 matched" over an Import button saying 4 read as a dropped row.
+    const flaggedToCheck = toCheck.length - conflicts.length
     const filtering = onlyToCheck && toCheck.length > 0
     const shown = filtering ? toCheck : matched
     // Select all acts on the rows shown; rows already there have nothing to import.
@@ -1081,10 +1103,22 @@ export function FileTargetImportPanel({
               and uncovered counts used to share the grey of "8 matched", so a
               file that mostly failed looked exactly like a perfect one. */}
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length, locale) })}</span>
+            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length - toCheck.length, locale) })}</span>
             {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: formatCount(alreadyThere.length, locale) })}</span>}
+            {flaggedToCheck > 0 && <span className="text-amber-600">{t("importExport.review.toCheckCount", { count: formatCount(flaggedToCheck, locale) })}</span>}
             {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: formatCount(conflicts.length, locale) })}</span>}
-            {unplaced > 0 && <span className="text-amber-600">{t("importExport.review.unmatchedRowCount", { count: formatCount(unplaced, locale) })}</span>}
+            {unplaced > 0 && (
+              <span className="text-amber-600">
+                {t(
+                  rowKind === "cue"
+                    ? "importExport.review.unmatchedCueCount"
+                    : rowKind === "verse"
+                      ? "importExport.review.unmatchedVerseCount"
+                      : "importExport.review.unmatchedRowCount",
+                  { count: formatCount(unplaced, locale) },
+                )}
+              </span>
+            )}
             {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: formatCount(brokenTimecodes, locale) })}</span>}
             {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: formatCount(uncovered.length, locale) })}</span>}
             {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: formatCount(skippedCues, locale) })}</span>}
@@ -1093,7 +1127,9 @@ export function FileTargetImportPanel({
             <p className="mt-1.5 text-xs text-amber-600">
               {t(
                 matchResult.untimed === "lines"
-                  ? "importExport.review.orderMatchLinesUntimed"
+                  ? rowKind === "cue"
+                    ? "importExport.review.orderMatchLinesUntimedCues"
+                    : "importExport.review.orderMatchLinesUntimedRows"
                   : matchResult.untimed === "rows"
                     ? "importExport.review.orderMatchRowsUntimed"
                     : "importExport.review.orderMatchWarning",
@@ -1149,9 +1185,9 @@ export function FileTargetImportPanel({
               {() => (
                 <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
                   {orphans.map((o, i) => (
-                    <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
+                    <li key={`${o.rowIndex}-${i}`} className="px-3 py-1.5">
                       <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                        {o.ref}
+                        {rowLabel(t, locale, rowKind, o.ref, o.rowIndex)}
                         {reasonLabel(o) && (
                           <span className="font-sans text-amber-600">{reasonLabel(o)}</span>
                         )}
@@ -1202,6 +1238,7 @@ export function FileTargetImportPanel({
         ) : (
           <ReviewRowList
             matched={shown}
+            kind={rowKind}
             selected={selectedCellIds}
             onToggle={toggleCell}
             expanded={expandedRows}

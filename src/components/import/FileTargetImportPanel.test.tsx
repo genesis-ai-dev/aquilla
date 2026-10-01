@@ -34,6 +34,9 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 import { FileTargetImportPanel, type FileTargetPanelBack } from "./FileTargetImportPanel"
 import { applyEBibleTargetImport } from "@/lib/import"
+import { CATALOGS } from "@/lib/i18n/messages"
+import { translate } from "@/lib/i18n/translate"
+import { formatCount } from "@/lib/i18n/format"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -252,7 +255,9 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
     // Positional matching triggers the order-match warning — worded for cues
     // on a file whose lines have no timings (AQU-1375).
-    expect(screen.getByText(/The open file's lines have no timings, so cues were matched in order/)).toBeInTheDocument()
+    expect(screen.getByText(
+      "The open file's lines have no timings, so cues were matched in order. Check each cue's source text.",
+    )).toBeInTheDocument()
     // Rows are labelled by the cue's timecode, never by an internal UUID.
     expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
     expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
@@ -454,7 +459,8 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       [100000, 100800, "TARGET far away"],
     ]), "episode.vtt"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    expect(screen.getByText("1 unmatched row")).toHaveClass("text-amber-600")
+    // A subtitle file's rows are cues, in the counts as in the list (AQU-1375).
+    expect(screen.getByText("1 unmatched cue")).toHaveClass("text-amber-600")
     expect(screen.getByText("1 broken timecode")).toHaveClass("text-amber-600")
     expect(screen.getByText("3 cells not covered")).toHaveClass("text-amber-600")
     // The lists, with a reason per cue and each uncovered line by name —
@@ -890,6 +896,8 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     renderPanel()
     await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1 One\n\\v 1 One again\n\\v 7 Seven\n"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // The count above names them as the list does.
+    expect(screen.getByText("2 unmatched verses")).toHaveClass("text-amber-600")
     openList(/Verses that didn't find a line/)
     expect(within(entryOf("One again")).getByText("This reference appears twice")).toBeInTheDocument()
     expect(within(entryOf("Seven")).getByText("No line has this reference")).toBeInTheDocument()
@@ -959,6 +967,8 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     it("keeps every row on its own line past a stray title row, and lists the title as not in the file", async () => {
       await mapAndReview("source,target\nGenesis draft,Génesis\nIn the beginning,Uno\nAnd the earth was formless,Dos\n")
       expect(screen.getByText("Paired with lines by source text. Rows whose source doesn't match their line are left unticked.")).toBeInTheDocument()
+      expect(screen.getByText("2 matched")).toBeInTheDocument()
+      expect(screen.getByText("1 unmatched row")).toBeInTheDocument()
       expect(screen.queryByText(/Matched in order/)).not.toBeInTheDocument()
       expect(rowOf("Uno")).toHaveAttribute("data-review-cell", "cell-gen-1-1")
       expect(rowOf("Dos")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
@@ -974,6 +984,11 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
       expect(within(row).getByText("Source in the file: Something else entirely")).toBeInTheDocument()
       expect(checkboxIn(row).checked).toBe(false)
       expect(screen.getByRole("tab", { name: /To check 1/ })).toBeInTheDocument()
+      // The counts agree with the Import button: the unticked row is to check,
+      // not matched.
+      expect(screen.getByText("1 matched")).toBeInTheDocument()
+      expect(screen.getByText("1 to check")).toHaveClass("text-amber-600")
+      expect(screen.getByRole("button", { name: "Import 1 cell" })).toBeInTheDocument()
     })
 
     it("assumes no source column unless one is headed as source", async () => {
@@ -1013,6 +1028,16 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
       expect(screen.getByText("1 unmatched row")).toBeInTheDocument()
     })
 
+    it("on a file whose lines have no timings, says its rows were matched in order", async () => {
+      renderPanel({ cells: [{ ...lines[0], startMs: undefined, endMs: undefined }, { ...lines[1], startMs: undefined, endMs: undefined }] })
+      await selectFile(makeFile("start,end,translation\n00:00:01.000,00:00:02.000,Uno\n00:00:03.000,00:00:04.000,Dos\n", "ep.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText(
+        "The open file's lines have no timings, so rows were matched in order. Check each row's source text.",
+      )).toBeInTheDocument()
+    })
+
     it("still matches a verse sheet's references on a file of untimed verses", async () => {
       renderPanel()
       await selectFile(makeFile("ref,start,end,target\nGEN 1:2,00:00:09.000,00:00:12.000,Dos\n", "audio-timing.csv"))
@@ -1030,6 +1055,24 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     openList(/Rows that didn't find a line/)
     expect(within(entryOf("Sin referencia")).getByText("No reference")).toBeInTheDocument()
     expect(within(entryOf("Sin referencia")).getByText("Row 2")).toBeInTheDocument()
+  })
+})
+
+// AQU-1375: the review's figures take the catalogue's plural forms — French
+// read "1 correspondances" — and a row with no label of its own is named in
+// the reader's language, not a hard-coded English "Row N".
+describe("FileTargetImportPanel — review figures and labels in other languages", () => {
+  const fr = (key: Parameters<typeof translate>[1], vars: Record<string, string>) => translate(CATALOGS.fr, key, vars, "fr")
+
+  it("says one match in the singular in French", () => {
+    expect(fr("importExport.review.matchedCount", { count: formatCount(1, "fr") })).toBe("1 correspondance")
+    expect(fr("importExport.review.matchedCount", { count: formatCount(4, "fr") })).toBe("4 correspondances")
+    expect(fr("importExport.review.unmatchedVerseCount", { count: formatCount(2, "fr") })).toBe("2 versets non appariés")
+  })
+
+  it("names an unlabelled row or cue by its place", () => {
+    expect(fr("importExport.review.rowNumber", { number: "3" })).toBe("Ligne 3")
+    expect(fr("importExport.review.cueNumber", { number: "3" })).toBe("Réplique 3")
   })
 })
 

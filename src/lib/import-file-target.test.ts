@@ -56,7 +56,7 @@ describe("matchTargetRowsByRef", () => {
   it("treats unknown refs as orphans, never silent drops", () => {
     const result = matchTargetRowsByRef([{ ref: "EXO 1:1", text: "orphan" }], cells)
     expect(result.matched).toHaveLength(0)
-    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan", reason: "refNotInFile" }])
+    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan", reason: "refNotInFile", rowIndex: 0 }])
   })
 
   it("ignores rows with empty text so blanks never clear an existing translation", () => {
@@ -75,7 +75,7 @@ describe("matchTargetRowsByRef", () => {
     )
     expect(result.matched).toHaveLength(1)
     expect(result.matched[0].incomingText).toBe("first wins")
-    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses", reason: "refRepeated" }])
+    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses", reason: "refRepeated", rowIndex: 1 }])
   })
 })
 
@@ -118,10 +118,9 @@ describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
     ])
   })
 
-  it("a spreadsheet row whose reference cell is blank, labelled by its row", () => {
-    expect(why([{ ref: "GEN 1:1", text: "one" }, { ref: undefined, text: "no ref" }])).toEqual([
-      { ref: "Row 2", reason: "noReference", verses: undefined },
-    ])
+  it("a spreadsheet row whose reference cell is blank — no label of its own, only its place", () => {
+    const result = matchTargetRowsByRef([{ ref: "GEN 1:1", text: "one" }, { ref: undefined, text: "no ref" }], cells)
+    expect(result.orphans).toEqual([{ ref: "", text: "no ref", reason: "noReference", rowIndex: 1 }])
   })
 })
 
@@ -259,7 +258,8 @@ describe("matchTargetRowsByOrder", () => {
       cells,
     )
     expect(result.matched).toHaveLength(3)
-    expect(result.orphans).toEqual([{ ref: "Row 4", text: "overflow" }])
+    // No label of its own: the review names it by its place (AQU-1375).
+    expect(result.orphans).toEqual([{ ref: "", text: "overflow", rowIndex: 3 }])
   })
 
   it("AQU-1144: labels the row with the incoming row's own ref when it carries one", () => {
@@ -280,8 +280,10 @@ describe("matchTargetRowsByOrder", () => {
 
   it("AQU-1144: rows with no ref still fall back to the cell ref then the row number", () => {
     const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], cells)
-    // Spreadsheet-by-order rows carry no ref, so their labels are unchanged.
-    expect(result.matched.map((m) => m.ref)).toEqual(["GEN 1:1", "Row 2"])
+    // Spreadsheet-by-order rows carry no ref. With no cell ref either, the
+    // label is left empty and the review names the row by its place, in the
+    // reader's language (AQU-1375).
+    expect(result.matched.map((m) => [m.ref, m.rowIndex])).toEqual([["GEN 1:1", 0], ["", 1]])
   })
 })
 
@@ -513,7 +515,7 @@ describe("matchTargetRowsByOrder — pairing by source text (AQU-1375)", () => {
     expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2", "l3", "l4", "l5"])
     expect(result.matched.every((m) => m.incomingText.slice(m.incomingText.indexOf(":") + 1) === m.sourceText.slice(0, 12))).toBe(true)
     expect(result.matched.some((m) => m.flag)).toBe(false)
-    expect(result.orphans).toEqual([{ ref: "Row 1", text: rows[0].text, reason: "sourceNotInFile" }])
+    expect(result.orphans).toEqual([{ ref: "", text: rows[0].text, reason: "sourceNotInFile", rowIndex: 0 }])
   })
 
   it("a row deleted from the spreadsheet leaves its line uncovered and every other row in place", () => {

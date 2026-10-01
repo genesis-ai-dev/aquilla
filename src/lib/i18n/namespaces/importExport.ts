@@ -1153,10 +1153,21 @@ export const importExport = defineNamespace({
     "importExport.review.elsewhere": "This file is for {incoming}; the open file is {file}.",
     "importExport.review.elsewhereNoReferences": "This file is for {incoming}; the open file's lines have no verse " +
       "references.",
-    "importExport.review.matchedCount": "{count} matched",
+    "importExport.review.matchedCount": plural({
+      one: "{count} matched",
+      other: "{count} matched",
+    }),
+    "importExport.review.toCheckCount": plural({
+      one: "{count} to check",
+      other: "{count} to check",
+    }),
+    "importExport.review.rowNumber": "Row {number}",
+    "importExport.review.cueNumber": "Cue {number}",
     "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
-    "importExport.review.orderMatchLinesUntimed": "The open file's lines have no timings, so cues were matched in order. " +
-      "Check each row's source text.",
+    "importExport.review.orderMatchLinesUntimedCues": "The open file's lines have no timings, so cues were matched in " +
+      "order. Check each cue's source text.",
+    "importExport.review.orderMatchLinesUntimedRows": "The open file's lines have no timings, so rows were matched in " +
+      "order. Check each row's source text.",
     "importExport.review.orderMatchRowsUntimed": "Some rows have no timing, so every row was matched in order. Check " +
       "each row's source text.",
     "importExport.review.countMismatchRows": "Rows in this file: {rows}. Lines in the open file: {lines}. If a row was " +
@@ -1229,6 +1240,14 @@ export const importExport = defineNamespace({
     "importExport.review.unmatchedRowCount": plural({
       one: "{count} unmatched row",
       other: "{count} unmatched rows",
+    }),
+    "importExport.review.unmatchedCueCount": plural({
+      one: "{count} unmatched cue",
+      other: "{count} unmatched cues",
+    }),
+    "importExport.review.unmatchedVerseCount": plural({
+      one: "{count} unmatched verse",
+      other: "{count} unmatched verses",
     }),
     "importExport.spreadsheet.acceptedFormats": "CSV, TSV, or XLSX",
     "importExport.spreadsheet.description": "Upload a CSV or XLSX file. You will map columns (source, target, ref, " +
@@ -3227,11 +3246,41 @@ export const importExport = defineNamespace({
       "importExport.review.matchedCount": {
         description:
           "First figure in the summary strip under the 'Review matches' heading: " +
-          "how many incoming rows were successfully paired with an existing line. " +
-          "Terse count-plus-participle fragment sitting beside sibling fragments, " +
-          "so it must stay short.",
+          "how many incoming rows were paired with an existing line. On the review " +
+          "of a file's target import it counts only those needing no decision — rows " +
+          "to check and conflicts have their own figures beside it. Terse " +
+          "count-plus-participle fragment sitting beside sibling fragments, so it " +
+          "must stay short.",
         placeholders: {
           count: "Number of incoming rows that were paired with an existing line.",
+        },
+      },
+      "importExport.review.toCheckCount": {
+        description:
+          "Amber figure in the summary strip under the 'Review matches' heading, " +
+          "beside the matched count: how many paired rows were left unticked for the " +
+          "user to check before importing (for example, the row's source text differs " +
+          "from its line's). Terse count-plus-phrase fragment, must stay short.",
+        placeholders: {
+          count: "Number of paired rows waiting for the user to check them.",
+        },
+      },
+      "importExport.review.rowNumber": {
+        description:
+          "Label of one row in the match-review lists when the uploaded spreadsheet " +
+          "row has no reference of its own: the row's position in the uploaded file. " +
+          "Shown in small monospace type above the row's text.",
+        placeholders: {
+          number: "The row's position in the uploaded file, counting from 1.",
+        },
+      },
+      "importExport.review.cueNumber": {
+        description:
+          "Label of one subtitle cue in the match-review lists when the cue has no " +
+          "timecode of its own: its position in the uploaded subtitle file. Shown in " +
+          "small monospace type above the cue's text.",
+        placeholders: {
+          number: "The cue's position in the uploaded file, counting from 1.",
         },
       },
       "importExport.review.orderMatchWarning": {
@@ -3241,13 +3290,21 @@ export const importExport = defineNamespace({
           "reference or timings to go by. Asks the user to check each row's source " +
           "text, shown beside it. Two short sentences.",
       },
-      "importExport.review.orderMatchLinesUntimed": {
+      "importExport.review.orderMatchLinesUntimedCues": {
         description:
           "Amber warning above the match-review list when a subtitle file was dropped " +
           "on a file whose lines have no timings (a plain text source, say), so its " +
           "cues were paired with lines by position (cue 1 to line 1, and so on) " +
-          "instead of by time. Asks the user to check each row's source text, shown " +
-          "beside it. Two short sentences.",
+          "instead of by time. Asks the user to check the source text shown beside " +
+          "each cue. Two short sentences.",
+      },
+      "importExport.review.orderMatchLinesUntimedRows": {
+        description:
+          "Amber warning above the match-review list when a spreadsheet with start " +
+          "and end times was dropped on a file whose lines have no timings, so its " +
+          "rows were paired with lines by position (row 1 to line 1, and so on) " +
+          "instead of by time. Asks the user to check the source text shown beside " +
+          "each row. Two short sentences.",
       },
       "importExport.review.orderMatchRowsUntimed": {
         description:
@@ -3611,6 +3668,24 @@ export const importExport = defineNamespace({
           "project and will therefore be ignored. Count plus noun phrase, no verb.",
         placeholders: {
           count: "Number of uploaded rows that were not paired with anything.",
+        },
+      },
+      "importExport.review.unmatchedCueCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading for an " +
+          "uploaded subtitle file: how many of its cues could not be paired with any " +
+          "line and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded subtitle cues that were not paired with anything.",
+        },
+      },
+      "importExport.review.unmatchedVerseCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading for an " +
+          "uploaded scripture (USFM) file: how many of its verses could not be paired " +
+          "with any line and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded verses that were not paired with anything.",
         },
       },
       "importExport.spreadsheet.acceptedFormats": {

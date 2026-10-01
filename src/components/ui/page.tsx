@@ -274,7 +274,7 @@ function SettingsGroup({
           ) : null}
         </div>
       ) : null}
-      <div className="divide-y overflow-hidden rounded-lg border bg-card">
+      <div data-slot="settings-card" className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}
       </div>
     </div>
@@ -328,4 +328,21 @@ function SettingsRow({
   )
 }
 
-export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, STAT_TILE_GRID, EmptyState, NotFoundIcon, TableEmptyState }
+/**
+ * Free-form content inside a SettingsGroup card: a paragraph, a tab strip, a
+ * standalone control. The card itself has no padding — only its rows supply the
+ * inset — so content dropped straight into it starts at the border, to the left
+ * of its own heading and of the rows around it (AQU-1524). Wrap it in this and
+ * it shares SettingsRow's inset and clears the card's dividers.
+ */
+function SettingsBlock({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="settings-block"
+      className={cn("px-4 py-3", className)}
+      {...props}
+    />
+  )
+}
+
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, SettingsBlock, StatTile, STAT_TILE_GRID, EmptyState, NotFoundIcon, TableEmptyState }

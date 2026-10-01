@@ -681,6 +681,82 @@ describe("worker deployment environment contract", () => {
     expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs")
   })
 
+  // AQU-682 / AQU-1157: the Neon migration guard covered the Workers only, so a
+  // dev deploy whose schema-guard failed still published the SPA —
+  // dev.aquilla.app served new front-end code against old Workers and an
+  // un-migrated database (2026-09-03, 14:26-14:32). A deployment is one unit:
+  // if the target schema is behind, NOTHING publishes, web included.
+  it("blocks every deploy surface — web included — on the target Neon schema guard", () => {
+    const scripts = (JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }).scripts ?? {}
+
+    for (const [script, guard] of [
+      ["deploy:aquilla:spa", "npm run neon:status:prod"],
+      ["deploy:aquilla:sync", "npm run neon:status:prod"],
+      ["deploy:aquilla:auth", "npm run neon:status:prod"],
+      ["deploy:aquilla:dev:spa", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:sync", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:auth", "npm run neon:status:dev"],
+    ] as const) {
+      const command = scripts[script]
+      expect(command).toContain(guard)
+      // The guard is read-only and runs before anything is built or uploaded.
+      expect(command.indexOf(guard)).toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+      expect(command).not.toContain("neon:apply")
+    }
+
+    for (const command of Object.values(scripts).filter((value) => value.includes("deploy:aquilla"))) {
+      expect(command).not.toContain("neon:apply")
+    }
+
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    const jobStart = (name: string) => {
+      const index = workflow.indexOf(`\n  ${name}:\n`)
+      expect(index).toBeGreaterThan(-1)
+      return index
+    }
+    const job = (name: string, next: string) =>
+      workflow.slice(jobStart(name), jobStart(next))
+
+    // schema-guard runs for every selectable surface, not just the Workers.
+    const guardJob = job("schema-guard", "web")
+    for (const surface of ["web", "sync", "auth"]) {
+      expect(guardJob).toContain(`needs.detect.outputs.${surface} == 'true'`)
+    }
+    expect(guardJob).not.toContain("neon:apply")
+
+    // ...and every deploy job waits on it and skips when it did not pass.
+    for (const [name, next] of [
+      ["web", "sync-worker"],
+      ["sync-worker", "auth-worker"],
+    ] as const) {
+      const deployJob = job(name, next)
+      expect(deployJob).toContain("needs: [target, detect, schema-guard]")
+      expect(deployJob).toContain("!failure() && !cancelled()")
+    }
+    const authJob = workflow.slice(jobStart("auth-worker"))
+    expect(authJob).toContain("needs: [target, detect, schema-guard]")
+    expect(authJob).toContain("!failure() && !cancelled()")
+
+    // The SPA deploy step must carry the credentials its own in-script guard
+    // reads, or the guard fails closed in CI for the wrong reason.
+    const webJob = job("web", "sync-worker")
+    for (const secret of [
+      "NEON_PG_HOST",
+      "NEON_PG_PASSWORD",
+      "NEON_DEV_PG_HOST",
+      "NEON_DEV_PG_PASSWORD",
+    ]) {
+      expect(webJob).toContain(`${secret}:`)
+    }
+
+    // The operator-facing order is written down where deploys are run from.
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    expect(matrix).toContain("**Migrate first, then deploy.**")
+    expect(matrix).toContain("Every surface — web, identity and sync alike — runs the target")
+  })
+
   it("installs root and worker dependencies before deployable worker checks", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
 

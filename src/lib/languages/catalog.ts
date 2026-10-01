@@ -238,20 +238,88 @@ function fold(value: string): string {
 }
 
 /**
- * Rank a catalog entry against a folded query. Lower is better; `null` means
- * "no match". Exact code beats name prefix beats code prefix beats substring,
- * so typing "fr" puts French on top and "fre" still surfaces it.
+ * Word boundaries, for the ranking below: anything that is not a letter or a
+ * digit separates words in a folded display name — spaces, but also the
+ * punctuation SIL's reference names carry ("Luba-Katanga", "Hawai'i Creole
+ * English", "Old English (ca. 450-1100)", "Biblical Hebrew/Aramaic/Greek").
+ * `undefined` (past the end of the name) counts as a boundary.
  */
-function rank(entry: LanguageEntry, query: string): number | null {
+function isBoundary(char: string | undefined): boolean {
+  return char === undefined || !/[a-z0-9]/.test(char)
+}
+
+/** Rank tiers, lower is better. See `rank`. */
+const RANK_EXACT_CODE = 0
+const RANK_EXACT_NAME = 1
+const RANK_WHOLE_WORD = 2
+const RANK_WORD_START = 3
+const RANK_CODE_PREFIX = 4
+const RANK_SUBSTRING = 5
+
+/**
+ * AQU-1457 — where in a folded name the query lands. A query that fills a
+ * whole word ("malay" in "Standard Malay") outranks one that only starts a
+ * word ("mala" in "Malayalam"), which in turn outranks a mid-word hit ("ala"
+ * in "Malayalam"); `wordIndex` says which word matched, so a name that *leads*
+ * with the query beats one that mentions it later.
+ *
+ * Multi-word queries fall out of the same rule, since the scan only tries
+ * word starts: "eastern arr" starts word 0 of "Eastern Arrernte".
+ */
+function matchName(name: string, query: string): { tier: number; wordIndex: number } | null {
+  let best: { tier: number; wordIndex: number } | null = null
+  let wordIndex = 0
+  for (let i = 0; i < name.length; i++) {
+    if (isBoundary(name[i]) || !isBoundary(name[i - 1])) continue
+    if (name.startsWith(query, i)) {
+      const tier = isBoundary(name[i + query.length]) ? RANK_WHOLE_WORD : RANK_WORD_START
+      if (!best || tier < best.tier) best = { tier, wordIndex }
+      // Word 0 with a whole-word hit is the best this name can do.
+      if (best.tier === RANK_WHOLE_WORD) break
+    }
+    wordIndex++
+  }
+  return best
+}
+
+/**
+ * Rank a catalog entry against a folded query. Lower is better; `null` means
+ * "no match". Exact code beats exact name beats a whole-word hit beats a
+ * word-start hit beats a code prefix beats a mid-word substring, so typing
+ * "fr" puts French on top, "fre" still surfaces it, and "arrernte" puts
+ * "Eastern Arrernte" above a name that merely contains those letters.
+ *
+ * `wordIndex` orders entries inside a tier (see `filterLanguages`).
+ */
+function rank(
+  entry: LanguageEntry,
+  query: string,
+): { tier: number; wordIndex: number } | null {
   const name = fold(entry.name)
   const code = fold(entry.code)
   const altCode = entry.altCode ? fold(entry.altCode) : null
-  if (code === query || altCode === query) return 0
-  if (name === query) return 1
-  if (name.startsWith(query)) return 2
-  if (code.startsWith(query) || altCode?.startsWith(query)) return 3
-  if (name.includes(query)) return 4
+  if (code === query || altCode === query) return { tier: RANK_EXACT_CODE, wordIndex: 0 }
+  if (name === query) return { tier: RANK_EXACT_NAME, wordIndex: 0 }
+  const inName = matchName(name, query)
+  if (inName) return inName
+  if (code.startsWith(query) || altCode?.startsWith(query)) {
+    return { tier: RANK_CODE_PREFIX, wordIndex: 0 }
+  }
+  if (name.includes(query)) return { tier: RANK_SUBSTRING, wordIndex: 0 }
   return null
+}
+
+/**
+ * AQU-1457 — 0 for SIL's standardized form of the matched language, 1
+ * otherwise. SIL names the standard variety of a macrolanguage "Standard
+ * <language>" ("Standard Malay" under `msa`, "Standard Arabic" under `ara`),
+ * and that variety is what a translator typing the bare language name almost
+ * always wants — so it sorts ahead of the geographic and ethnic varieties that
+ * qualify the same word ("Pattani Malay", "Kedah Malay"), which no
+ * name-derived measure such as length would do.
+ */
+function standardFormFirst(entry: LanguageEntry, wordIndex: number): number {
+  return wordIndex === 1 && fold(entry.name).startsWith("standard ") ? 0 : 1
 }
 
 /** 0 for a language with an ISO 639-1 code, 1 otherwise. See `filterLanguages`. */
@@ -303,18 +371,37 @@ export function filterLanguages(
   const folded = fold(query.trim())
   if (!folded) return allowed.slice(0, limit)
 
-  const scored: Array<{ entry: LanguageEntry; score: number }> = []
+  const scored: Array<{
+    entry: LanguageEntry
+    tier: number
+    wordIndex: number
+    standard: number
+  }> = []
   for (const entry of allowed) {
     const score = rank(entry, folded)
-    if (score !== null) scored.push({ entry, score })
+    if (score === null) continue
+    // Folded once here rather than inside the comparator below, which runs
+    // O(n log n) times over a 7,900-entry catalog.
+    scored.push({ entry, ...score, standard: standardFormFirst(entry, score.wordIndex) })
   }
-  // AQU-1456 — within a rank, a language that also carries an ISO 639-1 code
-  // comes first. Without this, widening the catalog from ~184 to ~7,900 buries
-  // the majors behind alphabetically-earlier obscure codes ("ger" surfacing
-  // "Geragew" ahead of "German"). Richer ranking across the long tail —
-  // word-start matches, shortest name first — is AQU-1457's job; this only
-  // keeps the pre-AQU-1456 ordering of the majors intact.
+  // Tiebreaks inside a tier, in order:
+  //  * the earlier word of the name matched — a name that leads with the query
+  //    is more likely to be the language meant than one that qualifies it;
+  //  * AQU-1457 — SIL's "Standard <language>" variety (see `standardFormFirst`);
+  //  * AQU-1456 — a language that also carries an ISO 639-1 code comes first.
+  //    Without this, widening the catalog from ~184 to ~7,900 buries the majors
+  //    behind alphabetically-earlier obscure codes ("ger" surfacing "Geragew"
+  //    ahead of "German");
+  //  * AQU-1457 — the shorter name, so the plain language beats its dialects
+  //    and historic stages ("Malay (macrolanguage)" ahead of "Malayic Dayak").
   // Stable beyond that: the catalog is already name-sorted.
-  scored.sort((a, b) => a.score - b.score || majorFirst(a.entry) - majorFirst(b.entry))
+  scored.sort(
+    (a, b) =>
+      a.tier - b.tier ||
+      a.wordIndex - b.wordIndex ||
+      a.standard - b.standard ||
+      majorFirst(a.entry) - majorFirst(b.entry) ||
+      a.entry.name.length - b.entry.name.length,
+  )
   return scored.slice(0, limit).map((item) => item.entry)
 }

@@ -138,10 +138,13 @@ describe("AssignedToMe", () => {
     expect(screen.getByText("French")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("John scope"))
-    expect(navigate).toHaveBeenCalledWith("/project/pa/editor/file/f1?lane=es")
+    expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?lane=es")
 
+    // AQU-1474: the default lane is an explicit, empty `?lane=`, never a bare
+    // URL. The editor reads an absent lane param as "keep the lane last used",
+    // which would open this default-lane assignment in the wrong language.
     fireEvent.click(screen.getByText("Mark scope"))
-    expect(navigate).toHaveBeenCalledWith("/project/pb/editor/file/f2")
+    expect(navigate).toHaveBeenLastCalledWith("/project/pb/editor/file/f2?lane=")
   })
 
   it("shows an empty state when there are no assignments", async () => {

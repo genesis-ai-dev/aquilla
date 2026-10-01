@@ -31,7 +31,12 @@ import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { memoize } from "../lib/request-memo"
-import { orgPathContribution } from "../../../db/shared/project-roles"
+import {
+  orgPathContribution,
+  parseAccessGrantsMode,
+  resolveWithGrantsMode,
+} from "../../../db/shared/project-roles"
+import { resolveProjectRoleViaGrants } from "../../../db/shared/access-grants"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -189,8 +194,27 @@ async function resolveProjectRoleInternal(
 
   // The grant paths don't depend on archived-ness, so both entry points share
   // one memo slot per (project, user) within a request.
+  // AQU-1352 P1: ACCESS_GRANTS_RESOLVER picks today's per-table resolver, the
+  // access_grants view, or both (shadow). The archive check above already ran,
+  // so the view path resolves with includeArchived and shares this memo slot.
   return memoize(env.requestMemo, `role:${projectId}:${user.id}`, () =>
-    resolveGrantPaths(env, user, projectId, project),
+    resolveWithGrantsMode<ResolvedRole>(
+      parseAccessGrantsMode(env.ACCESS_GRANTS_RESOLVER),
+      { userId: String(user.id), projectId },
+      () => resolveGrantPaths(env, user, projectId, project),
+      () =>
+        resolveProjectRoleViaGrants(
+          env.AQUILLA_PG,
+          { id: String(user.id), email: user.email },
+          projectId,
+          env.ADMIN_EMAILS,
+          true,
+        ),
+      (g) => {
+        const source = g.source as ResolvedRole["source"]
+        return { level: g.level, name: ROLE_NAMES[g.level] ?? "unknown", source }
+      },
+    ),
   )
 }
 

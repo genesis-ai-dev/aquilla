@@ -19,8 +19,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
-import { pickSelectOption } from "@/test-utils/select"
+import { pickComboboxOption } from "@/test-utils/combobox"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import type { CreateTarget } from "@/lib/sync/create-targets"
+
+// AQU-1352: the destination picker fetches create-targets on open and submit
+// waits for it. Each test resolves it (Personal unless it says otherwise).
+vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -85,18 +90,33 @@ vi.mock("@/components/ui/toast", () => ({
 }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
+import { fetchCreateTargets } from "@/lib/sync/create-targets"
 import { fetchProjectSettings, patchProjectSettings } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
+const mockCreateTargets = vi.mocked(fetchCreateTargets)
+
+const PERSONAL: CreateTarget = {
+  kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [],
+}
+/** An org the caller maintains, with a team to create into (AQU-1352 P2). */
+const ORG_WITH_TEAM: CreateTarget = {
+  kind: "org", orgId: 10, name: "Biblica ETT", path: ["Biblica ETT"], role: 600,
+  teams: [{ teamId: 1, name: "Pattani Malay", role: 500 }],
+}
 
 /** Matches the dialog's own LONG_RUNNING_WORK_MS. */
 const OVERRUN_MS = 120_000
 
-function openDialog() {
-  render(<ProjectCreateDialog onCreated={vi.fn()} />)
+/** The destination picker landing is what enables submit (AQU-1352). */
+const destinationLoaded = () => screen.findByTestId("project-create-destination")
+
+async function openDialog(orgId?: number) {
+  render(<ProjectCreateDialog onCreated={vi.fn()} orgId={orgId} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  await destinationLoaded()
 }
 
 function fillBasics(title = "Russian BSB") {
@@ -149,6 +169,8 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     mockFetchProjectSettings.mockReset()
     mockPatchProjectSettings.mockReset()
     mockPatchProjectSettings.mockResolvedValue({ kind: "ok" } as never)
+    mockCreateTargets.mockReset()
+    mockCreateTargets.mockResolvedValue([PERSONAL])
   })
 
   afterEach(() => {
@@ -157,7 +179,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
   it("disables every control in the body while a plain create is in flight", async () => {
     const release = holdCreateInFlight()
-    openDialog()
+    await openDialog()
     fillBasics()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
@@ -171,6 +193,8 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     expect(screen.getByLabelText(/^Target language/i)).toBeDisabled()
     expectRadioDisabled(screen.getByTestId("create-shape-linked-target"))
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeDisabled()
+    // AQU-1352: where the project lives is part of the request in flight too.
+    expect(screen.getByTestId("project-create-destination")).toBeDisabled()
     expect(closeButton()).toBeDisabled()
 
     // …and the shape radio really is inert: clicking it leaves the form on
@@ -181,9 +205,29 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     release()
   })
 
+  it("locks the destination and teams pickers of an org create (AQU-1352)", async () => {
+    mockCreateTargets.mockResolvedValue([ORG_WITH_TEAM])
+    const release = holdCreateInFlight()
+    await openDialog(10)
+    fillBasics()
+    expect(screen.getByTestId("project-create-destination")).toBeEnabled()
+    expect(screen.getByTestId("project-create-teams")).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
+
+    expect(screen.getByTestId("project-create-destination")).toBeDisabled()
+    expect(screen.getByTestId("project-create-teams")).toBeDisabled()
+    // …and a click on the locked teams picker opens nothing to choose from.
+    fireEvent.click(screen.getByTestId("project-create-teams"))
+    expect(screen.queryByRole("option", { name: "Pattani Malay" })).toBeNull()
+
+    release()
+  })
+
   it("refuses to close by X, Escape or an outside press during a create", async () => {
     const release = holdCreateInFlight()
-    openDialog()
+    await openDialog()
     fillBasics()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
@@ -199,11 +243,11 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
   it("locks the Linked Target path too, Add as lane included", async () => {
     const release = holdCreateInFlight()
-    openDialog()
+    await openDialog()
     fillBasics("French Episode 1")
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
 
     expect(screen.getByTestId("add-as-lane-btn")).toBeEnabled()
@@ -238,11 +282,11 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
       }),
     )
 
-    openDialog()
+    await openDialog()
     fillBasics("French Episode 1")
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
 
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
@@ -263,11 +307,11 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
   it("unlocks with the error and the user's values intact when the create fails", async () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
-    openDialog()
+    await openDialog()
     fillBasics()
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
 
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
@@ -283,8 +327,8 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     )
   })
 
-  it("never locks on a create that a validation error stopped before it started", () => {
-    openDialog()
+  it("never locks on a create that a validation error stopped before it started", async () => {
+    await openDialog()
     // No title, no languages: the form rejects it, so nothing goes in flight.
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
@@ -297,7 +341,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
   it("admits an overrun, hands back the X, and still reopens as a fresh usable form", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const release = holdCreateInFlight()
-    openDialog()
+    await openDialog()
     fillBasics()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
@@ -317,6 +361,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
     // Reopening is a brand-new form, not the locked one it was abandoned in.
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    await destinationLoaded()
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
     expect(screen.getByLabelText(/^Project title$/i)).toHaveValue("")
     expect(screen.queryByTestId("create-taking-long")).toBeNull()

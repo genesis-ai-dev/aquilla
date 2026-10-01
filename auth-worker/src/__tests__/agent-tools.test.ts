@@ -766,6 +766,9 @@ describe("executeDraft", () => {
       { model: "m", apiKey: "k", url: "https://mock/x" },
     )
     expect(done.text).toContain("Nothing to draft")
+    // The empty reply must hand the model a next step to relay — a bare
+    // "nothing here" reads as a dead end (2026-08-28 transcript).
+    expect(done.text).toContain("Suggest a next step")
   })
 
   // AQU-1455: draft prints the same widening notice as read, as its first line.

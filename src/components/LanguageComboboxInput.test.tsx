@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { describe, expect, it } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+
+import { loadFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
 import { LanguageComboboxInput } from "./LanguageComboboxInput"
 
@@ -46,6 +48,20 @@ function typeInto(input: HTMLElement, value: string) {
   fireEvent.change(input, { target: { value } })
 }
 
+/**
+ * AQU-1456 — wait out the lazy ISO 639-3 load, so the list on screen is the
+ * final one. The swap re-keys every row (French is `fr` in the bundled set and
+ * `fra` in the full one), which detaches any option located before it lands; a
+ * click on that stale node is a silent no-op. Call this after typing — the
+ * field's own load is in flight by then, and `act` flushes the re-render it
+ * triggers — and before locating an option to click.
+ */
+async function settleFullCatalog() {
+  await act(async () => {
+    await loadFullLanguageCatalog()
+  })
+}
+
 describe("LanguageComboboxInput", () => {
   it("suggests languages matching what was typed", async () => {
     render(<Harness />)
@@ -67,7 +83,11 @@ describe("LanguageComboboxInput", () => {
     render(<Harness />)
     typeInto(screen.getByLabelText("Language"), "fre")
 
-    const [best] = await screen.findAllByRole("option", { name: /French/ })
+    // Locate and click in one synchronous step, on the settled list: an option
+    // found before the catalog swap is detached by it, and the click is lost.
+    await settleFullCatalog()
+    await screen.findByRole("listbox")
+    const [best] = screen.getAllByRole("option", { name: /French/ })
     fireEvent.click(best)
 
     expect(screen.getByTestId("committed").textContent).toBe("French")

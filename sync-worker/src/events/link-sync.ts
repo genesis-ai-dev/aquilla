@@ -67,6 +67,11 @@ const LANE_KINDS_SOURCE = [
   'cell.retime',
   'cast.assign',
   'file.create',
+  // AQU-1358: an upstream rename is lane-relevant. Without it the freshness
+  // probe never sees the rename (head stays at the cursor, mirrorSync returns
+  // NOOP) and the delta never pulls the file id in, so the downstream copy
+  // keeps the old name forever.
+  'file.rename',
 ] as const
 
 /** AQU-477: additional lane-relevant kinds for `consumes: 'target'` links —
@@ -173,6 +178,27 @@ interface FoldedCell {
   metadata?: Record<string, unknown> | null
 }
 
+/**
+ * AQU-1520: the `metadata` bucket off a parsed event payload, or `null`.
+ *
+ * The payload is `JSON.parse`d untrusted text, so anything can be sitting on
+ * the key. A plain object is the only shape `cells.metadata` (JSONB) and the
+ * import-envelope readers accept — an array or a scalar would project as
+ * malformed JSONB and `readImportMilestone()` would reject it anyway, so it is
+ * dropped here rather than mirrored downstream.
+ *
+ * `null` (not `undefined`) so the caller's `?? undefined` in the mirror payload
+ * omits the key, which the projection's `COALESCE(excluded.metadata,
+ * cells.metadata)` upsert reads as "leave the downstream row alone".
+ */
+function payloadMetadata(
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const value = payload.metadata
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
 /** Deterministic uuid-shaped hash of an arbitrary key. Not cryptographic —
  *  only needs to be stable + collision-unlikely across its keyspace, which
  *  is what the callers below rely on (events PK idempotency; files PK
@@ -273,6 +299,13 @@ async function loadDelta(
         anchorCellId: typeof payload.anchorCellId === 'string' ? payload.anchorCellId : null,
         startMs: typeof payload.startMs === 'number' ? payload.startMs : null,
         endMs: typeof payload.endMs === 'number' ? payload.endMs : null,
+        // AQU-1520: the import envelope (`metadata.aquillaImport.milestone`) is
+        // what the section navigator builds its titles from. Without it a
+        // mirrored file falls back to app-invented "Part N" divisions even
+        // though the upstream shows "Acts Preface" and the named chapter
+        // sections. It travels with the create, exactly like `type` and
+        // `canonicalRef` do.
+        metadata: payloadMetadata(payload),
       })
     } else if (row.kind === 'source.cell.commit') {
       const prev = cells.get(key)
@@ -289,6 +322,12 @@ async function loadDelta(
         anchorCellId: prev?.anchorCellId ?? null,
         startMs: prev?.startMs ?? null,
         endMs: prev?.endMs ?? null,
+        // AQU-1520: a commit payload carries text only — no import envelope —
+        // so metadata rides the fold the same way `type`/`canonicalRef` do.
+        // `null` when the window holds no create: the payload then omits the
+        // key and the projection's COALESCE-upsert leaves the downstream row's
+        // own metadata alone, rather than erasing it on every text edit.
+        metadata: prev?.metadata ?? null,
       })
     } else if (row.kind === 'source.cell.visibility.set') {
       // AQU-1453: hide/show carries no text, so it can only ADJUST a state,
@@ -331,6 +370,7 @@ async function loadDelta(
         anchorCellId: prev?.anchorCellId ?? null,
         startMs: prev?.startMs ?? null,
         endMs: prev?.endMs ?? null,
+        metadata: prev?.metadata ?? null,
       })
     }
     // cell.retime / cast.assign / file.create: structural-only kinds that
@@ -359,7 +399,7 @@ async function loadDelta(
     const { results: liveRows } = await db
       .prepare(
         `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
-                start_ms, end_ms
+                start_ms, end_ms, metadata
            FROM cells
           WHERE project_id = ? AND side = 'source' AND target_lang = ''
             AND (file_id, cell_id) IN (${placeholders})`,
@@ -375,6 +415,7 @@ async function loadDelta(
         anchor_cell_id: string | null
         start_ms: number | string | null
         end_ms: number | string | null
+        metadata: Record<string, unknown> | null
       }>()
     const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
     for (const v of pending) {
@@ -397,6 +438,9 @@ async function loadDelta(
         anchorCellId: live.anchor_cell_id,
         startMs: live.start_ms == null ? null : Number(live.start_ms),
         endMs: live.end_ms == null ? null : Number(live.end_ms),
+        // AQU-1520: the live row is the whole state here, import envelope
+        // included — a park/unpark must not strip the cell's section title.
+        metadata: live.metadata,
         hidden: v.hidden,
       })
     }
@@ -947,15 +991,23 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   for (const upstreamFileId of deltaFileIdList) {
     downstreamFileIdOf.set(upstreamFileId, deterministicDownstreamFileId(downstreamProjectId, upstreamFileId))
   }
+  // AQU-1358: the downstream's CURRENT name comes back alongside the id, so a
+  // file the delta already knows can be classified three ways rather than two:
+  // new (mirror it), renamed upstream (re-mirror to refresh the name), or
+  // unchanged (emit nothing — this is what keeps a re-sync idempotent and
+  // stops repeated syncs minting duplicate rows/events for files A and B when
+  // only file C is new).
   let existingDownstreamFileIdSet = new Set<string>()
+  const downstreamNameOf = new Map<string, string>() // downstream file id -> its current name
   if (deltaFileIdList.length > 0) {
     const downstreamIds = deltaFileIdList.map((id) => downstreamFileIdOf.get(id)!)
     const placeholders = downstreamIds.map(() => '?').join(', ')
     const existingFiles = await db
-      .prepare(`SELECT id FROM files WHERE project_id = ? AND id IN (${placeholders})`)
+      .prepare(`SELECT id, name FROM files WHERE project_id = ? AND id IN (${placeholders})`)
       .bind(downstreamProjectId, ...downstreamIds)
-      .all<{ id: string }>()
+      .all<{ id: string; name: string }>()
     existingDownstreamFileIdSet = new Set(existingFiles.results.map((r) => r.id))
+    for (const r of existingFiles.results) downstreamNameOf.set(r.id, r.name)
   }
   const newUpstreamFileIds = deltaFileIdList.filter(
     (upstreamFileId) => !existingDownstreamFileIdSet.has(downstreamFileIdOf.get(upstreamFileId)!),
@@ -972,18 +1024,42 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   const persistedForProjection: PersistedEvent[] = []
   let skippedHashEqual = 0
 
-  // 1. file.mirror for new upstream files. `fileId` in the event envelope +
-  // payload is the DOWNSTREAM's deterministic id, never the upstream's raw
-  // id (files.id global-PK constraint — see deterministicDownstreamFileId).
-  if (newUpstreamFileIds.length > 0) {
-    const newFilePlaceholders = newUpstreamFileIds.map(() => '?').join(', ')
+  // 1. file.mirror for new upstream files, and (AQU-1358) for already-mirrored
+  // files whose upstream name has since changed — file.mirror's projection is
+  // an idempotent upsert that refreshes `name` on conflict, so a rename needs
+  // no new event kind, only an event that is actually emitted. `fileId` in the
+  // event envelope + payload is the DOWNSTREAM's deterministic id, never the
+  // upstream's raw id (files.id global-PK constraint — see
+  // deterministicDownstreamFileId).
+  const renamedUpstreamFileIds: string[] = []
+  if (deltaFileIdList.length > 0) {
+    const filePlaceholders = deltaFileIdList.map(() => '?').join(', ')
     const upstreamFiles = await db
-      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${newFilePlaceholders})`)
-      .bind(upstreamProjectId, ...newUpstreamFileIds)
+      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
+      .bind(upstreamProjectId, ...deltaFileIdList)
       .all<{ id: string; name: string; meta: string | null }>()
     for (const f of upstreamFiles.results) {
       const downstreamFileId = downstreamFileIdOf.get(f.id) ?? deterministicDownstreamFileId(downstreamProjectId, f.id)
-      const eventId = deterministicMirrorEventId(downstreamProjectId, `file:${f.id}`)
+      const isNew = !existingDownstreamFileIdSet.has(downstreamFileId)
+      const renamed = !isNew && downstreamNameOf.get(downstreamFileId) !== f.name
+      // Already mirrored under the same name — nothing to say. Most delta
+      // files land here (they were only dragged in by their cells' events),
+      // and skipping them is what makes repeated syncs a no-op instead of a
+      // fresh copy.
+      if (!isNew && !renamed) continue
+      if (renamed) renamedUpstreamFileIds.push(f.id)
+      // Key a rename on the NEW NAME so each distinct rename gets its own
+      // event-log row. (The projection runs regardless — it is built from
+      // persistedForProjection unconditionally, while only the events INSERT
+      // dedupes on the PK — so reusing `file:<id>` would still land the name;
+      // it would just drop the audit row.) Keeping it deterministic means a
+      // replay of the same rename is still an exact id-replay, and keeping it
+      // distinct from `file:<id>` leaves the create-time id every existing
+      // downstream already carries untouched.
+      const eventId = deterministicMirrorEventId(
+        downstreamProjectId,
+        renamed ? `file:${f.id}:name:${contentHash(f.name)}` : `file:${f.id}`,
+      )
       const payload: EventPayloads['file.mirror'] = {
         fileId: downstreamFileId,
         name: f.name,
@@ -1111,7 +1187,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     cellsMirrored++
   }
 
-  const filesMirrored = newUpstreamFileIds.length
+  // AQU-1358: renamed files are mirrored too (name refresh), so they count —
+  // otherwise a rename-only delta folds to totalMirrors === 0 and the whole
+  // emit is discarded as an empty fold below.
+  const filesMirrored = newUpstreamFileIds.length + renamedUpstreamFileIds.length
   const totalMirrors = cellsMirrored + filesMirrored
 
   if (totalMirrors === 0) {
@@ -1182,7 +1261,7 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   for (const c of folded.values()) {
     touchedFiles.add(downstreamFileIdOf.get(c.fileId) ?? deterministicDownstreamFileId(downstreamProjectId, c.fileId))
   }
-  for (const upstreamFileId of newUpstreamFileIds) {
+  for (const upstreamFileId of [...newUpstreamFileIds, ...renamedUpstreamFileIds]) {
     touchedFiles.add(downstreamFileIdOf.get(upstreamFileId)!)
   }
   for (const fileId of touchedFiles) {

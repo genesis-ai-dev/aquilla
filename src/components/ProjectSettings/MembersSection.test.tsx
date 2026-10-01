@@ -53,6 +53,11 @@ const mockRemove = vi.fn()
 const mockAdd = vi.fn()
 const mockRefresh = vi.fn()
 
+// AQU-1352 §3.9: the scope breadcrumb title reads the project name.
+vi.mock("@/hooks/useProject", () => ({
+  useProject: () => ({ project: { name: "Pattani Malay Bible" } }),
+}))
+
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
     members: mockMembers,
@@ -175,7 +180,8 @@ describe("MembersSection", () => {
     renderSection()
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
     expect(screen.getByRole("dialog")).toBeTruthy()
-    expect(screen.getByRole("heading", { name: /add a member/i })).toBeTruthy()
+    // AQU-1352 §3.9 rule 2: the header names the scope people are added to.
+    expect(screen.getByRole("heading", { name: /^Add people to .*Pattani Malay Bible$/ })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /add members/i })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /invite link/i })).toBeTruthy()
   })

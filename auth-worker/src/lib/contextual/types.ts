@@ -141,7 +141,9 @@ export interface SceneBriefDraft {
 export interface SpanDraft {
   spanId: string
   sceneBriefId: string
-  cells: { cellId: string; text: string }[]
+  /** `findings` (categorical QA codes, findings.ts) are set on accepted cells
+   *  handed to stage(); drafts under construction carry none. */
+  cells: { cellId: string; text: string; findings?: string[] }[]
   exampleIds: string[]
   promptVersion: string
 }

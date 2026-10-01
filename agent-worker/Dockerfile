@@ -8,7 +8,7 @@
 # relies on (pandas/openpyxl for spreadsheets, lxml/python-docx for docs,
 # chardet for encoding sniffing, beautifulsoup4 for HTML/XML, and bounded
 # readers for common long-tail document containers).
-FROM docker.io/cloudflare/sandbox:0.12.9-python
+FROM docker.io/cloudflare/sandbox:0.12.10-python
 
 # Use the SDK's Python variant explicitly. The generic image is not guaranteed
 # to contain pip, which made the previous first deployment dependent on an

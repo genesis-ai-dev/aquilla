@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { SettingsGroup } from '@/components/ui/page'
 import { getBillingPlanReview, type BillingPlanReview as Review,
   type BillingPlanSelection } from '@/lib/sync/billing-review'
 
@@ -34,9 +33,9 @@ export function BillingPlanReview({ jwt, orgId, selection, onDismiss }: {
   const money = (amount: number, currency: string) => new Intl.NumberFormat(undefined, {
     style: 'currency', currency: currency.toUpperCase(),
   }).format(amount / 100)
-  return <section ref={region} tabIndex={-1} aria-label="Review selected plan" aria-live="polite" className="p-4">
-    <SettingsGroup label="Review selected plan">
-      <div className="flex flex-col gap-3 p-4">
+  return <section ref={region} tabIndex={-1} aria-label="Review selected plan" aria-live="polite" className="px-4 py-3">
+    <p className="text-sm font-medium text-foreground">Review selected plan</p>
+    <div className="mt-2 flex flex-col gap-3">
       {!review && !failed && <p role="status">Checking workspace and current prices…</p>}
       {failed && <>
         <p role="alert">Plan review is unavailable. Your current access stays unchanged.</p>
@@ -57,7 +56,6 @@ export function BillingPlanReview({ jwt, orgId, selection, onDismiss }: {
         </> : <p>{restrictions[review.reason]}</p>}
       </>}
       <Button variant="ghost" onClick={onDismiss}>Close plan review</Button>
-      </div>
-    </SettingsGroup>
+    </div>
   </section>
 }

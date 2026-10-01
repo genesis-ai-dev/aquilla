@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ExamplePanel } from "./ExamplePanel"
 import type { ScoredPair } from "@/lib/search/dual-index"
+import { branchingResponseToScoredPairs } from "@/lib/sync/branching-search-read"
 
 const examples: ScoredPair[] = [
   {
@@ -183,6 +184,43 @@ describe("ExamplePanel", () => {
       const origins = await screen.findAllByTestId("example-origin")
       expect(origins[0]).toHaveTextContent("Genesis")
       expect(origins[0]).not.toHaveTextContent("TM ·")
+    })
+
+    // The pairs a single-cell draft actually hands the panel come from the
+    // branching-search adapter, not a hand-built fixture. With the adapter
+    // blanking `fileId` the host's lookup found no file and the origin line
+    // never rendered in the app, while the two tests above stayed green.
+    it("names the origin of pairs adapted from a branching-search response", async () => {
+      const pairs = branchingResponseToScoredPairs({
+        results: [
+          { cellId: "tu-1", sourceText: "In the beginning God created", targetText: "Al inicio Dios creó", queryCoverage: 1, fileId: "file-tmx" },
+          { cellId: "gen-2", sourceText: "God said let there be light", targetText: "Dios dijo que haya luz", queryCoverage: 0.2, fileId: "file-gen" },
+        ],
+        provenance: {},
+        upstreamProjectId: null,
+        corpusEventMax: null,
+        corpusSize: 2,
+      })
+      // The host's resolver: a lookup over the project's own file inventory.
+      const files = [
+        { id: "file-tmx", name: "legacy-memory.tmx", type: "tmx" },
+        { id: "file-gen", name: "Genesis", type: "usfm" },
+      ]
+      render(
+        <ExamplePanel
+          examples={pairs}
+          currentSource="In the beginning God created"
+          originFor={(fileId) => {
+            const file = files.find((f) => f.id === fileId)
+            return file && { fileName: file.name, isTranslationMemory: file.type === "tmx" }
+          }}
+        />,
+      )
+      open()
+      const origins = await screen.findAllByTestId("example-origin")
+      expect(origins).toHaveLength(2)
+      expect(origins[0]).toHaveTextContent("TM · legacy-memory.tmx")
+      expect(origins[1]).toHaveTextContent("Genesis")
     })
   })
 })

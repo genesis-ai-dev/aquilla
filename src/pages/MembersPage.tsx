@@ -214,6 +214,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 
             <OrgMembersTable
                   orgId={orgId}
+                  orgName={orgName}
                   members={members}
                   loading={membersLoading && members.length === 0}
                   callerOrgRoleLevel={activeOrg?.role.level ?? null}

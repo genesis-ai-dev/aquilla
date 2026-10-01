@@ -9,6 +9,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { toast } from "@/components/ui/toast"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -241,6 +248,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
     expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("3")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -288,6 +296,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     addExtraLanguage("es")
     addExtraLanguage("pt-BR")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -321,6 +330,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
   it("submits with no extras and still writes targetLanes as [primary]", async () => {
     openDialogWithBasics()
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -348,6 +358,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       target: { value: "English" },
     })
     fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -371,6 +382,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     openDialogWithBasics()
     addExtraLanguage("es")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {

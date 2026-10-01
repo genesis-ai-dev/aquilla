@@ -50,7 +50,7 @@ import {
   translateAsReadAttemptKey,
   withTranslateAsReadClaim,
 } from "@/lib/completion/translate-as-read"
-import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
+import { branchingResponseToScoredPairs, fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
@@ -4892,15 +4892,7 @@ export function ProjectWorkspace() {
           excludeCellId: excludeId,
           targetLang: activeLane,
         })
-        return res.results.map((r) => ({
-          cellId: r.cellId,
-          fileId: "",
-          source: r.sourceText,
-          target: r.targetText,
-          score: 1,
-          matchedTokens: res.provenance[r.cellId] ?? [],
-          coverageWeight: r.queryCoverage,
-        }))
+        return branchingResponseToScoredPairs(res)
       } catch (err) {
         console.warn("[ProjectWorkspace] branching-search fetch failed:", err)
         return []

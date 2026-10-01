@@ -5534,7 +5534,7 @@ function EditorRow({
   // We emit a `target.cell.commit` event chained off cell.targetEventId
   // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
   // the parent to revalidate useCells so the projection lands.
-  const handleEditorCommit = useCallback(async ({ value, valueHtml }: { value: string; valueHtml: string }): Promise<boolean> => {
+  const handleEditorCommit = useCallback(async ({ value, valueHtml, tmInsert }: { value: string; valueHtml: string; tmInsert?: true }): Promise<boolean> => {
     if (!editable) return false
     if (!project.id) return false
     // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
@@ -5613,7 +5613,12 @@ function EditorRow({
       // server's self-check reads cells.last_editor, which isn't committed yet
       // for this same-action commit+validate, so it can't catch this; the gate
       // has to be here. Default/undefined = allowed, preserving codex behavior.
-      if (shouldAutoValidateHumanEdit({
+      // AQU-1393: an exact-match Insert is the one commit through here that is
+      // not the translator's own wording — it is another cell's translation
+      // dropped in whole. It still lands as an ordinary edit (and so clears any
+      // prior validators), but it stays unvalidated until the translator
+      // validates it or edits it; that later edit commits without the flag.
+      if (!tmInsert && shouldAutoValidateHumanEdit({
         value,
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
@@ -6031,9 +6036,10 @@ function EditorRow({
    *
    * It fills the EDITOR rather than committing behind it, so the insert is the
    * same write the translator could have typed: they can edit or undo it before
-   * it settles, and it carries no validation of its own. When the row is still a
-   * read view the text is queued and the editor is opened — TranslatedEditor
-   * drains the queue when it focuses.
+   * it settles. Unlike typing it carries no validation of its own — the editor
+   * tags the commit `tmInsert` and `handleEditorCommit` skips auto-validation
+   * for it. When the row is still a read view the text is queued and the editor
+   * is opened — TranslatedEditor drains the queue when it focuses.
    */
   const handleInsertExampleTarget = useCallback((target: string) => {
     if (!editable || isLoading || lockHolderLabel || idmlConfiguration) return

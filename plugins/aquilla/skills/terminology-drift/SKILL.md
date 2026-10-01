@@ -28,15 +28,17 @@ person approves in Aquilla before anything is saved.
    (page with `cursor`), and call `read_comments` with that `fileId` and
    `cellId`. If a reviewer already discussed the term there, follow the
    reviewer and tell the user.
-3. Draft the corrected target text. Change only the term and the words that
+3. Call `list_terms` and find the concept. Use its preferred rendering, and
+   respect its notes and `matchOptions`.
+4. Draft the corrected target text. Change only the term and the words that
    must agree with it. Keep everything else exactly as it is.
-4. Call `prepare_translations` with all corrections in one changeset.
-5. Show the user the returned summary and the `approvalUrl`.
+5. Call `prepare_translations` with all corrections in one changeset.
+6. Show the user the returned summary and the `approvalUrl`.
    - In ask mode: a person must open the link and approve. Stop here. Say the
      change is not saved yet.
    - In act mode: ask the user to confirm in chat before you call
      `confirm_changeset`.
-6. Only after `confirm_changeset` succeeds may you say the fix is saved.
+7. Only after `confirm_changeset` succeeds may you say the fix is saved.
 
 ## Do not
 

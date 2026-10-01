@@ -1212,6 +1212,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   read_cell_memory: 'read',
   read_quality: 'read',
   read_term_consistency: 'read',
+  list_terms: 'read',
   prepare_translations: 'stage',
   preview_import: 'read',
   prepare_import: 'stage',

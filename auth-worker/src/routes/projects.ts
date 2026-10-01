@@ -1250,11 +1250,15 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 
+  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+
   return c.json({
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
-      email: m.email,
+      // The `?minRole=` "view admins" bypass serves callers the org hid the
+      // roster from; they learn who the admins are, not how to email them.
+      ...(hideEmails ? {} : { email: m.email }),
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),

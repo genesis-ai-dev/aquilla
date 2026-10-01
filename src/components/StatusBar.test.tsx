@@ -133,3 +133,16 @@ describe("StatusBar and the structural-cell policy", () => {
     expect(plain(container)).not.toContain("4 cells")
   })
 })
+
+// AQU-1493: plain rounding put 251 of 252 at "100%" beside a blank line, the
+// one progress figure the shared rule had missed.
+it("never reads 100% while a cell is untranslated", () => {
+  const many = Array.from({ length: 252 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i === 0 ? "empty" : "validated" }) as CellSummary)
+  const { container, rerender } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = () => (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain()).toContain("251 translated (99%)")
+  const done = many.map((c) => ({ ...c, status: "validated" as const }))
+  rerender(<StatusBar cells={done} healthMap={new Map()} projectHealth={0} />)
+  expect(plain()).toContain("252 translated (100%)")
+})

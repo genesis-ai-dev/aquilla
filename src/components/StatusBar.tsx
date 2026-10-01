@@ -4,6 +4,7 @@ import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate, formatNumber, formatPercent } from "@/lib/i18n/format"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 interface StatusBarProps {
   progress: { total: number; translated: number; validated: number }
@@ -26,7 +27,8 @@ export function StatusBar({
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
   const unvalidated = translated - validated
-  const fraction = total > 0 ? translated / total : 0
+  // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
+  const fraction = progressPercent(translated, total) / 100
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each

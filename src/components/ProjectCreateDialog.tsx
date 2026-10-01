@@ -16,16 +16,9 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Tooltip,
   TooltipContent,
@@ -77,7 +70,8 @@ interface ProjectCreateDialogProps {
  *
  * SWARM-TODO(AQU-478): live-UI walk once AQU-476 is deployed —
  *   1. + New Project → Advanced: project shape → "Linked target".
- *   2. Pick an existing project from the "Upstream project" dropdown.
+ *   2. Pick an existing project from the searchable "Upstream project"
+ *      picker (type to filter, or scroll the full list).
  *   3. Choose Live (subscribed) vs Clone (one-time snapshot), and — the
  *      "use its source" vs "use its translations" (consumes) choice.
  *   4. Submit → confirm the dialog closes and the new project opens with
@@ -575,37 +569,29 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           return (
                             <Field data-invalid={invalid}>
                               <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
-                              <Select
-                                // Base UI SelectValue falls back to the raw
-                                // value (a project UUID) unless items maps
-                                // each value to its display label — the
-                                // dropdown Option text alone is not enough.
-                                items={upstreamOptions.map((p) => ({
-                                  value: p.id,
-                                  label: p.name,
-                                }))}
-                                value={field.state.value || null}
+                              {/* AQU-1518: searchable, not a scroll-only
+                                  dropdown — a long project list made finding
+                                  the upstream a scrolling exercise. The picker
+                                  still shows the project NAME, never the raw
+                                  UUID it stores. */}
+                              <ProjectCombobox
+                                id="upstream-project"
+                                options={upstreamOptions}
+                                value={field.state.value}
                                 onValueChange={(value) => {
-                                  field.handleChange(value ?? "")
+                                  field.handleChange(value)
                                   // Clearing the upstream on self-contained
                                   // drops the corpus question; reset its answer
                                   // so a stale pick can't satisfy a later link.
                                   if (!value) form.setFieldValue("linkConsumes", "")
                                 }}
-                              >
-                                <SelectTrigger id="upstream-project" aria-invalid={invalid}>
-                                  <SelectValue placeholder={t("projectSettings.create.upstreamProjectPlaceholder")} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    {upstreamOptions.map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        {p.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
+                                invalid={invalid}
+                                placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
+                                searchPlaceholder={t("projectSettings.create.upstreamProjectSearchPlaceholder")}
+                                searchAriaLabel={t("projectSettings.create.upstreamProjectSearchAriaLabel")}
+                                emptyText={t("projectSettings.create.upstreamProjectNoMatches")}
+                                clearText={t("projectSettings.create.upstreamProjectNone")}
+                              />
                               {invalid && <FieldError errors={field.state.meta.errors} />}
                             </Field>
                           )

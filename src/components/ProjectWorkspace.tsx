@@ -422,6 +422,7 @@ import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { assignedFileIds } from "@/lib/assignments/assigned-files"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
@@ -6023,6 +6024,14 @@ export function ProjectWorkspace() {
       .catch(() => { /* silently ignore */ })
     return () => { cancelled = true }
   }, [jwt, project?.id, canAssignWork, assignmentsRefreshKey])
+
+  // AQU-894: the sidebar's "these are yours" set, off the inbox read already
+  // fetched above — no second request, and no roster read a contributor would
+  // be 403'd from.
+  const myAssignedFileIds = useMemo(
+    () => (project?.id ? assignedFileIds(myAssignments, project.id) : undefined),
+    [myAssignments, project?.id],
+  )
 
   // Build a cellId → {username, scopeLabel} map for the EditorTable gutter.
   // Strategy: match each cell against the active assignments using fileId and
@@ -12260,6 +12269,7 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
+                  assignedFileIds={myAssignedFileIds}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}

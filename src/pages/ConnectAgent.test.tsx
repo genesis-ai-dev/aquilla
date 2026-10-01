@@ -5,7 +5,10 @@ import { ConnectAgent } from "./ConnectAgent"
 import { connectionRequest } from "@/lib/sync/agent-connect"
 import { pickSelectOption } from "@/test-utils/select"
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" }, loading: false }) }))
-vi.mock("@/lib/sync/agent-connect", () => ({ connectionRequest: vi.fn() }))
+vi.mock("@/lib/sync/agent-connect", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/agent-connect")>()),
+  connectionRequest: vi.fn(),
+}))
 // AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
@@ -19,7 +22,7 @@ vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: async () => [
   { id: 2, name: "Guest org", role: { level: 100 } },
 ] }))
 const api = vi.mocked(connectionRequest)
-const request = { agentName: "My agent", mode: "ask", requestedProjectId: "p", expiresAt: "2030-01-01", tokenExpiresIn: 2592000 }
+const request = { agentName: "My agent", mode: "ask", requestedProjectId: "p", expiresAt: "2030-01-01" }
 const mount = () => render(<MemoryRouter initialEntries={["/connect-agent#user_code=ABCD-EFGH"]}><ConnectAgent /></MemoryRouter>)
 const review = async () => {
   mount()
@@ -40,6 +43,8 @@ describe("agent consent", () => {
     fireEvent.click(authorize)
     await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", { user_code: "ABCD-EFGH", approve: true, mode: "ask", project_id: "p", code_confirmed: true }))
     expect(await screen.findByRole("status")).toHaveTextContent("Access approved")
+    // Fallback for agents whose polling died: a pasteable nudge naming the code.
+    expect((screen.getByLabelText(/Paste this message/) as HTMLTextAreaElement).value).toContain("code ABCD-EFGH")
   })
   it("allows denial without choosing a project or confirming the code", async () => {
     mount(); fireEvent.click(screen.getByRole("button", { name: "Review request" }))

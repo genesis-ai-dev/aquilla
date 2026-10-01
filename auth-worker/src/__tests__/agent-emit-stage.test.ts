@@ -22,6 +22,7 @@ function ctx(overrides: Partial<EmitStageContext> = {}): EmitStageContext {
     runId: RUN_ID,
     projectId: PROJECT,
     roleLevel: 400,
+    lane: "",
     aliases: new AliasMap(),
     ...overrides,
   }
@@ -498,5 +499,50 @@ describe("stageEvents — the project's cell-editing tier (AQU-1068)", () => {
       ctx({ roleLevel: 400 }),
     )
     expect(result.proposal).not.toBeNull()
+  })
+})
+
+describe("stageEvents — lanes (AQU-1447)", () => {
+  const LANE_B = "ab12cd34"
+
+  it("stages a lane-B commit as a genesis commit tagged with the lane, ignoring lane A's head", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "Am Anfang" } }],
+      ctx({ lane: LANE_B }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.payload.targetLang).toBe(LANE_B)
+    expect(event.parentId).toBeUndefined()
+    expect(event.display.before).toBe("")
+  })
+
+  it("chains on lane B's own head once lane B has a commit", async () => {
+    const LANE_B_HEAD = "77777777-7777-4777-8777-777777777777"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'target', ?, 'Am Anfang', 'GEN 1:1', ?, 0)`,
+    )
+      .bind(PROJECT, FILE, CELL, LANE_B, LANE_B_HEAD)
+      .run()
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "Im Anfang" } }],
+      ctx({ lane: LANE_B }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.parentId).toBe(LANE_B_HEAD)
+    expect(event.payload.targetLang).toBe(LANE_B)
+  })
+
+  it("leaves the default lane unchanged: chains on its head, no targetLang, model-written targetLang stripped", async () => {
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x", targetLang: LANE_B } }],
+      ctx({ lane: "" }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.parentId).toBe(TARGET_HEAD)
+    expect(event.payload).not.toHaveProperty("targetLang")
   })
 })

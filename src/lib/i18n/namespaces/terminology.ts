@@ -66,6 +66,12 @@ export const terminology = defineNamespace({
     "terminology.editor.addTerm": "Add term",
     "terminology.editor.addTermDescription":
       "Create a source term and its preferred rendering for this project terminology.",
+    // AQU-872: the same form, seen by someone who may suggest a term but not
+    // approve one. Mirrors `terminology.addConcept.approveNoPermissionHint` on
+    // the in-editor popover, which has said this since AQU-1006.
+    "terminology.editor.addTermSuggestionDescription":
+      "Saved as a suggestion for review. Suggestions are not checked against " +
+      "translations until someone with termbase permission approves them.",
     "terminology.editor.sourceTermLabel": "Source term",
     "terminology.editor.sourceTermPlaceholder": "New source term…",
     "terminology.editor.renderingLabel": "Rendering",
@@ -173,7 +179,8 @@ export const terminology = defineNamespace({
     // reset button reuses onboarding.checklist.aiInstructions.resetToDefault.
     "terminology.livingMemory.section.brief.title": "Brief",
     "terminology.livingMemory.section.brief.description":
-      "Audience, purpose, and scope of this translation",
+      "Optional — who this translation is for and what it must achieve. The AI " +
+      "reads it as context, not as its instructions.",
     "terminology.livingMemory.section.brief.statusNone": "Not started",
     "terminology.livingMemory.section.brief.statusDraft": "Draft",
     "terminology.livingMemory.section.brief.statusComplete": "Complete",
@@ -465,6 +472,8 @@ export const terminology = defineNamespace({
       "concepts with renderings are enforced — set a concept's status to approved to " +
       "start checking.",
     "terminology.violations.kindMissing": "missing",
+    "terminology.violations.unnamedCell": "Untitled cell",
+    "terminology.violations.inFile": "In {file}",
     "terminology.violations.missingCount": plural({
       one: "{count} missing",
       other: "{count} missing",
@@ -1050,6 +1059,13 @@ export const terminology = defineNamespace({
           total: "Total infraction count across every concept, already formatted.",
           count: "Number of distinct concepts with at least one violation (the plural selector).",
         },
+      },
+      "terminology.violations.inFile": {
+        description:
+          "Tooltip and screen-reader text on the file affordance of one infringing-cell " +
+          "row in the Violations inbox, naming the file the cell lives in; {file} is the " +
+          "user's own file name (not translated).",
+        placeholders: { file: "The project file's own name, verbatim (not translated)." },
       },
       "terminology.violations.missingCount": {
         description:

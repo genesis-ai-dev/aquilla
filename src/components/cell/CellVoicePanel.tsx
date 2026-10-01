@@ -70,6 +70,8 @@ interface CellVoicePanelProps {
   controller?: UseCellAudioResult
   /** Open the character creator seeded with THIS cell's take (clone source). */
   onMakeCharacter: () => void
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 function fmtTime(s: number): string {
@@ -225,6 +227,7 @@ export function CellVoicePanel({
   onAfterGenerate,
   onMakeCharacter,
   controller,
+  targetLang,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -340,6 +343,7 @@ export function CellVoicePanel({
       audioId: playableId,
       trimStartMs: start != null ? Math.round(start * 1000) : null,
       trimEndMs: end != null ? Math.round(end * 1000) : null,
+      ...(targetLang ? { targetLang } : {}),
       author: username,
     })
     injectOptimisticAudioTrim(cell.fileId, cell.id, {
@@ -360,7 +364,7 @@ export function CellVoicePanel({
     }, trimP)
     void trimP
     notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
+  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username, targetLang])
 
   const changeTrim = useCallback((start: number | null, end: number | null) => {
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
@@ -381,10 +385,13 @@ export function CellVoicePanel({
   const generate = useCallback(async (autoplay: boolean, voiceId?: string) => {
     if (isVoicing || !canGenerate) return
     if (autoplay) autoplayRef.current = true
-    const ok = await generateCellVoice({ project, cell, session: sess, username, voiceId: voiceId ?? active.id })
+    const ok = await generateCellVoice({
+      project, cell, session: sess, username, voiceId: voiceId ?? active.id,
+      ...(targetLang ? { targetLang } : {}),
+    })
     if (ok) onAfterGenerate()
     else autoplayRef.current = false
-  }, [isVoicing, canGenerate, project, cell, sess, username, active.id, onAfterGenerate])
+  }, [isVoicing, canGenerate, project, cell, sess, username, active.id, onAfterGenerate, targetLang])
 
   // Clicking a voice chip IS the generate action: assign the line to that voice
   // and voice it immediately (autoplay when the take lands). Record it as
@@ -426,6 +433,7 @@ export function CellVoicePanel({
     cellId: cell.id,
     username,
     jwt: sess?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
   })
   const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
 

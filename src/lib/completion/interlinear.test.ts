@@ -235,8 +235,15 @@ describe("buildAlignmentModel — cold-start Dice path", () => {
     // from different rows of the corpus, so most source tokens only ever
     // co-occurred with these target tokens incidentally. That is exactly the
     // "noise" the default threshold exists to suppress.
-    const source = "God blessed the seventh day"
-    const target = "Dieu créa l homme à son image"
+    //
+    // AQU-1408 moved this fixture. It used to be "God blessed the seventh day"
+    // against "Dieu créa l homme à son image", whose sub-threshold links were
+    // "blessed", "seventh" and "day" ALL claiming "dieu" — the duplicate-target
+    // bug itself, which competitive linking now removes. The noise here is on
+    // distinct target tokens, so it survives as the weak-association noise this
+    // test is actually about.
+    const source = "In the beginning God created the heavens and the earth"
+    const target = "Dieu appela la terre sèche"
 
     const unfiltered = alignCell(source, target, model, { threshold: 0 })
     const noise = unfiltered.filter((l) => l.confidence < CONFIDENCE_MIN)
@@ -318,9 +325,10 @@ describe("buildAlignmentModel — warm EM path", () => {
 
   it("EM model excludes low-confidence noise below default threshold", () => {
     const model = buildAlignmentModel(WARM_CORPUS)
-    // Mismatched source/target rows — see the cold-start equivalent above.
-    const source = "God blessed the seventh day"
-    const target = "Dieu prononça toutes ces paroles"
+    // Mismatched source/target rows — see the cold-start equivalent above,
+    // including why AQU-1408 moved this fixture off a duplicate-target pair.
+    const source = "In the beginning God created the heavens and the earth"
+    const target = "Dieu vit que la lumière était bonne"
 
     const unfiltered = alignCell(source, target, model, { threshold: 0 })
     const noise = unfiltered.filter((l) => l.confidence < CONFIDENCE_MIN)
@@ -504,6 +512,110 @@ describe("AlignmentLink structure", () => {
       expect(l.tgtIndex).toBeGreaterThanOrEqual(0)
       expect(l.tgtIndex).toBeLessThan(tgtLen)
     }
+  })
+})
+
+// ── AQU-1408: one target token per link ───────────────────────────────────────
+
+describe("alignCell — competitive linking (AQU-1408)", () => {
+  /**
+   * The reported symptom: several source words all picked the same target
+   * word, so the panel listed "father" three times for one "father" in the
+   * verse. Three source tokens are seeded onto the same target token here so
+   * they all want it; only the strongest claimant may keep it.
+   */
+  const RIVAL_SEEDS: AlignmentSeed[] = [
+    { srcToken: "father", tgtToken: "père", weight: 10 },
+    { srcToken: "dad", tgtToken: "père", weight: 8 },
+    { srcToken: "parent", tgtToken: "père", weight: 6 },
+  ]
+
+  it("never returns the same target index twice", () => {
+    const model = buildAlignmentModel(SMALL_CORPUS, RIVAL_SEEDS)
+    const links = alignCell("father dad parent", "père", model, { threshold: 0 })
+
+    const tgtIndexes = links.map((l) => l.tgtIndex)
+    expect(new Set(tgtIndexes).size).toBe(tgtIndexes.length)
+  })
+
+  it("a target word occurring once in the cell is listed once", () => {
+    const model = buildAlignmentModel(SMALL_CORPUS, RIVAL_SEEDS)
+    const links = alignCell("father dad parent", "père", model, { threshold: 0 })
+
+    expect(links.filter((l) => l.tgtToken === "père")).toHaveLength(1)
+  })
+
+  it("the strongest claimant keeps the contested target word", () => {
+    const model = buildAlignmentModel(SMALL_CORPUS, RIVAL_SEEDS)
+    const links = alignCell("father dad parent", "père", model, { threshold: 0 })
+
+    const winner = links.find((l) => l.tgtToken === "père")
+    expect(winner?.srcToken).toBe("father")
+  })
+
+  it("a source token that loses the contest falls through to its next-best free target", () => {
+    // "dad" wants "père" most but "father" outbids it; "papa" is still free.
+    const seeds: AlignmentSeed[] = [
+      { srcToken: "father", tgtToken: "père", weight: 10 },
+      { srcToken: "dad", tgtToken: "père", weight: 8 },
+      { srcToken: "dad", tgtToken: "papa", weight: 4 },
+    ]
+    const model = buildAlignmentModel(SMALL_CORPUS, seeds)
+    const links = alignCell("father dad", "père papa", model, { threshold: 0 })
+
+    expect(links.find((l) => l.srcToken === "father")?.tgtToken).toBe("père")
+    expect(links.find((l) => l.srcToken === "dad")?.tgtToken).toBe("papa")
+  })
+
+  it("a target word repeated in the cell can still be claimed once per occurrence", () => {
+    // Two distinct positions of the same string are two distinct target slots:
+    // the rule is one link per occurrence, not one per spelling.
+    const model = buildAlignmentModel(SMALL_CORPUS, RIVAL_SEEDS)
+    const links = alignCell("father dad", "père père", model, { threshold: 0 })
+
+    expect(links.filter((l) => l.tgtToken === "père")).toHaveLength(2)
+    expect(new Set(links.map((l) => l.tgtIndex)).size).toBe(2)
+  })
+
+  it("each source token still appears at most once", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    const links = alignCell(
+      "God created the heavens and the earth",
+      "Dieu créa les cieux et la terre",
+      model,
+    )
+    const srcIndexes = links.map((l) => l.srcIndex)
+    expect(new Set(srcIndexes).size).toBe(srcIndexes.length)
+  })
+
+  it("holds on the warm EM path too", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    const links = alignCell(
+      "God said God saw God called",
+      "Dieu dit Dieu vit Dieu appela",
+      model,
+      { threshold: 0 },
+    )
+    const tgtIndexes = links.map((l) => l.tgtIndex)
+    expect(new Set(tgtIndexes).size).toBe(tgtIndexes.length)
+  })
+
+  it("is deterministic across repeated calls", () => {
+    const model = buildAlignmentModel(SMALL_CORPUS, RIVAL_SEEDS)
+    const a = alignCell("father dad parent", "père papa", model, { threshold: 0 })
+    const b = alignCell("father dad parent", "père papa", model, { threshold: 0 })
+    expect(a).toEqual(b)
+  })
+
+  it("every returned link still clears the threshold", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    const links = alignCell(
+      "God created the light",
+      "Dieu créa la lumière",
+      model,
+      { threshold: CONFIDENCE_AMBER },
+    )
+    for (const l of links) expect(l.confidence).toBeGreaterThanOrEqual(CONFIDENCE_AMBER)
   })
 })
 

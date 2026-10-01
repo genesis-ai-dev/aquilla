@@ -18,7 +18,6 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
-import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
@@ -37,8 +36,6 @@ interface Props {
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
-  /** Storage lane used when exporting translated source files. */
-  targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
   onShowDetails?: (fileId: string) => void
@@ -74,7 +71,6 @@ interface Props {
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
-  targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
@@ -299,11 +295,6 @@ export function ExpandableFileList({
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
-                            onExportSource={
-                              canExportSourceFile(file, canExportByOrgPolicy)
-                                ? () => { void exportFile(file) }
-                                : undefined
-                            }
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)
                                 ? () => { void downloadImportedOriginal({
@@ -351,14 +342,5 @@ export function ExpandableFileList({
       </div>
     </>
   )
-
-  async function exportFile(file: FileReference) {
-    await exportSourceFile({
-      projectId,
-      file,
-      getToken: getTokenForFile,
-      targetLang,
-    })
-  }
 
 }

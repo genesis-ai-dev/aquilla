@@ -93,7 +93,7 @@ describe("TranslatedEditor karaoke decoration", () => {
       button: 0,
       preventDefault: vi.fn(),
     } as unknown as MouseEvent
-    let handled: boolean | void
+    let handled: boolean | void = undefined
     act(() => {
       handled = editor!.view.someProp("handleClick", (handler) =>
         handler(editor!.view, 8, clickEvent),

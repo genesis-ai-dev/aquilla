@@ -187,3 +187,130 @@ describe('GET /cells/audit-stats', () => {
     expect(body.cells[0].cellId).toBe('c1')
   })
 })
+
+// ── AQU-1506 ────────────────────────────────────────────────────────────────
+// An N-lane file has one target row per lane for the same cell. Before this the
+// response marked none of them, so the client kept whichever row Postgres
+// returned first — heap order, which a validate or commit rewrites — and showed
+// one lane's validators on another's page.
+describe('GET /cells/audit-stats — lane marker (AQU-1506)', () => {
+  const TWO_LANE_SEED = {
+    lanes: [
+      { id: 'lane-src', project_id: 'proj-x', role: 'source', legacy_tag: '' },
+      { id: 'lane-def', project_id: 'proj-x', role: 'target', legacy_tag: '' },
+      { id: 'lane-fr', project_id: 'proj-x', role: 'target', legacy_tag: 'fr' },
+    ],
+    cells: [
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'source', value: 'in the beginning', content_hash: 'src-hash',
+        event_id: 'ev-src', source_event_id: null,
+        last_editor: 'importer', last_edit_at: 1000, validated: 0, word_count: 3,
+        target_lang: '', lane_id: 'lane-src',
+      },
+      // The fr row is seeded FIRST so heap order puts it ahead of the default
+      // lane's — the arrangement that made the default-lane page wrong.
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'target', value: 'au commencement', content_hash: 'fr-hash',
+        event_id: 'ev-fr-head', source_event_id: 'ev-src',
+        last_editor: 'dev', last_edit_at: 1700, validated: 1, word_count: 2,
+        target_lang: 'fr', lane_id: 'lane-fr',
+      },
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        side: 'target', value: 'al principio', content_hash: 'def-hash',
+        event_id: 'ev-def-head', source_event_id: 'ev-src',
+        last_editor: 'dev', last_edit_at: 1800, validated: 0, word_count: 2,
+        target_lang: '', lane_id: 'lane-def',
+      },
+    ],
+    cell_validators: [
+      // Only the fr lane is validated, and only by `dev`.
+      {
+        project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+        target_lang: 'fr', lane_id: 'lane-fr',
+        event_id: 'ev-fr-head', username: 'dev', decided_ts: 1750,
+      },
+    ],
+  }
+
+  interface AuditRow {
+    cellId: string
+    side: string
+    targetLang: string
+    laneId: string | null
+    lastEditEventId: string
+    activeValidators: string[]
+  }
+
+  async function readStats(seed: object, query = 'fileId=file-x'): Promise<AuditRow[]> {
+    const { db } = await makeTestDb(seed)
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
+    const req = new Request(`https://w/cells/audit-stats?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleCellsAuditReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { cells: AuditRow[] }).cells
+  }
+
+  it("marks every row with its lane, so two lanes' target rows are tellable apart", async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const targets = cells.filter((c) => c.side === 'target')
+    expect(targets).toHaveLength(2)
+    // The regression this guards: two `side: "target"` rows for one cell with no
+    // lane marker on either.
+    expect(targets.every((t) => typeof t.targetLang === 'string')).toBe(true)
+    expect(new Set(targets.map((t) => t.targetLang))).toEqual(new Set(['', 'fr']))
+    expect(targets.find((t) => t.targetLang === 'fr')!.laneId).toBe('lane-fr')
+    expect(targets.find((t) => t.targetLang === '')!.laneId).toBe('lane-def')
+  })
+
+  it('attributes validators to the lane that earned them, not to the first row', async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const fr = cells.find((c) => c.side === 'target' && c.targetLang === 'fr')!
+    const def = cells.find((c) => c.side === 'target' && c.targetLang === '')!
+    expect(fr.lastEditEventId).toBe('ev-fr-head')
+    expect(fr.activeValidators).toEqual(['dev'])
+    // The default lane is untouched by the fr validate.
+    expect(def.lastEditEventId).toBe('ev-def-head')
+    expect(def.activeValidators).toEqual([])
+  })
+
+  it('still gives the shared source row no validators, and marks it as lane-less', async () => {
+    const cells = await readStats(TWO_LANE_SEED)
+    const source = cells.find((c) => c.side === 'source')!
+    expect(source.targetLang).toBe('')
+    expect(source.activeValidators).toEqual([])
+  })
+
+  it('carries the lane on the single-cell (?cellId=) scope too', async () => {
+    const cells = await readStats(TWO_LANE_SEED, 'fileId=file-x&cellId=c1')
+    expect(cells).toHaveLength(3)
+    const fr = cells.find((c) => c.side === 'target' && c.targetLang === 'fr')!
+    expect(fr.activeValidators).toEqual(['dev'])
+  })
+
+  it('returns the same shape as before on a single-lane file', async () => {
+    const cells = await readStats({
+      cells: [
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+          side: 'target', value: 'hello world', content_hash: 'abcd1234',
+          event_id: 'ev-current', source_event_id: 'src-1',
+          last_editor: 'a', last_edit_at: 1700, validated: 1, word_count: 2,
+        },
+      ],
+      cell_validators: [
+        {
+          project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
+          event_id: 'ev-current', username: 'alice', decided_ts: 1750,
+        },
+      ],
+    })
+    expect(cells).toHaveLength(1)
+    expect(cells[0].targetLang).toBe('')
+    expect(cells[0].activeValidators).toEqual(['alice'])
+  })
+})

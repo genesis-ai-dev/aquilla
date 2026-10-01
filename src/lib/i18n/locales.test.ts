@@ -9,6 +9,7 @@ import {
 } from "./locales"
 import { CATALOGS } from "./messages"
 import { detectInitialLocale } from "./store"
+import { isPluralMessage } from "./plurals"
 
 describe("locale registry", () => {
   it("English is the default and is LTR", () => {
@@ -73,6 +74,57 @@ describe("Malay is offered under its real code, not Patani Malay's (AQU-1306)", 
   })
 })
 
+describe("Indonesian (AQU-869)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const indonesian = LOCALES.find((l) => l.code === "id")
+    expect(indonesian).toBeDefined()
+    expect(indonesian?.englishName).toBe("Indonesian")
+    expect(indonesian?.nativeName).toBe("Bahasa Indonesia")
+    expect(indonesian?.dir).toBe("ltr")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    // Same bar as every other locale: registering the code is not the
+    // deliverable, the strings are. An empty catalog falls back to English per
+    // key and would look, from the switcher alone, exactly like a working one.
+    expect(Object.keys(CATALOGS.id ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("is Indonesian, not Malay wearing an Indonesian label (AQU-1306)", () => {
+    // `id` and `ms` are close relatives, so the cheap way to produce this
+    // catalog would have been to transform the Malay one. The UI register is
+    // where that shortcut shows: these pairs mean the same thing and differ by
+    // language, so Malay forms appearing under `id` mean the wrong language
+    // shipped — the exact defect AQU-1306 was filed for, under a new code.
+    const id = CATALOGS.id ?? {}
+    const values = Object.values(id).filter((v): v is string => typeof v === "string")
+    const joined = values.join("\n").toLowerCase()
+    for (const malayOnly of ["muat naik", "muat turun", "pratonton", "tetapan", "projek"]) {
+      expect(joined).not.toContain(malayOnly)
+    }
+    expect(id["common.save"]).toBe("Simpan")
+    expect(id["common.delete"]).toBe("Hapus")
+    expect(id["common.preview"]).toBe("Pratinjau")
+    expect(id["common.project"]).toBe("Proyek")
+    expect(id["nav.settings"]).toBe("Pengaturan")
+    expect(id["common.comments"]).toBe("Komentar")
+  })
+  it("addresses the reader as `Anda`, never `kamu`", () => {
+    // One register throughout. `kamu` is the familiar form; a Bible-translation
+    // team reading their own tooling should not be addressed like a child.
+    const values = Object.values(CATALOGS.id ?? {}).filter((v): v is string => typeof v === "string")
+    expect(values.filter((v) => /\bkamu\b/i.test(v))).toEqual([])
+    expect(values.some((v) => /\bAnda\b/.test(v))).toBe(true)
+  })
+  it("migrates the retired `in` code instead of dropping it to English", () => {
+    // `in` is Indonesian's pre-1989 ISO 639-1 code. It shares no primary subtag
+    // with `id`, so without the alias the subtag branch cannot save it.
+    expect(LOCALE_ALIASES.in).toBe("id")
+    expect(normalizeLocale("in")).toBe("id")
+    expect(detectInitialLocale("in", "en-US")).toBe("id")
+    expect(normalizeLocale("id")).toBe("id")
+    expect(normalizeLocale("id-ID")).toBe("id")
+  })
+})
+
 describe("Simplified Chinese (AQU-978)", () => {
   it("is registered as a selectable LTR locale under its script subtag", () => {
     const zhHans = LOCALES.find((l) => l.code === "zh-Hans")
@@ -113,6 +165,44 @@ describe("Traditional Chinese (AQU-976)", () => {
   })
   it("resolves to itself rather than falling through to zh-Hans", () => {
     expect(normalizeLocale("zh-Hant")).toBe("zh-Hant")
+  })
+})
+
+describe("Russian (AQU-1226)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const ru = LOCALES.find((l) => l.code === "ru")
+    expect(ru).toBeDefined()
+    expect(ru?.dir).toBe("ltr")
+    // Cyrillic is LTR; the switcher lists locales by endonym, so this is the
+    // string a Russian reader scans the menu for.
+    expect(ru?.nativeName).toBe("\u0420\u0443\u0441\u0441\u043a\u0438\u0439")
+    expect(ru?.englishName).toBe("Russian")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    // Registering the locale is not the deliverable — the strings are. An empty
+    // catalog falls back to English per key and would look, from the switcher
+    // alone, exactly like a working locale.
+    expect(Object.keys(CATALOGS.ru ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("resolves region and script variants onto it", () => {
+    expect(normalizeLocale("ru")).toBe("ru")
+    expect(normalizeLocale("ru-RU")).toBe("ru")
+    expect(detectInitialLocale(null, "ru-RU")).toBe("ru")
+  })
+  it("supplies Russian's one/few/many forms for a count-governed key", () => {
+    // Russian has four categories where English wrote two, so a catalog that
+    // only carried English's pair would read ungrammatically at 2 and at 5 —
+    // see plurals.ts. Assert the forms are actually present, not just the key.
+    const counted = CATALOGS.ru?.["common.cellCount"]
+    expect(counted, "common.cellCount must be count-governed in ru").toBeDefined()
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "few", "many", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+      expect(counted.forms.one).not.toBe(counted.forms.few)
+      expect(counted.forms.few).not.toBe(counted.forms.many)
+    }
   })
 })
 

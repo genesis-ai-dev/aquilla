@@ -12,9 +12,11 @@ import {
   type PatchResult,
   type ProjectWideSettings,
   type ProjectSettingsResponse,
+  type ProjectLaneView,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -102,6 +104,71 @@ const AUTOPILOT_KEY = "autopilotEnabled"
 export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
   const keys = Object.keys(partial)
   return keys.length > 0 && keys.every((key) => key === AUTOPILOT_KEY)
+}
+
+/**
+ * Copy one settings key across. Generic over the key so both sides of the
+ * assignment are the same `ProjectWideSettings[K]`; a write keyed by the whole
+ * `keyof` union does not typecheck, which is why the call sites below used to
+ * cast the value away.
+ */
+function copySettingsKey<K extends keyof ProjectWideSettings>(
+  target: ProjectWideSettings,
+  source: ProjectWideSettings,
+  key: K,
+): void {
+  target[key] = source[key]
+}
+
+/**
+ * Roll a settings snapshot back to server truth for exactly the keys a
+ * rejected patch tried to write: a key the server stores takes its stored
+ * value back, a key it does not know is dropped, and anything outside the
+ * write attempt is left alone.
+ */
+function rollbackRejectedKeys(
+  prev: ProjectWideSettings,
+  partial: ProjectWideSettings,
+  snapTarget: ProjectWideSettings,
+): ProjectWideSettings {
+  const next = { ...prev }
+  for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
+    if (key in snapTarget) {
+      copySettingsKey(next, snapTarget, key)
+    } else {
+      delete next[key]
+    }
+  }
+  return next
+}
+
+/**
+ * AQU-1408: interlinear alignment seeds — what a member writes by confirming
+ * (✓) or rejecting (✕) a word-alignment suggestion in the BT tab. A patch that
+ * touches only this key is admitted at contributor(400)+.
+ *
+ * This carve-out exists because the panel's confirm/reject buttons are shown to
+ * every project member, so under the flat maintainer floor they were a
+ * silently dead control below 600: the in-memory model moved, the AQU-255
+ * guard (correctly) refused the below-floor local apply, and the seed never
+ * reached the server — the decision was simply gone on reload.
+ *
+ * Contributor matches `cell.backtranslation.set` in the sync perimeter's
+ * role policy, which is the same act at a different grain: saying what the
+ * words of a translation mean.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only this key changed" test against the stored
+ * row and remains authoritative.
+ */
+export const ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR = ROLE.CONTRIBUTOR
+
+const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
+
+/** True when a patch changes the alignment seeds and nothing else. */
+export function isAlignmentSeedsOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === ALIGNMENT_SEEDS_KEY)
 }
 
 /**
@@ -199,6 +266,10 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /** AQU-1418: the project's lane rows from the last settings response.
+   *  Null before the first response that carries them, and on a server
+   *  that predates lane rows. */
+  lanes: ProjectLaneView[] | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
@@ -367,7 +438,13 @@ export function useProjectSettings(
     [],
   )
 
-  const mountAtRef = useRef(performance.now())
+  // AQU-1470: count this instance toward the project's open so the hydration
+  // event fires once per open, not once per instance or refetch. Declared
+  // before the fetch effect so the open exists when the first GET resolves.
+  useEffect(() => {
+    if (!projectId) return
+    return retainProjectOpen(projectId)
+  }, [projectId])
 
   // AQU-979: stable per-instance id so this hook can ignore the settings-updated
   // event it broadcast itself (it already holds the authoritative response).
@@ -399,12 +476,14 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
     }
+    if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -448,10 +527,11 @@ export function useProjectSettings(
       const got = out.value
       writeServer(got)
       setHasFetched(true)
-      if (got) {
+      const withinMs = got ? claimHydrationReport(projectId) : null
+      if (got && withinMs !== null) {
         posthog.capture("project settings hydrated", {
           project_id: projectId,
-          within_ms: Math.round(performance.now() - mountAtRef.current),
+          within_ms: withinMs,
           has_server_row: got.version > 0,
           // AQU-1274 — see UseProjectSettingsOptions.roleTelemetry.
           ...(roleTelemetryRef.current
@@ -657,11 +737,7 @@ export function useProjectSettings(
         patchProjectSettings(jwt, projectId, local, baseVersion),
       )
       if (!aliveRef.current) return
-      const nonEmptyCount = Object.keys(local).filter((k) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key indexing into settings object; TS can't narrow string-keyed access
-        const v = (local as any)[k]
-        return v !== "" && v != null
-      }).length
+      const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServer(out.value)
         posthog.capture("project settings migrated", {
@@ -694,13 +770,14 @@ export function useProjectSettings(
     // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
     //
-    // AQU-822 / AQU-1086 / AQU-1246: the required floor is
-    // SETTINGS_EDIT_ROLE_FLOOR (maintainer) for every patch EXCEPT three
+    // AQU-822 / AQU-1086 / AQU-1246 / AQU-1408: the required floor is
+    // SETTINGS_EDIT_ROLE_FLOOR (maintainer) for every patch EXCEPT the
     // single-scope carve-outs — a terminology-only one (org's configured
-    // termbaseEditMinRole), a language-only one (org's configured
-    // languageEditMinRole), and an autopilotEnabled-only one (project_lead).
-    // Deriving it per-patch (rather than loosening the hook-wide floor) keeps
-    // the AQU-255 guarantee intact for all the other keys.
+    // termbaseEditMinRole), a countStructuralCells-only one (project_lead), a
+    // language-only one (org's configured languageEditMinRole), an
+    // autopilotEnabled-only one (project_lead), and an alignmentSeeds-only one
+    // (contributor). Deriving it per-patch (rather than loosening the
+    // hook-wide floor) keeps the AQU-255 guarantee intact for all other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
@@ -727,6 +804,7 @@ export function useProjectSettings(
       : isCountStructuralOnlyPatch(partial) ? ROLE.PROJECT_LEAD
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
+      : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
       : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
@@ -827,21 +905,10 @@ export function useProjectSettings(
       // the optimistic local state we applied above — do not silently retain the
       // rejected value per AQU-255 acceptance criteria.
       void refresh() // revert optimistic overlay by re-fetching truth
-      const snapTarget = serverRef.current?.settings ?? {}
-      setLocal((prev) => {
-        // Remove keys from partial that the server rejected; keep anything
-        // that wasn't part of this write attempt.
-        const next = { ...prev }
-        for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-          if (key in snapTarget) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment; TS can't narrow the value type for string-keyed writes on a record type
-            next[key] = snapTarget[key] as any
-          } else {
-            delete next[key]
-          }
-        }
-        return next
-      })
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      // Remove keys from partial that the server rejected; keep anything
+      // that wasn't part of this write attempt.
+      setLocal((prev) => rollbackRejectedKeys(prev, partial, snapTarget))
       void patchProject(projectId, (existing) => {
         // Roll back IDB keys to server truth for the keys in partial.
         const next = { ...existing }
@@ -865,17 +932,11 @@ export function useProjectSettings(
     // permanently diverge from server truth.
     void refresh()
     setLocal((prev) => {
-      const snapTarget = serverRef.current?.settings ?? {}
-      const next = { ...prev }
-      for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-        if (key in snapTarget) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during optimistic rollback; TS can't narrow string-keyed writes
-          next[key] = snapTarget[key] as any
-        } else {
-          delete next[key]
-        }
-      }
-      return next
+      // Read inside the updater, not at the call site: `refresh()` above is in
+      // flight, so the snapshot this resolves to is whatever the ref holds when
+      // React runs the update.
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
@@ -887,6 +948,7 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
+    lanes,
     isOnline,
     canEdit,
     reasonCannotEdit,

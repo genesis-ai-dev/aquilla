@@ -69,12 +69,36 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-581: whether a member below the assignment floor who carries lane
+   * scopes (AQU-553) may emit `assignment.create` for OTHER people, inside
+   * the target-language lanes they are scoped to. This is how an org names a
+   * mentor/coordinator who hands out chapters in one lane without also
+   * granting org-admin rights.
+   *
+   * Default (when absent) = false. The setting alone grants nothing — the
+   * caller must also be lane-scoped, so turning it on does NOT give every
+   * contributor assignment rights. Leads/maintainers can always assign
+   * regardless. Same OWNER-only write gate as allowSelfAssignment. Enforced
+   * server-side in sync-worker (authorize.ts lane-delegate carve-out).
+   */
+  allowScopedLaneAssignment?: boolean
+  /**
    * AQU-1083: the org-wide default for whether structural cells — chapter
    * headings, section titles, book names — count toward progress. Unset means
    * they DO, which is what every project did before this existed. A project
    * may override it.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1391: the org-wide default for repetition auto-propagation —
+   * validating a cell copies its translation into every other cell in the
+   * file whose source text is identical (the "repetitions" behaviour of
+   * Trados/memoQ/Matecat).
+   *
+   * Unset means ON, which is what CAT-tool users expect and what the feature
+   * shipped with. A project may override it either way.
+   */
+  autoPropagateRepetitions?: boolean
   /**
    * AQU-1037: Minimum effective project role allowed to assign, reassign, or
    * unassign file/chapter/target-lane work and route AI changesets. Default

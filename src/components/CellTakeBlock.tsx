@@ -84,6 +84,8 @@ export interface CellTakeBlockProps {
    * ever moving the highlight. Omit for a linked take the row does not play.
    */
   controller?: UseCellAudioResult
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -120,6 +122,7 @@ function CellTakeBlockView({
   recordLabel,
   readOnlyTranscript = false,
   controller,
+  targetLang,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -136,6 +139,7 @@ function CellTakeBlockView({
     username,
     onCommitted,
     jwt: session?.jwt ?? null,
+    ...(targetLang ? { targetLang } : {}),
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 
@@ -188,12 +192,13 @@ function CellTakeBlockView({
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
         ...(isSourceSegmentSelected(owner) ? { transcription: corrected } : {}),
+        ...(targetLang ? { targetLang } : {}),
         author: username,
       }).catch((err) => {
         console.warn("[transcript] correct emit failed:", err)
       })
     },
-    [owner, selectedAudioId, timings, attachment, project.id, username],
+    [owner, selectedAudioId, timings, attachment, project.id, username, targetLang],
   )
 
   return (
@@ -285,6 +290,7 @@ function CellTakeBlockView({
                 author={username}
                 session={session}
                 editable={editable}
+                targetLang={targetLang}
               />
             )}
           </>

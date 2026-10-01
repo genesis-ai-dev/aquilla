@@ -62,7 +62,10 @@ function hasStoredDecline(id: AiModelInfo["id"]): boolean {
   try { return localStorage.getItem(KEY_PREFIX + id) === DECLINED } catch { return false }
 }
 
-function storeConsent(id: AiModelInfo["id"]): void {
+/** Explicit settings downloads grant the same consent as the dialog — and
+ *  overwrite a prior Cancel, so transcription is not left off after the
+ *  operator opts in. */
+export function storeAiModelConsent(id: AiModelInfo["id"]): void {
   if (typeof localStorage === "undefined") return
   try { localStorage.setItem(KEY_PREFIX + id, GRANTED) } catch { /* private mode */ }
 }
@@ -70,12 +73,6 @@ function storeConsent(id: AiModelInfo["id"]): void {
 function storeDecline(id: AiModelInfo["id"]): void {
   if (typeof localStorage === "undefined") return
   try { localStorage.setItem(KEY_PREFIX + id, DECLINED) } catch { /* private mode */ }
-}
-
-/** Remember an explicit download from Preferences so a prior Cancel does not
- *  keep transcription off after the operator opts in. */
-export function storeModelConsent(id: AiModelInfo["id"]): void {
-  storeConsent(id)
 }
 
 /**
@@ -139,7 +136,7 @@ export function requestAiModelConsent(
         // deny coalesced waiters or skip storing consent.
         if (settled) return
         settled = true
-        if (granted) storeConsent(model.id)
+        if (granted) storeAiModelConsent(model.id)
         else storeDecline(model.id)
         pending = null
         notify()

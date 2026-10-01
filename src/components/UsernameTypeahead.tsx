@@ -8,6 +8,7 @@ import {
   InputGroupText,
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
@@ -263,40 +264,28 @@ export function UsernameTypeahead({
     <div ref={containerRef} className="relative space-y-1">
       <div className="flex items-center gap-1.5">
         {showModeToggle && (
-          <div className="inline-flex shrink-0 rounded-md border bg-muted/20 p-0.5 text-[10px]">
-            <AppTooltip content={t("workspace.typeahead.usernameModeTooltip")}>
-              <span className="inline-flex">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("username")}
-                  disabled={disabled}
-                  className={`rounded px-1.5 py-0.5 ${
-                    value.mode === "username"
-                      ? "bg-background text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
+          // AQU-1153: the mode switch is the app's shared Tabs control, not a
+          // hand-rolled pill pair, so it reads identically to every other
+          // two-way switch (cf. the voice-design mode tabs). Tooltips and the
+          // clear-on-switch behaviour are unchanged.
+          <Tabs
+            value={value.mode}
+            onValueChange={(next) => handleSwitchMode(next as RecipientMode)}
+            className="shrink-0 gap-0"
+          >
+            <TabsList>
+              <AppTooltip content={t("workspace.typeahead.usernameModeTooltip")}>
+                <TabsTrigger value="username" disabled={disabled}>
                   {t("workspace.typeahead.usernameModeLabel")}
-                </button>
-              </span>
-            </AppTooltip>
-            <AppTooltip content={t("workspace.typeahead.emailModeTooltip")} className="max-w-xs">
-              <span className="inline-flex">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("email")}
-                  disabled={disabled}
-                  className={`rounded px-1.5 py-0.5 ${
-                    value.mode === "email"
-                      ? "bg-background text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
+                </TabsTrigger>
+              </AppTooltip>
+              <AppTooltip content={t("workspace.typeahead.emailModeTooltip")} className="max-w-xs">
+                <TabsTrigger value="email" disabled={disabled}>
                   {t("common.email")}
-                </button>
-              </span>
-            </AppTooltip>
-          </div>
+                </TabsTrigger>
+              </AppTooltip>
+            </TabsList>
+          </Tabs>
         )}
 
         <InputGroup className="flex-1">

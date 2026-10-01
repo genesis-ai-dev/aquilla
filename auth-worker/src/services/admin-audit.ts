@@ -1,0 +1,106 @@
+// Audit trail for membership changes made by a platform admin (AQU-1322).
+//
+// Platform admins can change org and project membership on tenants they do not
+// belong to (support work). Those changes go through the ordinary member
+// routes, so nothing marked them as admin actions. This helper writes one
+// `admin_audit_log` row per change, but only when the ACTING user is a platform
+// admin; every other caller gets a no-op, so their requests behave as before.
+//
+// Actions (dotted, like 'elevation.grant' and 'settings.update'):
+//   org.member.add | org.member.role | org.member.remove
+//   project.member.grant | project.member.role | project.member.remove
+//   project.member.revoke_all
+//
+// The row is best-effort: it is written after the membership change has
+// committed, and a failed insert is logged, not thrown, because a 500 at that
+// point would tell the admin the change failed when it did not (and, in a
+// batch, would skip the remaining people). Same choice as admin-billing.ts.
+
+import type { AuthUser, Env } from "../types"
+import { isPlatformAdminEmail } from "../middleware/platform-admin"
+
+export type MembershipAuditAction =
+  | "org.member.add"
+  | "org.member.role"
+  | "org.member.remove"
+  | "project.member.grant"
+  | "project.member.role"
+  | "project.member.remove"
+  | "project.member.revoke_all"
+
+type MembershipScope =
+  | { scope: "org"; orgId: number }
+  | { scope: "project"; projectId: string }
+
+type ActingUser = Pick<AuthUser, "id" | "username" | "email">
+
+export const isAdminActor = (env: Env, actor: ActingUser): boolean =>
+  isPlatformAdminEmail(env, actor.email)
+
+/**
+ * The target's role in this org/project before the change, or null when they
+ * have no direct row. Queries only for platform admins so other callers pay
+ * nothing for the audit.
+ */
+export async function priorMembershipRole(
+  env: Env,
+  actor: ActingUser,
+  where: MembershipScope,
+  targetUserId: number,
+): Promise<number | null> {
+  if (!isAdminActor(env, actor)) return null
+  const row =
+    where.scope === "org"
+      ? await env.AQUILLA_PG.prepare(
+          "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
+        )
+          .bind(where.orgId, targetUserId)
+          .first<{ role_level: number }>()
+      : await env.AQUILLA_PG.prepare(
+          "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+        )
+          .bind(where.projectId, targetUserId)
+          .first<{ role_level: number }>()
+  return row ? Number(row.role_level) : null
+}
+
+export async function auditMembershipChange(
+  env: Env,
+  actor: ActingUser,
+  entry: {
+    action: MembershipAuditAction
+    where: MembershipScope
+    target: { id: number; username?: string }
+    roleBefore: number | null
+    roleAfter: number | null
+  },
+): Promise<void> {
+  if (!isAdminActor(env, actor)) return
+  try {
+    const targetUsername =
+      entry.target.username ??
+      (
+        await env.AQUILLA_PG.prepare("SELECT username FROM users WHERE id = ?")
+          .bind(entry.target.id)
+          .first<{ username: string }>()
+      )?.username ??
+      null
+    const detail = {
+      action: entry.action,
+      actor: { userId: actor.id, username: actor.username },
+      target: { userId: entry.target.id, username: targetUsername },
+      scope: entry.where.scope,
+      orgId: entry.where.scope === "org" ? entry.where.orgId : null,
+      projectId: entry.where.scope === "project" ? entry.where.projectId : null,
+      roleBefore: entry.roleBefore,
+      roleAfter: entry.roleAfter,
+    }
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, ?, ?)`,
+    )
+      .bind(actor.id, entry.action, JSON.stringify(detail))
+      .run()
+  } catch (err) {
+    console.error("[admin-audit] membership audit log failed:", err)
+  }
+}

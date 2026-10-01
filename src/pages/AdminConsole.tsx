@@ -55,7 +55,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
  * (Overview, Retention, Tenants, Teams, People, Projects, Activity) plus the editable
- * Platform tab (AI settings, compute credits, Field Plan billing). Gated by
+ * Platform tab (AI settings, AI credits, Field Plan billing). Gated by
  * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
  * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
  * gate. A non-admin who forces the route is redirected to their org overview.

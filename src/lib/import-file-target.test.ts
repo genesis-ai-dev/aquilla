@@ -593,6 +593,41 @@ describe("matchTargetRowsByOrder — pairing by source text (AQU-1375)", () => {
   })
 })
 
+// AQU-1375 changed how untimed imports explain themselves; a clean import of
+// either kind must come out exactly as it did before.
+describe("clean imports are untouched (AQU-1375)", () => {
+  it("a clean reference import: every verse matched, nothing new reported", () => {
+    const cells = [1, 2, 3].map((v) => cell({ cellId: `v${v}`, canonicalRef: `GEN 1:${v}` }))
+    const rows = usfmToTargetRows("\\id GEN\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n\\v 3 Tres\n")
+    const result = matchTargetRowsByRef(rows, cells)
+    expect(Object.keys(result).sort()).toEqual(["matched", "orphans", "uncovered", "unmatchedSourceCount"])
+    expect(result.orphans).toEqual([])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref])).toEqual([
+      ["v1", "Uno", "GEN 1:1"], ["v2", "Dos", "GEN 1:2"], ["v3", "Tres", "GEN 1:3"],
+    ])
+    for (const m of result.matched) {
+      expect(m).not.toHaveProperty("flag")
+      expect(m).not.toHaveProperty("incomingSource")
+    }
+  })
+
+  it("a clean timed subtitle import: aligned by overlap, nothing new reported", () => {
+    const cells = [1, 2, 3].map((n) => cell({ cellId: `c${n}`, startMs: n * 1000, endMs: n * 1000 + 800 }))
+    const rows = vttToTargetRows([
+      "WEBVTT", "",
+      "00:00:01.000 --> 00:00:01.800", "Uno", "",
+      "00:00:02.000 --> 00:00:02.800", "Dos", "",
+      "00:00:03.000 --> 00:00:03.800", "Tres", "",
+    ].join("\n"))
+    const result = matchTargetRowsByOrder(rows, cells)
+    expect(result.alignedBy).toBe("overlap")
+    expect(Object.keys(result).sort()).toEqual(["alignedBy", "matched", "orphans", "uncovered", "unmatchedSourceCount"])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.flag])).toEqual([
+      ["c1", "Uno", undefined], ["c2", "Dos", undefined], ["c3", "Tres", undefined],
+    ])
+  })
+})
+
 describe("usfmToTargetRows", () => {
   it("extracts verses and headings with the same refs the source import produces", () => {
     const usfm = [

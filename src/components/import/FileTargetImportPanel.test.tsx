@@ -912,11 +912,14 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     expect(screen.getByText("This file is for Exodus 1; the open file is Genesis 1.")).toHaveClass("text-amber-600")
   })
 
-  it("says nothing of the kind for the right file", async () => {
+  it("says nothing of the kind for the right file — a clean import reviews exactly as before", async () => {
     renderPanel()
     await selectFile(makeFile(USFM_FIXTURE))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    expect(screen.queryByText(/This file is for/)).not.toBeInTheDocument()
+    for (const note of [/This file is for/, /Matched in order/, /in this file:/, /Paired with lines/, /didn't find a line/]) {
+      expect(screen.queryByText(note)).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText("Source differs")).not.toBeInTheDocument()
   })
 
   it("says a spreadsheet was matched in order, and when its row count differs from the file's", async () => {

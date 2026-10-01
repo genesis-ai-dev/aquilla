@@ -1484,7 +1484,7 @@ export const my: Catalog = {
   "audio.recordingModal.nextCellTooltip": "နောက်ဆဲလ် (→)",
   "audio.recordingModal.retakeTooltip": "ပြန်သွင်းရန် (Esc)",
   "audio.recordingModal.retakeButton": "ပြန်သွင်းရန်",
-  "audio.recordingModal.saveTooltip": "သိမ်းရန် (Space သို့မဟုတ် Enter)",
+  "audio.recordingModal.saveTooltip": "သိမ်းရန် (Enter)",
   "audio.recordingModal.stopTooltip": "ရပ်ရန် (Space သို့မဟုတ် Esc)",
   "audio.recordingModal.startButton": "စတင်ရန်",
   "audio.recordingModal.startTooltip": "အသံသွင်း စတင်ရန် (Space)",

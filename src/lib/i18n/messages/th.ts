@@ -1483,7 +1483,7 @@ export const th: Catalog = {
   "audio.recordingModal.nextCellTooltip": "เซลล์ถัดไป (→)",
   "audio.recordingModal.retakeTooltip": "อัดใหม่ (Esc)",
   "audio.recordingModal.retakeButton": "อัดใหม่",
-  "audio.recordingModal.saveTooltip": "บันทึก (Space หรือ Enter)",
+  "audio.recordingModal.saveTooltip": "บันทึก (Enter)",
   "audio.recordingModal.stopTooltip": "หยุด (Space หรือ Esc)",
   "audio.recordingModal.startButton": "เริ่ม",
   "audio.recordingModal.startTooltip": "เริ่มบันทึกเสียง (Space)",

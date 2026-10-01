@@ -1483,7 +1483,7 @@ export const zh_Hans: Catalog = {
   "audio.recordingModal.nextCellTooltip": "下一个单元格 (→)",
   "audio.recordingModal.retakeTooltip": "重录 (Esc)",
   "audio.recordingModal.retakeButton": "重录",
-  "audio.recordingModal.saveTooltip": "保存 (Space 或 Enter)",
+  "audio.recordingModal.saveTooltip": "保存 (Enter)",
   "audio.recordingModal.stopTooltip": "停止 (Space 或 Esc)",
   "audio.recordingModal.startButton": "开始",
   "audio.recordingModal.startTooltip": "开始录音 (Space)",

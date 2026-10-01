@@ -43,6 +43,8 @@ export interface DenoiseTakeArgs {
   sourceUrl: string
   author: string
   session: FrontierSession | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export interface DenoiseTakeResult {
@@ -99,6 +101,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       mimeType: blob.type || undefined,
       referenceAudioId: sourceAudioId,
       durationMs: Math.round(durationMs),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author,
     })
   } catch (emitErr) {

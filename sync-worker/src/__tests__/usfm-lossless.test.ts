@@ -271,3 +271,110 @@ describe("serializeUsfmLossless — removing a verse the editor deleted", () => 
     expect(serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 9:99"]) })).toBe(BOOK)
   })
 })
+
+// AQU-865: Gretchen (Biblica Global Publishing) reported a native export writing
+// only the LAST number of a verse range — "\v 1-3" coming back as "\v 3". This is
+// where Aquilla's USFM export actually happens (export-route.ts /
+// export-bundle-route.ts both parse the stored original and serialize through
+// here), so this is where the property has to be pinned: the `\v` token is copied
+// out of the client's own bytes and only the TEXT span between markers is
+// substituted, so no verse number is ever recomposed from a parsed value.
+// Mirrored in src/lib/parsers/usfm-lossless.test.ts.
+describe("serializeUsfmLossless — verse-range labels (AQU-865)", () => {
+  const RANGE_BOOK = [
+    "\\id GEN",
+    "\\c 1",
+    "\\p",
+    "\\v 1-3 En el principio creó Dios los cielos y la tierra.",
+    "\\v 4a Y vio Dios que la luz era buena,",
+    "\\v 4b y separó la luz de las tinieblas.",
+    "\\v 5 Y llamó Dios a la luz Día.",
+    "",
+  ].join("\n")
+
+  /** Every verse token the file actually carries, in document order. */
+  const verseTokens = (usfm: string): string[] =>
+    [...usfm.matchAll(/\\v (\S+)/g)].map((m) => m[1])
+
+  it("parses the range as one verse whose ref carries the whole range", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    expect(doc.verses.map((v) => v.ref)).toEqual([
+      "GEN 1:1-3",
+      "GEN 1:4a",
+      "GEN 1:4b",
+      "GEN 1:5",
+    ])
+  })
+
+  it("keeps the full range on the marker when the range verse is translated", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, new Map([["GEN 1:1-3", "In the beginning God created."]]))
+    expect(out).toContain("\\v 1-3 In the beginning God created.")
+    // The reported defect: the range collapsed to its last (or first) member.
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("keeps a suffixed verse token intact too", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, new Map([["GEN 1:4a", "And God saw the light was good,"]]))
+    expect(out).toContain("\\v 4a And God saw the light was good,")
+    expect(out).toContain("\\v 4b y separó la luz de las tinieblas.")
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("re-parses to the SAME refs — no range is renumbered or expanded", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(
+      doc,
+      new Map([
+        ["GEN 1:1-3", "In the beginning God created."],
+        ["GEN 1:5", "And God called the light Day."],
+      ]),
+    )
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual([
+      "GEN 1:1-3",
+      "GEN 1:4a",
+      "GEN 1:4b",
+      "GEN 1:5",
+    ])
+  })
+
+  it("leaves an untranslated range verse byte-identical", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    expect(serializeUsfmLossless(doc, new Map([["GEN 1:5", "Day."]]))).toContain(
+      "\\v 1-3 En el principio creó Dios los cielos y la tierra.",
+    )
+    expect(serializeUsfmLossless(doc)).toBe(RANGE_BOOK)
+  })
+
+  it("counts a translated range verse once for the lossy-verse warning", () => {
+    // AQU-276's honesty counter addresses verses by the same ref, so a range
+    // must be reachable there too — otherwise a range with intra-verse markup
+    // would be silently excluded from the warning.
+    const withMarkup = RANGE_BOOK.replace(
+      "\\v 1-3 En el principio",
+      "\\v 1-3 \\nd Dios\\nd* en el principio",
+    )
+    const doc = parseUsfmLossless(withMarkup)
+    expect(countLossyVerses(doc, new Map([["GEN 1:1-3", "In the beginning."]]))).toBe(1)
+  })
+
+  it("appends an added cell to the range verse without inventing a number", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, undefined, {
+      appendAfter: new Map([["GEN 1:1-3", ["Contenido añadido."]]]),
+    })
+    expect(out).toContain("\\v 1-3 En el principio creó Dios los cielos y la tierra. Contenido añadido.")
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("removes a range verse whole — marker and range together", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:1-3"]) })
+    // Neither the words nor a bare/partial marker may survive. A leftover
+    // "\v 1" or "\v 3" here would BE the reported bug, arrived at by deletion.
+    expect(out).not.toContain("En el principio")
+    expect(verseTokens(out)).toEqual(["4a", "4b", "5"])
+    expect(out).toContain("\\v 4a Y vio Dios que la luz era buena,")
+  })
+})

@@ -16,7 +16,7 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
 import { listInworldSupportedLanguages } from "./inworld-supported-languages"
-import { verifyTokenForFile, verifyTokenForProject } from "./auth"
+import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
 import { recordCredit } from "./credits"
 import {
@@ -42,6 +42,30 @@ import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/share
 // real batch-narration session (many short clips in one sitting) never trips
 // it, tight enough to blunt a flood against the shared Inworld endpoint.
 const TTS_MAX_PER_USER_PER_WINDOW = 200
+
+// Voice design/publish call the paid Inworld API and mutate the shared voice
+// library, so they get a contributor floor (matching audio writes) and a much
+// tighter per-user throttle than synthesis.
+const TTS_VOICE_MUTATION_MAX_PER_USER_PER_WINDOW = 30
+
+async function guardVoiceMutation(
+  env: TtsEnv,
+  claims: { userId: number | string; role: number },
+  bucket: "tts_voice_design" | "tts_voice_publish",
+): Promise<Response | null> {
+  if (claims.role < WRITE_ROLE_LEVEL) {
+    return new Response("insufficient role", { status: 403 })
+  }
+  const db = env.AQUILLA_PG
+  if (!db) return new Response("database not configured", { status: 500 })
+  const identifier = `user:${claims.userId}`
+  const recent = await countRecentRateLimitEvents(db, bucket, identifier)
+  if (recent >= TTS_VOICE_MUTATION_MAX_PER_USER_PER_WINDOW) {
+    return Response.json({ error: "rate_limited", message: "Too many requests, slow down." }, { status: 429 })
+  }
+  await recordRateLimitEvent(db, bucket, identifier)
+  return null
+}
 
 export interface TtsEnv {
   SNAPSHOTS: R2Bucket
@@ -270,8 +294,8 @@ export async function handleTtsRequest(
     durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0
   } catch (err) {
     console.error("[tts] upstream unreachable:", err)
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(message, { status: 502 })
+    console.error("[tts] upstream voice request failed", err)
+    return new Response("voice provider request failed", { status: 502 })
   }
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     console.warn(
@@ -344,8 +368,8 @@ async function handleListSupportedLanguages(
     const languages = await listInworldSupportedLanguages(config)
     return Response.json({ languages })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(message, { status: 502 })
+    console.error("[tts] upstream voice request failed", err)
+    return new Response("voice provider request failed", { status: 502 })
   }
 }
 
@@ -390,8 +414,8 @@ async function handleListTtsVoices(
     const voices = await listInworldVoices(config, languages, { allSystem })
     return Response.json({ voices })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(message, { status: 502 })
+    console.error("[tts] upstream voice request failed", err)
+    return new Response("voice provider request failed", { status: 502 })
   }
 }
 
@@ -447,6 +471,9 @@ async function handleDesignTtsVoice(request: Request, env: TtsEnv): Promise<Resp
     return new Response(verified.reason, { status: verified.status })
   }
 
+  const blocked = await guardVoiceMutation(env, verified.claims, "tts_voice_design")
+  if (blocked) return blocked
+
   try {
     const designPromptMode = parseInworldDesignPromptMode(body.designPromptMode)
     const previewVoices = await designInworldVoice(config, {
@@ -458,8 +485,8 @@ async function handleDesignTtsVoice(request: Request, env: TtsEnv): Promise<Resp
     })
     return Response.json({ previewVoices })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(message, { status: 502 })
+    console.error("[tts] upstream voice request failed", err)
+    return new Response("voice provider request failed", { status: 502 })
   }
 }
 
@@ -504,6 +531,9 @@ async function handlePublishTtsVoice(request: Request, env: TtsEnv): Promise<Res
     return new Response(verified.reason, { status: verified.status })
   }
 
+  const blocked = await guardVoiceMutation(env, verified.claims, "tts_voice_publish")
+  if (blocked) return blocked
+
   try {
     const publishedId = await publishInworldVoice(config, {
       voiceId,
@@ -512,7 +542,7 @@ async function handlePublishTtsVoice(request: Request, env: TtsEnv): Promise<Res
     })
     return Response.json({ voiceId: publishedId })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return new Response(message, { status: 502 })
+    console.error("[tts] upstream voice request failed", err)
+    return new Response("voice provider request failed", { status: 502 })
   }
 }

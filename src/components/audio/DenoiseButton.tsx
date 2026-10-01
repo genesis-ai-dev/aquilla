@@ -40,6 +40,8 @@ interface Props {
   author: string
   session: FrontierSession | null
   editable: boolean
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export function DenoiseButton(props: Props) {
@@ -47,6 +49,7 @@ export function DenoiseButton(props: Props) {
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
+    targetLang,
   } = props
 
   const [processing, setProcessing] = useState(false)
@@ -68,6 +71,7 @@ export function DenoiseButton(props: Props) {
         sourceUrl: selectedUrl,
         author,
         session,
+        ...(targetLang ? { targetLang } : {}),
       })
       // Success: the cleaned take is optimistically selected, so this component
       // re-renders into the "Noise removed" state on the next pass.
@@ -76,7 +80,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setProcessing(false)
     }
-  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session])
+  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session, targetLang])
 
   const handleRevert = useCallback(async () => {
     if (!referenceAudioId || reverting) return
@@ -90,6 +94,7 @@ export function DenoiseButton(props: Props) {
         projectId, fileId, cellId,
         audioId: referenceAudioId,
         slot: "recording",
+        ...(targetLang ? { targetLang } : {}),
         author,
       })
       if (originalUrl) {
@@ -112,7 +117,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang])
 
   if (isDenoised) {
     return (

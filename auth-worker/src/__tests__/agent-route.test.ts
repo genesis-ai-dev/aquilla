@@ -382,6 +382,69 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
   })
 
+  // AQU-1455: with no file open the live model either asked "which file?"
+  // without calling a tool (the prompt told it to), or called read with
+  // fileId ":file" / "" and got an error that named no files. Either way the
+  // one-document auto-pick and the AQU-1468 buttons never ran. These replay
+  // the argument shapes the model actually sent, through the route.
+  describe("no file open", () => {
+    const SECOND_FILE = "66666666-6666-4666-8666-666666666666"
+    const readCall = (args: Record<string, unknown>) => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id: "tc1", type: "function", function: { name: "read", arguments: JSON.stringify(args) } }],
+    })
+
+    async function seedFiles(count: 1 | 2) {
+      await seedProjectWorld()
+      const rows: [string, string, string][] = [[FILE, "Genesis", "GEN"]]
+      if (count === 2) rows.push([SECOND_FILE, "Mark", "MRK"])
+      for (const [id, name, book] of rows) {
+        await env.AQUILLA_PG.prepare(
+          `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, ?, ?, ?)`,
+        )
+          .bind(id, PROJECT, name, book, crypto.randomUUID())
+          .run()
+      }
+    }
+
+    async function runUnfocused(args: Record<string, unknown>) {
+      const script = [readCall(args), { role: "assistant", content: "Which file?" }]
+      const systemPrompts: string[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
+        systemPrompts.push(body.messages[0].content)
+        return modelTurn(script.shift()!)
+      })
+      const res = await postRun(await jwtFor("alice"), {
+        projectId: PROJECT,
+        messages: [{ role: "user", content: "translate the first 5 cells" }],
+      })
+      const frames = parseFrames(await res.text())
+      return { result: frames.find((f) => f.type === "code_result")!, systemPrompt: systemPrompts[0] }
+    }
+
+    it("tells the model to read first, and an unbound :file returns the files to choose from", async () => {
+      await seedFiles(2)
+      const { result, systemPrompt } = await runUnfocused({ fileId: ":file", filter: "untranslated" })
+
+      expect(systemPrompt).toContain("your FIRST step is read with no fileId and no ref")
+      expect(result.ok).toBe(false)
+      expect(result.summary).toContain("ASK THE USER which file to work in and stop")
+      const { candidates } = result.data as { candidates: { id: string; name: string }[] }
+      expect(candidates.map((c) => c.name).sort()).toEqual(["Genesis", "Mark"])
+    })
+
+    it("a blank fileId on a one-document project reads that document", async () => {
+      await seedFiles(1)
+      const { result } = await runUnfocused({ fileId: "", filter: "untranslated" })
+
+      expect(result.ok).toBe(true)
+      const { cells } = result.data as { cells: { cellId: string; fileId: string }[] }
+      expect(cells[0]).toMatchObject({ cellId: CELL, fileId: FILE })
+    })
+  })
+
   it("streams SSE upstreams as per-token assistant_delta frames", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")
@@ -588,5 +651,96 @@ describe("GET /api/v1/ai/agent/runs — acceptance ledger", () => {
       appliedCount: 1,
       undoneCount: 1,
     })
+  })
+})
+
+// AQU-1467 — PostHog events from a real run. Producer: runAgentLoop's tool
+// dispatch; consumer: the telemetry batch POSTed to PostHog.
+describe("POST /api/v1/ai/agent/run — PostHog telemetry", () => {
+  function namedCall(id: string, name: string, args: Record<string, unknown>) {
+    return {
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+    }
+  }
+
+  async function runWithPosthog(script: Record<string, unknown>[], posthog: "ok" | "throws") {
+    await seedProjectWorld()
+    const batches: { batch: { event: string; properties: Record<string, unknown> }[] }[] = []
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/batch/")) {
+        if (posthog === "throws") throw new Error("posthog down")
+        batches.push(JSON.parse(String(init?.body)))
+        return new Response("{}")
+      }
+      return modelTurn(script.shift()!)
+    })
+    const res = await app.request(
+      "/api/v1/ai/agent/run",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({
+          projectId: PROJECT,
+          messages: [{ role: "user", content: "PROMPT-SENTINEL read it" }],
+          context: { fileId: FILE },
+        }),
+      },
+      Object.assign(Object.create(env), { OPENROUTER_API_KEY: "test-key", POSTHOG_KEY: "phc_test" }),
+    )
+    const frames = parseFrames(await res.text())
+    // The flush is not awaited when there is no executionCtx; let it settle.
+    await vi.waitFor(() => {
+      if (posthog === "ok") expect(batches).toHaveLength(1)
+    })
+    return { frames, batches }
+  }
+
+  const SCRIPT = () => [
+    namedCall("t1", "read", { fileId: FILE, ref: "GEN 1:1" }),
+    namedCall("t2", "search", { q: "zzzz-no-such-thing-anywhere" }),
+    namedCall("t3", "no_such_tool", { x: 1 }),
+    { role: "assistant", content: "REPLY-SENTINEL done" },
+  ]
+
+  it("emits one agent_tool_run per tool call with ok / nothing-to-do / error outcomes", async () => {
+    const { batches } = await runWithPosthog(SCRIPT(), "ok")
+    expect(batches).toHaveLength(1)
+    const events = batches[0].batch
+    const runs = events.filter((e) => e.event === "agent_tool_run")
+    expect(runs.map((e) => [e.properties.tool, e.properties.outcome])).toEqual([
+      ["read", "ok"],
+      ["search", "nothing-to-do"],
+      ["no_such_tool", "error"],
+    ])
+    expect(runs[0].properties.ref).toBe("GEN 1:1")
+    expect(runs[2].properties.error_class).toBeTruthy()
+    expect(events.filter((e) => e.event === "$ai_generation")).toHaveLength(4)
+    const trace = events.filter((e) => e.event === "$ai_trace")
+    expect(trace).toHaveLength(1)
+    const raw = JSON.stringify(events)
+    expect(raw).not.toContain("PROMPT-SENTINEL")
+    expect(raw).not.toContain("REPLY-SENTINEL")
+    expect(raw).not.toContain("zzzz-no-such-thing")
+  })
+
+  it("returns the same frames when the PostHog request throws", async () => {
+    const { frames } = await runWithPosthog(SCRIPT(), "throws")
+    const types = frames.map((f) => f.type).filter((t) => t !== "budget")
+    expect(types).toEqual([
+      "run_start",
+      "code_start", // read
+      "code_result",
+      "code_start", // search
+      "code_result",
+      "code_start", // unknown tool
+      "code_result",
+      "assistant_delta",
+      "usage",
+      "done",
+    ])
+    expect(frames.at(-1)).toMatchObject({ type: "done", status: "ok" })
   })
 })

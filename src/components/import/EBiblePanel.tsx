@@ -21,7 +21,8 @@ interface EBiblePanelProps {
   targetLanguage: string
   targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: scripture catalog imports land as one file per book. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   /** When provided, enables the "into target" mode toggle (AQU-191). */
   sourceCells?: SourceCellRef[]
   /** Called after a successful target-column import (no new FileReference). */
@@ -87,7 +88,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
     abortRef.current = new AbortController()
 
     try {
-      const ref = await importEBible(
+      const refs = await importEBible(
         selected,
         {
           projectId,
@@ -101,7 +102,7 @@ export function EBiblePanel({ projectId, username, sourceLanguage, targetLanguag
       )
       // Propagate the eBible translation's language code as the inferred
       // sourceLanguage so the project can seed it when unset (AQU-249).
-      await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
+      await onImported(refs, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {

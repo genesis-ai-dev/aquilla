@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type ComponentProps } from "react"
 import { Check, Search } from "lucide-react"
+import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -25,6 +26,133 @@ import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTyp
 import { RoleSelect } from "@/components/RoleSelect"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+
+/**
+ * AQU-1151: above this many rendered rows the checklist switches from a plain
+ * `<ul>` to a virtualized LegendList, so a 300-project org does not mount 300
+ * rows (each with a tooltip and a conditional role picker) every time the
+ * dialog opens or a checkbox toggles. Below the threshold, mounting everything
+ * is cheaper than virtualization bookkeeping and the box keeps its natural
+ * height, so the common small-org dialog is exactly what it always was.
+ */
+const VIRTUALIZE_ROW_THRESHOLD = 50
+/** An unselected row: `py-2` around a 20px checkbox, plus the 1px divider. */
+const ESTIMATED_ROW_HEIGHT_PX = 37
+/**
+ * The virtualized list needs a definite height to know what is on screen, so
+ * it takes the box's old `max-h-64` cap as a fixed height. Only lists longer
+ * than the threshold get here, and those always overflowed that cap anyway —
+ * the box is the same size it has always been.
+ */
+const VIRTUAL_LIST_HEIGHT_PX = 256
+
+interface ProjectChecklistRowProps {
+  project: CloudProjectSummary
+  /** The chosen role, or undefined when the project is not selected. */
+  selectedRole: RoleLevel | undefined
+  errorMsg: string | undefined
+  isDone: boolean
+  busy: boolean
+  isEmailMode: boolean
+  roleChoices: ComponentProps<typeof RoleSelect>["options"]
+  onToggle: (projectId: string) => void
+  onRoleChange: (projectId: string, level: RoleLevel) => void
+  className?: string
+}
+
+/**
+ * One project row in the add-to-projects checklist. Extracted from the dialog
+ * body so both containers render an identical row — the point of AQU-1151 is
+ * that virtualization changes only WHICH rows are mounted, never what a row
+ * is. It reads its own translations so a locale change reaches mounted rows
+ * through context rather than having to travel in LegendList's `extraData`.
+ */
+function ProjectChecklistRow({
+  project,
+  selectedRole,
+  errorMsg,
+  isDone,
+  busy,
+  isEmailMode,
+  roleChoices,
+  onToggle,
+  onRoleChange,
+  className,
+}: ProjectChecklistRowProps) {
+  const { t } = useI18n()
+  const isSelected = selectedRole !== undefined
+  return (
+    <div
+      className={`px-3 py-2 text-sm ${isSelected ? "bg-muted/40" : ""}${
+        className ? ` ${className}` : ""
+      }`}
+    >
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={isSelected}
+          aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: project.name })}
+          onClick={() => onToggle(project.id)}
+          disabled={busy}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
+            isSelected
+              ? "bg-primary border-primary text-primary-foreground"
+              : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
+          }`}
+        >
+          {isSelected && <Check className="h-3.5 w-3.5" />}
+        </button>
+        {/* AQU-1152: `truncate` alone never clipped this.
+          * The button is inline-block, and shrink-to-fit
+          * resolves a `white-space: nowrap` box to its full
+          * text width whatever the 1fr track allows — so a
+          * long name overflowed the track and painted over
+          * the role picker to its right. `max-w-full`
+          * clamps the box to the track, which is what makes
+          * the ellipsis appear. Not `w-full`: short names
+          * must keep hugging their text, hit area included.
+          */}
+        <AppTooltip content={project.name}>
+          <span className="block min-w-0">
+            <button
+              type="button"
+              onClick={() => onToggle(project.id)}
+              disabled={busy}
+              className="min-w-0 max-w-full truncate text-start hover:text-foreground disabled:opacity-50"
+            >
+              {project.name}
+            </button>
+          </span>
+        </AppTooltip>
+        {isDone ? (
+          <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+            <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
+          </span>
+        ) : isSelected ? (
+          <RoleSelect
+            options={roleChoices}
+            value={selectedRole}
+            onValueChange={(level) => onRoleChange(project.id, level as RoleLevel)}
+            disabled={busy}
+            size="sm"
+            className="shrink-0"
+            aria-label={t("org.teamDetail.roleForAriaLabel", { name: project.name })}
+          />
+        ) : (
+          <span aria-hidden className="w-0" />
+        )}
+      </div>
+      {errorMsg && (
+        <AppTooltip content={errorMsg} className="max-w-xs">
+          <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
+            {errorMsg}
+          </p>
+        </AppTooltip>
+      )}
+    </div>
+  )
+}
 
 interface MultiProjectInviteDialogProps {
   open: boolean
@@ -94,7 +222,7 @@ export function MultiProjectInviteDialog({
     selectedIds.length > 0 &&
     Boolean(session?.jwt)
 
-  function toggleProject(projectId: string) {
+  const toggleProject = useCallback((projectId: string) => {
     setSelections((prev) => {
       const next = { ...prev }
       if (projectId in next) {
@@ -104,11 +232,11 @@ export function MultiProjectInviteDialog({
       }
       return next
     })
-  }
+  }, [])
 
-  function setProjectRole(projectId: string, level: RoleLevel) {
+  const setProjectRole = useCallback((projectId: string, level: RoleLevel) => {
     setSelections((prev) => ({ ...prev, [projectId]: level }))
-  }
+  }, [])
 
   async function handleInvite() {
     if (!session?.jwt) {
@@ -227,6 +355,39 @@ export function MultiProjectInviteDialog({
   // contributor server-side, so only offer the link roles.
   const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : PROJECT_ROLE_OPTIONS
 
+  const renderProjectRow = useCallback(
+    (project: CloudProjectSummary, className?: string) => (
+      <ProjectChecklistRow
+        project={project}
+        selectedRole={selections[project.id]}
+        errorMsg={perProjectError[project.id]}
+        isDone={done?.[project.id] === "ok"}
+        busy={busy}
+        isEmailMode={isEmailMode}
+        roleChoices={roleChoices}
+        onToggle={toggleProject}
+        onRoleChange={setProjectRole}
+        className={className}
+      />
+    ),
+    [selections, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole],
+  )
+
+  // Everything a row reads out of dialog state has to travel in `extraData`:
+  // LegendList only re-renders a mounted row when this reference changes, so a
+  // value left out of here would leave a checked row looking unchecked (or a
+  // failed row without its error) until it scrolled out of view and back.
+  const listExtraData = useMemo(
+    () => ({ selections, perProjectError, done, busy, isEmailMode }),
+    [selections, perProjectError, done, busy, isEmailMode],
+  )
+
+  const renderVirtualRow = useCallback(
+    ({ item }: LegendListRenderItemProps<CloudProjectSummary>) =>
+      renderProjectRow(item, "border-b"),
+    [renderProjectRow],
+  )
+
   // Switching to email mode clamps any managerial selections down to the
   // link-share ceiling so the picker value always matches what the server
   // would grant.
@@ -303,77 +464,36 @@ export function MultiProjectInviteDialog({
                   <p className="mt-1.5 text-xs text-muted-foreground py-2">
                     {t("org.orgProjectsDataTable.noSearchMatch")}
                   </p>
+                ) : visibleProjects.length > VIRTUALIZE_ROW_THRESHOLD ? (
+                  // No list/listitem roles here: LegendList absolutely
+                  // positions rows inside its own scroll and spacer elements,
+                  // so a `role="list"` wrapper would own non-listitem
+                  // children. The per-row checkbox keeps its accessible name,
+                  // which is what this control is navigated by.
+                  <div
+                    data-testid="project-checklist-virtualized"
+                    className="mt-1.5 overflow-hidden rounded border"
+                    style={{ height: VIRTUAL_LIST_HEIGHT_PX }}
+                  >
+                    <LegendList
+                      data={visibleProjects}
+                      extraData={listExtraData}
+                      renderItem={renderVirtualRow}
+                      keyExtractor={(p) => p.id}
+                      estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
+                      // A row owns popover state (the role picker) and a
+                      // tooltip, so recycling one row's DOM into another
+                      // project would carry that state across.
+                      recycleItems={false}
+                      style={{ height: "100%" }}
+                      contentContainerStyle={{ width: "100%" }}
+                    />
+                  </div>
                 ) : (
                   <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
-                    {visibleProjects.map((p) => {
-                      const isSelected = p.id in selections
-                      const errorMsg = perProjectError[p.id]
-                      const isDone = done?.[p.id] === "ok"
-                      return (
-                        <li
-                          key={p.id}
-                          className={`px-3 py-2 text-sm ${
-                            isSelected ? "bg-muted/40" : ""
-                          }`}
-                        >
-                          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                            <button
-                              type="button"
-                              role="checkbox"
-                              aria-checked={isSelected}
-                              aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: p.name })}
-                              onClick={() => toggleProject(p.id)}
-                              disabled={busy}
-                              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
-                                isSelected
-                                  ? "bg-primary border-primary text-primary-foreground"
-                                  : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
-                              }`}
-                            >
-                              {isSelected && <Check className="h-3.5 w-3.5" />}
-                            </button>
-                            <AppTooltip content={p.name}>
-                              <span className="min-w-0">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleProject(p.id)}
-                                  disabled={busy}
-                                  className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
-                                >
-                                  {p.name}
-                                </button>
-                              </span>
-                            </AppTooltip>
-                            {isDone ? (
-                              <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                                <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
-                              </span>
-                            ) : isSelected ? (
-                              <RoleSelect
-                                options={roleChoices}
-                                value={selections[p.id]}
-                                onValueChange={(level) =>
-                                  setProjectRole(p.id, level as RoleLevel)
-                                }
-                                disabled={busy}
-                                size="sm"
-                                className="shrink-0"
-                                aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}
-                              />
-                            ) : (
-                              <span aria-hidden className="w-0" />
-                            )}
-                          </div>
-                          {errorMsg && (
-                            <AppTooltip content={errorMsg} className="max-w-xs">
-                              <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
-                                {errorMsg}
-                              </p>
-                            </AppTooltip>
-                          )}
-                        </li>
-                      )
-                    })}
+                    {visibleProjects.map((p) => (
+                      <li key={p.id}>{renderProjectRow(p)}</li>
+                    ))}
                   </ul>
                 )}
               </>

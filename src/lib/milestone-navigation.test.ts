@@ -102,6 +102,42 @@ describe("deriveMilestoneNavigation", () => {
       { key: "part:cell-51", label: "Part 2", count: 1 },
     ])
   })
+
+  it("keeps the section identity instead of swapping to Part N partway down (AQU-1164)", () => {
+    const chapterOne = { key: "biblica:GEN:1", kind: "chapter", label: "Genesis 1", shortLabel: "1" } as const
+    const generic = { key: "part:later", kind: "part", label: "Part 2", shortLabel: "2" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("verse-one", chapterOne),
+      persisted("verse-two", generic),
+      persisted("verse-three", generic),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([chapterOne, chapterOne, chapterOne])
+    expect(result.orderedMilestones.map(({ milestone }) => milestone.key)).toEqual(["biblica:GEN:1"])
+  })
+
+  it("lets a generic part milestone ahead of the first identity inherit it (AQU-1164)", () => {
+    const generic = { key: "part:lead", kind: "part", label: "Part 1", shortLabel: "1" } as const
+    const story = { key: "story:body.xml:s1", kind: "story", label: "Story 1", shortLabel: "1" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("lead", generic),
+      persisted("body", story),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([story, story])
+  })
+
+  it("keeps Part N for a file that is generic all the way through (AQU-1164)", () => {
+    const partOne = { key: "part:unit-1", kind: "part", label: "Part 1", shortLabel: "1" } as const
+    const partTwo = { key: "part:unit-51", kind: "part", label: "Part 2", shortLabel: "2" } as const
+    const result = deriveMilestoneNavigation([
+      persisted("cell-1", partOne),
+      persisted("cell-2", partOne),
+      persisted("cell-3", partTwo),
+    ])
+
+    expect([...result.milestoneByCellId.values()]).toEqual([partOne, partOne, partTwo])
+  })
 })
 
 describe("readImportMilestone", () => {

@@ -12,16 +12,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.13.5",
+    "hono": "^4.13.9",
     "partyserver": "^0.5.10",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260901.1",
+    "@cloudflare/workers-types": "^5.20260924.1",
     "@electric-sql/pglite": "^0.5.8",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.2",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.128.0"
+    "vitest": "^5.0.1",
+    "wrangler": "^4.137.0"
   }
 }

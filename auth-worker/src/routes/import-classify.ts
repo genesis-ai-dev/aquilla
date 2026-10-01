@@ -10,7 +10,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
-import { admitChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
+import { admitChatUsage, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
 import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
@@ -201,6 +201,14 @@ imports.post(
       })
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
+        // AQU-1241: a rejection the provider decided before any generation
+        // existed cost nothing, so release its reservation instead of leaving
+        // it against the workspace's allowance. Less certain failures stay held.
+        if (usage) {
+          c.header("X-Billing-Usage-Status", providerRejectedPreModel(upstream.status, detail)
+            ? await releaseChatUsage(c.env, usage)
+            : "pending")
+        }
         return c.json({
           error: "import_classifier_upstream_error",
           message: detail.slice(0, 500) || `Upstream returned ${upstream.status}`,
@@ -213,7 +221,7 @@ imports.post(
       }
       // The provider charged for this response even when the recipe below is
       // unusable, so settle before validating content. Upstream errors above
-      // keep the reservation: their charge is uncertain, not proven free.
+      // keep the reservation unless the rejection proves no model ran.
       if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
       const content = data.choices?.[0]?.message?.content
       if (!content) {

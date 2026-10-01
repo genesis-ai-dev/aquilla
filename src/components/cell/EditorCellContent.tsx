@@ -16,7 +16,7 @@ import {
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
 import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
@@ -92,6 +92,7 @@ export function SanitizedRichHtml({
   idmlStyleCatalog,
   idmlParagraphStyleId,
   concepts,
+  termMatching,
 }: {
   html: string
   idmlStyleCatalog?: IdmlStyleCatalog
@@ -104,6 +105,11 @@ export function SanitizedRichHtml({
    * Omitted by callers with no terminology surface (the agent workbench).
    */
   concepts?: Concept[]
+  /**
+   * AQU-1272: the project's affix inventory / fold defaults, so a formatted
+   * source cell highlights the same occurrences the plain-text path does.
+   */
+  termMatching?: TermMatchingSettings
 }) {
   const t = useT()
   const safeHtml = useMemo(
@@ -114,9 +120,10 @@ export function SanitizedRichHtml({
       // Strictly after sanitizing — the source sanitizer drops data-* attrs.
       return decorateTermsInHtml(sanitized, concepts, {
         label: (term) => t("editor.term.managed", { term }),
+        termMatching,
       })
     },
-    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t],
+    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t, termMatching],
   )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 

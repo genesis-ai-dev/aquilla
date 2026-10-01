@@ -110,6 +110,24 @@ function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number):
   selection.addRange(range)
 }
 
+/**
+ * A one-paragraph ProseMirror document holding `text` verbatim (AQU-1393).
+ *
+ * `setContent` parses a bare string as HTML, so a stored target containing "<"
+ * or "&" would arrive as markup instead of the characters the translator saved.
+ * Handing it a doc node with an explicit text node keeps it literal. Empty text
+ * yields an empty paragraph — a text node may not hold an empty string.
+ */
+function plainTextDocument(text: string): Record<string, unknown> {
+  return {
+    type: "doc",
+    content: [{
+      type: "paragraph",
+      ...(text ? { content: [{ type: "text", text }] } : {}),
+    }],
+  }
+}
+
 function presenceWords(text: string): string[] {
   // Unicode letters/numbers/marks keep this useful outside English. Treat
   // apostrophes and hyphens inside a token as part of the same word so one
@@ -303,6 +321,15 @@ function deleteIdmlSelection(
 export interface TranslatedEditorHandle {
   getFootnoteInsertionAnchor: () => FootnoteInsertionAnchor | null
   insertFootnoteMarker: (marker: string, anchor?: FootnoteInsertionAnchor | null, anchorText?: string) => boolean
+  /**
+   * Replace the whole target with plain text and commit it through the editor's
+   * normal snapshot path — the write a translator could have typed themselves,
+   * not a privileged one. Used by the Examples panel's exact-match Insert
+   * (AQU-1393). Returns false, writing nothing, when the editor is read-only or
+   * the cell is IDML: an IDML target is a structured slot document, and pouring
+   * flat text over it would drop the protected anchors the export depends on.
+   */
+  replacePlainText: (text: string) => boolean
 }
 
 interface PendingFootnoteDelete {
@@ -340,6 +367,13 @@ interface TranslatedEditorProps {
    * drains the buffer into the document so the first character(s) are never lost.
    */
   pendingInputRef?: MutableRefObject<string>
+  /**
+   * AQU-1393: text to REPLACE the target with once this editor focuses, drained
+   * like `pendingInputRef` above. The Examples panel's exact-match Insert sets
+   * it when the row's editor is not mounted yet, so one click both opens the
+   * cell and fills it. Ignored for IDML cells (see `replacePlainText`).
+   */
+  pendingReplaceRef?: MutableRefObject<string | null>
   onFocus?: () => void
   onBlur?: () => void
   onSelectionChange?: (selection: TargetPresenceSelection | null) => void
@@ -438,6 +472,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   aiDrafted = false,
   onCommit,
   pendingInputRef,
+  pendingReplaceRef,
   onFocus,
   onBlur,
   onSelectionChange,
@@ -1276,6 +1311,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()
+      // AQU-1393: a TM insert requested while this editor was still unmounted
+      // replaces the whole target, so it drains BEFORE the buffered keystrokes
+      // below — otherwise the replace would wipe keys the user had already
+      // typed into the activation window.
+      const pendingReplace = pendingReplaceRef?.current
+      if (pendingReplaceRef && pendingReplace != null) {
+        pendingReplaceRef.current = null
+        if (!idmlContext) {
+          editor.commands.setContent(plainTextDocument(pendingReplace))
+          commitEditorSnapshot.current("tm-insert")
+        }
+      }
       // AQU-746: drain any keystrokes the parent row buffered while this editor
       // was mounting/focusing (a fast typist after a click). The caret is now
       // placed — IDML at its protected slot position above, plain at end via the
@@ -1475,7 +1522,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       commitEditorSnapshot.current("footnote")
       return true
     },
-  }), [editor, isReadOnly, t])
+    replacePlainText(text) {
+      if (!editor || isReadOnly || idmlContext) return false
+      editor.commands.setContent(plainTextDocument(text))
+      commitEditorSnapshot.current("tm-insert")
+      return true
+    },
+  }), [editor, idmlContext, isReadOnly, t])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from

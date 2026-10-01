@@ -62,7 +62,8 @@ describe("ProjectAssignedToMe", () => {
   })
 
   // AQU-729 / AQU-538 (§3.5): every assignment renders a lane chip — named
-  // lanes use the tag, the default lane uses the project's target language.
+  // lanes use the tag, the default lane uses the project's target language
+  // (never a blank and never the word "default").
   it("renders a lane chip for every assignment", async () => {
     mockGetMyAssignments.mockResolvedValue([
       makeAssignment({ assignmentId: "asgn-es", scopeLabel: "Genesis", targetLang: "es" }),
@@ -78,6 +79,7 @@ describe("ProjectAssignedToMe", () => {
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
     expect(screen.getByText("es")).toBeTruthy()
     expect(screen.getByText("Portuguese")).toBeTruthy()
+    expect(screen.queryByText(/^default$/i)).toBeNull()
   })
 
   it("passes the whole assignment to onJumpToAssignment when a row is clicked", async () => {

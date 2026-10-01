@@ -27,10 +27,11 @@ export interface AiModelInfo {
   labelKey: MessageKey
   /** Approximate download size in MB (one-time). */
   sizeMb: number
-  /** Short user-facing rationale. Not yet keyed — out of this pass's scope
-   *  (the i18n scan's TRANSLATABLE_PROP_NAMES list doesn't include
-   *  `rationale`, so it wasn't flagged; still genuinely untranslated). */
-  rationale: string
+  /** Compact explanation shown in the consent prompt, onboarding checklist,
+   *  and Preferences → Local models — one key so the story cannot drift. */
+  shortKey: MessageKey
+  /** Fuller in-prompt explanation revealed by the Learn more disclosure. */
+  learnMoreKey: MessageKey
 }
 
 interface PendingRequest {
@@ -53,9 +54,25 @@ function hasStoredConsent(id: AiModelInfo["id"]): boolean {
   } catch { return false }
 }
 
-function storeConsent(id: AiModelInfo["id"]): void {
+const GRANTED = "1"
+const DECLINED = "0"
+
+function hasStoredDecline(id: AiModelInfo["id"]): boolean {
+  if (typeof localStorage === "undefined") return false
+  try { return localStorage.getItem(KEY_PREFIX + id) === DECLINED } catch { return false }
+}
+
+/** Explicit settings downloads grant the same consent as the dialog — and
+ *  overwrite a prior Cancel, so transcription is not left off after the
+ *  operator opts in. */
+export function storeAiModelConsent(id: AiModelInfo["id"]): void {
   if (typeof localStorage === "undefined") return
-  try { localStorage.setItem(KEY_PREFIX + id, "1") } catch { /* private mode */ }
+  try { localStorage.setItem(KEY_PREFIX + id, GRANTED) } catch { /* private mode */ }
+}
+
+function storeDecline(id: AiModelInfo["id"]): void {
+  if (typeof localStorage === "undefined") return
+  try { localStorage.setItem(KEY_PREFIX + id, DECLINED) } catch { /* private mode */ }
 }
 
 /**
@@ -87,9 +104,17 @@ export function clearStoredConsent(id?: AiModelInfo["id"]): void {
 /**
  * Block until the user has acknowledged the model download. Returns true if
  * already consented or the user accepts; false if they cancel.
+ *
+ * Cancel is once per browser for automatic saves: the prompt does not return
+ * on the next save. An explicit Transcribe press passes `askAgain` and the
+ * prompt comes back. Preferences → Local models can still download later.
  */
-export function requestAiModelConsent(model: AiModelInfo): Promise<boolean> {
+export function requestAiModelConsent(
+  model: AiModelInfo,
+  opts?: { askAgain?: boolean },
+): Promise<boolean> {
   if (hasStoredConsent(model.id)) return Promise.resolve(true)
+  if (!opts?.askAgain && hasStoredDecline(model.id)) return Promise.resolve(false)
   if (pending) {
     // Coalesce concurrent requests for the same model — a single dialog
     // serves them all. Different models queue.
@@ -111,7 +136,8 @@ export function requestAiModelConsent(model: AiModelInfo): Promise<boolean> {
         // deny coalesced waiters or skip storing consent.
         if (settled) return
         settled = true
-        if (granted) storeConsent(model.id)
+        if (granted) storeAiModelConsent(model.id)
+        else storeDecline(model.id)
         pending = null
         notify()
         resolve(granted)
@@ -136,14 +162,14 @@ export const WHISPER_MODEL: AiModelInfo = {
   id: "whisper",
   labelKey: "audio.consent.whisperLabel",
   sizeMb: 140,
-  rationale:
-    "Powers automatic word-level timing of recordings so you can scrub and karaoke playback. Runs entirely in your browser — recordings never leave your device.",
+  shortKey: "audio.consent.whisper.short",
+  learnMoreKey: "audio.consent.whisper.learnMore",
 }
 
 export const MMS_MODEL: AiModelInfo = {
   id: "mms",
   labelKey: "audio.consent.mmsLabel",
   sizeMb: 130,
-  rationale:
-    "Meta's MMS-TTS runs in your browser from browser-ready ONNX language models. Each language is downloaded the first time you use it.",
+  shortKey: "audio.consent.mms.short",
+  learnMoreKey: "audio.consent.mms.learnMore",
 }

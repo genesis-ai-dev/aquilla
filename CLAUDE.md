@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
-shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC, FEATURE-STORIES;
+shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC,
+FEATURE-STORIES, PARTNER-INTEGRATIONS;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk
@@ -20,6 +21,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 │   │                   #   dcs, codex-editor, brief, credits, entitlements, store, …
 │   ├── hooks/          # read hooks (useCells, useProject, …) + outbox flusher
 │   ├── pages/ components/ context/ branding/
+│   ├── partner-integrations/  # publisher-specific code; see PARTNER INTEGRATIONS below
 │   └── test-setup.ts
 ├── auth-worker/        # identity + agent-API Worker — see Backend below
 ├── sync-worker/        # realtime/sync Worker — see Backend below
@@ -30,6 +32,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── infra/modal/        # Modal services: diarization.py, seed_vc.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
+│                       #   specs/partner-integrations/<partner>/ is partner-owned
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
@@ -42,6 +45,26 @@ Worker claims `/`, `/homepage`, `/beta`, `/bible-translation`, `/case-studies/*`
 `/privacy`, `/terms`, sitemap/robots, and `/mkt/*` ahead of this repo's
 `aquilla.app/*` catch-all. This repo builds only `index.html`; marketing deploys do
 not ride the app's QA-gated release cycle. See **`docs/SEO.md`**.
+
+## Partner integrations — a folder you can delete
+
+Publisher-specific code (Biblica's importers today, Martin's Bible-swap code when
+it ports over) lives in **`src/partner-integrations/<partner>/`**, and any folder
+named `partner-integrations` at any depth is partner-owned. Two rules, and AQU-1286
+is where they come from:
+
+1. **Nothing outside such a folder may import from inside one.** Generic code
+   reaches partner code only through `src/lib/partners/registry.ts`, which
+   discovers `register.ts` files with an `import.meta.glob` — a glob that matches
+   nothing is an empty object, so the seam survives the folders being deleted. Do
+   not replace it with a static import list.
+2. **Deleting the folders must leave the app compiling, building and running**,
+   with that partner's import options simply absent. `npx tsx
+   scripts/make-public-copy.ts` produces the open-source copy by filtering them
+   out, and fails if a partner copyright notice survives anywhere else.
+
+Full convention, how to register one, and the known string-level gaps:
+**`docs/PARTNER-INTEGRATIONS.md`**.
 
 ## Commands
 

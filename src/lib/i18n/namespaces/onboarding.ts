@@ -20,6 +20,9 @@ export const onboarding = defineNamespace({
     "onboarding.connect.title": "Connect your agent",
     "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
     "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.handoff": "Agent still waiting? Paste this message into its chat. It contains no secrets.",
+    "onboarding.connect.handoffCopy": "Copy message",
+    "onboarding.connect.handoffCopied": "Copied",
     "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
     "onboarding.connect.manage": "Manage agent access",
     "onboarding.connect.account": "Signed in as {username}",
@@ -29,7 +32,7 @@ export const onboarding = defineNamespace({
     "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
     "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
     "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
-    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.expiry": "Access doesn't expire. You can see when it was last used and revoke it from API tokens at any time.",
     "onboarding.connect.project": "Project",
     "onboarding.connect.choose": "Choose a project",
     "onboarding.connect.noProjects": "You do not have the required access to an available project.",
@@ -249,8 +252,7 @@ export const onboarding = defineNamespace({
 
     // — AiModelsStep — model metadata (was module-level ModelMeta consts)
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
-    "onboarding.checklist.aiModels.whisper.blurb":
-      "Word-level timing for recorded audio. Runs locally; no network after download.",
+    // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
       "Local voices for many languages — one language model per download.",
@@ -516,6 +518,18 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenTrigger": "New token",
     "onboarding.apiTokens.newTokenDialogHeading": "New API token",
     "onboarding.apiTokens.namePlaceholder": "e.g. Import agent",
+    // AQU-1242: access is the write ceiling, asked before mode because it
+    // decides whether mode applies at all.
+    "onboarding.apiTokens.accessLabel": "Access",
+    "onboarding.apiTokens.accessReadLabel": "Read-only",
+    "onboarding.apiTokens.accessReadDescription":
+      "the agent can read, search and export, but cannot change anything.",
+    "onboarding.apiTokens.accessWriteLabel": "Read and write",
+    "onboarding.apiTokens.accessWriteDescription":
+      "the agent can also propose and apply changes, subject to the mode below.",
+    "onboarding.apiTokens.accessReadBadge": "read-only",
+    "onboarding.apiTokens.modeNotApplicable":
+      "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
     "onboarding.apiTokens.modeAskLabel": "Ask",
     "onboarding.apiTokens.modeAskDescription": "every write waits for your approval.",
@@ -545,7 +559,7 @@ export const onboarding = defineNamespace({
     // agent rail label reuses `nav.dock.agentTab` (identical text)
     "onboarding.credits.rail.llm": "Chat",
     "onboarding.credits.rail.tts": "TTS",
-    "onboarding.credits.panelTitle": "Compute credits",
+    "onboarding.credits.panelTitle": "AI credits",
     "onboarding.credits.panelDescription": "Usage against daily & weekly caps, broken out by rail",
     "onboarding.credits.agentSpendNote": "Agent spend (elevated rail — own cap, 5× markup)",
     "onboarding.credits.dialSummary": "Agent credits used today: {credits}",
@@ -713,6 +727,27 @@ export const onboarding = defineNamespace({
         description:
           "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
         placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
+      },
+      "onboarding.connect.account": {
+        description:
+          "Line at the top of the agent-consent page naming the Aquilla account the approval would be granted under, so the human can spot that they are signed in as the wrong user before authorizing an agent.",
+        placeholders: {
+          username: "The signed-in user's own Aquilla username. Not translated — a user-chosen account name, shown verbatim.",
+        },
+      },
+      "onboarding.connect.agent": {
+        description:
+          "Line on the agent-consent page naming the agent that is asking for access. The warning immediately below it (onboarding.connect.unverified) tells the human this name is self-reported, so keep this string a plain statement of the name rather than an endorsement of it.",
+        placeholders: {
+          name: "The display name the agent supplied when it started the connection request. Not translated, not verified by Aquilla, and chosen by whoever ran the agent.",
+        },
+      },
+      "onboarding.connect.confirm": {
+        description:
+          "Label of the checkbox the human must tick before the 'Authorize agent' button becomes enabled on the agent-consent page. It is the anti-phishing step of the device flow: the human asserts that they started this request and that the code on screen is the same one their agent is displaying.",
+        placeholders: {
+          code: "The connection code the human typed into the 'Connection code' field, in XXXX-XXXX form (uppercase letters and digits, with the ambiguous 0/1/I/O omitted). Not translated — echoed back verbatim so it can be compared character by character with the code the agent shows.",
+        },
       },
       "onboarding.apiTokens.revokeWarning": {
         description:

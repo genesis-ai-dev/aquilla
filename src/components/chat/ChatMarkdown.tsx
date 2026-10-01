@@ -65,9 +65,13 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   h2: ({ children }) => <h2 className="mb-1 mt-2 text-[1.05em] font-semibold first:mt-0">{children}</h2>,
   h3: ({ children }) => <h3 className="mb-1 mt-2 font-semibold first:mt-0">{children}</h3>,
   h4: ({ children }) => <h4 className="mb-1 mt-2 font-semibold first:mt-0">{children}</h4>,
+  // Never auto-load remote images: a prompt-injected model could encode data
+  // read from the project into an attacker-controlled image URL (zero-click
+  // exfiltration). Render the alt text instead.
+  img: ({ alt }) => <span className="text-muted-foreground">{alt ? `[image: ${alt}]` : "[image]"}</span>,
   a: ({ href, children }) => (
     <a
-      href={href}
+      href={href && /^(https?:|mailto:)/i.test(href) ? href : undefined}
       target="_blank"
       rel="noopener noreferrer"
       className="underline underline-offset-2 hover:opacity-80"

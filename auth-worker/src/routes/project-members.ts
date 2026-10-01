@@ -25,6 +25,7 @@ import { roleRequiredBody } from "../lib/role-denial"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import { auditMembershipChange } from "../services/admin-audit"
 
 const projectMembers = new Hono<AuthHonoEnv>()
 
@@ -164,6 +165,13 @@ projectMembers.post(
         .bind(projectId, targetUserId)
         .run()
       removed = true
+      await auditMembershipChange(c.env, user, {
+        action: "project.member.revoke_all",
+        where: { scope: "project", projectId },
+        target: { id: targetUserId },
+        roleBefore: Number(existingRow.role_level),
+        roleAfter: null,
+      })
     }
 
     // AQU-346: when the direct row was removed AND no other grant path

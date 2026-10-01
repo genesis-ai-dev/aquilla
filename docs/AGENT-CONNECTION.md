@@ -62,8 +62,17 @@ There is no refresh token. Reconnect after expiry or a lost redemption response.
   the user code in its fragment, avoiding server access-log and referrer exposure.
 - Requests expire in ten minutes. Approval and denial use conditional updates;
   redemption consumes the grant and inserts its credential in one SQL statement.
-- Polling is atomically claimed; early polls increase the interval. Initiation
-  and browser-code attempts use existing indexed rate-limit infrastructure.
+- Polling is atomically claimed while the grant is pending; early polls raise the
+  interval (+5s, capped at 60s) with one second of jitter slack. **An approved grant
+  skips the pacing gate** and redeems on the next request. Before this, an agent
+  that ignored `slow_down` ratcheted its interval past the grant's lifetime and
+  never collected an approved credential. Initiation and browser-code attempts use
+  existing indexed rate-limit infrastructure.
+- Approval restarts the ten-minute window. The consent page then shows a
+  secret-free message for the human to paste to an agent whose polling stopped
+  (for example on a tool timeout). The agent redeems once with its kept
+  `device_code`. A callback URL was considered and rejected as the default: most
+  hosted and sandboxed agents cannot receive inbound requests.
 - Credentials appear in the existing token list and use its revoke endpoint.
 - Migration `0090_agent_authorizations.sql` is required before deployment.
   `BASE_URL` must point to the matching SPA, including for local/dev deployments.

@@ -66,6 +66,13 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import type { ProjectLaneRecord } from '../../../db/shared/lanes'
+import {
+  archivedLaneReason,
+  archivedTagsFromSettings,
+  type ArchiveLaneRow,
+} from '../../../src/lib/lanes/archived-lane'
+import { echoableLaneLabels, visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
@@ -74,6 +81,17 @@ import { resolveAssignmentAuthority } from '../events/assignment-authority'
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
 export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
+
+function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
+  return lanes
+    .filter((lane) => lane.role === 'target')
+    .map((lane) => ({
+      id: lane.id,
+      name: lane.name,
+      legacyTag: lane.legacyTag,
+      archivedAt: lane.archivedAt,
+    }))
+}
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -563,7 +581,16 @@ export async function prepareChangesetCore(
         'PlanImport must be the only command in a changeset',
       )
     }
-    return preparePlanImport(db, cred, projectId, id, autonomyMode, planImports[0], env)
+    return preparePlanImport(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      planImports[0],
+      env,
+      resolvedRole.level,
+    )
   }
 
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
@@ -599,13 +626,43 @@ export async function prepareChangesetCore(
         ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
         : [],
     )
+    const archivedRows = archiveRows(projectSettings.lanes ?? [])
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      resolvedRole.level,
+    )
     for (const [index, c] of setCommands.entries()) {
       if (c.laneId && !registeredLanes.has(c.laneId)) {
+        const echoable = await echoableLaneLabels(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          resolvedRole.level,
+        )
+        const listedLanes = echoable === null
+          ? [...registeredLanes]
+          : [...registeredLanes].filter((lane) => echoable.has(lane))
         return errorResponse(
           'validation_failed',
           `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
-          { registeredLanes: [...registeredLanes] },
+          { registeredLanes: listedLanes },
         )
+      }
+      if (c.laneId) {
+        const archived = archivedLaneReason({
+          tag: c.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
+        if (archived) {
+          return errorResponse('validation_failed', `commands[${index}] ${archived}`)
+        }
       }
     }
   }
@@ -717,6 +774,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+    ...(cmd.laneId !== undefined ? { laneId: cmd.laneId } : {}),
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -757,6 +815,7 @@ async function preparePlanImport(
   autonomyMode: 'ask' | 'act',
   cmd: PlanImportCommand,
   env: ExternalEnv,
+  callerRoleLevel: number,
 ): Promise<Response> {
   if (cmd.cells.length === 0) {
     return errorResponse('validation_failed', 'PlanImport.cells must be non-empty')
@@ -838,6 +897,20 @@ async function preparePlanImport(
       ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
       : [],
   )
+  const archivedRows = archiveRows(projectSettings.lanes ?? [])
+  const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+  const namesALane = cmd.cells.some((cell) => (cell.variants ?? []).some((variant) => variant.laneId))
+  const visibleLaneIds = namesALane
+    ? (
+        await visibleTagsForMember(
+          db,
+          env.LANE_READ_WALL,
+          projectId,
+          Number(cred.userId),
+          callerRoleLevel,
+        )
+      ).visible
+    : null
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       if (variant.laneId && !registeredLanes.has(variant.laneId)) {
@@ -845,6 +918,20 @@ async function preparePlanImport(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
         )
+      }
+      if (variant.laneId) {
+        const archived = archivedLaneReason({
+          tag: variant.laneId,
+          lanes: archivedRows,
+          archivedTags,
+          visibleLaneIds,
+        })
+        if (archived) {
+          return errorResponse(
+            'validation_failed',
+            `PlanImport.cells[${cellIndex}].variants[${variantIndex}] ${archived}`,
+          )
+        }
       }
       const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
       if (variant.languageTag && variant.languageTag !== effectiveLanguage) {

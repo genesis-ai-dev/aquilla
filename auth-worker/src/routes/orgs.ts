@@ -7,7 +7,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform-admin"
-import { ROLE, type Env } from "../types"
+import { ROLE, type AuthUser, type Env } from "../types"
 import {
   addGroupMember,
   attachGroupProject,
@@ -51,7 +51,9 @@ import {
   isCanonicalRoleLevel,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
@@ -368,14 +370,21 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  const { projects, nextCursor } = await listOrgPortfolioPage(
-    c.env,
-    [orgId],
-    { userId: user.id, isAdmin },
-    page,
-  )
+  // AQU-1071: the active-language count rides along with the rollup the org
+  // dashboard is already asking for, so its tile costs no extra round trip. It
+  // is the same rule billing bills on (distinct active target-language tags,
+  // archived lanes and archived projects excluded), and deliberately org-wide
+  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
+  // a partner reading a smaller figure than their invoice is the confusion this
+  // ticket exists to remove, and a bare count names no project, so it discloses
+  // nothing the visibility rule guards.
+  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+    listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
+    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+  ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
+    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
     nextCursor,
   })
 })
@@ -826,6 +835,7 @@ async function grantOrgMemberOne(
   orgId: number,
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<OrgGrantOutcome> {
   const { username, role } = entry
   const target = await lookupUserByUsername(env, username)
@@ -836,6 +846,7 @@ async function grantOrgMemberOne(
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "org", orgId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -846,6 +857,13 @@ async function grantOrgMemberOne(
   )
     .bind(orgId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "org.member.add" : "org.member.role",
+    where: { scope: "org", orgId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -876,7 +894,7 @@ orgs.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry)
+        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry, user)
         results.push(
           outcome.ok
             ? { username: entry.username, ok: true }
@@ -886,7 +904,7 @@ orgs.post(
       return c.json({ results })
     }
 
-    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body)
+    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, ORG_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1097,6 +1115,19 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
     : invite.role_level
 
   try {
+    // [Pen test 2026-09-29] Claim the single-use invite (CAS) BEFORE granting
+    // membership so concurrent redeemers can't both be admitted.
+    if (!invite.used_at) {
+      const claim = await c.env.AQUILLA_PG.prepare(
+        `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
+         WHERE token = ? AND used_at IS NULL`,
+      )
+        .bind(user.id, token)
+        .run()
+      if (claim.meta.changes === 0) {
+        return c.json({ error: "Invite already used" }, 410)
+      }
+    }
     await c.env.AQUILLA_PG.prepare(
       `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
@@ -1106,13 +1137,6 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
          granted_at = CURRENT_TIMESTAMP`,
     )
       .bind(invite.org_id, user.id, finalRole, invite.created_by)
-      .run()
-    // Atomic stamp: only the first concurrent redeemer wins.
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE org_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP
-       WHERE token = ? AND used_at IS NULL`,
-    )
-      .bind(user.id, token)
       .run()
   } catch (err) {
     console.error("[org-invites] accept failed:", err)
@@ -1141,12 +1165,20 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
+  const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
   ])
+  await auditMembershipChange(c.env, user, {
+    action: "org.member.remove",
+    where: { scope: "org", orgId },
+    target: { id: targetUserId },
+    roleBefore,
+    roleAfter: null,
+  })
 
   return c.json({ removed: true })
 })

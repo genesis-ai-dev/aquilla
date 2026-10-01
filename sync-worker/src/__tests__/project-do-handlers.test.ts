@@ -7,6 +7,7 @@ import {
   applyPresenceUpdate,
   parseProjectDoClientMessage,
   PresenceDraftThrottle,
+  presenceFrameOwnerConnId,
   presenceSnapshot,
   PRESENCE_DRAFT_THROTTLE_MS,
   resolveConnId,
@@ -27,6 +28,11 @@ const emptyPresence = (): Map<string, PresenceState> => new Map()
 const who = (name: string) => ({ connId: name, userId: name })
 
 describe("parseProjectDoClientMessage", () => {
+  it("parses a heartbeat ping, keeping a numeric ts to echo", () => {
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: 42 }))).toEqual({ t: "ping", ts: 42 })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping" }))).toEqual({ t: "ping" })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "ping", ts: "x" }))).toEqual({ t: "ping" })
+  })
   it("parses focus.claim with leaseMs", () => {
     const m = parseProjectDoClientMessage(
       JSON.stringify({ t: "focus.claim", cellId: "c", leaseMs: 1000 }),
@@ -465,6 +471,65 @@ describe("PresenceDraftThrottle", () => {
     throttle.clear("alice")
     vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS * 2)
     expect(sent.map((f) => f.draftText)).toEqual(["a"])
+  })
+})
+
+describe("presenceFrameOwnerConnId (AQU-1162 — no self-echo)", () => {
+  it("names the connection a presence.diff describes", () => {
+    const { emit } = applyPresenceUpdate(
+      emptyPresence(),
+      who("alice"),
+      { t: "presence.update", viewingCell: "c1" },
+      1_000,
+    )
+    expect(emit).toHaveLength(1)
+    expect(presenceFrameOwnerConnId(emit[0])).toBe("alice")
+  })
+
+  it("names the connection a presence.draft describes", () => {
+    const frame: ServerPresenceDraft = {
+      t: "presence.draft",
+      userId: "alice",
+      connId: "alice-tab-2",
+      cellId: "c1",
+      draftText: "hola",
+      ts: 7,
+    }
+    // Keyed by connId, not userId: a second tab is a separate peer and still
+    // needs the other tab's drafts.
+    expect(presenceFrameOwnerConnId(frame)).toBe("alice-tab-2")
+  })
+
+  it("leaves every non-presence frame addressed to everyone", () => {
+    const frames: ProjectDoServerMessage[] = [
+      { t: "presence.left", userId: "alice", connId: "alice" },
+      { t: "lock.claimed", cellId: "c1", by: { userId: "alice", ts: 1 } },
+      { t: "lock.released", cellId: "c1", by: { userId: "alice", ts: 1 } },
+      { t: "presence", users: [] },
+    ]
+    for (const f of frames) expect(presenceFrameOwnerConnId(f)).toBeUndefined()
+  })
+
+  it("excludes only the originating socket when the DO fans a frame out", () => {
+    // Mirrors ProjectSync.broadcast(): one roster, one sender, everyone else
+    // receives. A user's own presence tells them nothing — every client
+    // consumer filters self rows out again — so the echo is pure cost.
+    const roster = ["alice", "alice-tab-2", "bob"]
+    const fanOut = (msg: ProjectDoServerMessage): string[] => {
+      const except = presenceFrameOwnerConnId(msg)
+      return roster.filter((connId) => connId !== except)
+    }
+    const { emit } = applyPresenceUpdate(
+      emptyPresence(),
+      who("alice"),
+      { t: "presence.update", viewingCell: "c1" },
+      1_000,
+    )
+    expect(fanOut(emit[0])).toEqual(["alice-tab-2", "bob"])
+    // A lock frame still reaches the claimer: it acts on its own grant.
+    expect(fanOut({ t: "lock.claimed", cellId: "c1", by: { userId: "alice", ts: 1 } })).toEqual(
+      roster,
+    )
   })
 })
 

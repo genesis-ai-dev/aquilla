@@ -94,6 +94,8 @@ export interface OrgAssignmentRow {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -116,6 +118,7 @@ export async function getOrgAssignmentWorkload(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
+            ln.name            AS lane_name,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
@@ -124,6 +127,8 @@ export async function getOrgAssignmentWorkload(
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -137,6 +142,7 @@ export async function getOrgAssignmentWorkload(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_name: string | null
       cells_total: number
       cells_done: number
       deadline: string | null
@@ -152,6 +158,7 @@ export async function getOrgAssignmentWorkload(
     username: r.assignee_username,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
@@ -220,6 +227,8 @@ export interface UnitAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): the lane this assignment is pinned to. '' = default. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
   deadline: string | null
   /** The assignment's cells that are inside this unit and still exist. */
   cellsTotal: number
@@ -387,7 +396,8 @@ export async function getUnitAssignments(
             -- reason the text count above it is: a stored verdict would disagree
             -- with the bar drawn above this panel the moment somebody changed
             -- the required number.
-            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated
+            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated,
+            MAX(ln.name) AS lane_name
        FROM assignments a
        JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
@@ -401,6 +411,8 @@ export async function getUnitAssignments(
                         AND t.target_lang = ?
        LEFT JOIN audio au ON au.cell_id = c.cell_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND ac.file_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -442,6 +454,7 @@ export async function getUnitAssignments(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_name: string | null
       deadline: string | null
       chapter_key: string
       cells_total: number
@@ -465,6 +478,7 @@ export async function getUnitAssignments(
         username: r.assignee_username,
         scopeLabel: r.scope_label,
         targetLang: r.target_lang ?? "",
+        laneName: r.lane_name,
         deadline: r.deadline,
         cellsTotal: 0,
         translated: 0,
@@ -518,15 +532,63 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName: string | null
+  /**
+   * AQU-894: EVERY file the assignment's resolved cells touch, ascending.
+   *
+   * `fileId` above is one arbitrary member of this set (`LIMIT 1`), which is
+   * all the inbox's "open the right file" click needs. It cannot answer "is
+   * this file mine?", because a books-scope assignment over GEN + EXO reports
+   * one of the two and says nothing about the other — so a sidebar reading
+   * `fileId` alone would mark half a person's own work as somebody else's.
+   * Empty only when the scope resolved to zero cells.
+   */
+  fileIds: string[]
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /** Display name of that lane, when the row exists. */
+  laneName?: string | null
+  /** Opaque lane id, for deep links. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number
   cellsDone: number
   createdAt: number
+}
+
+/**
+ * assignment_id → the distinct files its resolved cells live in (AQU-894).
+ *
+ * A second read rather than an aggregate in the inbox query itself: the inbox
+ * is a once-per-project-open read, and one plain SELECT that any Postgres
+ * driver returns as plain rows is worth more here than saving a round trip on
+ * a `json_agg` whose shape depends on how the driver decodes a JSON column.
+ *
+ * Callers pass the assignment ids they already selected, so this inherits
+ * their authorization exactly — it never widens what the caller may see.
+ */
+async function fileIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  for (const id of assignmentIds) byAssignment.set(id, [])
+  if (assignmentIds.length === 0) return byAssignment
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.file_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; file_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
 }
 
 /**
@@ -542,6 +604,8 @@ export async function getMyAssignments(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ln.name AS lane_name,
+            ln.id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -551,6 +615,8 @@ export async function getMyAssignments(
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -562,6 +628,8 @@ export async function getMyAssignments(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -571,14 +639,20 @@ export async function getMyAssignments(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
@@ -669,6 +743,8 @@ export async function getMyAssignmentsAcrossOrg(
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ln.name AS lane_name,
+            ln.id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -679,6 +755,8 @@ export async function getMyAssignmentsAcrossOrg(
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -692,6 +770,8 @@ export async function getMyAssignmentsAcrossOrg(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -701,15 +781,21 @@ export async function getMyAssignmentsAcrossOrg(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,

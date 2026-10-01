@@ -4,15 +4,23 @@
 // 1. extractMentions inline copy — mirrors comment-helpers tests to catch drift.
 // 2. deriveRecipientUsernames — correct union of mentions + participants, minus author.
 // 3. sendCommentNotifications — provider missing → no-op; send failure never throws.
-// 4. resolveUserEmails — queries users table by username.
+// 4. resolveRecipientProfiles — queries users table by username (email + preference).
 // 5. getThreadParticipants — returns existing thread authors for a reply.
+// 6. AQU-1193 — mention-only default, per-user preference, thread-stable subject.
 
 import { describe, it, expect, vi } from 'vitest'
 import {
   extractMentions,
   deriveRecipientUsernames,
+  filterUsernamesWithProjectAccess,
   sendCommentNotifications,
   sendNotificationEmail,
+  parseCommentEmailPreference,
+  shouldEmailRecipient,
+  threadSubject,
+  threadTopicFromBody,
+  resolveRecipientProfiles,
+  DEFAULT_COMMENT_EMAIL_PREFERENCE,
   type EmailService,
 } from '../notification-email'
 import { makeTestDb } from './helpers/pg-test-db'
@@ -115,6 +123,8 @@ describe('sendNotificationEmail', () => {
         projectName: 'TestProject',
         excerpt: 'Hello @bob',
         commentsUrl: 'https://aquilla.app/project/p1/comments',
+        threadTopic: 'Hello @bob',
+        isReply: false,
       },
     )
     expect(email.send).not.toHaveBeenCalled()
@@ -131,14 +141,17 @@ describe('sendNotificationEmail', () => {
         projectName: 'TestProject',
         excerpt: 'Hello @bob',
         commentsUrl: 'https://aquilla.app/project/p1/comments',
+        threadTopic: 'Hello @bob',
+        isReply: false,
       },
     )
     expect(email.send).toHaveBeenCalledOnce()
     const msg = email.send.mock.calls[0][0]
     expect(msg.to).toEqual(['recipient@example.com'])
     expect(msg.from).toBe('test@example.com')
-    expect(msg.subject).toContain('Alice')
-    expect(msg.subject).toContain('TestProject')
+    // AQU-1193: the subject is now the thread's, not the author's — so every
+    // message on one thread collapses into one mail conversation.
+    expect(msg.subject).toBe('[TestProject] Hello @bob')
   })
 
   it('defaults the From address to noreply@support.aquilla.app', async () => {
@@ -149,6 +162,8 @@ describe('sendNotificationEmail', () => {
       projectName: 'TestProject',
       excerpt: 'Hello @bob',
       commentsUrl: 'https://aquilla.app/project/p1/comments',
+      threadTopic: 'Hello @bob',
+      isReply: false,
     })
     expect(email.send.mock.calls[0][0].from).toBe('noreply@support.aquilla.app')
   })
@@ -170,6 +185,8 @@ describe('sendNotificationEmail', () => {
         projectName: '<script>alert(2)</script>',
         excerpt: 'check this <b>bold</b> & "quoted"',
         commentsUrl: 'https://aquilla.app/project/p1/comments',
+        threadTopic: 'check this thread',
+        isReply: false,
       },
     )
     const msg = email.send.mock.calls[0][0]
@@ -186,11 +203,16 @@ describe('sendNotificationEmail', () => {
       { EMAIL: email },
       'recipient@example.com',
       {
-        authorDisplayName: 'Alice\r\nBcc: attacker@evil.example',
+        authorDisplayName: 'Alice',
         kind: 'mention',
-        projectName: 'TestProject',
+        // AQU-1193 moved the interpolated parts of the subject: the project
+        // name and the thread topic (a comment body) are what land there now,
+        // and both are attacker-influenced.
+        projectName: 'TestProject\r\nBcc: attacker@evil.example',
         excerpt: 'hi',
         commentsUrl: 'https://aquilla.app/project/p1/comments',
+        threadTopic: 'topic\r\nBcc: other@evil.example',
+        isReply: false,
       },
     )
     const msg = email.send.mock.calls[0][0]
@@ -211,9 +233,107 @@ describe('sendNotificationEmail', () => {
           projectName: 'TestProject',
           excerpt: 'Hi',
           commentsUrl: 'https://aquilla.app/project/p1/comments',
+          threadTopic: 'Hi',
+          isReply: true,
         },
       ),
     ).rejects.toThrow('E_SENDER_NOT_VERIFIED')
+  })
+})
+
+// ── filterUsernamesWithProjectAccess ──────────────────────────────────────
+//
+// [Pen test 2026-09-24] API security & data exposure: @mention notifications
+// used to resolve emails globally with no project-membership check, letting
+// any contributor leak a comment excerpt to an arbitrary registered username
+// with no role on the project. These tests cover every grant path this
+// filter accepts, plus the no-grant rejection.
+
+describe('filterUsernamesWithProjectAccess', () => {
+  it('drops a mentioned username with no grant on the project', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'outsider', 'outsider@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['outsider'])
+    expect(result).toEqual([])
+  })
+
+  it('keeps a direct project_members grant', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'member', 'member@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-1', 1, 100)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['member'])
+    expect(result).toEqual(['member'])
+  })
+
+  it('keeps the project creator', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'creator', 'creator@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['creator'])
+    expect(result).toEqual(['creator'])
+  })
+
+  it('rejects a sub-maintainer org membership (below the org-path floor)', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'contributor', 'contributor@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'MyOrg', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-1', 'MyProject', 1, 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (1, 1, 400)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['contributor'])
+    expect(result).toEqual([])
+  })
+
+  it('keeps a maintainer-level org membership', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'maintainer', 'maintainer@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'MyOrg', 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-1', 'MyProject', 1, 999)")
+      .run()
+    await db
+      .prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (1, 1, 600)")
+      .run()
+
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['maintainer'])
+    expect(result).toEqual(['maintainer'])
+  })
+
+  it('returns an empty array for an empty username list without querying', async () => {
+    const { db } = await makeTestDb()
+    const result = await filterUsernamesWithProjectAccess(db, 'proj-1', [])
+    expect(result).toEqual([])
   })
 })
 
@@ -282,8 +402,30 @@ describe('sendCommentNotifications', () => {
     expect(email.send).toHaveBeenCalledOnce()
     const msg = email.send.mock.calls[0][0]
     expect(msg.to).toEqual(['bob@example.com'])
-    expect(msg.subject).toContain('alice')
-    expect(msg.subject).toContain('MyProject')
+    expect(msg.subject).toBe('[MyProject] Hello @bob, check this out')
+  })
+
+  it('does not email a mentioned username with no grant on the project', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'outsider', 'outsider@example.com', '')")
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 999)")
+      .run()
+
+    const email = makeEmailBinding()
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'Hello @outsider, check this out',
+      parentCommentId: null,
+    })
+
+    expect(email.send).not.toHaveBeenCalled()
   })
 
   it('does not send to the comment author even if self-mentioned', async () => {
@@ -305,5 +447,290 @@ describe('sendCommentNotifications', () => {
 
     // send should NOT have been called — alice is both author and only recipient
     expect(email.send).not.toHaveBeenCalled()
+  })
+})
+
+
+// ── AQU-1193: mention-only default, per-user preference, thread clustering ──
+
+describe('parseCommentEmailPreference', () => {
+  it('defaults when the blob is null, empty, or unparseable', () => {
+    expect(parseCommentEmailPreference(null)).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference(undefined)).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('{not json')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+  })
+
+  it('defaults when the blob is valid JSON but not an object', () => {
+    expect(parseCommentEmailPreference('null')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('"mentions"')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('42')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+  })
+
+  it('defaults when the key is missing or holds an unrecognised value', () => {
+    expect(parseCommentEmailPreference('{}')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('{"theme":"dark"}')).toBe(DEFAULT_COMMENT_EMAIL_PREFERENCE)
+    expect(parseCommentEmailPreference('{"commentEmails":"loud"}')).toBe(
+      DEFAULT_COMMENT_EMAIL_PREFERENCE,
+    )
+    expect(parseCommentEmailPreference('{"commentEmails":true}')).toBe(
+      DEFAULT_COMMENT_EMAIL_PREFERENCE,
+    )
+  })
+
+  it('reads each recognised value', () => {
+    expect(parseCommentEmailPreference('{"commentEmails":"all"}')).toBe('all')
+    expect(parseCommentEmailPreference('{"commentEmails":"mentions"}')).toBe('mentions')
+    expect(parseCommentEmailPreference('{"commentEmails":"off"}')).toBe('off')
+  })
+
+  it('is mention-only by default', () => {
+    expect(DEFAULT_COMMENT_EMAIL_PREFERENCE).toBe('mentions')
+  })
+})
+
+describe('shouldEmailRecipient', () => {
+  it('never sends anything when the user turned email off', () => {
+    expect(shouldEmailRecipient('mention', 'off')).toBe(false)
+    expect(shouldEmailRecipient('reply', 'off')).toBe(false)
+  })
+
+  it('always sends a mention short of off', () => {
+    expect(shouldEmailRecipient('mention', 'mentions')).toBe(true)
+    expect(shouldEmailRecipient('mention', 'all')).toBe(true)
+  })
+
+  it('suppresses reply noise on the default, and keeps it on all', () => {
+    expect(shouldEmailRecipient('reply', 'mentions')).toBe(false)
+    expect(shouldEmailRecipient('reply', 'all')).toBe(true)
+  })
+})
+
+describe('threadTopicFromBody', () => {
+  it('flattens newlines so the topic is one subject line', () => {
+    expect(threadTopicFromBody('first line\nsecond   line')).toBe('first line second line')
+  })
+
+  it('falls back to a fixed phrase for an empty or blank body', () => {
+    expect(threadTopicFromBody('')).toBe('Comment thread')
+    expect(threadTopicFromBody('   \n  ')).toBe('Comment thread')
+  })
+
+  it('ellipsises a long body rather than emitting a giant subject', () => {
+    const topic = threadTopicFromBody('x'.repeat(200))
+    expect(topic).toHaveLength(60)
+    expect(topic.endsWith('\u2026')).toBe(true)
+  })
+})
+
+describe('threadSubject', () => {
+  const base = {
+    authorDisplayName: 'alice',
+    kind: 'mention' as const,
+    projectName: 'Luke NT',
+    excerpt: 'hi',
+    commentsUrl: 'https://aquilla.app/project/p1/comments',
+    threadTopic: 'Is this verse right?',
+  }
+
+  it('is identical (modulo Re:) for the root and every reply on one thread', () => {
+    const root = threadSubject({ ...base, isReply: false })
+    const reply = threadSubject({ ...base, kind: 'reply', isReply: true })
+    expect(root).toBe('[Luke NT] Is this verse right?')
+    expect(reply).toBe('Re: [Luke NT] Is this verse right?')
+    expect(reply.replace(/^Re: /, '')).toBe(root)
+  })
+
+  it('does not vary with the author — that is what broke grouping before', () => {
+    const fromAlice = threadSubject({ ...base, authorDisplayName: 'alice', isReply: true })
+    const fromBob = threadSubject({ ...base, authorDisplayName: 'bob', isReply: true })
+    expect(fromAlice).toBe(fromBob)
+  })
+
+  it('falls back to a topic when the thread topic is blank', () => {
+    expect(threadSubject({ ...base, threadTopic: '', isReply: false })).toBe(
+      '[Luke NT] Comment thread',
+    )
+  })
+})
+
+describe('resolveRecipientProfiles', () => {
+  it('returns email + parsed preference, and defaults an untouched blob', async () => {
+    const { db } = await makeTestDb()
+    await db
+      .prepare(
+        "INSERT INTO users (id, username, email, password_hash, preferences) VALUES (1, 'bob', 'bob@example.com', '', '{\"commentEmails\":\"all\"}')",
+      )
+      .run()
+    await db
+      .prepare(
+        "INSERT INTO users (id, username, email, password_hash) VALUES (2, 'carol', 'carol@example.com', '')",
+      )
+      .run()
+
+    const profiles = await resolveRecipientProfiles(db, ['bob', 'carol', 'nobody'])
+    expect(profiles.get('bob')).toEqual({ email: 'bob@example.com', preference: 'all' })
+    expect(profiles.get('carol')).toEqual({
+      email: 'carol@example.com',
+      preference: 'mentions',
+    })
+    expect(profiles.has('nobody')).toBe(false)
+  })
+
+  it('returns an empty map for no usernames', async () => {
+    const { db } = await makeTestDb()
+    expect((await resolveRecipientProfiles(db, [])).size).toBe(0)
+  })
+})
+
+describe('sendCommentNotifications — preference gating (AQU-1193)', () => {
+  /** The thread's root comment body. Bound as a parameter, never inlined: the
+   *  Postgres shim rewrites `?` to `$n`, and this sentence ends in one. */
+  const ROOT_BODY = 'What should we do with verse 4?'
+
+  /** Seed a project plus a root comment with one prior participant (bob). */
+  async function seedThread(db: AquillaDb, opts: { bobPreferences?: string } = {}) {
+    await db
+      .prepare(
+        `INSERT INTO users (id, username, email, password_hash, preferences)
+         VALUES (1, 'bob', 'bob@example.com', '', ?)`,
+      )
+      .bind(opts.bobPreferences ?? '{}')
+      .run()
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+    await db
+      .prepare(
+        `INSERT INTO comments
+           (comment_id, project_id, scope_kind, body, author_id, created_at, updated_at)
+         VALUES ('root-1', 'proj-1', 'project', ?, 'bob', 1, 1)`,
+      )
+      .bind(ROOT_BODY)
+      .run()
+  }
+
+  it('does NOT email an unmentioned thread participant by default', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db)
+    const email = makeEmailBinding()
+
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'I agree with that',
+      parentCommentId: 'root-1',
+      commentId: 'reply-1',
+    })
+
+    expect(email.send).not.toHaveBeenCalled()
+  })
+
+  it('emails an unmentioned thread participant who opted into all', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db, { bobPreferences: '{"commentEmails":"all"}' })
+    const email = makeEmailBinding()
+
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'I agree with that',
+      parentCommentId: 'root-1',
+      commentId: 'reply-1',
+    })
+
+    expect(email.send).toHaveBeenCalledOnce()
+  })
+
+  it('still emails a mentioned user who is on the mentions default', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db)
+    const email = makeEmailBinding()
+
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'what do you think @bob?',
+      parentCommentId: 'root-1',
+      commentId: 'reply-1',
+    })
+
+    expect(email.send).toHaveBeenCalledOnce()
+  })
+
+  it('sends nothing at all to a user who turned comment email off, even on a mention', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db, { bobPreferences: '{"commentEmails":"off"}' })
+    const email = makeEmailBinding()
+
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'what do you think @bob?',
+      parentCommentId: 'root-1',
+      commentId: 'reply-1',
+    })
+
+    expect(email.send).not.toHaveBeenCalled()
+  })
+
+  it('subjects a reply from the thread ROOT, so the whole thread is one conversation', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db, { bobPreferences: '{"commentEmails":"all"}' })
+    const email = makeEmailBinding()
+
+    await sendCommentNotifications({
+      env: { EMAIL: email },
+      db,
+      baseUrl: 'https://aquilla.app',
+      projectId: 'proj-1',
+      author: 'alice',
+      body: 'I agree with that',
+      parentCommentId: 'root-1',
+      commentId: 'reply-1',
+    })
+
+    const msg = email.send.mock.calls[0][0]
+    // Root body, not this reply's body — the two replies below would otherwise
+    // carry different subjects and land as separate messages.
+    expect(msg.subject).toBe(`Re: [MyProject] ${ROOT_BODY}`)
+  })
+
+  it('gives two different repliers on one thread the identical subject', async () => {
+    const { db } = await makeTestDb()
+    await seedThread(db, { bobPreferences: '{"commentEmails":"all"}' })
+    const email = makeEmailBinding()
+
+    for (const [author, body] of [
+      ['alice', 'first reply'],
+      ['carol', 'second reply'],
+    ]) {
+      await sendCommentNotifications({
+        env: { EMAIL: email },
+        db,
+        baseUrl: 'https://aquilla.app',
+        projectId: 'proj-1',
+        author,
+        body,
+        parentCommentId: 'root-1',
+        commentId: `reply-${author}`,
+      })
+    }
+
+    expect(email.send).toHaveBeenCalledTimes(2)
+    const subjects = email.send.mock.calls.map((c) => c[0].subject)
+    expect(new Set(subjects).size).toBe(1)
   })
 })

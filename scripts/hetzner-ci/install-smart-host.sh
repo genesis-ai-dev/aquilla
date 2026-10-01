@@ -36,6 +36,12 @@ systemctl start aquillaqa.slice
 docker network inspect aquilla-qa >/dev/null 2>&1 || docker network create \
   --subnet 172.30.71.0/24 --opt com.docker.network.bridge.name=br-aquillaqa aquilla-qa
 # PR containers can reach public package/model endpoints, not the host or LAN.
+# IPv6 is dropped outright rather than allowlisted: nothing here depends on IPv6
+# egress (registries/model endpoints are all reachable over IPv4), and the host's
+# own IPv6 address (if the provider routes one) isn't knowable at image-build time
+# the way its IPv4 is, so there is no safe equivalent of the IPv4 host-address
+# block below. Blanket-dropping v6 removes it as a containment bypass instead of
+# leaving it implicitly wide open.
 cat > /opt/aquilla-qa/firewall.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -47,6 +53,14 @@ for destination in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 127.0.
 done
 iptables -A AQUILLA_QA -j RETURN
 iptables -C DOCKER-USER -i br-aquillaqa -j AQUILLA_QA 2>/dev/null || iptables -I DOCKER-USER -i br-aquillaqa -j AQUILLA_QA
+
+if command -v ip6tables >/dev/null 2>&1; then
+  ip6tables -C INPUT -i br-aquillaqa -j DROP 2>/dev/null || ip6tables -I INPUT -i br-aquillaqa -j DROP
+  ip6tables -N AQUILLA_QA6 2>/dev/null || true
+  ip6tables -F AQUILLA_QA6
+  ip6tables -A AQUILLA_QA6 -j DROP
+  ip6tables -C DOCKER-USER -i br-aquillaqa -j AQUILLA_QA6 2>/dev/null || ip6tables -I DOCKER-USER -i br-aquillaqa -j AQUILLA_QA6
+fi
 EOF
 chmod 755 /opt/aquilla-qa/firewall.sh
 cat > /etc/systemd/system/aquilla-qa-firewall.service <<'EOF'

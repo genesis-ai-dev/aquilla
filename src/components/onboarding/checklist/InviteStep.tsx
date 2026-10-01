@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectScopePath } from "@/hooks/useProjectScopePath"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { callerLevelFromRoster } from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface InviteStepProps {
@@ -27,6 +29,13 @@ export function InviteStep({
   // AQU-1352 §3.9: the dialog header names the scope ("Add people to Org › Project")
   // once it is known; the dialog falls back to its generic title until then.
   const scopePath = useProjectScopePath(projectId)
+  const { session } = useFrontierSession()
+  // AQU-853: same cap as the settings Members pane — the role picker must not
+  // offer a grant above the caller's own role.
+  const callerLevel = useMemo(
+    () => callerLevelFromRoster(members, session?.username),
+    [members, session?.username],
+  )
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
@@ -49,6 +58,7 @@ export function InviteStep({
         addMany={addMany}
         scopePath={scopePath}
         onAdded={onSharesChanged}
+        callerLevel={callerLevel}
       />
     </div>
   )

@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // AQU-646: auto-transcription after a media import. Sam's confirmed expected
 // behavior is that importing an MP3 SURFACES SOURCE TEXT — the user should not
 // have to find the Transcribe button before the text view fills in.
@@ -127,7 +128,9 @@ export interface AutoTranscribeArgs {
  */
 export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Promise<void> {
   try {
-    const consented = await requestAiModelConsent(WHISPER_MODEL)
+    const consented = usesHostedTranscription(args.session, args.projectId)
+      ? true
+      : await requestAiModelConsent(WHISPER_MODEL)
     if (!consented) return
     await runTranscribeAll({
       cells: args.seed.cells,

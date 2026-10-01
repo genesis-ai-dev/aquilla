@@ -122,9 +122,15 @@ export class Glossary {
 
   // ── Term detail → Forms section (AQU-1271) ─────────────────────────────────
 
-  /** The discovered-surface-form chips on the open term detail. */
+  /**
+   * The discovered-surface-form chips on the open term detail.
+   *
+   * AQU-1272: only the chips. Each carries `aria-pressed` (included/excluded);
+   * the "+N more" expander in the same container does not, and counting it made
+   * `toHaveCount(n)` pass or fail on how many forms happened to be collapsed.
+   */
   formsChips(): Locator {
-    return this.page.getByTestId("discovered-forms").getByRole("button")
+    return this.page.getByTestId("discovered-forms").locator("button[aria-pressed]")
   }
 
   /** Drop a discovered surface form from matching; waits for the term.update flush. */
@@ -143,9 +149,15 @@ export class Glossary {
     return this.page.getByRole("button", { name, exact: true })
   }
 
-  /** The term detail's "N occurrence(s)" summary line. */
+  /**
+   * The term detail's "N occurrence(s)" summary line.
+   *
+   * AQU-1272: scoped to the detail panel. The same phrase renders in the term
+   * list behind it, so a page-wide match could resolve to a different term's
+   * count (or to strict-mode ambiguity) depending on what was on screen.
+   */
   occurrenceSummary(): Locator {
-    return this.page.getByText(/^\d+ occurrences?$/)
+    return this.page.getByTestId("term-detail").getByText(/^\d+ occurrences?$/)
   }
 
   async openViolations(): Promise<void> {

@@ -28,11 +28,12 @@ function useRenderNote(): (
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
 ) => string | null {
   const t = useT()
   const { locale } = useI18n()
-  return (unit, now, audioFiles) => {
-    const note = planUnitNote(unit, now, audioFiles)
+  return (unit, now, audioFiles, textFiles) => {
+    const note = planUnitNote(unit, now, audioFiles, textFiles)
     if (!note) return null
     switch (note.kind) {
       case "marked":
@@ -140,8 +141,10 @@ export function usePlanStatusNote(
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  /** AQU-955: the set from `textFileIds`; see `planUnitStatus`. */
+  textFiles?: ReadonlySet<string>,
 ): string | null {
-  return useRenderNote()(unit, now, audioFiles)
+  return useRenderNote()(unit, now, audioFiles, textFiles)
 }
 
 /**
@@ -166,12 +169,14 @@ export function usePlanRowNote(
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  /** AQU-955: the set from `textFileIds`; see `planUnitStatus`. */
+  textFiles?: ReadonlySet<string>,
 ): string | null {
   const { locale } = useI18n()
-  const note = planUnitNote(unit, now, audioFiles)
-  const rendered = useRenderNote()(unit, now, audioFiles)
+  const note = planUnitNote(unit, now, audioFiles, textFiles)
+  const rendered = useRenderNote()(unit, now, audioFiles, textFiles)
   const activity = unit.lastEditAt != null ? formatRelativeTime(unit.lastEditAt, locale, now) : null
-  const nearlyComplete = planUnitStatus(unit, now, audioFiles) === "nearly_complete"
+  const nearlyComplete = planUnitStatus(unit, now, audioFiles, textFiles) === "nearly_complete"
   if (!note) return activity
   if (note.kind === "no_target" && !nearlyComplete) return activity
   return rendered

@@ -193,6 +193,26 @@ export async function downloadProjectOffline(
   }
 }
 
+/**
+ * Rolls back downloads (and removals) that a previous session left half-done:
+ * a reload or quit mid-download leaves the row at `downloading` forever, and
+ * nothing ever clears it — downloadProjectOffline no-ops on it, the sync
+ * manager only runs `ready` projects, and the project menu shows only a
+ * disabled "Downloading…". Call once per store boot, before any download can
+ * start; no download of this session is in flight yet, so any such row is
+ * stale. Safe for `downloading`: offline write routing only applies to
+ * `ready` projects, so there is no queued work to lose. Returns the project
+ * ids it rolled back.
+ */
+export function recoverInterruptedDownloads(store: Store<typeof schema>): string[] {
+  const stuck = store
+    .query(tables.offlineProjects.select())
+    .filter((row) => row.status === "downloading" || row.status === "removing")
+    .map((row) => row.projectId)
+  for (const projectId of stuck) deleteProjectRows(store, projectId)
+  return stuck
+}
+
 /** Count of locally queued writes (any status — `pending`, `flushing`, or
  *  stuck `failed`) for a project: none of these are confirmed synced, so a
  *  non-zero count means "Remove offline copy" would discard unsynced work. */

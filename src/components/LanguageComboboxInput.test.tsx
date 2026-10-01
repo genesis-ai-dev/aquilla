@@ -53,9 +53,13 @@ describe("LanguageComboboxInput", () => {
     typeInto(input, "fre")
 
     const listbox = await screen.findByRole("listbox")
-    expect(
-      screen.getByRole("option", { name: /French/ }),
-    ).toBeTruthy()
+    // AQU-1456 — a dozen names in the lazily loaded ISO 639-3 catalog contain
+    // "French" ("Cajun French", "Old French (842-ca. 1400)"), and whether that
+    // load has resolved by now is a race, so assert on the top-ranked option
+    // rather than on there being only one. French itself ranks first either way
+    // (AQU-1457).
+    const [best] = screen.getAllByRole("option", { name: /French/ })
+    expect(best.textContent).toMatch(/^French/)
     expect(listbox.textContent).toContain("fr")
   })
 
@@ -63,7 +67,8 @@ describe("LanguageComboboxInput", () => {
     render(<Harness />)
     typeInto(screen.getByLabelText("Language"), "fre")
 
-    fireEvent.click(await screen.findByRole("option", { name: /French/ }))
+    const [best] = await screen.findAllByRole("option", { name: /French/ })
+    fireEvent.click(best)
 
     expect(screen.getByTestId("committed").textContent).toBe("French")
     expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("French")

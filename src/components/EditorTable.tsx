@@ -38,6 +38,9 @@ import {
   useCellView,
 } from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import {
+  audioColumnFor, fileHasAudio, fileLastSeenWithAudio, rememberFileAudio, type AudioColumn,
+} from "@/lib/audio/file-has-audio"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
@@ -1359,6 +1362,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // heard lines' too — an empty answer means "not read yet", and each row's
   // audio check shows a placeholder instead of claiming there is no audio.
   const audioChecking = !audioLoaded || heardLinesLoading
+  // AQU-1495: the audio column is drawn only on a file that has audio (Sam,
+  // 2026-10-01) — the selection bar's rule, from the same helper. A read
+  // that has not come back says nothing either way: the map may still be the
+  // previous file's. While anything is unread the placeholder holds the slot
+  // only where audio is expected — a dubbing file, whose heard lines are still
+  // arriving, or a file last seen with audio — so a text-only file never
+  // pulses on every line.
+  const audioMemoryKey = audioFileId ? `${project.id}/${audioFileId}` : null
+  const hasAudio = fileHasAudio(audioLoaded ? audioByCellId : null, heardLinesLoading ? null : linkedTakesByCell)
+  const audioColumn = audioColumnFor({
+    hasAudio,
+    checking: audioChecking,
+    expectAudio: heardLinesLoading || (audioMemoryKey !== null && fileLastSeenWithAudio(audioMemoryKey)),
+  })
+  useEffect(() => {
+    if (audioMemoryKey && !audioChecking) rememberFileAudio(audioMemoryKey, hasAudio)
+  }, [audioMemoryKey, audioChecking, hasAudio])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2500,7 +2520,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
-          audioChecking={audioChecking}
+          audioColumn={audioColumn}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2626,7 +2646,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClearCellErrors,
     activeLane,
     audioByCellId,
-    audioChecking,
+    audioColumn,
     audioLens,
     castGutter,
     ttsSettings,
@@ -3529,8 +3549,8 @@ interface MemoizedRowProps {
   /** The heard lines performing this row that hold a recording — see
    *  `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet — see `audioChecking`. */
-  audioChecking: boolean
+  /** What the audio column shows — see `audioColumn` on the table. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3724,7 +3744,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, audioChecking, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3846,7 +3866,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         linkedTakes={linkedTakes}
-        audioChecking={audioChecking}
+        audioColumn={audioColumn}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3969,9 +3989,9 @@ interface EditorRowProps {
   /** The heard lines performing this row that hold a recording, in film order
    *  — see `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet: the audio check shows a
-   *  placeholder rather than "no audio". */
-  audioChecking: boolean
+  /** The file's audio column: absent on a file with no audio, a placeholder
+   *  while its recordings are read, else the line's audio check. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4970,7 +4990,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, audioChecking, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioColumn, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -6882,17 +6902,18 @@ function EditorRow({
     }
   }
 
-  // AQU-490: no switch, no project setting, no file-level gate. Audio
-  // validation sits in this gutter beside text validation wherever a line has
-  // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
-  // opt-in switch he had asked for a day earlier. The control decides for
-  // itself: a line with no recording draws an empty slot, exactly as a cell
-  // with no text carries no text control.
-  const audioValidationControl = (
+  // AQU-490: no switch and no project setting. Audio validation sits in this
+  // gutter beside text validation wherever a line has a recording — Sam's
+  // ruling of 2026-09-21, replacing the opt-in switch he had asked for a day
+  // earlier. The control decides for itself: a line with no recording draws a
+  // faded mic. AQU-1495 (Sam, 2026-10-01): the column itself is drawn only on
+  // a file with audio, so removing the last recording takes it away, and a
+  // text-only file never shows one.
+  const audioValidationControl = audioColumn === "off" ? null : (
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationLine.takes}
-      checking={audioChecking}
+      checking={audioColumn === "checking"}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide

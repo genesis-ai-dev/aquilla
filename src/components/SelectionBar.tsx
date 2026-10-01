@@ -25,7 +25,7 @@ import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/select
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
-import { selectedDubTakes } from "@/lib/sync/cell-audio-read-types"
+import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
@@ -274,19 +274,13 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
    * it — the very click that emptied it also hid the way back.
    *
    * A text-only file still shows only the text pair, so nothing grows two dead
-   * buttons it can never use.
+   * buttons it can never use. The same rule draws the editor gutter's audio
+   * column (AQU-1495), so the two can never disagree about a file.
    */
-  const fileHasAudio = useMemo(() => {
-    // A dubbing file's recordings are on its heard lines, not its rows.
-    for (const heard of linkedTakesByCell?.values() ?? []) {
-      if (heard.some((h) => h.hasTake)) return true
-    }
-    if (!audioByCellId) return false
-    for (const entry of audioByCellId.values()) {
-      if (selectedDubTakes(entry).length > 0) return true
-    }
-    return false
-  }, [audioByCellId, linkedTakesByCell])
+  const fileHasAudio = useMemo(
+    () => fileHasAnyAudio(audioByCellId, linkedTakesByCell),
+    [audioByCellId, linkedTakesByCell],
+  )
 
   /** Why the validate button is dark, in the selection's own terms. */
   const validateAudioDisabledReason = useMemo(() => {

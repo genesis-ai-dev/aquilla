@@ -22,8 +22,11 @@ export { EXTERNAL_CONTENT_HOSTS, isProxyableHost } from "./resource-proxy-handle
 /** The proxy base, e.g. `https://resources.aquilla.app`, or "" when unset.
  *  Trailing slashes are trimmed so callers can always append `/...`. */
 export function getResourcesBase(): string {
+  // Vite defines `import.meta.env`; Node/Playwright helpers that import this
+  // module (AQU-1060 helloao load) do not. Keep the `import.meta.env.NAME`
+  // member access so Vitest's `vi.stubEnv` still patches it.
   return (
-    (import.meta.env.VITE_RESOURCES_BASE as string | undefined)?.replace(/\/+$/, "") ?? ""
+    (import.meta.env?.VITE_RESOURCES_BASE as string | undefined)?.replace(/\/+$/, "") ?? ""
   )
 }
 

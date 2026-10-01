@@ -16,6 +16,14 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the lane row. Absent on older servers. */
+  name?: string | null
+  /** Opaque lane id. Deep links may use this instead of the tag. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
+  /** AQU-1458. Absent on older servers, which means "not archived". */
+  archived?: boolean
 }
 
 export interface PortfolioProject {
@@ -97,12 +105,44 @@ export interface OrgPortfolio {
   projects: PortfolioProject[]
 }
 
-export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+/**
+ * AQU-1071: an org's rollup plus the number the enterprise billing band is read
+ * off — distinct ACTIVE target languages across the org (archived lanes and
+ * archived projects excluded), counted server-side by the same helper billing
+ * uses, so the dashboard tile and the invoice cannot disagree.
+ *
+ * A project with three target lanes contributes three languages; two projects
+ * translating into the same language contribute one, which is why this is not
+ * derived client-side from the per-project lane chips.
+ */
+export interface OrgPortfolioSummary {
+  projects: PortfolioProject[]
+  /** 0 from a server that predates the field, so a tile reads 0 rather than NaN. */
+  activeLanguageCount: number
+}
+
+export async function getOrgPortfolioSummary(
+  jwt: string,
+  orgId: number,
+): Promise<OrgPortfolioSummary> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio`, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
-  return ((await res.json()) as { projects: PortfolioProject[] }).projects
+  const body = (await res.json()) as {
+    projects?: PortfolioProject[]
+    activeLanguageCount?: number
+  }
+  return {
+    projects: body.projects ?? [],
+    activeLanguageCount: Number.isFinite(body.activeLanguageCount)
+      ? Number(body.activeLanguageCount)
+      : 0,
+  }
+}
+
+export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+  return (await getOrgPortfolioSummary(jwt, orgId)).projects
 }
 
 export const PORTFOLIO_PAGE_SIZE = 40
@@ -266,6 +306,36 @@ export function recordedMinutes(p: PortfolioProject): number {
   return Math.round(p.recordedMs / 60000)
 }
 
+/**
+ * AQU-950: the most recent sign of work on the project — the signal the
+ * "Stalled" flag and the attention sort are allowed to read.
+ *
+ * The scalar `lastEditAt` is `MAX(files.last_edit_at)`, which the sync-worker
+ * derives from `MAX(cells.last_edit_at)`. Only events that WRITE A CELL ROW
+ * stamp that column, so a team doing review work is invisible to it:
+ * `cell.validate` / `cell.unvalidate` update `cell_validators`,
+ * `cells.validated` and `cells.ai_drafted` and never touch `last_edit_at`.
+ * The same is true of audio takes, which live in `cell_audio`. A project in
+ * active review or active recording therefore went quiet on this signal and
+ * was labelled "Stalled" after 14 days while its team was working in it daily
+ * — the mislabelling ETEN raised twice.
+ *
+ * Each lane's `lastEditAt` is `file_section_progress.updated_at`, restamped
+ * whenever ANY counter-affecting event lands on the file (validations and
+ * audio included), so the max across the lanes is the honest "something
+ * happened here" timestamp. It is already on the wire — no new bookkeeping.
+ * Lanes are optional (an older server sends none), so the scalar remains the
+ * floor rather than being replaced by it.
+ */
+export function latestActivityAt(p: PortfolioProject): number | null {
+  let latest = p.lastEditAt ?? null
+  for (const lane of p.lanes ?? []) {
+    const at = lane.lastEditAt
+    if (at != null && (latest == null || at > latest)) latest = at
+  }
+  return latest
+}
+
 export type DeadlineStatus = "overdue" | "soon" | "ok"
 
 /**
@@ -304,7 +374,10 @@ export function deadlineStatus(p: PortfolioProject, now: number): DeadlineStatus
 
 /** Attention score: higher = more attention needed. Overdue ranks above stalled, which ranks above low completion. */
 export function attentionRank(p: PortfolioProject, now: number): number {
-  const ageMs = p.lastEditAt != null ? now - p.lastEditAt : Infinity
+  // AQU-950: same activity signal the Stalled chip reads, so the sort can
+  // never rank a row as idle while the status column says it is not.
+  const activityAt = latestActivityAt(p)
+  const ageMs = activityAt != null ? now - activityAt : Infinity
   const stale = ageMs > 14 * 24 * 60 * 60 * 1000 ? 1 : 0
   const overdue = deadlineStatus(p, now) === "overdue" ? 1 : 0
   // AQU-1097: a project whose own deadline holds but whose units are already

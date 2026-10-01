@@ -871,6 +871,35 @@ describe("POST /api/v1/voice/tts/design", () => {
   })
 })
 
+describe("voice design/publish role floor", () => {
+  it("403s a viewer-role token on design and never reaches Inworld", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1) })
+    const token = await makeToken({ role: 100 })
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", {
+        projectId: "p1",
+        designPrompt: "A warm middle-aged male narrator with a steady pace and a clear tone.",
+      }, token),
+    ))!
+    expect(res.status).toBe(403)
+    expect(calls).toHaveLength(0)
+  })
+
+  it("403s a viewer-role token on publish and never reaches Inworld", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1) })
+    const token = await makeToken({ role: 100 })
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/publish", { projectId: "p1", voiceId: "ws__design-voice-a" }, token),
+    ))!
+    expect(res.status).toBe(403)
+    expect(calls).toHaveLength(0)
+  })
+})
+
 describe("POST /api/v1/voice/tts/publish", () => {
   it("401 without a valid sync-token", async () => {
     const { db } = makeStubDb()

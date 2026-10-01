@@ -97,6 +97,40 @@ describe("Paratext target import durability", () => {
     expect(published).toBeGreaterThan(sourceUploads[1].index)
   })
 
+  // AQU-1406: a support member the archive reader could not read is reported in
+  // the import summary, not swallowed — and it does not hold back the books.
+  it.each([
+    ["source", async (plan: ParatextPlan) => commitParatextProject(
+      plan,
+      { projectId: "p1", author: "alice", getToken: async () => "tok" },
+    )],
+    ["target", async (plan: ParatextPlan) => importParatextAsTarget(
+      plan,
+      [{ ref: "GEN 1:1", text: "In the beginning." }],
+      { projectId: "p1", author: "alice", targetLang: "fr", getToken: async () => "tok" },
+    )],
+  ])("reports an unreadable archive member alongside a successful %s import", async (_mode, run) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/source")) {
+        return new Response(JSON.stringify({ artifactId: "a", key: "k", sha256: "f".repeat(64) }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ accepted: 1 }), { status: 200 })
+    }))
+    const plan = makePlan()
+    plan.skippedEntries = [{
+      name: "shared/ptxprint/Default/FRTlocal.sfm",
+      reason: "skipped (not scripture content)",
+    }]
+
+    const result = await run(plan)
+
+    expect(result.refs).toHaveLength(1)
+    expect(result.skipped).toEqual([{
+      book: "shared/ptxprint/Default/FRTlocal.sfm",
+      reason: "skipped (not scripture content)",
+    }])
+  })
+
   it.each([
     ["source", async (plan: ParatextPlan) => commitParatextProject(
       plan,

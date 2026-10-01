@@ -288,40 +288,84 @@ export async function writeOrgBillingOverrides(
 }
 
 /**
- * Active target-lane count for an org — the number the enterprise SOW bills by.
+ * AQU-1071: the active-language counts the org dashboard and the platform-admin
+ * tenants table show. One query for every org asked about, so a multi-org view
+ * does not fan out into a query per row.
  *
  * "Active" excludes both ways a partner can stand a language down (AQU-1070):
  * archived projects (`archived_at`) and paused ones (`is_active = false`, the
  * lifecycle toggle). A paused lane is one nobody is working, so billing it
  * would leave partners with no way to drop out of a band short of archiving.
  * Lane-level archival is applied per project by `countDistinctTargetLanes`.
+ *
+ * `byOrg` is per-org; `combined` de-duplicates across the whole set, because a
+ * language two orgs both translate into is one language, not two — an all-orgs
+ * tile that summed `byOrg` would over-report it.
  */
-export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
+export interface OrgTargetLaneCounts {
+  byOrg: Map<number, number>
+  combined: number
+}
+
+export async function countTargetLanesByOrg(
+  db: AquillaDb,
+  orgIds: readonly number[],
+): Promise<OrgTargetLaneCounts> {
+  const unique = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  const empty: OrgTargetLaneCounts = { byOrg: new Map(), combined: 0 }
+  if (unique.length === 0) return empty
   try {
+    const placeholders = unique.map(() => "?").join(", ")
     const { results } = await db
       .prepare(
-        `SELECT ps.target_language,
+        `SELECT p.org_id AS org_id,
+                ps.target_language,
                 ps.target_lanes,
                 (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
            FROM project_settings ps
            JOIN projects p ON p.id = ps.project_id
-          WHERE p.org_id = ?
+          WHERE p.org_id IN (${placeholders})
             AND p.archived_at IS NULL
             AND COALESCE(p.is_active, TRUE)`,
       )
-      .bind(orgId)
-      .all<{ target_language: string | null; target_lanes: unknown; archived_lanes: unknown }>()
-    const projects: TargetLaneProject[] = (results ?? []).map((row) => ({
-      targetLanguage: row.target_language,
-      targetLanes: parseLaneList(row.target_lanes),
-      archivedLanes: parseLaneList(row.archived_lanes),
-    }))
-    return countDistinctTargetLanes(projects)
+      .bind(...unique)
+      .all<{
+        org_id: number
+        target_language: string | null
+        target_lanes: unknown
+        archived_lanes: unknown
+      }>()
+    const byOrgProjects = new Map<number, TargetLaneProject[]>()
+    const all: TargetLaneProject[] = []
+    for (const row of results ?? []) {
+      const project: TargetLaneProject = {
+        targetLanguage: row.target_language,
+        targetLanes: parseLaneList(row.target_lanes),
+        archivedLanes: parseLaneList(row.archived_lanes),
+      }
+      const orgId = Number(row.org_id)
+      const list = byOrgProjects.get(orgId)
+      if (list) list.push(project)
+      else byOrgProjects.set(orgId, [project])
+      all.push(project)
+    }
+    const byOrg = new Map<number, number>()
+    // Every org asked about gets an answer, including the ones with no projects
+    // — an absent entry would read as "unknown" at the call site, not as zero.
+    for (const orgId of unique) {
+      byOrg.set(orgId, countDistinctTargetLanes(byOrgProjects.get(orgId) ?? []))
+    }
+    return { byOrg, combined: countDistinctTargetLanes(all) }
   } catch (err) {
-    if (isMissingTableError(err)) return 0
-    console.error("[billing] countOrgTargetLanes error:", err)
-    return 0
+    if (isMissingTableError(err)) return empty
+    console.error("[billing] countTargetLanesByOrg error:", err)
+    return empty
   }
+}
+
+export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
+  const { byOrg } = await countTargetLanesByOrg(db, [orgId])
+  return byOrg.get(orgId) ?? 0
 }
 
 export async function readWordSnapshot(

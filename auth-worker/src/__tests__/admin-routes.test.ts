@@ -70,6 +70,44 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     expect(body.orgs[0]).toMatchObject({ id: 1, ownerUsername: "wendi", memberCount: 1, projectCount: 2 })
   })
 
+  // AQU-1071: the tenants table shows each org's active-language count, so the
+  // billing band is legible across tenants instead of one Billing tab at a time.
+  it("GET /orgs reports each org's active target-language count, per the billing rule", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'NWT', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES
+        ('pa', 'John', 1, 1, NULL),
+        ('pb', 'Mark', 1, 1, NULL),
+        ('pz', 'Retired', 1, 1, '2026-01-01')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES
+        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Dioula"]}', 1),
+        ('pb', '{"targetLanguage":"Dioula","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+
+    const res = await app.request("/api/v2/admin/orgs", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      orgs: Array<{ id: number; activeLanguageCount: number }>
+    }
+    const byId = Object.fromEntries(body.orgs.map((o) => [o.id, o]))
+    // Bambara and Dioula — Dioula is shared by two projects, Songhai is archived,
+    // and Zarma's project is archived.
+    expect(byId[1]).toMatchObject({ activeLanguageCount: 2 })
+    // An org with no projects answers 0 rather than omitting the field, so the
+    // table can tell "none" apart from "this server doesn't report it".
+    expect(byId[2]).toMatchObject({ activeLanguageCount: 0 })
+  })
+
   it("GET /teams lists every group with org + member/grant counts", async () => {
     await seedUser(7, "root")
     await seedUser(1, "wendi")

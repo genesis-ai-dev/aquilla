@@ -96,6 +96,39 @@ export function useQueueCurrentCellId(): string | null {
   return useSyncExternalStore(subscribe, runningCellId, () => null)
 }
 
+function subscribeClock(listener: () => void): () => void {
+  const unsubState = subscribe(listener)
+  const unsubProgress = subscribeProgress(listener)
+  return () => { unsubState(); unsubProgress() }
+}
+
+/** Clip seconds while Play All is sounding this cell, otherwise null.
+ *  Other rows keep a stable null so the transport tick does not repaint them. */
+export function useQueueCellPlayhead(cellId: string | undefined): number | null {
+  return useSyncExternalStore(
+    subscribeClock,
+    () => {
+      if (!cellId || state.kind !== "playing" || state.cellId !== cellId) return null
+      return progress.currentTime
+    },
+    () => null,
+  )
+}
+
+/** @internal — drive the playhead hook without opening an audio element. */
+export function __setQueuePlaybackForTests(next: {
+  cellId: string | null
+  currentTime: number
+  playing: boolean
+}): void {
+  state = next.playing && next.cellId
+    ? { kind: "playing", cellIndex: 0, cellId: next.cellId }
+    : IDLE
+  progress = { ...progress, currentTime: next.currentTime }
+  notify()
+  notifyProgress()
+}
+
 // ── Missing-clip registry (decision 2026-08-05) ─────────────────────────────
 // Lines whose dub audio DEFINITIVELY 404'd (deleted, or an upload that never
 // completed) — the timeline paints a per-chip badge from this, so the user is

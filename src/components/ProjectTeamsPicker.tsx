@@ -34,6 +34,8 @@ interface ProjectTeamsPickerProps {
   value: number[]
   onValueChange: (teamIds: number[]) => void
   showRequiredError?: boolean
+  /** AQU-1519: locked while the create dialog is working. */
+  disabled?: boolean
 }
 
 export function ProjectTeamsPicker({
@@ -42,6 +44,7 @@ export function ProjectTeamsPicker({
   value,
   onValueChange,
   showRequiredError = false,
+  disabled = false,
 }: ProjectTeamsPickerProps) {
   const t = useT()
   // Team names are unique per org (groups UNIQUE(org_id, name)), so the name
@@ -58,6 +61,7 @@ export function ProjectTeamsPicker({
       <MultiSelectCombobox
         items={names}
         value={selectedNames}
+        disabled={disabled}
         onValueChange={(next: string[]) =>
           onValueChange(next.map((n) => idByName.get(n)).filter((id): id is number => id != null))
         }

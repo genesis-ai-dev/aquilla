@@ -19,6 +19,7 @@ import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
+import { toast } from "@/components/ui/toast"
 import {
   Tooltip,
   TooltipContent,
@@ -29,7 +30,6 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
-import { toast } from "@/components/ui/toast"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
@@ -120,6 +120,28 @@ const MAX_TARGET_LANE_BOXES = 10
  */
 const EXTRA_LANGUAGES_WARNING =
   "Project created; adding extra languages failed — add them in Settings → Languages."
+
+/**
+ * AQU-1519: how long the dialog waits before admitting a create is overrunning
+ * and handing the user a way out. Deliberately generous — a linked-target
+ * create seeds the whole upstream inside the same request, so linking a full
+ * Bible legitimately takes a while and must not trip this. The request is
+ * never cancelled; this only decides when the dialog stops being a dead end.
+ */
+const LONG_RUNNING_WORK_MS = 120_000
+
+const LONG_RUNNING_WORK_MESSAGE =
+  "This is taking longer than expected. You can close this dialog — the project " +
+  "may still finish and show up in your projects list."
+
+/**
+ * AQU-1519: what the dialog is busy doing. Anything non-null locks every
+ * control in the body AND every way of closing, so a stray click mid-create
+ * can no longer edit the form under a request in flight or — on the
+ * linked-target path — add a lane to the upstream while its clone is still
+ * being built.
+ */
+type DialogWork = "creating" | "adding-lane"
 
 /**
  * Complete lane registry for the create settings PATCH: primary first, then
@@ -218,7 +240,22 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // land the retry on the same row instead of creating a duplicate project.
   const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
-  const [submitWarning, setSubmitWarning] = useState<string | null>(null)
+  const [work, setWork] = useState<DialogWork | null>(null)
+  const [workOverran, setWorkOverran] = useState(false)
+  const locked = work !== null
+  // The escape hatch: once the work has overrun, closing is allowed again so
+  // the dialog can never trap the user. The fields stay locked either way —
+  // the request is still in flight and editing it would change nothing.
+  const canClose = !locked || workOverran
+
+  /** Release the lock and the overrun notice together — they only ever move as
+   *  one, and keeping them in step here is what lets the overrun timer below be
+   *  a pure subscription with no setState in its body. */
+  function releaseWork() {
+    setWork(null)
+    setWorkOverran(false)
+  }
+
   // AQU-1352: null until create-targets loads (and again on every reload,
   // close, or page-org change). Submit is disabled while it is null, so a
   // stale or unresolved choice can never pick the org (review finding).
@@ -251,120 +288,126 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     validators: { onSubmit: projectSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
-      setSubmitWarning(null)
 
-      const jwt = session?.jwt
-      if (!jwt) {
-        setSubmitError("You need to be signed in to create a project.")
-        return
-      }
-
-      const project: ProjectRecord = {
-        id: draftProjectId.current,
-        name: value.name.trim(),
-        sourceLanguage: value.sourceLanguage.trim(),
-        targetLanguage: value.targetLanguage.trim(),
-        createdAt: new Date().toISOString(),
-        files: [],
-        members: [{ userId: session.username, role: "owner" }],
-      }
-
-      if (!destination) return
-      if (needTeams && teamIds.length === 0) {
-        setTeamsError(true)
-        setSubmitError(t("projectSettings.create.teamsRequiredError"))
-        return
-      }
-
-      let extraLanguagesFailed = false
-      const extrasToApply = value.extraLanguages
-      const upstreamId = value.upstreamProjectId.trim()
-      // Self-contained + upstream → one-time clone; linked-target → live.
-      // No upstream on self-contained → plain create, no link call.
-      const willLink = !!upstreamId
-      const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
-      const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
-
+      // AQU-1519: the dialog locks for the whole create and unlocks in the
+      // `finally`, so no early return (sign-in, a failed call) can leave it
+      // stuck. A validation failure never reaches here — the form rejects it
+      // first — so this can never lock a user out of fixing a bad field.
+      setWork("creating")
       try {
-        await createCloudProject(jwt, {
-          id: project.id,
-          name: project.name,
-          orgId: destination.orgId,
-          teamIds: destination.orgId != null ? teamIds : undefined,
-        })
+        const jwt = session?.jwt
+        if (!jwt) {
+          setSubmitError("You need to be signed in to create a project.")
+          return
+        }
 
-        // One atomic settings write at version 0. The HTTP PATCH handler
-        // replaces the whole blob (no per-key merge), so languages and lanes
-        // must travel together — a second PATCH with only targetLanes would
-        // silently wipe sourceLanguage/targetLanguage (AQU-1250).
+        const project: ProjectRecord = {
+          id: draftProjectId.current,
+          name: value.name.trim(),
+          sourceLanguage: value.sourceLanguage.trim(),
+          targetLanguage: value.targetLanguage.trim(),
+          createdAt: new Date().toISOString(),
+          files: [],
+          members: [{ userId: session.username, role: "owner" }],
+        }
+
+        if (!destination) return
+        if (needTeams && teamIds.length === 0) {
+          setTeamsError(true)
+          setSubmitError(t("projectSettings.create.teamsRequiredError"))
+          return
+        }
+
+        let extraLanguagesFailed = false
+        const extrasToApply = value.extraLanguages
+        const upstreamId = value.upstreamProjectId.trim()
+        // Self-contained + upstream → one-time clone; linked-target → live.
+        // No upstream on self-contained → plain create, no link call.
+        const willLink = !!upstreamId
+        const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
+        const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
+
         try {
-          const result = await patchProjectSettings(
-            jwt,
-            project.id,
-            {
-              sourceLanguage: project.sourceLanguage,
-              targetLanguage: project.targetLanguage,
-              targetLanes: completeTargetLanes(project.targetLanguage, extrasToApply),
-            },
-            PROJECT_SETTINGS_VERSION_INITIAL,
-          )
-          if (result.kind !== "ok") extraLanguagesFailed = true
-        } catch (err) {
-          console.warn("[project-create] settings write failed (non-fatal):", err)
-          extraLanguagesFailed = true
-        }
-
-        if (willLink) {
-          const linkResult = await linkProjectSource(jwt, project.id, {
-            sourceProjectId: upstreamId,
-            mode: linkMode,
-            consumes: linkConsumes,
+          await createCloudProject(jwt, {
+            id: project.id,
+            name: project.name,
+            orgId: destination.orgId,
+            teamIds: destination.orgId != null ? teamIds : undefined,
           })
-          if (linkResult.seeded === false && linkMode === "live") {
-            await triggerLinkSync(jwt, project.id)
+
+          // One atomic settings write at version 0. The HTTP PATCH handler
+          // replaces the whole blob (no per-key merge), so languages and lanes
+          // must travel together — a second PATCH with only targetLanes would
+          // silently wipe sourceLanguage/targetLanguage (AQU-1250).
+          try {
+            const result = await patchProjectSettings(
+              jwt,
+              project.id,
+              {
+                sourceLanguage: project.sourceLanguage,
+                targetLanguage: project.targetLanguage,
+                targetLanes: completeTargetLanes(project.targetLanguage, extrasToApply),
+              },
+              PROJECT_SETTINGS_VERSION_INITIAL,
+            )
+            if (result.kind !== "ok") extraLanguagesFailed = true
+          } catch (err) {
+            console.warn("[project-create] settings write failed (non-fatal):", err)
+            extraLanguagesFailed = true
           }
+
+          if (willLink) {
+            const linkResult = await linkProjectSource(jwt, project.id, {
+              sourceProjectId: upstreamId,
+              mode: linkMode,
+              consumes: linkConsumes,
+            })
+            if (linkResult.seeded === false && linkMode === "live") {
+              await triggerLinkSync(jwt, project.id)
+            }
+          }
+        } catch (err) {
+          console.error("[project-create] failed:", err)
+          setSubmitError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
+          return
         }
-      } catch (err) {
-        console.error("[project-create] failed:", err)
-        setSubmitError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
-        return
-      }
 
-      await createProject(project)
-      posthog.capture("project created", {
-        project_id: project.id,
-        project_shape: value.shape,
-        source_language: project.sourceLanguage,
-        target_language: project.targetLanguage,
-        extra_target_languages: extrasToApply.length,
-        ...(willLink
-          ? { link_mode: linkMode, link_consumes: linkConsumes, upstream_project_id: upstreamId }
-          : {}),
-      })
-      onCreated(project)
-      toast.add({
-        type: "success",
-        title: t("projectSettings.create.createdToast", {
-          name: project.name,
-          destination:
-            destination.orgId == null
-              ? t("projectSettings.create.destinationPersonal")
-              : destination.name,
-        }),
-      })
-      form.reset()
-      clearSubmitError()
+        await createProject(project)
+        posthog.capture("project created", {
+          project_id: project.id,
+          project_shape: value.shape,
+          source_language: project.sourceLanguage,
+          target_language: project.targetLanguage,
+          extra_target_languages: extrasToApply.length,
+          ...(willLink
+            ? { link_mode: linkMode, link_consumes: linkConsumes, upstream_project_id: upstreamId }
+            : {}),
+        })
+        onCreated(project)
+        toast.add({
+          type: "success",
+          title: t("projectSettings.create.createdToast", {
+            name: project.name,
+            destination:
+              destination.orgId == null
+                ? t("projectSettings.create.destinationPersonal")
+                : destination.name,
+          }),
+        })
+        form.reset()
+        clearSubmitError()
 
-      if (extraLanguagesFailed) {
-        // The project exists and onCreated already fired — leave the dialog
-        // open just long enough for the warning to be readable rather than
-        // rolling anything back. This create succeeded, so a subsequent submit
-        // in the still-open dialog is a NEW project: mint a fresh draft id so
-        // it doesn't false-dedup onto the row we just created (AQU-712).
-        draftProjectId.current = uuid()
-        setSubmitWarning(EXTRA_LANGUAGES_WARNING)
-      } else {
+        // AQU-1519: a successful create ALWAYS closes the dialog, partial
+        // success included. A failed lanes PATCH is a warning about a project
+        // that exists, not a reason to hold the user in a form they are done
+        // with — so it rides a toast on the page they land on, where it survives
+        // the close instead of being wiped by it.
+        if (extraLanguagesFailed) {
+          toast.add({ type: "warning", title: EXTRA_LANGUAGES_WARNING })
+        }
         setOpen(false)
+      } finally {
+        releaseWork()
       }
     },
   })
@@ -376,12 +419,23 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     setTeamsError(false)
     form.reset()
     clearSubmitError()
-    setSubmitWarning(null)
+    // AQU-1519: a dialog closed while a create was overrunning must reopen as a
+    // fresh, usable form — never still locked. The request it left behind
+    // finishes on its own and is not cancelled by the close.
+    releaseWork()
     // AQU-712: closing the dialog ends the session — mint a fresh draft id so
     // the next time it opens starts a brand-new project (no false dedup onto a
     // project created in a previous session).
     draftProjectId.current = uuid()
   }, [open, form, clearSubmitError])
+
+  // AQU-1519: arm the overrun escape hatch for exactly as long as the dialog is
+  // busy. Disarming is `releaseWork`'s job, not this effect's.
+  useEffect(() => {
+    if (!locked) return
+    const timer = setTimeout(() => setWorkOverran(true), LONG_RUNNING_WORK_MS)
+    return () => clearTimeout(timer)
+  }, [locked])
 
   // The page org changed under an open dialog: the old choice is void.
   useEffect(() => {
@@ -398,11 +452,20 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // AQU-1519: the X, Escape and an outside press all arrive here, so one
+        // guard covers all three ways out. While the dialog is working it owns
+        // the close decision; once the work has overrun it hands it back.
+        if (!next && !canClose) return
+        setOpen(next)
+      }}
+    >
       <DialogTrigger render={<Button />}>
         {t("projectSettings.create.trigger")}
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent closeDisabled={!canClose}>
         <DialogHeader>
           <DialogTitle>{t("projectSettings.create.dialogTitle")}</DialogTitle>
         </DialogHeader>
@@ -415,365 +478,400 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             // blocks re-entrant clicks, but implicit form submission can still
             // fire while a create is in flight. Bail so one dialog pass creates
             // exactly one project (AQU-711).
-            if (form.state.isSubmitting) return
+            if (form.state.isSubmitting || locked) return
             void form.handleSubmit()
           }}
           className="contents"
         >
-          <DialogBody className="flex flex-col gap-5">
-            {open && (
-              <ProjectDestinationPicker
-                jwt={session?.jwt}
-                pageOrgId={orgId}
-                onChange={onDestination}
-              />
-            )}
-            {open && destination?.orgId != null && (
-              <ProjectTeamsPicker
-                teams={destination.teams ?? []}
-                required={needTeams}
-                value={teamIds}
-                onValueChange={(next) => {
-                  setTeamIds(next)
-                  setTeamsError(false)
-                }}
-                showRequiredError={teamsError}
-              />
-            )}
-            <FieldGroup>
-              <form.Field
-                name="name"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="project-create-title">{t("projectSettings.info.titleLabel")}</FieldLabel>
-                      <Input
-                        id="project-create-title"
-                        // Avoid DOM name="name" — Chrome treats it as a contact
-                        // field and shows Contact Autofill despite autocomplete=off.
-                        name="aquilla-project-title"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        className={FIELD_CLASS}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        placeholder={t("projectSettings.create.namePlaceholder")}
-                        aria-invalid={invalid}
-                      />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
+          <DialogBody>
+            {/* AQU-1519: one disabled fieldset backs the whole lock — it takes
+                every input, radio, select trigger and button inside it out of
+                play at once, so a control added to this dialog later (the
+                searchable upstream picker of AQU-1518, say) is locked by
+                default rather than by remembering to. The explicit `disabled`
+                on each control is what Base UI's non-native parts (a radio is
+                a <span role="radio">) need on top of it. */}
+            <fieldset
+              disabled={locked}
+              aria-busy={locked}
+              data-testid="create-project-fields"
+              className="flex min-w-0 flex-col gap-5"
+            >
+              {open && (
+                <ProjectDestinationPicker
+                  jwt={session?.jwt}
+                  pageOrgId={orgId}
+                  onChange={onDestination}
+                  disabled={locked}
+                />
+              )}
+              {open && destination?.orgId != null && (
+                <ProjectTeamsPicker
+                  teams={destination.teams ?? []}
+                  required={needTeams}
+                  value={teamIds}
+                  onValueChange={(next) => {
+                    setTeamIds(next)
+                    setTeamsError(false)
+                  }}
+                  showRequiredError={teamsError}
+                  disabled={locked}
+                />
+              )}
+              <FieldGroup>
+                <form.Field
+                  name="name"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <FieldLabel htmlFor="project-create-title">{t("projectSettings.info.titleLabel")}</FieldLabel>
+                        <Input
+                          id="project-create-title"
+                          // Avoid DOM name="name" — Chrome treats it as a contact
+                          // field and shows Contact Autofill despite autocomplete=off.
+                          name="aquilla-project-title"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          className={FIELD_CLASS}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          placeholder={t("projectSettings.create.namePlaceholder")}
+                          aria-invalid={invalid}
+                          disabled={locked}
+                        />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
 
-              <form.Field
-                name="sourceLanguage"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="project-create-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
-                        <LanguageFieldHint />
-                      </div>
-                      <LanguageComboboxInput
-                        id="project-create-source"
-                        name="aquilla-project-source-language"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        className={FIELD_CLASS}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onValueChange={field.handleChange}
-                        placeholder={t("projectSettings.create.sourceLanguagePlaceholder")}
-                        aria-invalid={invalid}
-                      />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
+                <form.Field
+                  name="sourceLanguage"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="project-create-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
+                          <LanguageFieldHint />
+                        </div>
+                        <LanguageComboboxInput
+                          id="project-create-source"
+                          name="aquilla-project-source-language"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          className={FIELD_CLASS}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onValueChange={field.handleChange}
+                          placeholder={t("projectSettings.create.sourceLanguagePlaceholder")}
+                          aria-invalid={invalid}
+                          disabled={locked}
+                        />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
 
-              <form.Field
-                name="targetLanguage"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="project-create-target">
-                          {t("projectSettings.create.targetLanguagesLabel")}
-                        </FieldLabel>
-                        <LanguageFieldHint />
-                      </div>
-                      <form.Field
-                        name="extraLanguages"
-                        children={(extrasField) => (
-                          <TargetLanguageInputs
-                            // Remount when the dialog reopens so local row
-                            // state can't leak across sessions.
-                            key={open ? "open" : "closed"}
-                            onPrimaryChange={field.handleChange}
-                            onExtrasChange={extrasField.handleChange}
-                            onBlur={field.handleBlur}
-                            invalid={invalid}
-                          />
-                        )}
-                      />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
-            </FieldGroup>
-
-            <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
-              <summary className="text-xs font-medium text-muted-foreground select-none">
-                {t("projectSettings.create.advancedShapeSummary")}
-              </summary>
-              <form.Field
-                name="shape"
-                children={(field) => (
-                  <form.Subscribe
-                    selector={(state) =>
-                      filledTargetLaneCount(
-                        state.values.targetLanguage,
-                        state.values.extraLanguages,
-                      )
-                    }
-                  >
-                    {(targetLaneCount) => (
-                      <RadioGroup
-                        value={field.state.value}
-                        onValueChange={(value) => pickShape(value as ProjectShape)}
-                        className="gap-3 pt-1"
-                      >
-                        <label className="flex items-start gap-2.5 text-sm">
-                          <RadioGroupItem
-                            value="self-contained"
-                            className="mt-0.5"
-                            data-testid="create-shape-self-contained"
-                          />
-                          <span>
-                            <RichMessage
-                              k="projectSettings.create.shapeSelfContained"
-                              count={targetLaneCount}
-                              values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                <form.Field
+                  name="targetLanguage"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <div className="flex items-center gap-1.5">
+                          <FieldLabel htmlFor="project-create-target">
+                            {t("projectSettings.create.targetLanguagesLabel")}
+                          </FieldLabel>
+                          <LanguageFieldHint />
+                        </div>
+                        <form.Field
+                          name="extraLanguages"
+                          children={(extrasField) => (
+                            <TargetLanguageInputs
+                              // Remount when the dialog reopens so local row
+                              // state can't leak across sessions.
+                              key={open ? "open" : "closed"}
+                              onPrimaryChange={field.handleChange}
+                              onExtrasChange={extrasField.handleChange}
+                              onBlur={field.handleBlur}
+                              invalid={invalid}
+                              disabled={locked}
                             />
-                          </span>
-                        </label>
-                        <label className="flex items-start gap-2.5 text-sm">
-                          <RadioGroupItem
-                            value="linked-target"
-                            className="mt-0.5"
-                            data-testid="create-shape-linked-target"
-                          />
-                          <span>
+                          )}
+                        />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
+              </FieldGroup>
+
+              <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
+                <summary className="text-xs font-medium text-muted-foreground select-none">
+                  {t("projectSettings.create.advancedShapeSummary")}
+                </summary>
+                <form.Field
+                  name="shape"
+                  children={(field) => (
+                    <form.Subscribe
+                      selector={(state) =>
+                        filledTargetLaneCount(
+                          state.values.targetLanguage,
+                          state.values.extraLanguages,
+                        )
+                      }
+                    >
+                      {(targetLaneCount) => (
+                        <RadioGroup
+                          value={field.state.value}
+                          onValueChange={(value) => pickShape(value as ProjectShape)}
+                          disabled={locked}
+                          className="gap-3 pt-1"
+                        >
+                          <label className="flex items-start gap-2.5 text-sm">
+                            <RadioGroupItem
+                              value="self-contained"
+                              className="mt-0.5"
+                              data-testid="create-shape-self-contained"
+                            />
+                            <span>
+                              <RichMessage
+                                k="projectSettings.create.shapeSelfContained"
+                                count={targetLaneCount}
+                                values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                              />
+                            </span>
+                          </label>
+                          <label className="flex items-start gap-2.5 text-sm">
+                            <RadioGroupItem
+                              value="linked-target"
+                              className="mt-0.5"
+                              data-testid="create-shape-linked-target"
+                            />
+                            <span>
+                              <RichMessage
+                                k="projectSettings.create.shapeLinkedTarget"
+                                count={targetLaneCount}
+                                values={{
+                                  name: (
+                                    <strong>
+                                      {t("projectSettings.create.shapeLinkedTargetName", {
+                                        count: targetLaneCount,
+                                      })}
+                                    </strong>
+                                  ),
+                                }}
+                              />
+                            </span>
+                          </label>
+                        </RadioGroup>
+                      )}
+                    </form.Subscribe>
+                  )}
+                />
+
+                <form.Subscribe
+                  selector={(state) =>
+                    [state.values.shape, state.values.upstreamProjectId] as const
+                  }
+                  children={([shape, upstreamProjectId]) => {
+                    const showCorpusChoice =
+                      shape === "linked-target" || !!upstreamProjectId.trim()
+                    // Add-as-lane only for the live linked-target sibling case —
+                    // a self-contained clone of "Its Source" is a real project,
+                    // not a lane recommendation.
+                    const showAddAsLane =
+                      shape === "linked-target" && !!upstreamProjectId.trim()
+
+                    return (
+                      <div className="mt-3 flex flex-col gap-3 border-t pt-3">
+                        <p className="text-sm text-muted-foreground">
+                          {shape === "linked-target" ? (
                             <RichMessage
-                              k="projectSettings.create.shapeLinkedTarget"
-                              count={targetLaneCount}
+                              k="projectSettings.create.liveIntro"
                               values={{
-                                name: (
-                                  <strong>
-                                    {t("projectSettings.create.shapeLinkedTargetName", {
-                                      count: targetLaneCount,
-                                    })}
-                                  </strong>
-                                ),
+                                mode: <strong>{t("projectSettings.create.liveModeName")}</strong>,
                               }}
                             />
-                          </span>
-                        </label>
-                      </RadioGroup>
-                    )}
-                  </form.Subscribe>
-                )}
-              />
+                          ) : (
+                            <RichMessage
+                              k="projectSettings.create.cloneIntro"
+                              values={{
+                                mode: <strong>{t("projectSettings.create.cloneModeName")}</strong>,
+                              }}
+                            />
+                          )}
+                        </p>
 
-              <form.Subscribe
-                selector={(state) =>
-                  [state.values.shape, state.values.upstreamProjectId] as const
-                }
-                children={([shape, upstreamProjectId]) => {
-                  const showCorpusChoice =
-                    shape === "linked-target" || !!upstreamProjectId.trim()
-                  // Add-as-lane only for the live linked-target sibling case —
-                  // a self-contained clone of "Its Source" is a real project,
-                  // not a lane recommendation.
-                  const showAddAsLane =
-                    shape === "linked-target" && !!upstreamProjectId.trim()
-
-                  return (
-                    <div className="mt-3 flex flex-col gap-3 border-t pt-3">
-                      <p className="text-sm text-muted-foreground">
-                        {shape === "linked-target" ? (
-                          <RichMessage
-                            k="projectSettings.create.liveIntro"
-                            values={{
-                              mode: <strong>{t("projectSettings.create.liveModeName")}</strong>,
-                            }}
-                          />
-                        ) : (
-                          <RichMessage
-                            k="projectSettings.create.cloneIntro"
-                            values={{
-                              mode: <strong>{t("projectSettings.create.cloneModeName")}</strong>,
-                            }}
-                          />
-                        )}
-                      </p>
-
-                      <form.Field
-                        name="upstreamProjectId"
-                        children={(field) => {
-                          const invalid = isFieldInvalid(field)
-                          return (
-                            <Field data-invalid={invalid}>
-                              <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
-                              {/* AQU-1518: searchable, not a scroll-only
-                                  dropdown — a long project list made finding
-                                  the upstream a scrolling exercise. The picker
-                                  still shows the project NAME, never the raw
-                                  UUID it stores. */}
-                              <ProjectCombobox
-                                id="upstream-project"
-                                options={upstreamOptions}
-                                value={field.state.value}
-                                onValueChange={(value) => {
-                                  field.handleChange(value)
-                                  // Clearing the upstream on self-contained
-                                  // drops the corpus question; reset its answer
-                                  // so a stale pick can't satisfy a later link.
-                                  if (!value) form.setFieldValue("linkConsumes", "")
-                                }}
-                                invalid={invalid}
-                                placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
-                                searchPlaceholder={t("projectSettings.create.upstreamProjectSearchPlaceholder")}
-                                searchAriaLabel={t("projectSettings.create.upstreamProjectSearchAriaLabel")}
-                                emptyText={t("projectSettings.create.upstreamProjectNoMatches")}
-                                clearText={t("projectSettings.create.upstreamProjectNone")}
-                              />
-                              {invalid && <FieldError errors={field.state.meta.errors} />}
-                            </Field>
-                          )
-                        }}
-                      />
-
-                      {showCorpusChoice ? (
                         <form.Field
-                          name="linkConsumes"
+                          name="upstreamProjectId"
                           children={(field) => {
                             const invalid = isFieldInvalid(field)
                             return (
                               <Field data-invalid={invalid}>
-                                <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
-                                <form.Subscribe
-                                  selector={(state) =>
-                                    filledTargetLaneCount(
-                                      state.values.targetLanguage,
-                                      state.values.extraLanguages,
-                                    )
-                                  }
-                                >
-                                  {(targetLaneCount) => (
-                                    <RadioGroup
-                                      // null = nothing selected (never prefill).
-                                      value={field.state.value || null}
-                                      onValueChange={(value) =>
-                                        field.handleChange((value ?? "") as LinkConsumes)
-                                      }
-                                      className="gap-2"
-                                    >
-                                      <label className="flex items-start gap-2.5 text-sm">
-                                        <RadioGroupItem value="source" className="mt-0.5" />
-                                        <span>
-                                          <RichMessage
-                                            k="projectSettings.create.linkConsumesSource"
-                                            count={targetLaneCount}
-                                            values={{
-                                              name: (
-                                                <strong>
-                                                  {t("projectSettings.create.linkConsumesSourceName")}
-                                                </strong>
-                                              ),
-                                            }}
-                                          />
-                                        </span>
-                                      </label>
-                                      <label className="flex items-start gap-2.5 text-sm">
-                                        <RadioGroupItem value="target" className="mt-0.5" />
-                                        <span>
-                                          <RichMessage
-                                            k="projectSettings.create.linkConsumesTarget"
-                                            values={{
-                                              name: (
-                                                <strong>
-                                                  {t("projectSettings.create.linkConsumesTargetName")}
-                                                </strong>
-                                              ),
-                                            }}
-                                          />
-                                        </span>
-                                      </label>
-                                    </RadioGroup>
-                                  )}
-                                </form.Subscribe>
+                                <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
+                                {/* AQU-1518: searchable, not a scroll-only
+                                    dropdown — a long project list made finding
+                                    the upstream a scrolling exercise. The picker
+                                    still shows the project NAME, never the raw
+                                    UUID it stores. */}
+                                <ProjectCombobox
+                                  id="upstream-project"
+                                  options={upstreamOptions}
+                                  value={field.state.value}
+                                  disabled={locked}
+                                  onValueChange={(value) => {
+                                    field.handleChange(value)
+                                    // Clearing the upstream on self-contained
+                                    // drops the corpus question; reset its answer
+                                    // so a stale pick can't satisfy a later link.
+                                    if (!value) form.setFieldValue("linkConsumes", "")
+                                  }}
+                                  invalid={invalid}
+                                  placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
+                                  searchPlaceholder={t("projectSettings.create.upstreamProjectSearchPlaceholder")}
+                                  searchAriaLabel={t("projectSettings.create.upstreamProjectSearchAriaLabel")}
+                                  emptyText={t("projectSettings.create.upstreamProjectNoMatches")}
+                                  clearText={t("projectSettings.create.upstreamProjectNone")}
+                                />
                                 {invalid && <FieldError errors={field.state.meta.errors} />}
                               </Field>
                             )
                           }}
                         />
-                      ) : null}
 
-                      {showAddAsLane ? (
-                        <form.Subscribe
-                          selector={(state) =>
-                            [state.values.linkConsumes, state.values.targetLanguage] as const
-                          }
-                          children={([consumes, targetLanguage]) =>
-                            consumes === "source" ? (
-                              <AddAsLaneRecommendation
-                                jwt={session?.jwt}
-                                upstreamProject={
-                                  upstreamOptions.find((p) => p.id === upstreamProjectId) ?? null
-                                }
-                                targetLanguage={targetLanguage}
-                                onAdded={() => {
-                                  form.reset()
-                                  clearSubmitError()
-                                  setOpen(false)
-                                }}
-                              />
-                            ) : null
-                          }
-                        />
-                      ) : null}
-                    </div>
-                  )
-                }}
-              />
-            </details>
+                        {showCorpusChoice ? (
+                          <form.Field
+                            name="linkConsumes"
+                            children={(field) => {
+                              const invalid = isFieldInvalid(field)
+                              return (
+                                <Field data-invalid={invalid}>
+                                  <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
+                                  <form.Subscribe
+                                    selector={(state) =>
+                                      filledTargetLaneCount(
+                                        state.values.targetLanguage,
+                                        state.values.extraLanguages,
+                                      )
+                                    }
+                                  >
+                                    {(targetLaneCount) => (
+                                      <RadioGroup
+                                        // null = nothing selected (never prefill).
+                                        value={field.state.value || null}
+                                        onValueChange={(value) =>
+                                          field.handleChange((value ?? "") as LinkConsumes)
+                                        }
+                                        disabled={locked}
+                                        className="gap-2"
+                                      >
+                                        <label className="flex items-start gap-2.5 text-sm">
+                                          <RadioGroupItem value="source" className="mt-0.5" />
+                                          <span>
+                                            <RichMessage
+                                              k="projectSettings.create.linkConsumesSource"
+                                              count={targetLaneCount}
+                                              values={{
+                                                name: (
+                                                  <strong>
+                                                    {t("projectSettings.create.linkConsumesSourceName")}
+                                                  </strong>
+                                                ),
+                                              }}
+                                            />
+                                          </span>
+                                        </label>
+                                        <label className="flex items-start gap-2.5 text-sm">
+                                          <RadioGroupItem value="target" className="mt-0.5" />
+                                          <span>
+                                            <RichMessage
+                                              k="projectSettings.create.linkConsumesTarget"
+                                              values={{
+                                                name: (
+                                                  <strong>
+                                                    {t("projectSettings.create.linkConsumesTargetName")}
+                                                  </strong>
+                                                ),
+                                              }}
+                                            />
+                                          </span>
+                                        </label>
+                                      </RadioGroup>
+                                    )}
+                                  </form.Subscribe>
+                                  {invalid && <FieldError errors={field.state.meta.errors} />}
+                                </Field>
+                              )
+                            }}
+                          />
+                        ) : null}
 
-            {submitError && (
-              <FieldError role="alert">
-                {submitError}
-              </FieldError>
-            )}
-            {suppliedProjects == null && discoveredProjectsError && (
-              <p className="text-sm text-destructive">{discoveredProjectsError}</p>
-            )}
-            {submitWarning && (
-              <p role="status" className="text-xs text-amber-600" data-testid="create-extra-lang-warning">
-                {submitWarning}
-              </p>
-            )}
+                        {showAddAsLane ? (
+                          <form.Subscribe
+                            selector={(state) =>
+                              [state.values.linkConsumes, state.values.targetLanguage] as const
+                            }
+                            children={([consumes, targetLanguage]) =>
+                              consumes === "source" ? (
+                                <AddAsLaneRecommendation
+                                  jwt={session?.jwt}
+                                  disabled={locked}
+                                  onBusyChange={(busy) => {
+                                    if (busy) setWork("adding-lane")
+                                    else releaseWork()
+                                  }}
+                                  upstreamProject={
+                                    upstreamOptions.find((p) => p.id === upstreamProjectId) ?? null
+                                  }
+                                  targetLanguage={targetLanguage}
+                                  onAdded={() => {
+                                    form.reset()
+                                    clearSubmitError()
+                                    setOpen(false)
+                                  }}
+                                />
+                              ) : null
+                            }
+                          />
+                        ) : null}
+                      </div>
+                    )
+                  }}
+                />
+              </details>
+
+              {submitError && (
+                <FieldError role="alert">
+                  {submitError}
+                </FieldError>
+              )}
+              {suppliedProjects == null && discoveredProjectsError && (
+                <p className="text-sm text-destructive">{discoveredProjectsError}</p>
+              )}
+            </fieldset>
           </DialogBody>
+
+          {/* Outside the scrolling body so an overrunning create always says so
+              where the user is already looking — right by the button they are
+              waiting on (AQU-1519). */}
+          {workOverran && (
+            <p
+              role="status"
+              className="shrink-0 text-xs text-amber-600"
+              data-testid="create-taking-long"
+            >
+              {LONG_RUNNING_WORK_MESSAGE}
+            </p>
+          )}
 
           <form.Subscribe
             // Track isSubmitting alongside whether this create will link:
@@ -795,7 +893,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 <Button
                   type="submit"
                   form="project-create-form"
-                  disabled={isSubmitting || !destination}
+                  // `locked`, not just `isSubmitting`: the mirror case is a lane
+                  // add in flight, which must block Create too (AQU-1519). And no
+                  // destination, no create (AQU-1352).
+                  disabled={isSubmitting || locked || !destination}
                   className="h-9 w-full shrink-0"
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}
@@ -832,11 +933,19 @@ function AddAsLaneRecommendation({
   upstreamProject,
   targetLanguage,
   onAdded,
+  onBusyChange,
+  disabled = false,
 }: {
   jwt: string | undefined
   upstreamProject: CloudProjectSummary | null
   targetLanguage: string
   onAdded: () => void
+  /** AQU-1519: lifts this panel's in-flight state to the dialog so a lane add
+   *  locks the whole modal, exactly as a create does. */
+  onBusyChange: (busy: boolean) => void
+  /** AQU-1519: true while the dialog is busy with anything at all — a create in
+   *  flight, or this panel's own lane add. */
+  disabled?: boolean
 }) {
   const t = useT()
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
@@ -877,9 +986,18 @@ function AddAsLaneRecommendation({
   const roleKnown = roleLevel != null
   const canAttempt = !roleKnown || roleLevel >= ROLE.MAINTAINER
 
+  /** Every failure path: surface it AND release the dialog-wide lock, so a
+   *  failed lane add leaves a usable form behind (AQU-1519). */
+  function fail(reason: string) {
+    setStatus("error")
+    setMessage(reason)
+    onBusyChange(false)
+  }
+
   async function handleAddAsLane() {
     const project = upstreamProject
     if (!project) return
+    // Both of these are validation, checked before anything locks.
     if (!jwt) {
       setStatus("error")
       setMessage("You need to be signed in to add a lane.")
@@ -894,13 +1012,13 @@ function AddAsLaneRecommendation({
 
     setStatus("loading")
     setMessage(null)
+    onBusyChange(true)
     try {
       const current = await fetchProjectSettings(jwt, project.id)
       const existingLanes = current?.settings.targetLanes ?? []
       const lower = trimmed.toLowerCase()
       if (existingLanes.some((l) => l.toLowerCase() === lower)) {
-        setStatus("error")
-        setMessage(`"${trimmed}" is already a lane on ${project.name}.`)
+        fail(`"${trimmed}" is already a lane on ${project.name}.`)
         return
       }
 
@@ -918,25 +1036,22 @@ function AddAsLaneRecommendation({
           lane: trimmed,
         })
         // Give the success hint a beat on screen, then close — no project
-        // was created, so there's nothing else for this dialog to do.
+        // was created, so there's nothing else for this dialog to do. The lock
+        // stays on through that beat; closing the dialog releases it.
         closeTimerRef.current = setTimeout(onAdded, 900)
         return
       }
       if (result.kind === "conflict") {
-        setStatus("error")
-        setMessage("Someone else updated that project's settings just now. Try again.")
+        fail("Someone else updated that project's settings just now. Try again.")
         return
       }
       if (result.kind === "forbidden") {
-        setStatus("error")
-        setMessage(`You need maintainer access on ${project.name} to add a lane there.`)
+        fail(`You need maintainer access on ${project.name} to add a lane there.`)
         return
       }
-      setStatus("error")
-      setMessage("Couldn't add the lane. Please try again.")
+      fail("Couldn't add the lane. Please try again.")
     } catch (err) {
-      setStatus("error")
-      setMessage(err instanceof Error ? err.message : "Couldn't add the lane. Please try again.")
+      fail(err instanceof Error ? err.message : "Couldn't add the lane. Please try again.")
     }
   }
 
@@ -961,7 +1076,7 @@ function AddAsLaneRecommendation({
           variant="default"
           className="font-bold"
           data-testid="add-as-lane-btn"
-          disabled={!canAttempt || status === "loading"}
+          disabled={disabled || !canAttempt || status === "loading"}
           onClick={() => void handleAddAsLane()}
         >
           {status === "loading" && <Spinner data-icon="inline-start" />}
@@ -1029,11 +1144,14 @@ function TargetLanguageInputs({
   onExtrasChange,
   onBlur,
   invalid = false,
+  disabled = false,
 }: {
   onPrimaryChange: (next: string) => void
   onExtrasChange: (next: string[]) => void
   onBlur?: () => void
   invalid?: boolean
+  /** AQU-1519: locked while the dialog is working. */
+  disabled?: boolean
 }) {
   const t = useT()
   // Index 0 is the project's targetLanguage; 1..n are the additional lanes.
@@ -1126,6 +1244,7 @@ function TargetLanguageInputs({
                     : t("projectSettings.create.additionalTargetPlaceholder")
                 }
                 aria-invalid={(index === 0 && invalid) || error != null}
+                disabled={disabled}
               />
               {index > 0 && (
                 <button
@@ -1134,7 +1253,8 @@ function TargetLanguageInputs({
                     lang: lane.value.trim() || String(index + 1),
                   })}
                   data-testid={`create-target-lang-remove-${index}`}
-                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-muted hover:opacity-100"
+                  disabled={disabled}
+                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-muted hover:opacity-100 disabled:pointer-events-none disabled:opacity-40"
                   onClick={() => sync(lanes.filter((_, i) => i !== index), bulk)}
                 >
                   <X className="size-4" aria-hidden="true" />
@@ -1162,6 +1282,7 @@ function TargetLanguageInputs({
             autoCapitalize="none"
             spellCheck={false}
             rows={3}
+            disabled={disabled}
             value={bulk}
             onChange={(event) => sync(lanes, event.target.value)}
             placeholder={t("projectSettings.create.bulkTargetLanguagesPlaceholder")}
@@ -1183,7 +1304,7 @@ function TargetLanguageInputs({
             type="button"
             variant="outline"
             size="sm"
-            disabled={!canAddMore}
+            disabled={disabled || !canAddMore}
             data-testid="create-add-target-lang"
             onClick={() =>
               sync([...lanes, { id: nextLaneId.current++, value: "" }], bulk)

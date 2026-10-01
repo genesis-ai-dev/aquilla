@@ -1504,6 +1504,15 @@ export const projectSettings = defineNamespace({
           "\"Projects\" here means Aquilla translation projects, the same sense as " +
           "projectSettings.create.upstreamProjectLabel.",
       },
+      "projectSettings.linkSource.pickerSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the \"Link to a source project\" " +
+          "picker in Project Settings → Source & sync (AQU-1525). Screen-reader-only — " +
+          "never rendered as visible text; the visible hint is " +
+          "projectSettings.linkSource.pickerSearchPlaceholder. \"Projects\" here means " +
+          "Aquilla translation projects, the same sense as " +
+          "projectSettings.linkSource.pickerLabel.",
+      },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",
       },

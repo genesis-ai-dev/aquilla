@@ -103,6 +103,11 @@ CREATE TABLE group_members (
     user_id  BIGINT NOT NULL,
     added_by BIGINT,
     added_at TIMESTAMPTZ DEFAULT now(),
+    -- AQU-1352 (0120): NULL = legacy member (per-project grants only);
+    -- non-NULL = team-scope role flowing to every attached project.
+    role_level INTEGER NULL
+        CONSTRAINT group_members_role_level_check
+        CHECK (role_level IS NULL OR role_level IN (100, 200, 300, 400, 500, 600, 700)),
     PRIMARY KEY (group_id, user_id)
 );
 
@@ -1044,6 +1049,10 @@ CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang
 -- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
 CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
+-- AQU-1464: newest target edit in ONE lane across every file, for the archive
+-- confirmation's "last change in this lane" lookup. The two indexes above lead
+-- with file_id, so neither serves a project+lane scan (migration 0117).
+CREATE INDEX idx_cells_lane_last_edit ON cells(project_id, lane_id, last_edit_at DESC) WHERE side = 'target';
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);
@@ -2101,3 +2110,40 @@ ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey      
 ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
+
+-- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
+-- Lane and file scopes are not included. Platform admin is env-driven, not a row.
+-- 0121: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
+  SELECT om.user_id::BIGINT            AS user_id,
+         'org'::TEXT                   AS scope_type,
+         om.org_id::TEXT               AS scope_id,
+         om.role_level::INT            AS role_level,
+         'direct'::TEXT                AS source,
+         NULL::BIGINT                  AS via_team_id,
+         om.granted_by::BIGINT         AS granted_by,
+         om.granted_at                 AS granted_at
+    FROM org_members om
+  UNION ALL
+  SELECT pm.user_id::BIGINT, 'project'::TEXT, pm.project_id::TEXT,
+         pm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
+         pm.granted_by::BIGINT, pm.granted_at
+    FROM project_members pm
+  UNION ALL
+  SELECT gm.user_id::BIGINT, 'project'::TEXT, gpg.project_id::TEXT,
+         gpg.role_level::INT, 'team'::TEXT, gpg.group_id::BIGINT,
+         gpg.granted_by::BIGINT, gpg.granted_at
+    FROM group_project_grants gpg
+    JOIN group_members gm ON gm.group_id = gpg.group_id
+  UNION ALL
+  SELECT p.created_by::BIGINT, 'project'::TEXT, p.id::TEXT,
+         700::INT, 'creator'::TEXT, NULL::BIGINT,
+         NULL::BIGINT, p.created_at
+    FROM projects p
+   WHERE p.created_by IS NOT NULL
+  UNION ALL
+  SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
+         gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
+         gm.added_by::BIGINT, gm.added_at
+    FROM group_members gm
+   WHERE gm.role_level IS NOT NULL;

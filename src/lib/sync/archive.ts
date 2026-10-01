@@ -23,7 +23,7 @@ export interface ArchiveLocalOnly {
 
 export interface ArchiveForbidden {
   kind: "forbidden"
-  /** e.g. "only owners can archive a project" */
+  /** e.g. "maintainer+ required to archive a project" */
   message?: string
 }
 

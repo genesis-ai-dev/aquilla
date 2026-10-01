@@ -16,16 +16,9 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Tooltip,
   TooltipContent,
@@ -36,6 +29,9 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
+import { toast } from "@/components/ui/toast"
+import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
+import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
   fetchProjectSettings,
   patchProjectSettings,
@@ -77,7 +73,8 @@ interface ProjectCreateDialogProps {
  *
  * SWARM-TODO(AQU-478): live-UI walk once AQU-476 is deployed —
  *   1. + New Project → Advanced: project shape → "Linked target".
- *   2. Pick an existing project from the "Upstream project" dropdown.
+ *   2. Pick an existing project from the searchable "Upstream project"
+ *      picker (type to filter, or scroll the full list).
  *   3. Choose Live (subscribed) vs Clone (one-time snapshot), and — the
  *      "use its source" vs "use its translations" (consumes) choice.
  *   4. Submit → confirm the dialog closes and the new project opens with
@@ -222,6 +219,19 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
+  // AQU-1352: null until create-targets loads (and again on every reload,
+  // close, or page-org change). Submit is disabled while it is null, so a
+  // stale or unresolved choice can never pick the org (review finding).
+  const [destination, setDestination] = useState<Destination | null>(null)
+  // AQU-1352 P2: teams to create into; reset whenever the destination changes.
+  const [teamIds, setTeamIds] = useState<number[]>([])
+  const [teamsError, setTeamsError] = useState(false)
+  const needTeams = teamsRequired(destination?.role, destination?.orgId)
+  const onDestination = (next: Destination | null) => {
+    setDestination(next)
+    setTeamIds([])
+    setTeamsError(false)
+  }
 
   const upstreamOptions = useMemo(
     () => linkableProjects.filter((p) => !p.archivedAt),
@@ -259,6 +269,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         members: [{ userId: session.username, role: "owner" }],
       }
 
+      if (!destination) return
+      if (needTeams && teamIds.length === 0) {
+        setTeamsError(true)
+        setSubmitError(t("projectSettings.create.teamsRequiredError"))
+        return
+      }
+
       let extraLanguagesFailed = false
       const extrasToApply = value.extraLanguages
       const upstreamId = value.upstreamProjectId.trim()
@@ -269,7 +286,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
 
       try {
-        await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
+        await createCloudProject(jwt, {
+          id: project.id,
+          name: project.name,
+          orgId: destination.orgId,
+          teamIds: destination.orgId != null ? teamIds : undefined,
+        })
 
         // One atomic settings write at version 0. The HTTP PATCH handler
         // replaces the whole blob (no per-key merge), so languages and lanes
@@ -320,6 +342,16 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           : {}),
       })
       onCreated(project)
+      toast.add({
+        type: "success",
+        title: t("projectSettings.create.createdToast", {
+          name: project.name,
+          destination:
+            destination.orgId == null
+              ? t("projectSettings.create.destinationPersonal")
+              : destination.name,
+        }),
+      })
       form.reset()
       clearSubmitError()
 
@@ -339,6 +371,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
   useEffect(() => {
     if (open) return
+    setDestination(null)
+    setTeamIds([])
+    setTeamsError(false)
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
@@ -347,6 +382,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     // project created in a previous session).
     draftProjectId.current = uuid()
   }, [open, form, clearSubmitError])
+
+  // The page org changed under an open dialog: the old choice is void.
+  useEffect(() => {
+    setDestination(null)
+    setTeamIds([])
+    setTeamsError(false)
+  }, [orgId])
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
@@ -379,6 +421,25 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           className="contents"
         >
           <DialogBody className="flex flex-col gap-5">
+            {open && (
+              <ProjectDestinationPicker
+                jwt={session?.jwt}
+                pageOrgId={orgId}
+                onChange={onDestination}
+              />
+            )}
+            {open && destination?.orgId != null && (
+              <ProjectTeamsPicker
+                teams={destination.teams ?? []}
+                required={needTeams}
+                value={teamIds}
+                onValueChange={(next) => {
+                  setTeamIds(next)
+                  setTeamsError(false)
+                }}
+                showRequiredError={teamsError}
+              />
+            )}
             <FieldGroup>
               <form.Field
                 name="name"
@@ -575,37 +636,29 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           return (
                             <Field data-invalid={invalid}>
                               <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
-                              <Select
-                                // Base UI SelectValue falls back to the raw
-                                // value (a project UUID) unless items maps
-                                // each value to its display label — the
-                                // dropdown Option text alone is not enough.
-                                items={upstreamOptions.map((p) => ({
-                                  value: p.id,
-                                  label: p.name,
-                                }))}
-                                value={field.state.value || null}
+                              {/* AQU-1518: searchable, not a scroll-only
+                                  dropdown — a long project list made finding
+                                  the upstream a scrolling exercise. The picker
+                                  still shows the project NAME, never the raw
+                                  UUID it stores. */}
+                              <ProjectCombobox
+                                id="upstream-project"
+                                options={upstreamOptions}
+                                value={field.state.value}
                                 onValueChange={(value) => {
-                                  field.handleChange(value ?? "")
+                                  field.handleChange(value)
                                   // Clearing the upstream on self-contained
                                   // drops the corpus question; reset its answer
                                   // so a stale pick can't satisfy a later link.
                                   if (!value) form.setFieldValue("linkConsumes", "")
                                 }}
-                              >
-                                <SelectTrigger id="upstream-project" aria-invalid={invalid}>
-                                  <SelectValue placeholder={t("projectSettings.create.upstreamProjectPlaceholder")} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectGroup>
-                                    {upstreamOptions.map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        {p.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </SelectContent>
-                              </Select>
+                                invalid={invalid}
+                                placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
+                                searchPlaceholder={t("projectSettings.create.upstreamProjectSearchPlaceholder")}
+                                searchAriaLabel={t("projectSettings.create.upstreamProjectSearchAriaLabel")}
+                                emptyText={t("projectSettings.create.upstreamProjectNoMatches")}
+                                clearText={t("projectSettings.create.upstreamProjectNone")}
+                              />
                               {invalid && <FieldError errors={field.state.meta.errors} />}
                             </Field>
                           )
@@ -742,7 +795,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 <Button
                   type="submit"
                   form="project-create-form"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !destination}
                   className="h-9 w-full shrink-0"
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}

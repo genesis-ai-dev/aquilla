@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { formatBuildInfo, formatBuildLabel, type BuildIdentity } from "@/lib/build-label"
+import {
+  formatBuildInfo,
+  formatBuildLabel,
+  formatBuildRailLabel,
+  type BuildIdentity,
+} from "@/lib/build-label"
 import {
   resolveBackendEnvironment,
   type DeploymentEnvironment,
@@ -25,6 +30,8 @@ const BUILT_AT = __APP_BUILT_AT__
 
 const IDENTITY: BuildIdentity = { version: VERSION, branch: BRANCH, sha: SHA, builtAt: BUILT_AT }
 const label = formatBuildLabel(IDENTITY)
+/** AQU-1523: the width-bound variant for the left rail; see build-label.ts. */
+const railLabel = formatBuildRailLabel(IDENTITY)
 const title = formatBuildInfo(IDENTITY)
 
 // Routes where AppShell / LeftDock already render <VersionTag/> in the left-rail
@@ -127,15 +134,25 @@ function useCopyBuildInfo() {
 }
 
 /**
- * In-flow version line for the bottom of a left rail. `mt-auto` pins it to the
+ * In-flow version block for the bottom of a left rail. `mt-auto` pins it to the
  * foot of a flex column; it never overlaps content because it occupies layout.
+ *
+ * AQU-1523: a column, not a row. The environment badge sits ABOVE the build
+ * label rather than beside it, so the label spans the rail's full width — a
+ * preview walk at the default 224px measured the label's fitted text at 13px
+ * ("v0") while the badge, Help and localization shared its line. Everything
+ * that is not the label itself now sits on a different line. Narrower than the
+ * default still truncates with an ellipsis, which is the intended degradation.
  */
 export function VersionTag() {
   const t = useT()
   const { copied, copy } = useCopyBuildInfo()
 
   return (
-    <div className="mt-auto flex w-full min-w-0 shrink-0 items-center gap-1">
+    <div
+      data-slot="version-tag"
+      className="mt-auto flex w-full min-w-0 shrink-0 flex-col items-start gap-0.5"
+    >
       <EnvironmentTag />
       <Tooltip>
         <TooltipTrigger
@@ -146,7 +163,9 @@ export function VersionTag() {
               size="xs"
               onClick={copy}
               className={cn(
-                "h-auto min-w-0 flex-1 justify-start rounded-md px-3 py-1.5 font-mono text-[10px] leading-none",
+                // px-1, not px-3: 16px of padding is 2.5 glyphs of build string
+                // at this size, and the string is what the row exists to show.
+                "h-auto w-full min-w-0 justify-start rounded-md px-1 py-1.5 font-mono text-[10px] leading-none",
                 copied
                   ? "text-emerald-600 hover:text-emerald-600"
                   : "text-muted-foreground/40 hover:text-muted-foreground/70",
@@ -159,7 +178,7 @@ export function VersionTag() {
                   <span className="truncate">{t("nav.version.copiedLabel")}</span>
                 </>
               ) : (
-                <span className="truncate">{label}</span>
+                <span className="truncate">{railLabel}</span>
               )}
             </Button>
           }

@@ -121,6 +121,20 @@ describe("changed-file E2E impact selection", () => {
     }
   })
 
+  it("maps the document-understanding tag layer to the AI completion journey", () => {
+    // AQU-657: tags reach a user through retrieval and few-shot selection, so a
+    // change to them must not fall through to the generic shared-runtime sentinel.
+    for (const file of [
+      "src/lib/understanding/passage-tags.ts",
+      "src/lib/understanding/passage-tag-store.ts",
+      "auth-worker/src/routes/ai-passage-tags.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
+    }
+  })
+
   it("maps Knowledge Base clients and routes to the project-settings persistence journey", () => {
     expect(selectAffectedE2E([
       "src/components/knowledge/KnowledgeBaseSurface.tsx",
@@ -171,8 +185,9 @@ describe("changed-file E2E impact selection", () => {
 
   it("maps a format parser to the import journey rather than shared runtime", () => {
     for (const file of [
-      "src/lib/parsers/biblica-ebl.ts",
-      "src/lib/biblica/ebl/notes.ts",
+      "src/lib/parsers/usfm.ts",
+      "src/partner-integrations/biblica/parsers/biblica-ebl.ts",
+      "src/partner-integrations/biblica/ebl/notes.ts",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",

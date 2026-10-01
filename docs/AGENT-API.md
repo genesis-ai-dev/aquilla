@@ -428,7 +428,7 @@ CRUD surface with MCP bolted on.
 | Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text, raw }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. Export substitutes translations into the preserved original artifact, and **re-attaches each verse's `usfmNotes` to its translation (AQU-1295)** — appended at the end of the verse, restored from `raw` where the importer captured it — so a translated verse keeps its notes instead of losing them with the replaced span. This is the one place the two importers deliberately differ and still agree on the exported file: the in-app import is lossless (markers stay in cell text and the translator edits them in place), the agent import is content-only (markers are parked in metadata and the exporter puts the notes back). **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
-| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
+| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory`, `list_terms` (AQU-1175 — the termbase) |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
@@ -1114,3 +1114,87 @@ Rules:
 Out of scope here, each its own issue: the editor's own menu item and reveal toggle
 (AQU-1422), exports (AQU-1423), progress/health/drafting/search (AQU-1424), the Codex
 migration (AQU-1425).
+
+## Status addendum (2026-09-27, AQU-1175 — termbase read + inflection variants)
+
+Terminology was the one settings-adjacent surface an agent could write but not read, and
+the field that decides whether a term matches at all was being dropped on the way in.
+AQU-1176 / AQU-1222 shipped settings read + `PatchSettings`, and AQU-1179 put `term.*` on
+the EmitEvents allowlist; this closes the remaining two gaps and documents a trap in the
+rules engine.
+
+- **New read** — `GET /api/v1/external/projects/:projectId/terms` (optional
+  `status=active|draft|deprecated`, `includeDeleted=1`, `limit`, `cursor`), MCP tool
+  `list_terms`. One entry per concept: `conceptId`, `sourceTerm`, `renderings`
+  (`preferred|admitted|forbidden`), `status`, `notes`, `caseSensitive`, `matchOptions`,
+  `createdBy`, `createdAt`/`updatedAt`, `deletedAt`. Oldest first, VIEWER floor, standard
+  external rate limit. A **parity read**: it delegates to `concepts-read-route.ts`, the same
+  internal route the in-app Terminology page reads, and `read_term_consistency` now shares
+  the same fetcher — so the termbase an agent lists and the termbase the drift scan runs
+  against cannot diverge.
+- **`matchOptions` is always an object, never null.** The column is nullable and `null`
+  means "all defaults", but an agent that cannot distinguish "no variants configured" from
+  "variants unknown" cannot decide whether a term needs fixing. `{}` says: configured for
+  exactly one surface form.
+- **Read before you write.** A second `term.create` for a `sourceTerm` that already has a
+  concept does not merge — it leaves the project two competing entries. Patch the existing
+  `conceptId` with `term.update`.
+
+### `match` (inflection variants) now reaches the projection — it used to be dropped
+
+`term.create` / `term.update` accept `match: { forms?, excludedForms?, affixes?, foldMarks? }`:
+
+| field | meaning |
+| --- | --- |
+| `match.forms` | extra literal source forms treated as alternates of `sourceTerm` |
+| `match.excludedForms` | matched surface forms a human rejected (compared after folding) |
+| `match.affixes` | allow the project's configured prefixes/suffixes around the term |
+| `match.foldMarks` | ignore combining marks (vowel points, accents) on both sides |
+
+The event kinds, `concepts.match_options` and the in-app Terminology UI have carried this
+since AQU-1006, but the EmitEvents payload validators never named `match`, so it was
+**silently dropped off every term written through this API** — a caller got a 200, an
+applied changeset, and a concept matching one surface form. Matching is exact by default,
+so in an inflected language that meant terminology through the Agent API was effectively
+unusable: exact-match on `Боже Слово` flags none of its inflected forms. `match` is now
+validated and forwarded, replaced wholesale when present and left untouched when absent
+(the same rule as `renderings`, for the same reason — no per-item identity to merge on), so
+send the full option set you want and `match: {}` to clear every option back to defaults.
+`forms`/`excludedForms` are capped at 100 entries each, because every entry becomes an
+alternate in a regex that runs on each keystroke in the editor.
+
+An **unrecognized key inside `match` is rejected**, unlike the extra payload keys the other
+validators drop. `{ form: [...] }` for `forms` would otherwise filter down to `{}` — i.e.
+silently clear the options the caller was trying to set, and return 200 for it. Inside the
+one field whose entire history is "silently dropped", a typo has to be an error.
+
+Verify a landed term with `get_prompt_preview` (`injectedTerms`) and `read_term_consistency`.
+
+### Caveat: rule patterns are compiled WITHOUT the `u` flag
+
+A rule you stage through `PatchSettings` (`rules[]`) is evaluated by
+`src/lib/rules/rule-engine.ts`, which compiles `new RegExp(pattern, "g" + caseFlag)` — no
+`u` flag. Only terminology-derived rules (`id` prefixed `term:`) opt into `u`, because the
+shared matcher's boundary patterns need `\p{L}`; user- and agent-authored patterns
+deliberately do not, so that a pattern valid without `u` is never silently invalidated by
+becoming illegal under `u`.
+
+The consequence for an agent is worse than a rejected pattern: **Unicode property escapes
+and `\u{...}` braces still COMPILE without `u`, and quietly mean something else.** Verified
+behaviour:
+
+| pattern | with `u` | as your rule is actually compiled (no `u`) |
+| --- | --- | --- |
+| `\p{L}+` | any letters | matches the literal text `p{L}` — `\p` is an identity escape |
+| `\u{0301}` | U+0301 | matches 301 consecutive `u` characters (`{0301}` parses as a quantifier) |
+| `\p{Cyrillic}` | *invalid property name — throws* | matches literal `p{Cyrillic}` |
+
+So a rule written in the `u` dialect does not error, does not warn, and does not fire on
+the text you meant — it silently matches nothing (or, worse, something unrelated). Nothing
+surfaces in the changeset summary or in `read_quality`, because as far as the API is
+concerned the pattern is a valid regex.
+
+Write patterns in the non-`u` dialect instead: explicit ranges (`[\u0400-\u04FF]` for
+Cyrillic, verified to work in both modes), `\uXXXX` escapes rather than `\u{...}`, and
+literal characters where you can. Then **confirm the rule fires** against a cell you know
+violates it — `read_quality` after the commit — rather than trusting the changeset receipt.

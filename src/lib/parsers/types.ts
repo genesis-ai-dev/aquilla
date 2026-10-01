@@ -39,6 +39,24 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
+/** The domain kind an imported TMX file is stored under (`importedFileKind`).
+ *  Like `"codex"` above it reaches the client as `file.type` without being a
+ *  member of `FileType`. */
+export const TRANSLATION_MEMORY_FILE_KIND = "translation-memory"
+
+/**
+ * Is this file an imported translation memory?
+ *
+ * Takes the wire string rather than `FileType` on purpose: a TMX imported
+ * through the app arrives as `"translation-memory"`, which a `type === "tmx"`
+ * test never matches (AQU-1393 — the Examples panel showed a real TMX as an
+ * ordinary project file). `"tmx"` still counts: rows created with the parser id
+ * as their kind — API imports, and files that predate the domain kind.
+ */
+export function isTranslationMemoryFile(type: string): boolean {
+  return type === TRANSLATION_MEMORY_FILE_KIND || type === "tmx"
+}
+
 /** Content-aware section capability. `hasScriptureContent` is persisted in
  * the normalized import manifest for Scripture-shaped spreadsheets and custom
  * formats; native Scripture types remain compatible with older records. */

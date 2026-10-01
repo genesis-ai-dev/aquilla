@@ -7,6 +7,7 @@ import { BrandContext } from "@/branding/use-brand"
 import { useI18nOptional } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
+import { FeedbackButton } from "./ReportProblemButton/FeedbackButton"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
@@ -336,26 +337,77 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Keep build and shared utilities in one footer row in both sidebar
-          layouts. Help stays compact beside localization; the org-only Tour
-          remains hidden in the project editor. */}
+      {/* AQU-1523: three footer rows, not one. The labelled Feedback button
+          (AQU-1028) and the build label (AQU-1023) shared a single row, and in
+          a 224px sidebar the label lost — it fitted to 13px ("v0" and nothing
+          else), so support could no longer read a release off a screenshot.
+          Removing Feedback from that row was not enough: see the release row
+          below for the width arithmetic. So the rows are now
+          Feedback / build label / connectivity + Help + localization, under
+          the account row. Help stays compact beside localization; the org-only
+          Tour remains hidden in the project editor. Both sidebar layouts (org
+          chrome and the project dock) render this same footer. */}
       <div
         data-slot="app-shell-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
+        className={cn(
+          "flex shrink-0 flex-col gap-1 px-2 pb-2",
+          // Collapsed rail is 40px after the aside's ps-2 — pin to the same
+          // icon column the chrome header above uses so nothing spills.
+          chromeCollapsed && "w-10 items-center",
+        )}
       >
-        <div className="flex min-w-0 items-center gap-1.5">
-          <VersionTag />
-          {/* Same overflow reasoning as BetaBadge above: no room for a text
-              chip in the 40px collapsed icon rail. */}
-          {!chromeCollapsed && <ConnectivityStatusChip />}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <HelpMenu compact showTour={!useDockResize} />
-          {i18n && (
-            <LanguageSwitcher
-              ariaLabel={i18n.t("language.switcher.chrome")}
-            />
+        <div
+          data-slot="app-shell-sidebar-feedback-row"
+          className={cn(
+            "flex min-w-0 items-center",
+            chromeCollapsed ? "justify-center" : "justify-start",
           )}
+        >
+          {/* AQU-1028: feedback is a first-class control here, not a row inside
+              the Help dropdown — the stuck user has to be able to see it. */}
+          <FeedbackButton compact={chromeCollapsed} />
+        </div>
+        {/* The build label gets a line to itself. Nothing else can share it:
+            at the footer's 10px monospace the label needs ~190px, and the
+            sidebar's 224px leaves ~208px once the footer's own padding is
+            taken — so a 68px Help+localization pair beside it starves the
+            label however the row is justified. A preview walk measured
+            exactly that, with the label fitted to 13px ("v0"). */}
+        <div
+          data-slot="app-shell-sidebar-release-row"
+          className={cn("flex min-w-0 items-center", chromeCollapsed && "w-full")}
+        >
+          <VersionTag />
+        </div>
+        <div
+          data-slot="app-shell-sidebar-utility-row"
+          className={cn(
+            "flex items-center gap-2",
+            chromeCollapsed ? "w-full flex-col gap-1" : "justify-between",
+          )}
+        >
+          {/* Always-present left child: the chip renders null off the Tauri
+              runtime (i.e. in every browser), and without a placeholder
+              `justify-between` would drop Help and localization to the start
+              edge instead of holding them at the end. Hidden in the 40px rail
+              for the same reason as BetaBadge above — no room for a text chip. */}
+          <div className="flex min-w-0 items-center">
+            {!chromeCollapsed && <ConnectivityStatusChip />}
+          </div>
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1",
+              // Two 32px controls do not fit side by side in the 40px rail.
+              chromeCollapsed && "flex-col",
+            )}
+          >
+            <HelpMenu compact showTour={!useDockResize} />
+            {i18n && (
+              <LanguageSwitcher
+                ariaLabel={i18n.t("language.switcher.chrome")}
+              />
+            )}
+          </div>
         </div>
       </div>
     </aside>

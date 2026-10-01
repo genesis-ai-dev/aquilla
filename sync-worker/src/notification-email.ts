@@ -1,5 +1,10 @@
 // Best-effort comment notification emails for sync-worker.
 //
+// AQU-1193: comment mail is mention-only by default and thread-clustered. The
+// per-user dial lives in `users.preferences.commentEmails` ('all' | 'mentions'
+// | 'off'); see CommentEmailPreference below, and the SPA's mirror in
+// src/lib/notifications/comment-email-pref.ts.
+//
 // This module mirrors the NotificationEmailPayload + sendNotificationEmail
 // shape from auth-worker/src/services/email.ts. It exists as a separate
 // file because sync-worker and auth-worker are distinct CF Workers and
@@ -36,7 +41,7 @@ export function extractMentions(text: string): string[] {
 export interface NotificationEmailPayload {
   /** Display name of the person who posted the comment. */
   authorDisplayName: string
-  /** Notification kind — controls subject + headline copy. */
+  /** Notification kind — controls headline copy. */
   kind: 'mention' | 'reply'
   /** Project display name. */
   projectName: string
@@ -44,6 +49,15 @@ export interface NotificationEmailPayload {
   excerpt: string
   /** Deep link to the project's comments page. */
   commentsUrl: string
+  /**
+   * Stable topic for the comment THREAD this message belongs to (AQU-1193) —
+   * derived from the thread's root comment, so every message in the thread
+   * produces the same subject and mail clients collapse them into one
+   * conversation. See `threadSubject()`.
+   */
+  threadTopic: string
+  /** True for a reply (not the thread's first message) — prefixes `Re: `. */
+  isReply: boolean
 }
 
 /**
@@ -106,12 +120,65 @@ function buildNotificationHtml(p: NotificationEmailPayload): string {
           </p>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="color: #6b7280; font-size: 0.875rem;">
-            You are receiving this because you were mentioned or participated in this thread.
+            ${
+              p.kind === 'mention'
+                ? 'You are receiving this because you were mentioned in this thread.'
+                : 'You are receiving this because you asked for every reply on threads you are part of.'
+            }
+            Change or turn off comment email under Preferences → Notifications.
           </p>
         </div>
       </body>
     </html>
   `.trim()
+}
+
+/** Longest thread topic carried in a subject line before it is ellipsised. */
+const MAX_THREAD_TOPIC_CHARS = 60
+
+/**
+ * Collapse a comment body to a one-line subject topic (AQU-1193).
+ *
+ * Newlines are flattened (a subject is a single header line) and the result is
+ * capped, so a long opening comment doesn't produce an unreadable subject. An
+ * empty or whitespace-only root body falls back to a fixed phrase rather than
+ * an empty topic — an empty subject would defeat the grouping this exists for.
+ */
+export function threadTopicFromBody(body: string): string {
+  const flattened = body.replace(/\s+/g, ' ').trim()
+  if (!flattened) return 'Comment thread'
+  return flattened.length > MAX_THREAD_TOPIC_CHARS
+    ? flattened.slice(0, MAX_THREAD_TOPIC_CHARS - 1) + '\u2026'
+    : flattened
+}
+
+/**
+ * The subject line for one notification (AQU-1193).
+ *
+ * Every message about the same comment thread gets the SAME subject, modulo a
+ * leading `Re: ` on replies — which is exactly the shape Gmail, Outlook and
+ * Apple Mail normalise away when they decide two messages belong to one
+ * conversation. Before this, a mention read `{author} mentioned you in {project}`
+ * and a reply read `New reply in {project}`, so N replies from N people on one
+ * thread arrived as N unrelated messages (the Biblica ETT inbox flood).
+ *
+ * Threading by subject is a deliberate second choice. Real RFC 5322 threading
+ * (`Message-ID` + `In-Reply-To` + `References`) is more reliable, but the
+ * Cloudflare Email Service `send_email` binding exposes no custom-header field
+ * — see the `EmailService` shape above, which is the whole surface we get.
+ * Switch to headers if the binding ever grows them; the thread identity needed
+ * to build them (the root comment id) is already resolved by the caller.
+ *
+ * CR/LF is stripped from every interpolated part: a display name, project name
+ * and comment body are all attacker-influenced, and a newline in a subject is a
+ * header-injection primitive.
+ */
+export function threadSubject(payload: NotificationEmailPayload): string {
+  const oneLine = (value: string) => value.replace(/[\r\n]+/g, ' ')
+  const project = oneLine(payload.projectName)
+  const topic = oneLine(payload.threadTopic) || 'Comment thread'
+  const base = `[${project}] ${topic}`
+  return payload.isReply ? `Re: ${base}` : base
 }
 
 /**
@@ -127,14 +194,7 @@ export async function sendNotificationEmail(
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM ?? 'noreply@support.aquilla.app'
-  // Strip CR/LF so an attacker-controlled display name/project name can't
-  // inject extra headers into the outbound message via the subject line.
-  const authorForSubject = payload.authorDisplayName.replace(/[\r\n]+/g, ' ')
-  const projectForSubject = payload.projectName.replace(/[\r\n]+/g, ' ')
-  const subject =
-    payload.kind === 'mention'
-      ? `${authorForSubject} mentioned you in ${projectForSubject}`
-      : `New reply in ${projectForSubject}`
+  const subject = threadSubject(payload)
   const html = buildNotificationHtml(payload)
   const text =
     payload.kind === 'mention'
@@ -171,26 +231,103 @@ export function deriveRecipientUsernames(opts: {
   return Array.from(recipients)
 }
 
+// ── Per-user email preference (AQU-1193) ──────────────────────────────
+
 /**
- * Look up emails for a list of usernames from the `users` table.
- * Returns a map of username → email (only entries that exist in the DB).
+ * How much comment email one user wants.
+ *
+ * - `all`      — every mention AND every reply on a thread they are in (the
+ *                behaviour everyone got before this ticket).
+ * - `mentions` — only comments that @-mention them. THE DEFAULT.
+ * - `off`      — no comment email at all.
  */
-export async function resolveUserEmails(
+export type CommentEmailPreference = 'all' | 'mentions' | 'off'
+
+/**
+ * Mention-only is the default because firing on every reply is what flooded
+ * inboxes during the 2026-09-04 Biblica ETT test: several people replying on
+ * one cell sent each participant a separate message per reply. Catherine's ask
+ * was literally "the only time you get a notification is if someone @-mentions
+ * you". Someone who wants the old firehose opts into `all`.
+ */
+export const DEFAULT_COMMENT_EMAIL_PREFERENCE: CommentEmailPreference = 'mentions'
+
+/** Key this preference lives under inside the `users.preferences` JSON blob.
+ *  MIRRORED in src/lib/notifications/comment-email-pref.ts — keep in sync. */
+export const COMMENT_EMAIL_PREFERENCE_KEY = 'commentEmails'
+
+/**
+ * Read the preference out of a `users.preferences` JSON blob.
+ *
+ * Total and never throws: the column is free-form JSON written by
+ * `PATCH /api/v2/auth/me`, so malformed JSON, a non-object, a missing key and
+ * an unrecognised value all resolve to the default. Silently defaulting is the
+ * safe direction — the failure mode is "got the standard amount of email",
+ * not "stopped emailing someone who expected it".
+ */
+export function parseCommentEmailPreference(
+  preferencesJson: string | null | undefined,
+): CommentEmailPreference {
+  if (!preferencesJson) return DEFAULT_COMMENT_EMAIL_PREFERENCE
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(preferencesJson)
+  } catch {
+    return DEFAULT_COMMENT_EMAIL_PREFERENCE
+  }
+  if (!parsed || typeof parsed !== 'object') return DEFAULT_COMMENT_EMAIL_PREFERENCE
+  const value = (parsed as Record<string, unknown>)[COMMENT_EMAIL_PREFERENCE_KEY]
+  return value === 'all' || value === 'mentions' || value === 'off'
+    ? value
+    : DEFAULT_COMMENT_EMAIL_PREFERENCE
+}
+
+/**
+ * Does this recipient get an email for this notification?
+ *
+ * A mention always wins over "reply" noise — short of `off`, being named is the
+ * one thing we never suppress.
+ */
+export function shouldEmailRecipient(
+  kind: 'mention' | 'reply',
+  preference: CommentEmailPreference,
+): boolean {
+  if (preference === 'off') return false
+  if (kind === 'mention') return true
+  return preference === 'all'
+}
+
+/** One resolved recipient: where to mail them, and how much they want. */
+export interface RecipientProfile {
+  email: string
+  preference: CommentEmailPreference
+}
+
+/**
+ * Look up email + comment-email preference for a list of usernames.
+ * Returns a map of username → profile (only entries that exist in the DB).
+ */
+export async function resolveRecipientProfiles(
   db: AquillaDb,
   usernames: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, RecipientProfile>> {
   if (usernames.length === 0) return new Map()
 
   // Parameterised IN clause — one placeholder per username.
   const placeholders = usernames.map(() => '?').join(', ')
   const rows = await db
-    .prepare(`SELECT username, email FROM users WHERE username IN (${placeholders})`)
+    .prepare(
+      `SELECT username, email, preferences FROM users WHERE username IN (${placeholders})`,
+    )
     .bind(...usernames)
-    .all<{ username: string; email: string }>()
+    .all<{ username: string; email: string; preferences: string | null }>()
 
-  const result = new Map<string, string>()
+  const result = new Map<string, RecipientProfile>()
   for (const row of rows.results) {
-    result.set(row.username, row.email)
+    result.set(row.username, {
+      email: row.email,
+      preference: parseCommentEmailPreference(row.preferences),
+    })
   }
   return result
 }
@@ -275,6 +412,28 @@ export async function getThreadParticipants(
 }
 
 /**
+ * Body of a thread's ROOT comment, used to build the stable thread subject
+ * (AQU-1193). Returns null when the root is missing or deleted — the caller
+ * then falls back to the new comment's own body, so a deleted root never costs
+ * the thread its subject (and therefore its grouping) mid-conversation.
+ */
+export async function getThreadRootBody(
+  db: AquillaDb,
+  projectId: string,
+  rootCommentId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT body FROM comments
+       WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+    )
+    .bind(projectId, rootCommentId)
+    .first<{ body: string }>()
+  return row?.body ?? null
+}
+
+/**
  * Look up the project display name. Returns null if not found.
  */
 export async function getProjectName(
@@ -298,6 +457,11 @@ export interface CommentNotificationOpts {
   author: string
   body: string
   parentCommentId: string | null
+  /** Id of the comment that was just created. With `parentCommentId` this
+   *  identifies the thread: root id = parentCommentId ?? commentId (AQU-1193).
+   *  Optional so an older caller still compiles; the thread topic then falls
+   *  back to this comment's own body. */
+  commentId?: string
 }
 
 /**
@@ -306,6 +470,13 @@ export interface CommentNotificationOpts {
  * so a broken email provider cannot block the comment write path.
  *
  * Called via ctx.waitUntil() from the events route after DB commit.
+ *
+ * AQU-1193 changed two things about what actually goes out:
+ *  - Recipients are filtered by each user's `commentEmails` preference, which
+ *    defaults to mentions-only. Thread participants who were not named get
+ *    nothing unless they opted into `all`.
+ *  - Every message on one thread carries the same subject, so mail clients
+ *    collapse the thread into a single conversation instead of N messages.
  */
 export async function sendCommentNotifications(
   opts: CommentNotificationOpts,
@@ -328,28 +499,42 @@ export async function sendCommentNotifications(
 
     if (recipientUsernames.length === 0) return
 
-    const [emailMap, projectName] = await Promise.all([
-      resolveUserEmails(db, recipientUsernames),
+    // The thread's identity. A reply's root is its parent; a new top-level
+    // comment IS its own root, so it seeds the subject its replies will reuse.
+    const isReply = parentCommentId !== null
+    const rootCommentId = parentCommentId ?? opts.commentId ?? null
+
+    const [profiles, projectName, rootBody] = await Promise.all([
+      resolveRecipientProfiles(db, recipientUsernames),
       getProjectName(db, projectId),
+      isReply && rootCommentId
+        ? getThreadRootBody(db, projectId, rootCommentId)
+        : Promise.resolve(null),
     ])
 
     const commentsUrl = `${baseUrl}/project/${projectId}/comments`
     const excerpt = body.slice(0, 200)
     const authorDisplay = author
+    const threadTopic = threadTopicFromBody(rootBody ?? body)
 
     const sends: Promise<void>[] = []
     for (const username of recipientUsernames) {
-      const email = emailMap.get(username)
-      if (!email) continue
+      const profile = profiles.get(username)
+      if (!profile) continue
       const isMentioned = mentionedUsernames.includes(username)
       const kind: 'mention' | 'reply' = isMentioned ? 'mention' : 'reply'
+      // Mention-only by default — a thread participant who was not named
+      // gets nothing unless they opted into `all` (AQU-1193).
+      if (!shouldEmailRecipient(kind, profile.preference)) continue
       sends.push(
-        sendNotificationEmail(env, email, {
+        sendNotificationEmail(env, profile.email, {
           authorDisplayName: authorDisplay,
           kind,
           projectName: projectName ?? projectId,
           excerpt,
           commentsUrl,
+          threadTopic,
+          isReply,
         }).catch((err) => {
           console.warn(`[comment-notifications] failed to send to ${username}:`, err)
         }),

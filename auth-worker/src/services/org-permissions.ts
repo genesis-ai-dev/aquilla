@@ -37,7 +37,28 @@ export interface UserOrg {
 }
 
 /**
- * Return the user's owned organization, lazy-creating one if absent.
+ * Find the user's personal org without creating one. Prefers billing_scope
+ * 'personal'; falls back to an owned org with billing_scope NULL (legacy
+ * personal workspaces predate the column and were never backfilled). A
+ * 'team' org is never personal.
+ */
+export async function findPersonalOrg(
+  env: Env,
+  userId: number,
+): Promise<{ id: number; name: string | null } | null> {
+  return env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      WHERE owner_user_id = ? AND (billing_scope = 'personal' OR billing_scope IS NULL)
+      ORDER BY (billing_scope = 'personal') DESC NULLS LAST, id ASC
+      LIMIT 1`,
+  )
+    .bind(userId)
+    .first<{ id: number; name: string | null }>()
+}
+
+/**
+ * Return the user's personal organization, lazy-creating one if absent.
+ * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
  */
@@ -45,11 +66,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: number; name: string | null }>()
+  const existing = await findPersonalOrg(env, user.id)
 
   if (existing) {
     return { id: existing.id, name: existing.name, role: 700 }
@@ -950,7 +967,16 @@ export interface OrgGroupDetail {
   name: string
   description: string | null
 
-  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null; addedAt: string | null }>
+  members: Array<{
+    userId: number
+    username: string
+    email: string | null
+    /** Org role (unchanged meaning). */
+    roleLevel: number | null
+    /** AQU-1352 P2: team-scope role; null = legacy member (per-project grants only). */
+    teamRoleLevel: number | null
+    addedAt: string | null
+  }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }>
 }
 
@@ -969,7 +995,7 @@ export async function getOrgGroupDetail(
 
   const members = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level,
-            gm.added_at AS added_at
+            gm.role_level AS team_role_level, gm.added_at AS added_at
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -977,7 +1003,7 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; added_at: string | Date | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; team_role_level: number | null; added_at: string | Date | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted,
@@ -999,6 +1025,7 @@ export async function getOrgGroupDetail(
       username: m.username,
       email: m.email ?? null,
       roleLevel: m.role_level,
+      teamRoleLevel: m.team_role_level == null ? null : Number(m.team_role_level),
       addedAt: timestampIso(m.added_at),
     })),
     projects: (projects.results ?? []).map((p) => ({
@@ -2347,6 +2374,12 @@ export async function getAssignmentMinRoleForProject(
  * subject to `rosterViewMinRole` exactly as before, so AQU-485's
  * safe-by-default promise for contributors/reviewers/viewers is untouched.
  *
+ * The carve-out stops at the default roster floor (MAINTAINER). Raising the
+ * roster above that — "only owners can see this" — is an explicit choice that
+ * the assignment floor must not punch through. Otherwise the badge saves
+ * owner-only, then a maintainer still reads the project roster because the
+ * assignment default (PROJECT_LEAD) pulls the effective floor back down.
+ *
  * Scoped to the per-project roster (the picker's source). The org-wide
  * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
  * project-scoped authority and confers no org-wide roster visibility.
@@ -2356,6 +2389,7 @@ export async function getProjectRosterViewMinRole(env: Env, orgId: number): Prom
     getRosterViewMinRole(env, orgId),
     getAssignmentMinRole(env, orgId),
   ])
+  if (rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE) return rosterFloor
   return Math.min(rosterFloor, assignmentFloor)
 }
 

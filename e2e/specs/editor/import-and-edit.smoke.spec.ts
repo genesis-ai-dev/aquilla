@@ -46,7 +46,6 @@ test("imported video keeps its authenticated picture and range seeking after rel
   await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime))
     .toBeGreaterThan(0.9)
   await ws.pauseMedia()
-  await alice.screenshot({ path: "/private/tmp/aquilla-imported-video-reload.png" })
 })
 
 test("alice imports markdown, edits a cell, and the edit persists across reload", async ({ alice }) => {

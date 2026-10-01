@@ -48,6 +48,11 @@ vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
 
+// AQU-1071: the org's active-language count, as the mocked portfolio summary
+// reports it. The mock factory below repeats the literal rather than reading this
+// const: the factory runs at import time, before module-level initialization.
+const ORG_ACTIVE_LANGUAGES = 7
+
 // Mock portfolio fetch; keep real metrics helpers. Project list data is built
 // inside the factory so vi.hoist does not race with outer constants.
 vi.mock("@/lib/frontier/portfolio", async (importActual) => {
@@ -91,6 +96,12 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
     ...actual,
     getPortfolio,
     getPortfolios,
+    // AQU-1071: the org rollup and the org's active-language count arrive in one
+    // response, and useOrgPortfolio reads both through this call.
+    getOrgPortfolioSummary: vi.fn(async () => ({
+      projects: await getPortfolio(),
+      activeLanguageCount: 7, // keep in step with ORG_ACTIVE_LANGUAGES
+    })),
     getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
       const list = await getPortfolio()
       const q = opts?.q?.trim().toLowerCase() ?? ""
@@ -197,7 +208,8 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getOrgPortfolioSummary, getPortfolioPage, getPortfolios, getPortfoliosPage } =
+    await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -234,6 +246,10 @@ beforeEach(async () => {
     ]
   })
   vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getOrgPortfolioSummary).mockImplementation(async () => ({
+    projects: await getPortfolio("jwt", 1),
+    activeLanguageCount: ORG_ACTIVE_LANGUAGES,
+  }))
   vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
     const list = await getPortfolio("jwt", 1)
     const q = opts?.q?.trim().toLowerCase() ?? ""
@@ -664,6 +680,23 @@ describe("OrgOverview / OrgProjects", () => {
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
     expect(projectsStat).toHaveClass("flex-row-reverse")
     expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
+  })
+
+  // AQU-1071: the enterprise billing band is "how many active target languages
+  // does this org have", and it was only readable on the platform-admin Billing
+  // tab. The tile shows the same server-side count, so a partner can see their
+  // own band — and see when they cross one — without asking us.
+  it("shows the org's active-language count in the rollup strip", async () => {
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    const label = screen.getAllByText("Active languages").find((el) => !el.closest("nav"))!
+    const tile = label.parentElement?.parentElement
+    if (!tile) throw new Error("languages tile root not found")
+    // The server's count, NOT a client-side tally of the lane chips: two projects
+    // translating into the same language are one language, and an archived lane is
+    // none, so the tile must not be re-derived from the rows on screen.
+    expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
+    expect(within(tile).getByText("Distinct target lanes")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

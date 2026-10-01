@@ -100,7 +100,7 @@ test(`aligned paragraphs from ${source} reuse source timings and persist an inde
   await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed script wording.")
   await alice.getByLabel("Track name", { exact: true }).fill("Aligned paragraph track")
   await alice.getByRole("button", { name: "Use aligned segments", exact: true }).click()
-  await expect(alice.getByRole("dialog")).toBeHidden()
+  await expect(ws.modalDialogs()).toBeHidden()
   await ws.zoomTimelineIn()
   await expect(alice.getByTestId("tl-editor")).toContainText("Aligned paragraph track")
   await expect(alice.getByTestId("tl-editor")).toContainText("Reviewed script wording.")
@@ -239,7 +239,6 @@ test("attaching captions adds a track and counted overwrite preserves source aud
     .scrollIntoViewIfNeeded()
   await expect(alice.getByTestId("tl-editor").getByText("Replacement wording.", { exact: true }))
     .toBeVisible()
-  await alice.screenshot({ path: "/private/tmp/aquilla-caption-track-overwrite.png" })
 })
 
 for (const [format, captions] of Object.entries(captionSources)) {
@@ -278,7 +277,6 @@ test(`media and ${format} captions publish reviewed segments and playable audio`
   await expect(ws.sourceAudioClips()).toHaveCount(2)
   await expect(ws.cellRow(0)).toContainText("Reviewed first caption.")
   await expect(ws.cellRow(1)).toContainText("Second caption.")
-  await alice.screenshot({ path: `/private/tmp/aquilla-media-captions-${format}.png` })
   await ws.sourceAudioClips().first().click()
   await expect(alice.getByText("0:00.5–0:01.5 | 1.0s", { exact: true })).toBeVisible()
   await alice.getByRole("button", { name: "Play all", exact: true }).click()

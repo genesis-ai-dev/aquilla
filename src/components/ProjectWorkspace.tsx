@@ -50,7 +50,7 @@ import {
   translateAsReadAttemptKey,
   withTranslateAsReadClaim,
 } from "@/lib/completion/translate-as-read"
-import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
+import { branchingResponseToScoredPairs, fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
@@ -71,6 +71,7 @@ import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
+import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
   ALL_ORGS_PARAM,
   editorReturnFromLocation,
@@ -82,7 +83,7 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -105,7 +106,10 @@ import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAud
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
-import { resolveDeepLinkLaneSelection } from "./project-workspace-lane-deeplink"
+import {
+  openCommentsCellFromSearchParams,
+  resolveDeepLinkLaneSelection,
+} from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
@@ -144,6 +148,7 @@ import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
+import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
@@ -273,7 +278,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -308,6 +313,8 @@ import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
 import { RenameDialog } from "./RenameDialog"
 import { FileSegmentationDialog } from "./FileSegmentationDialog"
+import { AnalysisReportDialog } from "./analysis/AnalysisReportDialog"
+import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -422,6 +429,7 @@ import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { assignedFileIds } from "@/lib/assignments/assigned-files"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
@@ -768,6 +776,18 @@ export function ProjectWorkspace() {
     return pending.length > 0 ? [...base, ...pending] : base
   }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
 
+  // AQU-1393: the Examples panel names where each match came from. Resolved
+  // here because the file inventory lives at this level and the editor table
+  // never receives it — the row only needs the answer for one fileId. An
+  // imported TMX is flagged as a translation memory rather than as one of the
+  // project's own files: a translator reading a 95% match needs to know whether
+  // the pair is their team's work or a memory someone shipped them.
+  const exampleOriginFor = useCallback((fileId: string): ExampleOrigin | undefined => {
+    const file = projectFiles.find((f) => f.id === fileId)
+    if (!file) return undefined
+    return { fileName: file.name, isTranslationMemory: isTranslationMemoryFile(file.type) }
+  }, [projectFiles])
+
   // AQU-744: current visible file ids, readable from the long-lived WS
   // message handler without re-subscribing on every inventory change. A
   // `file.progress.updated` frame naming an id missing from this set is a
@@ -939,7 +959,31 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/terminology") ||
       location.pathname.endsWith("/agent") ||
       PROJECT_MEMORY_PATH_RE.test(location.pathname)
-    ) return
+    ) {
+      // AQU-1496: normally these surfaces inherit the open file from this
+      // component's own state, because hopping surfaces keeps the instance
+      // (see ProjectWorkspaceRoute). On a COLD mount of one of these URLs — a
+      // reload or a deep link — there is no such state, and the agent
+      // workbench reads the open file directly, so with none it renders
+      // "Choose a file" with "0 cells". Re-seed it from the evidence the URL
+      // and the last-location store carry. No navigate: the surface owns the
+      // URL, only the selection is restored.
+      if (!activeFileIdRef.current) {
+        const seeded = resolveOverlayFileId({
+          projectId,
+          returnPath: editorReturnFromLocation(
+            location.pathname,
+            location.search,
+            projectId,
+          ),
+          savedFileId: readLastLocation(currentUsernameRef.current, projectId)?.fileId,
+          legacyFileId: readLastActiveFileId(projectId),
+          knownFileIds: fileIds,
+        })
+        if (seeded) setSelectedFileId(seeded)
+      }
+      return
+    }
 
     // A file is already in the URL: leave it unless the project genuinely
     // doesn't have it (and it isn't a still-pending optimistic import).
@@ -1016,6 +1060,9 @@ export function ProjectWorkspace() {
     projectFiles,
     workspaceTabs.tabs,
     redirectTo,
+    // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
+    // `location.pathname` already arrives through `redirectTo`.
+    location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
   // File-scoped target import dialog ("Import target translations into this file").
@@ -1056,7 +1103,13 @@ export function ProjectWorkspace() {
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
     if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
+    // AQU-1496: fall back to whatever file the workspace actually has open.
+    // Without it, a fileless surface reached without a `?return=` hand-off
+    // (a bare link, or a reload after the file was re-seeded from the
+    // last-location store) sent "back to the editor" to the bare editor path
+    // instead of the file the user was looking at.
     return editorReturnFromLocation(location.pathname, location.search, projectId)
+      ?? (activeFileId ? workspaceReturnPath(projectId, activeFileId) : null)
   }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
 
   const openOverlay = useCallback((
@@ -1102,6 +1155,31 @@ export function ProjectWorkspace() {
   // panel is already open re-scrolls instead of doing nothing.
   const [attachmentDrawerFocusId, setAttachmentDrawerFocusId] = useState<string | null>(null)
   const [attachmentsDrawerOpen, setAttachmentsDrawerOpen] = useState(false)
+
+  // AQU-1259: a link from a comment surface (`&comments=1`) also OPENS that
+  // cell's thread, where a bare `?cellId=` only scrolls to the row.
+  //
+  // Deliberately not routed through `pendingCellScrollRef`: the drawer does not
+  // need the editor mounted or the row found. It renders as soon as the cell
+  // exists in the store (`commentsCell` below resolves to null until then), so
+  // parking the id here survives the cell stream without spending any of the
+  // scroll machine's attempt budget — and a cell the file no longer has simply
+  // never opens a panel instead of retrying.
+  //
+  // Keyed to `searchParams` only, which react-router memoizes on
+  // `location.search` — so this re-asserts the link's intent when a NEW link
+  // arrives and never on a re-render. That is what lets the user close the
+  // drawer and have it stay closed while they keep working in the file, without
+  // needing a "already consumed" ref that would then swallow a second click on
+  // the same thread. One aside at a time, like every other opener here.
+  useEffect(() => {
+    const cellId = openCommentsCellFromSearchParams(searchParams)
+    if (!cellId) return
+    setDrawerRuleId(null)
+    setHistoryCellId(null)
+    setAttachmentsDrawerOpen(false)
+    setCommentsCellId(cellId)
+  }, [searchParams])
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
   // LLM). Findings are session-local: held here, never persisted or synced.
   const [checkOpen, setCheckOpen] = useState(false)
@@ -4857,15 +4935,7 @@ export function ProjectWorkspace() {
           excludeCellId: excludeId,
           targetLang: activeLane,
         })
-        return res.results.map((r) => ({
-          cellId: r.cellId,
-          fileId: "",
-          source: r.sourceText,
-          target: r.targetText,
-          score: 1,
-          matchedTokens: res.provenance[r.cellId] ?? [],
-          coverageWeight: r.queryCoverage,
-        }))
+        return branchingResponseToScoredPairs(res)
       } catch (err) {
         console.warn("[ProjectWorkspace] branching-search fetch failed:", err)
         return []
@@ -6002,6 +6072,14 @@ export function ProjectWorkspace() {
       .catch(() => { /* silently ignore */ })
     return () => { cancelled = true }
   }, [jwt, project?.id, canAssignWork, assignmentsRefreshKey])
+
+  // AQU-894: the sidebar's "these are yours" set, off the inbox read already
+  // fetched above — no second request, and no roster read a contributor would
+  // be 403'd from.
+  const myAssignedFileIds = useMemo(
+    () => (project?.id ? assignedFileIds(myAssignments, project.id) : undefined),
+    [myAssignments, project?.id],
+  )
 
   // Build a cellId → {username, scopeLabel} map for the EditorTable gutter.
   // Strategy: match each cell against the active assignments using fileId and
@@ -8350,6 +8428,21 @@ export function ProjectWorkspace() {
   // "File details" modal (sidebar file row ⋯ menu).
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
   const [segmentationFileId, setSegmentationFileId] = useState<string | null>(null)
+  // AQU-1392: file the volume-analysis report is open for, or null.
+  const [analysisFileId, setAnalysisFileId] = useState<string | null>(null)
+  // The dialog restarts its run whenever these change identity, so both are
+  // memoized rather than built inline in the JSX.
+  const analysisFileName = analysisFileId
+    ? project?.files.find((f) => f.id === analysisFileId)?.name ?? ""
+    : ""
+  const analysisFiles = useMemo(
+    () => (analysisFileId ? [{ fileId: analysisFileId, name: analysisFileName }] : []),
+    [analysisFileId, analysisFileName],
+  )
+  const analysisLoadSources = useMemo(
+    () => buildSourceLoader(projectId ?? "", getTokenForFile),
+    [projectId, getTokenForFile],
+  )
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -9023,6 +9116,24 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
+  /**
+   * AQU-1507: the eligibility split for the OPEN file, computed exactly as
+   * `runBatchValidate` computes it, so the confirmation dialog promises the
+   * number the run will deliver. Lazy on purpose — it walks every cell, and the
+   * dialog it feeds is opened far less often than this context is rebuilt.
+   */
+  const batchValidateSummary = useCallback(() => summarizeBatchValidate(
+    project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+    {
+      username: currentUsername,
+      myScopes,
+      activeLane,
+      cap: project?.completionSettings?.validationBatchSize,
+      canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
+      hasTarget: Boolean(project?.id && activeFileId),
+    },
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -9031,7 +9142,8 @@ export function ProjectWorkspace() {
     // The registry reads one shape; the two halves are counted apart only
     // because they read different maps (see validatableTakes above).
     audioCounts: { ...audioCounts, validatableTakes },
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes])
+    batchValidateSummary,
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -9116,29 +9228,21 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       // AQU-1503: this handler used to bail on FOUR branches with a bare
       // `return` and raise no toast on any path, success included. The
-      // confirmation dialog counts every unvalidated cell in the file, while
+      // confirmation dialog counted every unvalidated cell in the file, while
       // the run below drops untouched AI drafts, out-of-scope cells and cells
       // already signed off by this reader — so a file whose unvalidated cells
-      // are all AI drafts promised "12 cells" and then did nothing at all: no
+      // were all AI drafts promised "12 cells" and then did nothing at all: no
       // events, no error, and no telemetry to prove the click had happened.
       //
       // Every branch now ends in a visible message and one PostHog event.
       // `summarizeBatchValidate` owns the eligibility split so this path and
       // the selection toolbar's button report the same counts in the same
       // words (lib/review/batch-validate-summary.ts).
-      const candidates = project?.id && activeFileId
-        ? cellSummaries.filter((c) => c.fileId === activeFileId)
-        : []
-      const summary = summarizeBatchValidate(candidates, {
-        username: currentUsername,
-        myScopes,
-        activeLane,
-        // AQU-586: cap how many eligible cells one batch-validate processes.
-        // 0/undefined = validate all eligible (unchanged default behavior).
-        cap: project?.completionSettings?.validationBatchSize,
-        canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
-        hasTarget: Boolean(project?.id && activeFileId),
-      })
+      //
+      // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
+      // so the number the dialog promised is by construction the number this
+      // loop validates — the divergence was the rest of the reported bug.
+      const summary = batchValidateSummary()
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -9345,7 +9449,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate, batchValidateSummary])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11411,10 +11515,15 @@ export function ProjectWorkspace() {
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
+  //
+  // AQU-1497: returns whether the commit path validated the edit itself. The
+  // Target pane needs that to know the file's repeated segments are owed this
+  // text, and pays the debt once the translator leaves the cell (AQU-1484's
+  // settled-edit rule) — see `settleOwedRepetitions` in AgentContextPane.
   const handleAgentTargetCommit = useCallback(async (
     cellId: string,
     snapshot: { value: string; valueHtml: string },
-  ) => {
+  ): Promise<{ autoValidated: boolean }> => {
     if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       throw new Error("Your project role cannot edit translations.")
@@ -11452,6 +11561,7 @@ export function ProjectWorkspace() {
     }
 
     rememberPendingTargetCommit(cell.id, eventId, parentId)
+    let autoValidated = false
     if (shouldAutoValidateHumanEdit({
       value: snapshot.value,
       canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
@@ -11467,11 +11577,14 @@ export function ProjectWorkspace() {
           author: currentUsername,
           targetLang: activeLane,
         })
+        // Only a validation that actually landed owes the repetitions anything.
+        autoValidated = true
       } catch (error) {
         console.warn("[agent-target-auto-validate] emit failed:", error)
       }
     }
     await handleCellCommitted(cell.id, eventId, parentId)
+    return { autoValidated }
   }, [
     activeLane,
     applyOptimisticTargetEditWithCapture,
@@ -11695,6 +11808,13 @@ export function ProjectWorkspace() {
       label: t("segmentation.menuItem"),
       icon: SplitSquareVertical,
       onClick: () => setSegmentationFileId(activeFileId),
+    })
+    // AQU-1392: the volume-analysis report for this file.
+    items.push({
+      id: "file-analyze",
+      label: t("workspace.analysis.action"),
+      icon: BarChart3,
+      onClick: () => setAnalysisFileId(activeFileId),
     })
     items.push({
       id: "file-export",
@@ -12175,10 +12295,20 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
+            // AQU-1079: the Agent workbench lives in the center pane, not the
+            // dock, so the rail used to render its icon inactive and swallow
+            // the click while the workbench was open — the sidebar entry read
+            // as dead. Mark it active while its surface is up, and let the
+            // click toggle that surface off like any other rail tab.
+            surfaceTab={centerSurface === "agent" ? "agent" : null}
+            onSurfaceTabToggle={() => closeAgentTab()}
             onActiveTabChange={(t) => {
               // Agent rail: while the workbench is showing, re-focus it;
               // otherwise open the compact panel in the dock (even if an
-              // Agent editor tab is still sitting in the strip).
+              // Agent editor tab is still sitting in the strip). The rail's
+              // own click on an active Agent surface no longer lands here —
+              // it goes to onSurfaceTabToggle above — so this branch is now
+              // only the expand affordance restoring its last tab.
               if (t === "agent") {
                 if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
                   openAgentTab()
@@ -12251,6 +12381,7 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
+                  assignedFileIds={myAssignedFileIds}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -12663,6 +12794,8 @@ export function ProjectWorkspace() {
                 project={project}
                 refreshProject={refresh}
                 projectSettings={projectSettings}
+                activeLane={activeLane}
+                onActiveLaneChange={setActiveLane}
               />
             </Suspense>
           </div>
@@ -12719,6 +12852,7 @@ export function ProjectWorkspace() {
               validationRequirement: readValidationCount(project),
               canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
               onValidationChange: handleAgentValidationChange,
+              onCellValidated: handleCellValidated,
               cellLockHolders,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
@@ -13209,6 +13343,7 @@ export function ProjectWorkspace() {
             }
             isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
+            exampleOriginFor={exampleOriginFor}
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
@@ -13967,7 +14102,7 @@ export function ProjectWorkspace() {
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t)}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
@@ -13985,6 +14120,15 @@ export function ProjectWorkspace() {
         open={segmentationFileId !== null}
         onOpenChange={(v) => { if (!v) setSegmentationFileId(null) }}
         canEdit={currentRoleLevel >= ROLE.PROJECT_LEAD}
+      />
+      {/* AQU-1392: volume-analysis report for the open file. */}
+      <AnalysisReportDialog
+        open={analysisFileId !== null}
+        onClose={() => setAnalysisFileId(null)}
+        scope="file"
+        label={analysisFileName}
+        files={analysisFiles}
+        loadSources={analysisLoadSources}
       />
       <FileDetailsModal
         open={detailsFileId !== null}

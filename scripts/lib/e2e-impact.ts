@@ -80,6 +80,14 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    // AQU-657: document-understanding tags (and the route that asks for them)
+    // reach a user through retrieval and few-shot selection, so they select the
+    // AI predict journey rather than falling through to the generic
+    // shared-runtime sentinel.
+    source: /^(?:src\/lib\/understanding|auth-worker\/src\/routes\/ai-passage-tags)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
     // AQU-1025: few-shot retrieval is the AI predict journey, not collab.
     source: /(?:sync-worker\/.*branching-search|src\/lib\/sync\/branching-search)/i,
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
@@ -107,10 +115,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {
-    // `parsers`/`biblica` are the importer's own reading layer — a change there
-    // only reaches a user through an import, so it selects the import sentinel
-    // rather than falling through to the generic shared-runtime one.
-    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
+    // `parsers` and the partner integrations are the importer's own reading layer
+    // — a change there only reaches a user through an import, so it selects the
+    // import sentinel rather than falling through to the generic shared-runtime
+    // one. Partner readers moved under `src/partner-integrations/` in AQU-1286.
+    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|audio|voice|video|search|sidebar|timeline|storage)|src\/partner-integrations\/|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {

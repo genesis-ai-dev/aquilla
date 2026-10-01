@@ -8,7 +8,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { pickComboboxOption } from "@/test-utils/combobox"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -72,23 +80,6 @@ const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockTriggerLinkSync = vi.mocked(triggerLinkSync)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (the keyboard path). The
-// trigger's displayed label can lag a tick behind the committed value in
-// this harness, so callers assert on the resulting application state
-// (e.g. a mocked call's arguments) rather than the trigger's textContent.
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
-}
 
 describe("ProjectCreateDialog — linked-target creation flow", () => {
   beforeEach(() => {
@@ -124,7 +115,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
 
     const trigger = screen.getByRole("combobox", { name: /Upstream project/i })
     await waitFor(() => {
@@ -144,7 +135,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
 
     // Corpus choice is no longer prefilled — pick "Its Source" explicitly.
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
@@ -187,7 +178,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
@@ -226,7 +217,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
@@ -266,7 +257,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
 
     fireEvent.submit(document.getElementById("project-create-form")!)
     await waitFor(() => {

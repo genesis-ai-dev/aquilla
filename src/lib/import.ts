@@ -22,7 +22,7 @@ import { proxyOrigin } from "./net/resource-proxy"
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
-import { detectFileType, isMediaFileType } from "./parsers/types"
+import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { tileSegments } from "./timeline/tile-segments"
@@ -37,6 +37,7 @@ import {
   type ProjectEntry,
   type ProjectEntryCollection,
   type ProjectSourceArtifact,
+  type SkippedProjectEntry,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
@@ -52,10 +53,10 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
-import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
-import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
-import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
-import { extractEblStrings } from "./parsers/biblica-ebl"
+// Partner readers are NOT imported here — they arrive on the `edition` descriptor
+// passed to `importPartnerNotes`, so this module still compiles with the
+// partner-integrations folders deleted. See docs/PARTNER-INTEGRATIONS.md.
+import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -79,7 +80,10 @@ import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
+import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
+import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
   normalizeTranslatableStrings,
@@ -432,7 +436,7 @@ export interface ImportResult {
    *  sidebar can group + order by canonical book. */
   bookCode?: string
   /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a
-   *  named collection such as "Treasure Hunt Bible" for a Biblica edition. */
+   *  named collection such as one publisher title from a partner integration. */
   corpusMarker?: string | undefined
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
@@ -579,7 +583,7 @@ export interface ImportFileResult {
  * TMX files participate in translation-memory retrieval even though their
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
-  return fileType === "tmx" ? "translation-memory" : fileType
+  return fileType === "tmx" ? TRANSLATION_MEMORY_FILE_KIND : fileType
 }
 
 /** Merge caller-supplied provenance into the versioned import summary. */
@@ -828,7 +832,7 @@ export async function importEBible(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   const corpusText = await fetchTranslationText(
@@ -850,20 +854,101 @@ export async function importEBible(
   const fileName = `${translation.title} (${translation.id})`
 
   // eBible has no speaker tags — ignore speakerPairs.
-  const { ref } = await emitParsedFile(
-    { name: fileName, strings, rawSource: corpusText, rawSourceFormat: "ebible" },
-    "ebible",
+  return emitScriptureBooks(
+    strings,
+    {
+      fileType: "ebible",
+      singleFileName: fileName,
+      rawSourceFormat: "ebible",
+      wholeRawSource: corpusText,
+      // A book's slice of a vref-aligned corpus is the same one-line-per-verse
+      // shape, so each per-book file gets a valid original of its own rather
+      // than 66 copies of the whole Bible. Same trade the multi-book USFM split
+      // makes: content-only fidelity, per-book skeleton.
+      bookRawSource: (slice) => slice.strings.map((string) => string.original).join("\n"),
+    },
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
+}
+
+/**
+ * Emit parsed scripture cells as one source file per book (AQU-1187).
+ *
+ * The web-catalog scripture importers (eBible, Hello AO) parse a whole
+ * selection in one pass, so the split happens here rather than in the parser.
+ * Books are emitted in parse order — both parsers already produce canonical
+ * order — and each file carries its `bookCode`, which is what lets the sidebar
+ * group them into OT/NT and order them canonically (AQU-1084). Cells the split
+ * cannot attribute to a known book keep the old single-file shape.
+ *
+ * Progress is reported cumulatively across books so the dialog's bar stays
+ * monotonic over a 31k-cell whole-Bible import.
+ */
+async function emitScriptureBooks(
+  strings: TranslatableString[],
+  spec: {
+    fileType: FileType
+    /** Name used when the import is not split (one book, or no book codes). */
+    singleFileName: string
+    rawSourceFormat: SourceArtifactFormat
+    wholeRawSource: string
+    /** The raw original for one book, when the import is split per book. */
+    bookRawSource: (slice: BookSlice) => string
+  },
+  ctx: ImportContext,
+  onCellsEnqueued: (enqueued: number, total: number) => void,
+): Promise<FileReference[]> {
+  const slices = splitStringsByBook(strings)
+  const total = strings.length
+
+  if (slices === null || slices.length === 1) {
+    const { ref } = await emitParsedFile(
+      {
+        name: spec.singleFileName,
+        strings,
+        rawSource: spec.wholeRawSource,
+        rawSourceFormat: spec.rawSourceFormat,
+        // One book still learns its code, so a single-book import groups under
+        // its testament instead of landing in "Ungrouped".
+        ...(slices?.length === 1 ? { bookCode: slices[0].bookCode } : {}),
+      },
+      spec.fileType,
+      { ...ctx, onCellEnqueued: (count) => onCellsEnqueued(count, total) },
+    )
+    return [ref]
+  }
+
+  const refs: FileReference[] = []
+  let enqueuedBefore = 0
+  for (const slice of slices) {
+    const { ref } = await emitParsedFile(
+      {
+        name: getBookName(slice.bookCode) ?? slice.bookCode,
+        strings: slice.strings,
+        rawSource: spec.bookRawSource(slice),
+        rawSourceFormat: spec.rawSourceFormat,
+        bookCode: slice.bookCode,
+        roundTripFidelity: "content-only",
+      },
+      spec.fileType,
+      {
+        ...ctx,
+        onCellEnqueued: (count) => onCellsEnqueued(enqueuedBefore + count, total),
+      },
+    )
+    refs.push(ref)
+    enqueuedBefore += slice.strings.length
+    onCellsEnqueued(enqueuedBefore, total)
+  }
+  return refs
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,7 +1099,7 @@ export async function importHelloao(
   ctx: ImportContext,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal,
-): Promise<FileReference> {
+): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   let rawComplete = ""
@@ -1035,25 +1120,31 @@ export async function importHelloao(
 
   const fileName = `${translation.englishName || translation.name} (${translation.id})`
 
-  const { ref } = await emitParsedFile(
+  return emitScriptureBooks(
+    strings,
     {
-      name: fileName,
-      strings,
-      rawSource: rawComplete || JSON.stringify(complete),
+      fileType: "helloao",
+      singleFileName: fileName,
       rawSourceFormat: "helloao",
+      wholeRawSource: rawComplete || JSON.stringify(complete),
+      // Hello AO's payload is already per-book, so a book's original is the
+      // same envelope carrying just that book — valid on its own, and it keeps
+      // a whole-Bible import from storing the bulk payload 66 times.
+      bookRawSource: (slice) => JSON.stringify({
+        ...complete,
+        books: complete.books.filter((book) => book.id.toUpperCase() === slice.bookCode),
+      }),
     },
-    "helloao",
     {
       ...ctx,
       sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
-      onCellEnqueued: (count, total) => {
-        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
-        ctx.onCellEnqueued?.(count, total)
-      },
+    },
+    (enqueued, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: enqueued, cellsTotal: total })
+      ctx.onCellEnqueued?.(enqueued, total)
     },
   )
-  return ref
 }
 
 /**
@@ -1223,7 +1314,7 @@ export async function importTranslationNotes(
       name: file.name,
       fileType: "tsv",
       role: "source",
-      kind: "translation-notes",
+      kind: TRANSLATION_NOTES_FILE_KIND,
       importFormat: "tn-tsv",
       parserVersion: "tn-tsv-v1",
     },
@@ -1245,132 +1336,69 @@ export async function importTranslationNotes(
   }
 }
 
-/** Distinguishes a notes-only Biblica import from a whole-package IDML import. */
-export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
-
 /**
- * The Treasure Hunt Bible is a different InDesign template with the opposite
- * marking convention, so it gets its own profile — the cells are not
- * interchangeable with study-Bible notes even though both are Biblica IDML.
- */
-export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
-
-/**
- * Reach4Life is a third template again — a teenagers' workbook wrapped around
- * the NIrV, organized by lesson rather than by chapter.
- */
-export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
-
-/**
- * Equipping Biblical Leaders is a fourth template — a training programme's
- * facilitator and participant guides, divided by topic and lesson rather than
- * by book, and holding no published scripture to set anything around.
- */
-export const EBL_PROFILE_ID = "builtin:biblica-ebl"
-
-/**
- * Which Biblica title an IDML package is. Nothing in the package identifies the
- * edition, and the four templates disagree about what a paragraph style means,
- * so the person importing it says which one this is.
- */
-export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life" | "ebl"
-
-/**
- * Sidebar folder per edition, so a project holding more than one Biblica title
- * keeps them apart. The label is the file's corpus marker, which the sidebar
- * groups by and the user can rename or move a file out of later.
- */
-const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": "Biblica Study Notes",
-  "treasure-hunt": "Treasure Hunt Bible",
-  reach4life: "Reach 4 Life",
-  ebl: "Equipping Biblical Leaders",
-}
-
-export type BiblicaImportPhase = "parse" | "save"
-export interface BiblicaProgress {
-  phase: BiblicaImportPhase
-  /** Engine parse progress, while the package is being read. */
-  idml?: IdmlProgress
-  cellsEnqueued?: number
-  cellsTotal?: number
-  /** Paragraphs left out because they are scripture rather than notes. */
-  verseUnitCount?: number
-}
-
-/**
- * Import the notes from a Biblica IDML package.
+ * Import the note/prose cells from a partner's IDML package (AQU-1286).
+ *
+ * This is the generic half of the old publisher-specific notes importer. Which
+ * template the package is, what counts as a note in it, and what to say when it
+ * yields nothing are all the partner's business and travel in the `edition`
+ * descriptor — see `src/lib/partners/types.ts` and
+ * `docs/PARTNER-INTEGRATIONS.md`. Nothing here names a publisher, so deleting the
+ * partner folders leaves this function compiling with no caller, which is
+ * exactly the intended stripped state.
  *
  * The package parses through the same shared v2 engine as a plain IDML import,
  * so cells keep their protected anchors, exact locators, and preserved source
- * bytes — strict IDML export still works. Only the note paragraphs become cells:
- * the Bible text is set from the publisher's scripture files, so importing it
- * here would ask translators to retype scripture they must not edit.
- *
- * Which paragraphs count as notes depends on the edition. A study Bible marks
- * its notes positively (`intro:*`); the Treasure Hunt Bible and Reach4Life mark
- * scripture instead, so everything set around the Bible text is imported —
- * facts and hunts, lessons and journeys, book introductions and front matter.
- * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
- *
- * The study Bible's own front and back matter — contents, "how to use", the
- * Bible Dictionary, the timelines, the maps, the cover — ships as separate
- * volumes holding no scripture at all, which is how the reader recognizes them
- * without another toggle. There every text-bearing paragraph is a cell.
+ * bytes — strict IDML export still works.
  */
-export interface BiblicaImportOptions {
+export interface PartnerNotesImportOptions {
+  /** Which of the partner's templates to read the package with. */
+  edition: PartnerImportEdition
   /**
    * When true, cut long note lines into one cell per sentence.
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean
-  /** Which template's rules to read the package with. Defaults to a study Bible. */
-  edition?: BiblicaEdition
 }
 
-export async function importBiblicaStudyNotes(
+export async function importPartnerNotes(
   file: File,
   ctx: ImportContext,
-  onProgress?: (p: BiblicaProgress) => void,
-  options?: BiblicaImportOptions,
+  onProgress: ((p: PartnerImportProgress) => void) | undefined,
+  options: PartnerNotesImportOptions,
 ): Promise<FileReference> {
-  if (!/\.idml$/i.test(file.name)) {
-    throw new Error(t("importExport.errors.biblicaExpectsIdml"))
-  }
+  const { edition } = options
   assertSourceUploadByteLength(file.size)
   onProgress?.({ phase: "parse" })
 
-  const edition: BiblicaEdition = options?.edition ?? "study-notes"
   // The worker transfers (detaches) its input, so the preserved source artifact
   // is read from the File a second time rather than shared with the parse buffer.
   const parseBuffer = await file.arrayBuffer()
   assertIdmlPackageBytes(parseBuffer, file.name)
-  const parseOptions = {
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
-    onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
-    ...(options?.splitSentences !== undefined
-      ? { splitSentences: options.splitSentences }
-      : {}),
-  }
-  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await parseBiblicaEdition(
-    edition,
+  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await edition.parse(
     parseBuffer,
-    parseOptions,
+    {
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
+      ...(options.splitSentences !== undefined
+        ? { splitSentences: options.splitSentences }
+        : {}),
+    },
   )
 
-  // A study-Bible volume that yields nothing was almost certainly read with the
-  // wrong edition. A front/back matter volume that yields nothing is simply
-  // artwork — the maps and plates hold no text — and still imports, so the file
-  // stays part of the project and exports back unchanged.
+  // A volume that yields nothing was almost certainly read with the wrong
+  // edition. A front/back matter volume that yields nothing is simply artwork —
+  // the maps and plates hold no text — and still imports, so the file stays part
+  // of the project and exports back unchanged.
   if (strings.length === 0 && !frontBackMatter) {
-    throw new Error(emptyBiblicaImportMessage(edition, file.name))
+    throw new Error(edition.emptyImportMessage(file.name))
   }
 
   const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
   const normalized = normalizeTranslatableStrings(strings, {
     fileName: name,
     fileType: "idml",
-    profileId: BIBLICA_PROFILE_IDS[edition],
+    profileId: edition.profileId,
     profileVersion: "1",
     fidelity: "content-only",
   })
@@ -1390,7 +1418,7 @@ export async function importBiblicaStudyNotes(
       rawBytes: await file.arrayBuffer(),
       rawSourceFormat: "idml",
       roundTripFidelity: "content-only",
-      corpusMarker: BIBLICA_CORPUS_MARKERS[edition],
+      corpusMarker: edition.corpusMarker,
       ...(bookCodes.length === 1 ? { bookCode: bookCodes[0] } : {}),
     },
     "idml",
@@ -1411,104 +1439,6 @@ export async function importBiblicaStudyNotes(
   return ref
 }
 
-const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
-  "study-notes": BIBLICA_NOTES_PROFILE_ID,
-  "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
-  reach4life: REACH4LIFE_PROFILE_ID,
-  ebl: EBL_PROFILE_ID,
-}
-
-interface BiblicaParseOutcome {
-  strings: TranslatableString[]
-  bookCodes: string[]
-  /** Paragraphs left out because they are the published Bible text. */
-  skippedScriptureCount: number
-  /**
-   * The package is one of the study Bible's front/back matter volumes — no
-   * scripture anywhere, so an empty result is a legitimate artwork-only volume
-   * rather than a package read with the wrong edition.
-   */
-  frontBackMatter: boolean
-}
-
-/**
- * Run the reader for one edition. Each returns the same three things under its
- * own names, because each counts a different thing as scripture.
- */
-async function parseBiblicaEdition(
-  edition: BiblicaEdition,
-  buffer: ArrayBuffer,
-  parseOptions: {
-    signal?: AbortSignal
-    onProgress: (progress: IdmlProgress) => void
-    splitSentences?: boolean
-  },
-): Promise<BiblicaParseOutcome> {
-  if (edition === "treasure-hunt") {
-    const { strings, bookCodes, skipped } =
-      await extractTreasureHuntStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "reach4life") {
-    const { strings, bookCodes, skipped } =
-      await extractReach4LifeStrings(buffer, undefined, parseOptions)
-    return {
-      strings,
-      bookCodes,
-      skippedScriptureCount: skipped.scriptureUnitCount,
-      frontBackMatter: false,
-    }
-  }
-  if (edition === "ebl") {
-    // A guide is written material throughout, so nothing is skipped for being
-    // scripture and no one book owns the file.
-    const { strings } = await extractEblStrings(buffer, undefined, parseOptions)
-    return { strings, bookCodes: [], skippedScriptureCount: 0, frontBackMatter: false }
-  }
-  const { strings, bookCodes, skipped, frontBackMatter } =
-    await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
-  return {
-    strings,
-    bookCodes,
-    skippedScriptureCount: skipped.verseUnitCount,
-    frontBackMatter,
-  }
-}
-
-/**
- * What to say when a package parsed but yielded nothing. The overwhelmingly
- * likely cause is the wrong edition, so each message names the styles it looked
- * for and — for the default reading — the toggles that change it.
- */
-function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): string {
-  if (edition === "treasure-hunt") {
-    return `${fileName} parsed successfully but contained no Treasure Hunt notes. `
-      + "Treasure Hunt content lives in `!meta_*`, `_intro_*` and front-matter paragraph "
-      + "styles — check that this is a Treasure Hunt volume."
-  }
-  if (edition === "reach4life") {
-    return `${fileName} parsed successfully but contained no Reach 4 Life content. `
-      + "Reach 4 Life content lives in the `R4Lv4 Paragraph Styles:*` lesson groups and in "
-      + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
-      + "that this is a Reach 4 Life package."
-  }
-  if (edition === "ebl") {
-    // Nothing is filtered out by edition here, so an empty result means the
-    // package carried no text at all rather than the wrong template.
-    return `${fileName} parsed successfully but contained no text. An EBL guide imports `
-      + "every text-bearing paragraph, so this package holds only artwork — check that "
-      + "this is the guide rather than a cover or plate volume."
-  }
-  return `${fileName} parsed successfully but contained no study notes. `
-    + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
-    + "document. If this is a Treasure Hunt Bible, a Reach 4 Life or an EBL file, tick the "
-    + "matching box and import it again."
-}
 
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
 function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
@@ -2081,6 +2011,10 @@ export interface ParatextPlan {
   /** Whole ZIP/folder package, including Settings, BookNames, support files,
    * and any media members. One immutable artifact binds to every book file. */
   sourceArtifact?: ProjectSourceArtifact
+  /** Support members the archive reader could not read and left out (AQU-1406).
+   *  They still travel inside the preserved package; the commit phase reports
+   *  them so a consultant sees what was passed over. */
+  skippedEntries?: SkippedProjectEntry[]
 }
 
 /**
@@ -2111,7 +2045,12 @@ export async function prepareParatextProject(
     assertSourceUploadSize(bytes)
     sourceArtifact = { ...entries.sourceArtifact, bytes: async () => bytes }
   }
-  return { project, books, ...(sourceArtifact ? { sourceArtifact } : {}) }
+  return {
+    project,
+    books,
+    ...(sourceArtifact ? { sourceArtifact } : {}),
+    ...(entries.skippedEntries?.length ? { skippedEntries: entries.skippedEntries } : {}),
+  }
 }
 
 async function preserveParatextPackage(
@@ -2185,6 +2124,13 @@ export async function importParatextProject(
   return commitParatextProject(plan, ctx, onProgress)
 }
 
+/** Members the archive reader left out before parsing, in the shape the import
+ *  summary lists — so an unreadable support file is accounted for next to any
+ *  book-level skips instead of vanishing (AQU-1406). */
+function archiveSkips(plan: ParatextPlan): { book: string; reason: string }[] {
+  return (plan.skippedEntries ?? []).map((entry) => ({ book: entry.name, reason: entry.reason }))
+}
+
 /**
  * Upload a prepared (client-side-parsed, user-confirmed) Paratext plan: each
  * book becomes one Aquilla File via the bulk endpoint. Progress fires per
@@ -2197,7 +2143,7 @@ export async function commitParatextProject(
   onProgress?: (p: ParatextImportProgress) => void,
 ): Promise<ParatextImportResult> {
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plan.books.length
   // Source language defaults to the project's ISO code so the Aquilla project
   // inherits it (caller may override per source/target choice).
@@ -2331,7 +2277,7 @@ export async function importParatextAsTarget(
   const project = plan.project
   const plans = buildBilingualPlan(project.books, sourceVerses, project.bookNames)
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plans.length
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   // Overall cell budget: source cells + target commits per non-skipped book.

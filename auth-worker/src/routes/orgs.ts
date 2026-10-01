@@ -51,10 +51,12 @@ import {
   isCanonicalRoleLevel,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
+import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -368,14 +370,22 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  const { projects, nextCursor } = await listOrgPortfolioPage(
-    c.env,
-    [orgId],
-    { userId: user.id, isAdmin },
-    page,
-  )
+  // AQU-1071: the active-language count rides along with the rollup the org
+  // dashboard is already asking for, so its tile costs no extra round trip. It
+  // is the same rule billing bills on (distinct active target-language tags;
+  // archived lanes, archived projects and — AQU-1070 — paused projects
+  // excluded), and deliberately org-wide
+  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
+  // a partner reading a smaller figure than their invoice is the confusion this
+  // ticket exists to remove, and a bare count names no project, so it discloses
+  // nothing the visibility rule guards.
+  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+    listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
+    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+  ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
+    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
     nextCursor,
   })
 })
@@ -710,6 +720,45 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await removeGroupMember(c.env, groupId, targetUserId)
   return c.json({ removed: true })
+})
+
+// AQU-1352 P2 (spec §3.1, §3.4): set a member's team-scope role.
+// Gate: org role >= maintainer, or the caller's own team role >= maintainer.
+// Only Maintainer / Project Lead / Viewer / null (legacy) are valid, and the
+// caller can neither grant above their own level nor edit someone above it.
+const teamRoleBody = z.object({ roleLevel: z.number().int().nullable() })
+
+orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRoleBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  const targetUserId = parseInt(c.req.param("userId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const orgRole = (await getEffectiveOrgRole(c.env, orgId, user)) ?? 0
+  const teamRole = (await getTeamMemberRole(c.env, groupId, user.id)) ?? 0
+  const callerLevel = Math.max(orgRole, teamRole)
+  if (orgRole < ROLE.MAINTAINER && teamRole < ROLE.MAINTAINER) {
+    return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
+  }
+  const { roleLevel } = c.req.valid("json")
+  if (roleLevel != null && !TEAM_SCOPE_ROLES.includes(roleLevel)) {
+    return c.json({ error: "team role must be maintainer, project lead, viewer, or none" }, 400)
+  }
+  // Authority from a TEAM role alone is strictly below-own-level: a team
+  // maintainer may not mint or demote peers. Org maintainer+ keeps <= rights.
+  const teamOnly = orgRole < ROLE.MAINTAINER
+  const exceeds = (level: number) => (teamOnly ? level >= callerLevel : level > callerLevel)
+  if (roleLevel != null && exceeds(roleLevel)) {
+    return c.json({ error: teamOnly ? "cannot grant a team role at or above your own" : "cannot grant a team role above your own" }, 403)
+  }
+  const current = await getTeamMemberRole(c.env, groupId, targetUserId)
+  if (current === undefined) return c.json({ error: "user is not on this team" }, 404)
+  if (current != null && exceeds(current)) {
+    return c.json({ error: "cannot change the team role of someone at or above you" }, 403)
+  }
+  await setTeamMemberRole(c.env, groupId, targetUserId, roleLevel)
+  return c.json({ userId: targetUserId, teamRoleLevel: roleLevel })
 })
 
 // Strict role validation — only the seven canonical levels are accepted.

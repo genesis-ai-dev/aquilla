@@ -35,13 +35,18 @@ describe("requestAiModelConsent", () => {
     act(() => { result.current!.resolve(false) })
     await expect(promise).resolves.toBe(false)
 
-    // Cancellation does NOT persist consent — next request shows the dialog again.
+    // Cancel is once per browser — the next save must not open the prompt.
     const r2 = renderHook(() => usePendingAiConsent())
-    const p2 = requestAiModelConsent(MMS_MODEL)
+    await expect(requestAiModelConsent(MMS_MODEL)).resolves.toBe(false)
+    expect(r2.result.current).toBeNull()
+
+    // The Transcribe button asks again.
+    const r3 = renderHook(() => usePendingAiConsent())
+    const again = requestAiModelConsent(MMS_MODEL, { askAgain: true })
     await act(async () => {})
-    expect(r2.result.current?.model.id).toBe("mms")
-    act(() => { r2.result.current!.resolve(false) })
-    await expect(p2).resolves.toBe(false)
+    expect(r3.result.current?.model.id).toBe("mms")
+    act(() => { r3.result.current!.resolve(false) })
+    await expect(again).resolves.toBe(false)
   })
 
   it("coalesces concurrent requests for the same model into one dialog", async () => {

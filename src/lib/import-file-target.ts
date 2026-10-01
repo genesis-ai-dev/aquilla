@@ -250,6 +250,16 @@ export interface FileTargetMatchResult {
    *  bare "0 matched". `file` is empty when the open file's lines carry no
    *  verse references at all. */
   elsewhere?: { incoming: ChapterSpan[]; file: ChapterSpan[] }
+  /** Why a ref-less match fell back to raw order although one side carried
+   *  timings (AQU-1375): `lines` — the rows are timed but the open file's
+   *  lines aren't (a subtitle file on a markdown source, say); `rows` — the
+   *  lines are timed but some rows aren't. Absent when neither side had any,
+   *  and on every other kind of match. */
+  untimed?: "lines" | "rows"
+  /** A raw-order match's row and line counts, set only when they differ —
+   *  the likeliest sign that a row was added or left out and everything after
+   *  it is one line off (AQU-1375). */
+  countMismatch?: { rows: number; lines: number }
 }
 
 /** A run of chapters of one book, as the review names it ("Exodus 1–3"). */
@@ -1170,7 +1180,9 @@ export function matchTargetRowsByOverlap(
  *  to matching by position.
  *
  *  The result's `alignedBy` says which ran, so the review screen only warns
- *  about order alignment when order alignment is what happened. */
+ *  about order alignment when order alignment is what happened; on an order
+ *  match, `untimed` says why timings went unused and `countMismatch` flags the
+ *  likeliest shift (AQU-1375). */
 export function matchTargetRowsByOrder(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
@@ -1180,20 +1192,25 @@ export function matchTargetRowsByOrder(
   options: { applyOffset?: boolean; known?: TimebaseCorrections; overrides?: ContestOverrides } = {},
 ): FileTargetMatchResult {
   const nonEmptyRows = rows.filter((row) => row.text.trim().length > 0)
-  const canMatchByOverlap =
-    cells.length > 0 &&
-    nonEmptyRows.length > 0 &&
-    cells.every((cell) => cellTimingMs(cell) !== null) &&
-    nonEmptyRows.every((row) => rowTimingMs(row) !== null)
+  const cellsTimed = cells.length > 0 && cells.every((cell) => cellTimingMs(cell) !== null)
+  const timedRows = nonEmptyRows.filter((row) => rowTimingMs(row) !== null).length
+  const canMatchByOverlap = cellsTimed && nonEmptyRows.length > 0 && timedRows === nonEmptyRows.length
 
-  return canMatchByOverlap
-    ? matchTargetRowsByOverlap(rows, cells, {
-        rescale: true,
-        applyOffset: options.applyOffset,
-        known: options.known,
-        overrides: options.overrides,
-      })
-    : matchRowsPositionally(rows, cells)
+  if (canMatchByOverlap) {
+    return matchTargetRowsByOverlap(rows, cells, {
+      rescale: true,
+      applyOffset: options.applyOffset,
+      known: options.known,
+      overrides: options.overrides,
+    })
+  }
+  const result = matchRowsPositionally(rows, cells)
+  const untimed = timedRows === 0 ? undefined : cellsTimed ? "rows" : "lines"
+  return {
+    ...result,
+    ...(untimed ? { untimed } : {}),
+    ...(rows.length !== cells.length ? { countMismatch: { rows: rows.length, lines: cells.length } } : {}),
+  }
 }
 
 /** Decode HTML entities commonly emitted by subtitle authoring tools

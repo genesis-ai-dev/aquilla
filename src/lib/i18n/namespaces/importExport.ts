@@ -1154,6 +1154,14 @@ export const importExport = defineNamespace({
       "references.",
     "importExport.review.matchedCount": "{count} matched",
     "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
+    "importExport.review.orderMatchLinesUntimed": "The open file's lines have no timings, so cues were matched in order. " +
+      "Check each row's source text.",
+    "importExport.review.orderMatchRowsUntimed": "Some rows have no timing, so every row was matched in order. Check " +
+      "each row's source text.",
+    "importExport.review.countMismatchRows": "Rows in this file: {rows}. Lines in the open file: {lines}. If a row was " +
+      "added or left out, every row after it is on the wrong line.",
+    "importExport.review.countMismatchCues": "Cues in this file: {rows}. Lines in the open file: {lines}. If a cue was " +
+      "added or left out, every cue after it is on the wrong line.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
@@ -3224,6 +3232,43 @@ export const importExport = defineNamespace({
           "by position (row 1 to line 1, row 2 to line 2) because neither side had a " +
           "reference or timings to go by. Asks the user to check each row's source " +
           "text, shown beside it. Two short sentences.",
+      },
+      "importExport.review.orderMatchLinesUntimed": {
+        description:
+          "Amber warning above the match-review list when a subtitle file was dropped " +
+          "on a file whose lines have no timings (a plain text source, say), so its " +
+          "cues were paired with lines by position (cue 1 to line 1, and so on) " +
+          "instead of by time. Asks the user to check each row's source text, shown " +
+          "beside it. Two short sentences.",
+      },
+      "importExport.review.orderMatchRowsUntimed": {
+        description:
+          "Amber warning above the match-review list when the open file's lines have " +
+          "timings but some uploaded spreadsheet rows don't, so every row was paired " +
+          "with a line by position (row 1 to line 1, and so on) instead of by time. " +
+          "Asks the user to check each row's source text. Two short sentences.",
+      },
+      "importExport.review.countMismatchRows": {
+        description:
+          "Amber note above the match-review list when spreadsheet rows were paired " +
+          "with lines by position and the two counts differ: one row added or left " +
+          "out shifts every later row onto the wrong line. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of rows in the uploaded file.",
+          lines: "Number of lines in the open file.",
+        },
+      },
+      "importExport.review.countMismatchCues": {
+        description:
+          "Amber note above the match-review list when subtitle cues were paired with " +
+          "lines by position and the two counts differ: one cue added or left out " +
+          "shifts every later cue onto the wrong line. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of cues in the uploaded file.",
+          lines: "Number of lines in the open file.",
+        },
       },
       "importExport.review.reasonBackwardsTimecode": {
         description:

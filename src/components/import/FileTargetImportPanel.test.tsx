@@ -250,8 +250,9 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     // Went straight to review — not the "unsupported file type" error path.
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
-    // Positional matching triggers the order-match warning.
-    expect(screen.getByText(/Matched in order, not by reference or timing/)).toBeInTheDocument()
+    // Positional matching triggers the order-match warning — worded for cues
+    // on a file whose lines have no timings (AQU-1375).
+    expect(screen.getByText(/The open file's lines have no timings, so cues were matched in order/)).toBeInTheDocument()
     // Rows are labelled by the cue's timecode, never by an internal UUID.
     expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
     expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
@@ -331,7 +332,7 @@ describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
     expect(screen.getByText("00:00:05,500 --> 00:00:08,250")).toBeInTheDocument()
     // Positional matching is lossy if the cue count drifts, so the user must be
     // warned to eyeball alignment before importing.
-    expect(screen.getByText(/Matched in order, not by reference or timing/)).toBeInTheDocument()
+    expect(screen.getByText(/The open file's lines have no timings, so cues were matched in order/)).toBeInTheDocument()
   })
 
   it("reaches the review step for a .sbv file, labelled by cue timecode", async () => {
@@ -916,6 +917,30 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     await selectFile(makeFile(USFM_FIXTURE))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.queryByText(/This file is for/)).not.toBeInTheDocument()
+  })
+
+  it("says a spreadsheet was matched in order, and when its row count differs from the file's", async () => {
+    renderPanel()
+    await selectFile(makeFile("target\nUno\nDos\nTres\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("Matched in order, not by reference or timing. Check each row's source text.")).toBeInTheDocument()
+    expect(screen.getByText(
+      "Rows in this file: 3. Lines in the open file: 2. If a row was added or left out, every row after it is on the wrong line.",
+    )).toHaveClass("text-amber-600")
+  })
+
+  it("counts cues, not rows, for a subtitle file — and says nothing when the counts agree", async () => {
+    renderPanel()
+    await selectFile(makeFile("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nUno\n\n00:00:03.000 --> 00:00:04.000\nDos\n", "ep.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByText(/in this file:/)).not.toBeInTheDocument()
+
+    cleanup()
+    renderPanel({ cells: BASE_CELLS.slice(0, 1) })
+    await selectFile(makeFile("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nUno\n\n00:00:03.000 --> 00:00:04.000\nDos\n", "ep.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Cues in this file: 2\. Lines in the open file: 1\./)).toBeInTheDocument()
   })
 
   it("lists a spreadsheet's unmatched rows as rows", async () => {

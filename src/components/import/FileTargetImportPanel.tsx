@@ -1065,7 +1065,23 @@ export function FileTargetImportPanel({
           </div>
           {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.orderMatchWarning")}
+              {t(
+                matchResult.untimed === "lines"
+                  ? "importExport.review.orderMatchLinesUntimed"
+                  : matchResult.untimed === "rows"
+                    ? "importExport.review.orderMatchRowsUntimed"
+                    : "importExport.review.orderMatchWarning",
+              )}
+            </p>
+          )}
+          {/* AQU-1375: on an order match, unequal counts are the likeliest
+              sign that every row after some point is one line off. */}
+          {showOrderMatchWarning && matchResult.countMismatch && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {t(rowKind === "cue" ? "importExport.review.countMismatchCues" : "importExport.review.countMismatchRows", {
+                rows: formatCount(matchResult.countMismatch.rows, locale),
+                lines: formatCount(matchResult.countMismatch.lines, locale),
+              })}
             </p>
           )}
           {looseFit && (

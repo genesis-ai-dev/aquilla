@@ -444,6 +444,10 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     )
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["u1", "u2"])
+    // AQU-1375: the review words it for cues on an untimed file, and the
+    // counts agree.
+    expect(result.untimed).toBe("lines")
+    expect(result.countMismatch).toBeUndefined()
   })
 
   it("falls back to raw order when an incoming row carries no timing", () => {
@@ -453,6 +457,7 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     )
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c2"])
+    expect(result.untimed).toBe("rows")
   })
 
   it("spreadsheet order matching is untouched — no timings on either side", () => {
@@ -464,6 +469,22 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["s1", "s3"])
     expect(result.unmatchedSourceCount).toBe(1)
+    expect(result.untimed).toBeUndefined()
+    expect(result.countMismatch).toBeUndefined()
+  })
+
+  it("AQU-1375: an order match says when its row and line counts differ", () => {
+    const untimed = [cell({ cellId: "s1" }), cell({ cellId: "s2" })]
+    expect(matchTargetRowsByOrder([{ text: "a" }, { text: "b" }, { text: "c" }], untimed).countMismatch)
+      .toEqual({ rows: 3, lines: 2 })
+    expect(matchTargetRowsByOrder([{ text: "a" }], untimed).countMismatch).toEqual({ rows: 1, lines: 2 })
+  })
+
+  it("AQU-1375: a timing match reports neither, whatever the counts", () => {
+    const result = matchTargetRowsByOrder([cueRow(1000, 1800, "one")], cells)
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.untimed).toBeUndefined()
+    expect(result.countMismatch).toBeUndefined()
   })
 })
 

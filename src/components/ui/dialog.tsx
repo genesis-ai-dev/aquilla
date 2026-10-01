@@ -46,9 +46,16 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  closeDisabled = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * Greys out the built-in X. Pair it with a Root that refuses to close while
+   * busy so the affordance matches the behaviour instead of looking live and
+   * doing nothing (AQU-1519).
+   */
+  closeDisabled?: boolean
 }) {
   const t = useT()
   return (
@@ -77,6 +84,7 @@ function DialogContent({
                 className="absolute top-2 end-2"
                 size="icon-sm"
                 aria-label={t("common.close")}
+                disabled={closeDisabled}
               />
             }
           >

@@ -53,9 +53,16 @@ interface ProjectDestinationPickerProps {
    * choice made against a previous page org or a previous open.
    */
   onChange: (destination: Destination | null) => void
+  /** AQU-1519: locked while the create dialog is working. */
+  disabled?: boolean
 }
 
-export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDestinationPickerProps) {
+export function ProjectDestinationPicker({
+  jwt,
+  pageOrgId,
+  onChange,
+  disabled = false,
+}: ProjectDestinationPickerProps) {
   const t = useT()
   const orgCtx = useActiveOrgOptional()
   const [targets, setTargets] = useState<CreateTarget[] | null>(null)
@@ -125,6 +132,7 @@ export function ProjectDestinationPicker({ jwt, pageOrgId, onChange }: ProjectDe
       <Select
         items={targets.map((x) => ({ value: keyOf(x), label: labelOf(x) }))}
         value={selected}
+        disabled={disabled}
         onValueChange={(value) => {
           if (!value) return
           const target = targets.find((x) => keyOf(x) === value)

@@ -1154,6 +1154,11 @@ export const importExport = defineNamespace({
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
+    "importExport.review.reasonNoReference": "No reference",
+    "importExport.review.reasonRefNotInFile": "No line has this reference",
+    "importExport.review.reasonRefRepeated": "This reference appears twice",
+    "importExport.review.reasonBridgeOverSeparateLines": "Covers verses {first}–{last}, which are separate lines here",
+    "importExport.review.reasonPartOfBridgedLine": "Verses {first}–{last} are one line here",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.rowAlreadyThere": "Already there",
     "importExport.review.rivalHeading": "Also fits this line",
@@ -1201,6 +1206,8 @@ export const importExport = defineNamespace({
       other: "{count} source cells not covered",
     }),
     "importExport.review.unmatchedListTitle": "Cues that didn't find a line",
+    "importExport.review.unmatchedRowsListTitle": "Rows that didn't find a line",
+    "importExport.review.unmatchedVersesListTitle": "Verses that didn't find a line",
     "importExport.review.unmatchedRowCount": plural({
       one: "{count} unmatched row",
       other: "{count} unmatched rows",
@@ -3211,6 +3218,47 @@ export const importExport = defineNamespace({
           "paired with any line: no line of the open file plays close enough in time " +
           "to this cue. Short sentence fragment.",
       },
+      "importExport.review.reasonNoReference": {
+        description:
+          "Reason shown next to one entry in the list of uploaded spreadsheet rows that " +
+          "were not paired with any line: the row's reference cell (such as GEN 1:3) " +
+          "is blank, so there is nothing to match it by. Short fragment.",
+      },
+      "importExport.review.reasonRefNotInFile": {
+        description:
+          "Reason shown next to one entry in the list of uploaded rows or verses that " +
+          "were not paired with any line: no line of the open file carries this " +
+          "reference (such as GEN 1:3), for example because of a typo or a verse the " +
+          "file doesn't have. Short sentence.",
+      },
+      "importExport.review.reasonRefRepeated": {
+        description:
+          "Reason shown next to one entry in the list of uploaded rows or verses that " +
+          "were not paired with any line: the same reference appears earlier in the " +
+          "uploaded file, and that earlier row already took the line. Short sentence.",
+      },
+      "importExport.review.reasonBridgeOverSeparateLines": {
+        description:
+          "Reason shown next to one entry in the list of uploaded verses that were not " +
+          "paired with any line: the uploaded text is one combined passage for several " +
+          "verses (a 'verse bridge', such as verses 1-2), while the open file has a " +
+          "separate line for each of those verses. Short sentence.",
+        placeholders: {
+          first: "First verse number of the combined passage, such as 1.",
+          last: "Last verse number of the combined passage, such as 2.",
+        },
+      },
+      "importExport.review.reasonPartOfBridgedLine": {
+        description:
+          "Reason shown next to one entry in the list of uploaded verses that were not " +
+          "paired with any line: the open file holds this verse together with its " +
+          "neighbours in one combined line (a 'verse bridge', such as verses 1-2), so " +
+          "there is no line for this verse on its own. Short sentence.",
+        placeholders: {
+          first: "First verse number of the open file's combined line, such as 1.",
+          last: "Last verse number of the open file's combined line, such as 2.",
+        },
+      },
       "importExport.review.replacesExisting": {
         description:
           "Amber warning line under one row of the match-review list, shown only " +
@@ -3426,6 +3474,18 @@ export const importExport = defineNamespace({
           "Title of a collapsible list under the summary strip naming every cue of " +
           "the uploaded subtitle file that was not paired with any line, each with " +
           "the reason.",
+      },
+      "importExport.review.unmatchedRowsListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every row of " +
+          "the uploaded spreadsheet that was not paired with any line of the open " +
+          "file, each with the reason.",
+      },
+      "importExport.review.unmatchedVersesListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every verse " +
+          "of the uploaded scripture (USFM) file that was not paired with any line " +
+          "of the open file, each with the reason.",
       },
       "importExport.review.unmatchedRowCount": {
         description:

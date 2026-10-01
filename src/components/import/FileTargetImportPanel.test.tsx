@@ -870,6 +870,51 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
   })
 })
 
+describe("FileTargetImportPanel — untimed imports say why a row found no line (AQU-1375)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 0, skippedCount: 0 })
+  })
+
+  const openList = (title: RegExp) => {
+    const details = screen.getByText(title).closest("details")!
+    act(() => {
+      details.open = true
+      fireEvent(details, new Event("toggle"))
+    })
+  }
+  const entryOf = (text: string) => screen.getByText(text).closest("li")!
+
+  it("lists a USFM file's unmatched verses as verses, each with its reason", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1 One\n\\v 1 One again\n\\v 7 Seven\n"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    openList(/Verses that didn't find a line/)
+    expect(within(entryOf("One again")).getByText("This reference appears twice")).toBeInTheDocument()
+    expect(within(entryOf("Seven")).getByText("No line has this reference")).toBeInTheDocument()
+  })
+
+  it("names the verses of a bridge the file keeps apart", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1-2 Both verses\n"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    openList(/Verses that didn't find a line/)
+    expect(
+      within(entryOf("Both verses")).getByText("Covers verses 1–2, which are separate lines here"),
+    ).toBeInTheDocument()
+  })
+
+  it("lists a spreadsheet's unmatched rows as rows", async () => {
+    renderPanel()
+    await selectFile(makeFile("ref,target\nGEN 1:1,Uno\n,Sin referencia\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    openList(/Rows that didn't find a line/)
+    expect(within(entryOf("Sin referencia")).getByText("No reference")).toBeInTheDocument()
+    expect(within(entryOf("Sin referencia")).getByText("Row 2")).toBeInTheDocument()
+  })
+})
+
 describe("FileTargetImportPanel — the back arrow", () => {
   beforeEach(() => {
     vi.clearAllMocks()

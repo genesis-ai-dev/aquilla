@@ -40,7 +40,7 @@ import {
   type FileTargetCellRef,
   type FileTargetMatchedCell,
   type FileTargetMatchResult,
-  type TargetOrphanReason,
+  type TargetOrphan,
   type TargetRow,
 } from "@/lib/import-file-target"
 import {
@@ -122,6 +122,15 @@ function sourceArtifactFormat(fileName: string) {
   if (ext === "xlsx") return "xlsx" as const
   if (ext === "tsv") return "tsv" as const
   return "csv" as const
+}
+
+/** What one incoming row is called in the review's lists: a subtitle file's
+ *  cues, a USFM file's verses, a spreadsheet's rows (AQU-1375). */
+function incomingRowKind(fileName: string): "cue" | "verse" | "row" {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
+  if (USFM_EXTENSIONS.has(ext)) return "verse"
+  return "row"
 }
 
 /** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
@@ -905,14 +914,29 @@ export function FileTargetImportPanel({
     // fragile top-to-bottom pairing this warns about — don't send the user off
     // to eyeball 500 rows for a drift that cannot have happened.
     const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
-    const reasonLabel = (reason: TargetOrphanReason | undefined) =>
-      reason === "backwardsTimecode"
-        ? t("importExport.review.reasonBackwardsTimecode")
-        : reason === "lostItsLine"
-          ? t("importExport.review.reasonLostItsLine")
-          : reason === "noLineInReach"
-            ? t("importExport.review.reasonNoLineInReach")
-            : null
+    const reasonLabel = (orphan: TargetOrphan): string | null => {
+      switch (orphan.reason) {
+        case "backwardsTimecode": return t("importExport.review.reasonBackwardsTimecode")
+        case "lostItsLine": return t("importExport.review.reasonLostItsLine")
+        case "noLineInReach": return t("importExport.review.reasonNoLineInReach")
+        case "noReference": return t("importExport.review.reasonNoReference")
+        case "refNotInFile": return t("importExport.review.reasonRefNotInFile")
+        case "refRepeated": return t("importExport.review.reasonRefRepeated")
+        case "bridgeOverSeparateLines":
+          return orphan.verses ? t("importExport.review.reasonBridgeOverSeparateLines", orphan.verses) : null
+        case "partOfBridgedLine":
+          return orphan.verses ? t("importExport.review.reasonPartOfBridgedLine", orphan.verses) : null
+        default: return null
+      }
+    }
+    const rowKind = sourceFile ? incomingRowKind(sourceFile.name) : "row"
+    const unmatchedListTitle = t(
+      rowKind === "cue"
+        ? "importExport.review.unmatchedListTitle"
+        : rowKind === "verse"
+          ? "importExport.review.unmatchedVersesListTitle"
+          : "importExport.review.unmatchedRowsListTitle",
+    )
     // A whole-file shift is offered as a tickbox (ticked when the matcher
     // applied it), its label folding in any frame-rate change that comes with
     // it; the frame-rate note stands alone only for a stretch without a shift.
@@ -1050,15 +1074,15 @@ export function FileTargetImportPanel({
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
 
           {orphans.length > 0 && (
-            <LazyDetails summary={`${t("importExport.review.unmatchedListTitle")} (${formatCount(orphans.length, locale)})`}>
+            <LazyDetails summary={`${unmatchedListTitle} (${formatCount(orphans.length, locale)})`}>
               {() => (
                 <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
                   {orphans.map((o, i) => (
                     <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
                       <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
                         {o.ref}
-                        {reasonLabel(o.reason) && (
-                          <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                        {reasonLabel(o) && (
+                          <span className="font-sans text-amber-600">{reasonLabel(o)}</span>
                         )}
                       </p>
                       <p className="truncate text-foreground/80">{o.text}</p>

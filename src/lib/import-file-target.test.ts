@@ -56,7 +56,7 @@ describe("matchTargetRowsByRef", () => {
   it("treats unknown refs as orphans, never silent drops", () => {
     const result = matchTargetRowsByRef([{ ref: "EXO 1:1", text: "orphan" }], cells)
     expect(result.matched).toHaveLength(0)
-    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan" }])
+    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan", reason: "refNotInFile" }])
   })
 
   it("ignores rows with empty text so blanks never clear an existing translation", () => {
@@ -75,7 +75,53 @@ describe("matchTargetRowsByRef", () => {
     )
     expect(result.matched).toHaveLength(1)
     expect(result.matched[0].incomingText).toBe("first wins")
-    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses" }])
+    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses", reason: "refRepeated" }])
+  })
+})
+
+// AQU-1375: every unmatched row used to show just its reference and text, so a
+// typo, a repeated verse and a verse bridge all read the same — and the same
+// as a harmless extra row.
+describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
+  const cells: FileTargetCellRef[] = [
+    cell({ cellId: "v1", canonicalRef: "GEN 1:1" }),
+    cell({ cellId: "v2", canonicalRef: "GEN 1:2" }),
+    cell({ cellId: "v3", canonicalRef: "GEN 1:3" }),
+    cell({ cellId: "v45", canonicalRef: "GEN 1:4-5" }),
+  ]
+  const why = (rows: TargetRow[]) =>
+    matchTargetRowsByRef(rows, cells).orphans.map(({ ref, reason, verses }) => ({ ref, reason, verses }))
+
+  it("a reference no line carries, typo or not", () => {
+    expect(why([{ ref: "GNE 1:3", text: "typo" }, { ref: "GEN 1:9", text: "beyond" }])).toEqual([
+      { ref: "GNE 1:3", reason: "refNotInFile", verses: undefined },
+      { ref: "GEN 1:9", reason: "refNotInFile", verses: undefined },
+    ])
+  })
+
+  it("a reference that appears twice — the second one, however spelled", () => {
+    expect(why([{ ref: "GEN 1:2", text: "a" }, { ref: "Genesis 1:2", text: "b" }])).toEqual([
+      { ref: "Genesis 1:2", reason: "refRepeated", verses: undefined },
+    ])
+  })
+
+  it("a bridge over verses the file keeps as separate lines, naming the bridge", () => {
+    const rows = usfmToTargetRows("\\id GEN\n\\c 1\n\\v 1-2 In the beginning, and the earth\n\\v 3 Light\n")
+    expect(why(rows)).toEqual([
+      { ref: "GEN 1:1-2", reason: "bridgeOverSeparateLines", verses: { first: "1", last: "2" } },
+    ])
+  })
+
+  it("a single verse the file holds inside a bridged line, naming that line's bridge", () => {
+    expect(why([{ ref: "GEN 1:5", text: "five" }])).toEqual([
+      { ref: "GEN 1:5", reason: "partOfBridgedLine", verses: { first: "4", last: "5" } },
+    ])
+  })
+
+  it("a spreadsheet row whose reference cell is blank, labelled by its row", () => {
+    expect(why([{ ref: "GEN 1:1", text: "one" }, { ref: undefined, text: "no ref" }])).toEqual([
+      { ref: "Row 2", reason: "noReference", verses: undefined },
+    ])
   })
 })
 

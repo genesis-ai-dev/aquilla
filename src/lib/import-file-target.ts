@@ -29,7 +29,7 @@ import {
 import { extractSbvStrings } from "./parsers/sbv"
 import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { formatVerseReference, parseVerseReference } from "./scripture-reference"
+import { formatVerseReference, parseVerseReference, type VerseReference } from "./scripture-reference"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -148,8 +148,11 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   alreadyThere?: boolean
 }
 
-/** Why an incoming row found no line. Absent where the answer is structural
- *  and needs no explaining (no line carries that ref; more rows than lines). */
+/** Why an incoming row found no line. One code per reason, each with its own
+ *  sentence on the review screen; a reason that needs figures carries them on
+ *  the orphan (`verses`). AQU-1289's versification report is expected to add
+ *  codes here for the relations it resolves, rather than invent a second list.
+ *  Absent only where the answer needs no explaining (more rows than lines). */
 export type TargetOrphanReason =
   /** No line lies within reach of the cue's timing. */
   | "noLineInReach"
@@ -160,6 +163,20 @@ export type TargetOrphanReason =
    *  Typically the second half of a line the translator split in two, whose
    *  text would otherwise be dropped without a word. */
   | "lostItsLine"
+  /** The row's reference cell was blank (AQU-1375). */
+  | "noReference"
+  /** No line carries this reference: a typo, or a verse the open file doesn't
+   *  have (AQU-1375). */
+  | "refNotInFile"
+  /** An earlier row already took this reference's line (AQU-1375). */
+  | "refRepeated"
+  /** A bridge (`\v 1-2`) over verses the open file keeps as separate lines
+   *  (AQU-1375). How it should land is AQU-1289's call; this only says why it
+   *  didn't. `verses` names the bridge. */
+  | "bridgeOverSeparateLines"
+  /** A single verse the open file holds inside one bridged line (AQU-1375).
+   *  `verses` names that line's bridge. */
+  | "partOfBridgedLine"
 
 /** An incoming row that was not paired with any line. */
 export interface TargetOrphan {
@@ -171,6 +188,9 @@ export interface TargetOrphan {
   contest?: number
   /** Where the cue sits in the uploaded file (overlap matching only). */
   rowIndex?: number
+  /** The bridge a `bridgeOverSeparateLines` or `partOfBridgedLine` reason is
+   *  about: its first and last verse. */
+  verses?: { first: string; last: string }
 }
 
 /** Pairings a person fixed on the review screen by swapping a contest
@@ -280,6 +300,47 @@ function canonicalVerseRef(ref: string | null | undefined): string | null {
   return verse ? formatVerseReference(verse) : null
 }
 
+/** The open file's verse lines, grouped by book and chapter — what a missed
+ *  reference is explained against. */
+function verseLinesByChapter(cells: FileTargetCellRef[]): Map<string, VerseReference[]> {
+  const byChapter = new Map<string, VerseReference[]>()
+  for (const cell of cells) {
+    const verse = parseVerseReference(cell.canonicalRef)
+    if (!verse) continue
+    const key = `${verse.bookCode} ${verse.chapter}`
+    byChapter.set(key, [...(byChapter.get(key) ?? []), verse])
+  }
+  return byChapter
+}
+
+const verseOrdinal = (verse: string) => parseInt(verse, 10)
+
+/** Why no line carries a reference (AQU-1375): a bridge over verses the file
+ *  keeps apart, a verse the file keeps inside a bridge, or simply not there. */
+function whyNoLineHasRef(
+  ref: string,
+  lineVerses: Map<string, VerseReference[]>,
+): Pick<TargetOrphan, "reason" | "verses"> {
+  const row = parseVerseReference(ref)
+  if (!row) return { reason: "refNotInFile" }
+  const lines = lineVerses.get(`${row.bookCode} ${row.chapter}`) ?? []
+  const first = verseOrdinal(row.verse)
+  if (row.toVerse) {
+    const last = verseOrdinal(row.toVerse)
+    const separate = lines.some((line) => {
+      const at = verseOrdinal(line.verse)
+      return !line.toVerse && at >= first && at <= last
+    })
+    if (separate) return { reason: "bridgeOverSeparateLines", verses: { first: row.verse, last: row.toVerse } }
+  } else {
+    const bridge = lines.find(
+      (line) => line.toVerse && first >= verseOrdinal(line.verse) && first <= verseOrdinal(line.toVerse),
+    )
+    if (bridge?.toVerse) return { reason: "partOfBridgedLine", verses: { first: bridge.verse, last: bridge.toVerse } }
+  }
+  return { reason: "refNotInFile" }
+}
+
 /** Match rows to cells by canonical ref (first cell wins on dup refs). A ref
  *  matches exactly first; failing that, a verse ref matches whichever way it
  *  is spelled — `Genesis 1:4`, `gen 1:4` and `GEN 1.4` all find `GEN 1:4`
@@ -308,23 +369,28 @@ export function matchTargetRowsByRef(
   const matched: FileTargetMatchedCell[] = []
   const orphans: TargetOrphan[] = []
   const matchedCellIds = new Set<string>()
+  const lineVerses = verseLinesByChapter(cells)
 
-  for (const row of rows) {
-    if (!row.text.trim()) continue
-    const cell = row.ref ? cellForRef(row.ref) : undefined
+  rows.forEach((row, index) => {
+    if (!row.text.trim()) return
+    if (!row.ref) {
+      orphans.push({ ref: `Row ${index + 1}`, text: row.text, reason: "noReference" })
+      return
+    }
+    const cell = cellForRef(row.ref)
     if (!cell) {
-      orphans.push({ ref: row.ref ?? "(no ref)", text: row.text })
-      continue
+      orphans.push({ ref: row.ref, text: row.text, ...whyNoLineHasRef(row.ref, lineVerses) })
+      return
     }
     if (matchedCellIds.has(cell.cellId)) {
       // A later row targeting an already-matched ref is an orphan, not a
       // silent overwrite of the earlier row.
-      orphans.push({ ref: row.ref!, text: row.text })
-      continue
+      orphans.push({ ref: row.ref, text: row.text, reason: "refRepeated" })
+      return
     }
     matchedCellIds.add(cell.cellId)
-    matched.push(toMatchedCell(cell, row.text, row.ref!))
-  }
+    matched.push(toMatchedCell(cell, row.text, row.ref))
+  })
 
   const uncovered = uncoveredLines(cells, matched)
   return {

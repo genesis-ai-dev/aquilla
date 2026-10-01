@@ -13,6 +13,13 @@ describe("secret-free agent setup", () => {
     expect(prompt).not.toContain("Token:")
     // Agents lose their polling loop to tool timeouts; they must know to wait for the handoff.
     expect(prompt).toContain("keep device_code")
+    // The point of connecting once: the agent registers a persistent MCP server
+    // and the credential lasts until revoked, so no reconnect instructions.
+    expect(prompt).toContain("MCP server")
+    expect(prompt).toContain("does not expire")
+    expect(prompt).not.toContain("30 days")
+    // Python-urllib's default UA gets a non-JSON 403 from the edge (AQU-1512).
+    expect(prompt).toContain("User-Agent")
   })
   it("tells a stalled agent to redeem without handing it any secret", () => {
     const message = buildApprovedMessage("https://auth.example/identity/", "ABCD-EFGH")

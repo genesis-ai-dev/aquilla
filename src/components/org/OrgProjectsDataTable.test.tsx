@@ -316,7 +316,10 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     expect(esRow).toHaveTextContent("8% validated")
   })
 
-  it("Open links carry ?lane= for named lanes and no lane query for the default lane", () => {
+  // AQU-1474: the default lane is an explicit, empty `?lane=`, never a bare
+  // URL. The editor reads an absent lane param as "keep the lane last used",
+  // so a bare link from the default-lane row could open a different lane.
+  it("Open links carry ?lane=<tag> for named lanes and an empty ?lane= for the default lane", () => {
     const lanes = [
       { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
       { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
@@ -329,7 +332,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {
       name: /open/i,
     })
-    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor")
+    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor?lane=")
 
     const esOpen = within(screen.getByTestId("project-lane-row-p1-es")).getByRole("link", {
       name: /open/i,

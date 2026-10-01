@@ -52,13 +52,51 @@ describe("BacktranslationPanel", () => {
   it("offers Generate back-translation when there is a translation and no reading", () => {
     renderPanel()
     expect(screen.getByRole("button", { name: /generate back-translation/i })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /statistical gloss/i })).toBeTruthy()
+    // AQU-1408: the gloss is a section that is simply there, not an expander
+    // the reader has to know to open.
+    expect(screen.getByRole("heading", { name: /statistical gloss/i })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /statistical gloss/i })).toBeNull()
   })
 
-  it("shows a live project-pairs gloss before any AI back-translation exists", () => {
+  it("shows the statistical gloss before any AI back-translation exists", () => {
     renderPanel({ statisticalGloss: "house of him" })
-    expect(screen.getByText(/updates as you translate/i)).toBeTruthy()
+    expect(screen.getByRole("heading", { name: /statistical gloss/i })).toBeTruthy()
     expect(screen.getByText("house of him")).toBeTruthy()
+  })
+
+  // AQU-1408 §3: the order is the point. The gloss is the project's own
+  // evidence, so it must precede the AI reading in the document — a reader who
+  // meets the smoothed AI reading first has already been anchored by it.
+  it("puts the statistical gloss above the AI back-translation", () => {
+    const { container } = renderPanel({
+      statisticalGloss: "house of him",
+      cell: cell({
+        backtranslation: "the house of him",
+        backtranslationForText: "maison de lui",
+        backtranslationPolished: true,
+      }),
+    })
+    const glossHeading = screen.getByRole("heading", { name: /statistical gloss/i })
+    const aiHeading = screen.getByText("AI back-translation")
+    expect(
+      glossHeading.compareDocumentPosition(aiHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(container).toBeTruthy()
+  })
+
+  // AQU-1408 §4: each view says what KIND of output it is, on screen, not in a
+  // tooltip a reader has to discover by hovering.
+  it("shows a visible descriptor for each of the two readings", () => {
+    renderPanel({
+      statisticalGloss: "house of him",
+      cell: cell({
+        backtranslation: "the house of him",
+        backtranslationForText: "maison de lui",
+        backtranslationPolished: true,
+      }),
+    })
+    expect(screen.getByText(/direct word-for-word translation/i)).toBeTruthy()
+    expect(screen.getByText(/smoothed, re-worded reading/i)).toBeTruthy()
   })
 
   it("labels an AI back-translation and reassures when it still matches", () => {
@@ -72,6 +110,17 @@ describe("BacktranslationPanel", () => {
     expect(screen.getByText("AI back-translation")).toBeTruthy()
     expect(screen.getByText("Matches this translation")).toBeTruthy()
     expect(screen.getByText("the house of him")).toBeTruthy()
+  })
+
+  it("still marks a hand-corrected reading as corrected", () => {
+    renderPanel({
+      cell: cell({
+        backtranslation: "house of him",
+        backtranslationForText: "maison de lui",
+        backtranslationPolished: false,
+      }),
+    })
+    expect(screen.getByText("Hand-corrected")).toBeTruthy()
   })
 
   it("warns when the back-translation describes an earlier version", () => {

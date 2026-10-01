@@ -6,7 +6,7 @@ import { AdminBillingSection } from "./AdminBillingSection"
 
 /**
  * Platform — editable admin surfaces grouped together (away from the
- * read-only oversight tabs): AI settings, compute/credit caps, and Field
+ * read-only oversight tabs): AI settings, AI-credit caps, and Field
  * Plan billing. A light sub-nav switches between them so the console's
  * top-level tab bar stays about "what's happening" vs. "what I configure".
  */
@@ -19,7 +19,7 @@ export function AdminPlatformSection({ jwt }: { jwt: string }) {
       <Tabs value={sub} onValueChange={(v) => setSub(v as Sub)}>
         <TabsList>
           <TabsTrigger value="settings">AI settings</TabsTrigger>
-          <TabsTrigger value="credits">Compute &amp; credits</TabsTrigger>
+          <TabsTrigger value="credits">AI credits</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
         </TabsList>
         <TabsContent value="settings" className="mt-4">

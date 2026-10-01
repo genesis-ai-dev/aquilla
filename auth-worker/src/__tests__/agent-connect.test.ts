@@ -26,7 +26,7 @@ const approve = (user_code: string, jwt: string, project_id = "p") => post("deci
   user_code, approve: true, code_confirmed: true, project_id,
 }, jwt)
 describe("browser authorization → existing credential consumer", () => {
-  it("delivers one scoped expiring credential to the agent, revocable through existing controls", async () => {
+  it("delivers one scoped non-expiring credential to the agent, revocable through existing controls", async () => {
     const jwt = await seed(); const request = await start()
     expect(request.verification_uri_complete).toContain("/connect-agent#user_code=")
     expect(request.verification_uri_complete).not.toContain(request.device_code)
@@ -34,8 +34,12 @@ describe("browser authorization → existing credential consumer", () => {
     expect(await (await approve(request.user_code, jwt)).json()).toEqual({ status: "approved" })
     const response = await poll(request.device_code)
     expect(response.status).toBe(200)
-    const token = await response.json() as { access_token: string; credential_id: string; expires_in: number }
-    expect(token.expires_in).toBe(2592000)
+    const token = await response.json() as { access_token: string; credential_id: string; expires_in?: number }
+    // Perpetual by design: an agent set up once (e.g. as an MCP server) keeps
+    // working until the human revokes it — no silent 30-day breakage.
+    expect(token.expires_in).toBeUndefined()
+    expect(await env.AQUILLA_PG.prepare("SELECT expires_at FROM api_credentials WHERE id = ?")
+      .bind(token.credential_id).first()).toEqual({ expires_at: null })
     expect(await validateApiCredential(env.AQUILLA_PG, token.access_token)).toMatchObject({ userId: "1", mode: "ask", projectId: "p" })
     expect(await (await poll(request.device_code)).json()).toEqual({ error: "expired_token" })
     const rows = JSON.stringify(await env.AQUILLA_PG.prepare("SELECT * FROM agent_authorizations").all())

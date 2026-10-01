@@ -82,6 +82,12 @@ export const projectSettings = defineNamespace({
       "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
+    // AQU-1518: the upstream picker is a searchable combobox, not a
+    // scroll-only dropdown.
+    "projectSettings.create.upstreamProjectSearchPlaceholder": "Search projects…",
+    "projectSettings.create.upstreamProjectSearchAriaLabel": "Search projects",
+    "projectSettings.create.upstreamProjectNoMatches": "No projects match.",
+    "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
     "projectSettings.create.linkConsumesSourceName": "Its Source",
@@ -635,6 +641,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
       "its cell data is preserved and you can restore it anytime.",
+    // AQU-1464: "is anyone still working in here?" — shown inside the archive
+    // confirmation, above the Confirm button.
+    "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
+    "projectSettings.languages.lastChange": "Last change in this lane: {date} by {editor}",
+    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
+    "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
+    "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
@@ -1315,6 +1328,26 @@ export const projectSettings = defineNamespace({
           lane: "The lane's language tag (data, not translated).",
         },
       },
+      "projectSettings.languages.lastChange": {
+        description:
+          "Inside the archive-lane confirmation: when this lane was last translated in, and " +
+          "by whom. Tells the project manager whether the lane is dormant or someone is " +
+          "working in it right now, because archiving locks the lane's translators out of " +
+          "editing. Shown only to people who may archive the lane.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+          editor: "The editing member's username (data, never translated).",
+        },
+      },
+      "projectSettings.languages.lastChangeUnknownEditor": {
+        description:
+          "Same as projectSettings.languages.lastChange, for a lane whose newest edit " +
+          "records no editor name (an imported or pre-attribution row). Keep the two " +
+          "wordings consistent — only the trailing \"by <name>\" is dropped.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+        },
+      },
       "projectSettings.languages.archiveLaneAriaLabel": {
         description: "Accessible name of the archive-icon button for one target lane row.",
         placeholders: {
@@ -1438,6 +1471,14 @@ export const projectSettings = defineNamespace({
           "Disabled note in a project Members row menu, shown in place of 'Change role' " +
           "when the viewer may manage membership in general but not THIS member, whose " +
           "current role is at or above the viewer's own.",
+      },
+      "projectSettings.create.upstreamProjectSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the Create New Project dialog's " +
+          "\"Upstream project\" picker (AQU-1518). Screen-reader-only — never rendered " +
+          "as visible text; the visible hint is upstreamProjectSearchPlaceholder. " +
+          "\"Projects\" here means Aquilla translation projects, the same sense as " +
+          "projectSettings.create.upstreamProjectLabel.",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",

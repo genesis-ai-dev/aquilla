@@ -71,8 +71,9 @@ like an ordinary slice. The bot's job ends at the same place either way.
 4. If `cut` is `true`:
    - `git branch <plan.branch> <plan.sha>` then `git push origin <plan.branch>`.
      The branch is cut from `plan.sha`, which is the last PR in the slice —
-     **not** the current tip of `dev`; do not `git push origin dev:<plan.branch>`
-     or otherwise substitute `dev`'s HEAD.
+     or `plan.floor`, the newest `dev` commit production already runs, when
+     the slice ends behind it — **not** the current tip of `dev`; do not
+     `git push origin dev:<plan.branch>` or otherwise substitute `dev`'s HEAD.
    - Build the release notes (template below) from `plan.prs`, `plan.areas`,
      and `plan.branch`.
    - Post the notes as a **commit comment** on `plan.sha` (`POST
@@ -105,7 +106,9 @@ Needs a human: #773 (walk not conclusive).
 
 - Title line: `## Release <plan.branch> · <plan.prs.length> PRs · areas: <plan.areas joined by ", ", or omit "areas:" entirely if plan.areas is empty>`.
   Note `plan.prCount` is a different number — the total unreleased PRs on
-  `dev` at plan time, not this slice's size. Use `plan.prs.length`.
+  `dev` at plan time (a PR the tagged release tip already carries as a
+  cherry-pick counts as released), not this slice's size. Use
+  `plan.prs.length`.
 - One table row per PR in `plan.prs`, oldest first (the plan already returns
   them in that order). "Title" is the PR's title, fetched from the GitHub
   API — the plan itself doesn't carry it. "Walk @ head sha" is `pr.walk`

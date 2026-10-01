@@ -1,5 +1,5 @@
 /**
- * Tests for AdminCreditsSection — platform-admin compute/credits table.
+ * Tests for AdminCreditsSection — the platform-admin AI-credits table.
  *
  * WHY these tests matter:
  *   - The admin table must render per-org credit spend.
@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { AdminCreditsSection } from "./AdminCreditsSection"
 import type { AdminOrgCredits } from "@/lib/sync/credits"
 
@@ -295,5 +296,37 @@ describe("AdminCreditsSection — AQU-942: the table is the known shell", () => 
     render(<AdminCreditsSection jwt="admin-jwt" />)
     expect(await screen.findByText("No orgs found.")).toBeInTheDocument()
     expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+  })
+})
+
+describe("AdminCreditsSection — AQU-688: the control captions explain themselves", () => {
+  // WHY: "Enforce" and "Show org" are two words of platform jargon sitting in a
+  // dense table, and the ticket was filed because the person who owns the
+  // console could not recall what "Show org" did. The explanation has to be
+  // reachable from the UI, not only from the source — so assert the caption is
+  // a tooltip trigger carrying the behaviour, not merely that a title
+  // attribute exists somewhere (AppTooltip strips `title` on purpose).
+  it("explains what Enforce and Show org do on hover", async () => {
+    mockList.mockResolvedValue([ORG_A])
+    renderWithTooltips(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    await expectTooltip(screen.getByText("Enforce"), /refused with a 429/)
+    await expectTooltip(screen.getByText("Show org"), /maintainers can see its AI-credit usage/)
+  })
+
+  it("carries the same explanation to assistive tech, where there is no hover", async () => {
+    // The caption is deliberately not a tab stop (it would add two per row to
+    // an admin table), so the switch itself has to describe its consequence —
+    // otherwise the fix only reaches operators using a mouse.
+    mockList.mockResolvedValue([ORG_A])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    for (const testId of ["enforce-toggle-1", "show-org-toggle-1"]) {
+      const describedBy = screen.getByTestId(testId).getAttribute("aria-describedby")
+      expect(describedBy).toBeTruthy()
+      expect(document.getElementById(describedBy!)?.textContent).toMatch(/Off \(default\)/)
+    }
   })
 })

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { tsvNotesRoute } from "./tsv-notes"
 import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
+import { readNoteReferenceMetadata } from "@/lib/notes/note-metadata"
 import type { DcsCatalogEntry, DcsManifest } from "../types"
 
 const TN_ENTRY: DcsCatalogEntry = {
@@ -167,5 +168,26 @@ describe("tsvNotesRoute parse()", () => {
     })
     expect(changed[0].cells[0].cellId).toBe(a[0].cells[0].cellId)
     expect(changed[0].cells[0].contentHash).not.toBe(a[0].cells[0].contentHash)
+  })
+})
+
+// AQU-527 — the seam between this producer and the panel that displays its
+// output. `Quote` is carried, not translated, so the only way the phrase reaches
+// a translator is the metadata bucket; a renamed key here leaves every test in
+// this file green while the editor's notes sidebar silently drops the phrase.
+describe("tsvNotesRoute → notes sidebar seam (AQU-527)", () => {
+  it("emits the original-language quote where the sidebar's reader looks for it", () => {
+    const cells = tsvNotesRoute.parse({
+      entry: TN_ENTRY,
+      manifest: TN_MANIFEST,
+      files: new Map([["tn_TIT.tsv", TN_TSV]]),
+    })[0].cells
+
+    const read = readNoteReferenceMetadata(cells[0].metadata)
+    expect(read.quote).toBe("δοῦλος")
+    expect(read.quoteScript).toBe("grc")
+    expect(read.supportReference).toBe("rc://en/ta/man/figs-abstractnouns")
+    // The prose stays the cell's value — the quote is never folded into it.
+    expect(cells[0].value).toBe("Paul calls himself a servant here.")
   })
 })

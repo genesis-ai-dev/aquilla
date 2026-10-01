@@ -814,7 +814,10 @@ projects.patch(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
-// POST /api/v2/projects/:projectId/archive — owner-only
+// POST /api/v2/projects/:projectId/archive — maintainer+ (AQU-1070)
+//   Archiving is reversible (DELETE below restores) and is the billing lever
+//   partners use to drop a finished language out of their active-lane band, so
+//   it sits with the maintainers who run the portfolio rather than org owners.
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.post("/:projectId/archive", authMiddleware, async (c) => {
@@ -823,8 +826,8 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can archive a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json({ error: "maintainer+ required to archive a project" }, 403)
   }
 
   try {
@@ -859,7 +862,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
-// DELETE /api/v2/projects/:projectId/archive — restore (owner-only)
+// DELETE /api/v2/projects/:projectId/archive — restore (maintainer+, AQU-1070)
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.delete("/:projectId/archive", authMiddleware, async (c) => {
@@ -868,8 +871,8 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can restore a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json({ error: "maintainer+ required to restore a project" }, 403)
   }
 
   try {
@@ -1027,6 +1030,23 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
   if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+
+  // Names on this roster are the member list. An owner-only roster floor must
+  // hide them here too — the Team card is how a maintainer still "sees" the
+  // roster after the Members card has closed, under a badge that still reads
+  // "only maintainers & owners".
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (project?.org_id != null) {
+    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    if (!canViewRoster(role.level, rosterMinRole)) {
+      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+    }
+  }
+
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })
@@ -1233,11 +1253,15 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 
+  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+
   return c.json({
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
-      email: m.email,
+      // The `?minRole=` "view admins" bypass serves callers the org hid the
+      // roster from; they learn who the admins are, not how to email them.
+      ...(hideEmails ? {} : { email: m.email }),
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),

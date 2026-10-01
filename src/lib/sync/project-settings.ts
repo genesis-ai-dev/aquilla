@@ -497,6 +497,59 @@ export async function setProjectLaneArchived(
   return { kind: "ok" }
 }
 
+/** AQU-1464: the newest target edit in one lane, as the archive dialog shows it. */
+export interface LaneLastChange {
+  /** Epoch milliseconds of the edit. */
+  at: number
+  /** The editing member's username, or null when the row records no editor. */
+  by: string | null
+}
+
+/**
+ * `lastChange: null` means the lane has genuinely never been edited — the
+ * server answered. An `error` means the lookup FAILED and the answer is
+ * unknown; callers must say so rather than rendering "no changes yet", which
+ * would read as a safe-to-archive signal the server never gave.
+ */
+export type LaneLastChangeResult =
+  | { kind: "ok"; lastChange: LaneLastChange | null }
+  | { kind: "error"; message: string }
+
+/**
+ * GET /api/v2/projects/:id/lanes/:laneId/last-change. Language-edit floor —
+ * the same one that guards archiving, so a Contributor gets 403 → `error`.
+ */
+export async function fetchLaneLastChange(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LaneLastChangeResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/last-change`,
+      { method: "GET", headers: authHeaders(jwt) },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `last-change failed (${res.status})` }
+  let body: { lastChange?: { at?: unknown; by?: unknown } | null }
+  try {
+    body = (await res.json()) as typeof body
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  const raw = body.lastChange
+  if (!raw) return { kind: "ok", lastChange: null }
+  // Defend the formatter: a non-finite or non-positive stamp would render as an
+  // "Invalid date" or a 1970 date, which is worse than admitting we don't know.
+  const at = typeof raw.at === "number" ? raw.at : Number(raw.at)
+  if (!Number.isFinite(at) || at <= 0) return { kind: "ok", lastChange: null }
+  return { kind: "ok", lastChange: { at, by: typeof raw.by === "string" && raw.by ? raw.by : null } }
+}
+
 /**
  * Discriminated GET outcome so callers can tell "the server answered and
  * there are no settings for you" apart from "the request failed".

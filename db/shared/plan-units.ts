@@ -32,7 +32,7 @@ import type { AquillaDb, AquillaStatement } from "../shim/postgres"
  * legitimate unit — `kind` is not a usable discriminator here because it falls
  * back through `role` and then to 'codex'.
  */
-export const PLAN_UNIT_FILE_PREDICATE = `f.deleted_at IS NULL AND COALESCE(f.role, '') <> 'audio-cues'`
+export const PLAN_UNIT_FILE_PREDICATE = `f.deleted_at IS NULL AND COALESCE(f.role, '') NOT IN ('audio-cues', 'timeline-content')`
 
 /**
  * One row per planning unit, as a subquery.

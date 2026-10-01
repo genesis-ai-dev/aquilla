@@ -359,6 +359,16 @@ export async function handleAudioRequest(
                updated_at = now()`,
             // AQU-1240 slice 8: source-side media binding -> the source lane.
           ).bind(crypto.randomUUID(), projectId, artifactId, fileId, projectId),
+          // Imported media is also the original source. Reuse its R2 object
+          // rather than uploading another copy for Download original.
+          db.prepare(
+            `INSERT INTO file_source_blobs (
+               file_id, project_id, format, raw_source, r2_key, size_bytes, created_at
+             ) VALUES (?, ?, ?, NULL, ?, ?, (extract(epoch from now()) * 1000)::bigint)
+             ON CONFLICT (file_id) DO NOTHING`,
+          ).bind(fileId, projectId,
+            /\.([a-z0-9]+)$/i.exec(audioId)?.[1].toLowerCase() ?? "bin",
+            key, body.byteLength),
         ])
       } catch (error) {
         if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})

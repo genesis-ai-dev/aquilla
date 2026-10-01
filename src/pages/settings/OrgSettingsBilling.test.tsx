@@ -245,3 +245,51 @@ it('routes native paid billing to the workspace portal and preserves access on f
   expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
   expect(getBillingOffers).not.toHaveBeenCalled()
 })
+
+// AQU-1524: a settings card has no padding of its own — only its rows supply the
+// inset — so content dropped straight into one starts at the card border, left of
+// its own heading. This walks up from each piece of content and fails if the card
+// edge is reached before anything supplies the inset.
+function insetInsideCard(element: Element): boolean {
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    if (node.getAttribute('data-slot') === 'settings-card') return false
+    if (node.classList.contains('px-4')) return true
+  }
+  return false
+}
+
+describe('AQU-1524 billing card inset', () => {
+  it('insets Workspace billing, Compare new plans and AI usage content instead of leaving it on the card border', async () => {
+    mockGet.mockResolvedValue(unpaid)
+    renderBilling()
+    await screen.findByTestId('billing-plan')
+
+    // Workspace billing: the explanatory paragraphs, not just the name/type row.
+    const workspace = screen.getByTestId('billing-workspace')
+    expect(insetInsideCard(screen.getByText(/Confirm this workspace’s type with support/))).toBe(true)
+    expect(insetInsideCard(screen.getByText(/uses this workspace’s allowance/))).toBe(true)
+    expect(workspace.querySelector('[data-slot="settings-block"]')).not.toBeNull()
+
+    // Compare new plans: intro, tabs, billing-period select, status line, footer.
+    expect(insetInsideCard(screen.getByText(/Compare personal and shared team capacity/))).toBe(true)
+    expect(insetInsideCard(screen.getByRole('tab', { name: 'Team & Enterprise' }))).toBe(true)
+    expect(insetInsideCard(screen.getByRole('combobox', { name: 'Plan billing period' }))).toBe(true)
+    expect(insetInsideCard(await screen.findByText(/Plan prices are temporarily unavailable/))).toBe(true)
+    expect(insetInsideCard(screen.getByText(/New plans reset AI capacity every seven days/))).toBe(true)
+    // …and they share the plan rows' left edge.
+    expect(insetInsideCard(screen.getByText('Enterprise'))).toBe(true)
+
+    // AI usage: every paragraph and the capacity link.
+    expect(insetInsideCard(screen.getByTestId('billing-usage'))).toBe(true)
+    expect(insetInsideCard(screen.getByRole('link', { name: 'Discuss AI capacity' }))).toBe(true)
+  })
+
+  it('sizes Refresh billing to its label rather than stretching it across the column', async () => {
+    mockGet.mockResolvedValue(unpaid)
+    renderBilling()
+    const refresh = await screen.findByRole('button', { name: 'Refresh billing' })
+    // The surrounding column is `flex flex-col`, so a flex child stretches unless
+    // it opts out — the button must not span the full page column.
+    expect(refresh.className).toContain('self-start')
+  })
+})

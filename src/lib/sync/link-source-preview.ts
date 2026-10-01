@@ -33,6 +33,12 @@ export interface LinkSourcePreview {
    * upstream file with no source cells yet arrives. This is therefore the
    * upstream's whole file list, which is what makes the stated count equal the
    * number that actually turns up after confirming.
+   *
+   * AQU-1528 added the chain case (`consumes: 'target'`) to the same flow, and
+   * this count is right for it unchanged: `laneKindsFor('target')` is
+   * `LANE_KINDS_SOURCE` plus the target-commit/validate kinds, so the file set
+   * that mirrors is identical — the corpus choice decides what the mirrored
+   * cells say, not how many files arrive.
    */
   fileCount: number
   /**

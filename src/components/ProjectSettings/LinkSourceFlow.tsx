@@ -23,9 +23,25 @@
 // no way in and the workaround was to delete and rebuild it (hit on a Biblica
 // setup call, five projects deep).
 //
-// Linking posts mode='live' / consumes='source' — the same shape as Create New
-// Project → Linked target → "Its Source", which is the one outcome this flow
-// offers (a one-time clone is deliberately not on the menu here).
+// Linking posts mode='live' (a one-time clone is deliberately not on the menu
+// here) plus the corpus the user picks:
+//
+// AQU-1528: until this slice the flow hard-coded consumes='source' — Create New
+// Project → Linked target → "Its Source". That left the CHAIN case (this
+// project translates one of the upstream's translations, e.g. French → Chaluba)
+// reachable only while creating a project, so a team that wanted it on a
+// project they already had was back to deleting and rebuilding it — the exact
+// workaround AQU-1010 exists to remove. So the flow now asks the same question
+// the create modal asks, "Which corpus should become this project's source?",
+// and posts the answer.
+//
+// The wording is shared by reusing the create modal's own catalog keys
+// (`projectSettings.create.linkConsumes*`) rather than copying the sentences:
+// the acceptance criterion is that the two read identically, and a copy would
+// drift on the first edit to either. `gate` is left off the request on purpose
+// — the route defaults it to 'validated' (auth-worker routes/source-linking.ts),
+// which is both what creation sends and the "only validated upstream
+// translations flow through" behaviour the chain case is specified to have.
 //
 // Linking is ADDITIVE: the server seeds the upstream's source cells alongside
 // whatever this project already holds, so existing files, translations and
@@ -41,8 +57,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
@@ -54,6 +72,14 @@ import {
 } from "@/lib/sync/link-source-preview"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+
+/**
+ * Which corpus of the upstream becomes this project's source. `""` is "not
+ * answered yet" — never a default, because the two outcomes are different
+ * products and guessing one would silently build the wrong chain.
+ */
+type LinkConsumes = "" | "source" | "target"
 
 export interface LinkSourceFlowProps {
   projectId: string
@@ -79,6 +105,10 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
   const { projects, isLoading, error: projectsError } = useProjectsForNavigation(canLink)
 
   const [chosen, setChosen] = useState("")
+  // AQU-1528: deliberately unset until the user answers. Kept across a change
+  // of upstream (the question is about the corpus, not the project), and reset
+  // after a successful link so a re-link following a Detach asks again.
+  const [consumes, setConsumes] = useState<LinkConsumes>("")
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -143,20 +173,23 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
   async function handleLink() {
     // AQU-1526: the upstream under review, not the picker's value — what gets
     // linked is exactly what the preview above described.
-    if (!reviewing || !jwt || linking) return
+    // `consumes` cannot be empty here — the review button is gated on it — but
+    // the guard keeps the request from ever defaulting the corpus silently.
+    if (!reviewing || !consumes || !jwt || linking) return
     setLinking(true)
     setError(null)
     try {
       const result = await linkProjectSource(jwt, projectId, {
         sourceProjectId: reviewing,
         mode: "live",
-        consumes: "source",
+        consumes,
       })
       // AQU-476/QA-BUG-1: the server seeds inside the same call; `false` means
       // that trigger did not run, so self-heal before the user sees an empty
       // file list. Same fallback ProjectCreateDialog does.
       if (result.seeded === false) await triggerLinkSync(jwt, projectId)
       setChosen("")
+      setConsumes("")
       setReviewing(null)
       setPreview(null)
       onLinked()
@@ -251,6 +284,24 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
             )}
           </>
         )}
+        {/* AQU-1528: the confirm step has to say WHICH corpus is about to
+            become this project's source — the file count alone reads the same
+            for either answer. These are the badge strings SourceLinkSection
+            shows once the link exists, so the before and after match. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="outline">
+            {consumes === "target"
+              ? t("projectSettings.sourceLink.consumesTranslations")
+              : t("projectSettings.sourceLink.consumesSource")}
+          </Badge>
+          {consumes === "target" && (
+            <Badge variant="outline">
+              {t("projectSettings.sourceLink.gateLabel", {
+                value: t("projectSettings.sourceLink.gateValidatedOnly"),
+              })}
+            </Badge>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground">
           {t("projectSettings.linkSource.additiveNote")}
         </p>
@@ -293,6 +344,51 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
           emptyText={t("projectSettings.linkSource.pickerNoMatches")}
         />
       </Field>
+      {/* Only once an upstream is on the table — the question is about THAT
+          project's corpora, and the create modal gates it the same way. */}
+      {chosen && (
+        <Field>
+          <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
+          <RadioGroup
+            // null = nothing selected (never prefill).
+            value={consumes || null}
+            onValueChange={(value) => {
+              setConsumes((value ?? "") as LinkConsumes)
+              setError(null)
+            }}
+            className="gap-2"
+          >
+            <label className="flex items-start gap-2.5 text-sm">
+              <RadioGroupItem value="source" className="mt-0.5" />
+              <span>
+                <RichMessage
+                  k="projectSettings.create.linkConsumesSource"
+                  // The lane-count plural of this sentence governs a
+                  // same-org recommendation ("a target lane … is" vs
+                  // "target lanes … are"). An established project being
+                  // linked has its lanes already and this flow never reads
+                  // them, so it takes the singular form.
+                  count={1}
+                  values={{
+                    name: <strong>{t("projectSettings.create.linkConsumesSourceName")}</strong>,
+                  }}
+                />
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5 text-sm">
+              <RadioGroupItem value="target" className="mt-0.5" />
+              <span>
+                <RichMessage
+                  k="projectSettings.create.linkConsumesTarget"
+                  values={{
+                    name: <strong>{t("projectSettings.create.linkConsumesTargetName")}</strong>,
+                  }}
+                />
+              </span>
+            </label>
+          </RadioGroup>
+        </Field>
+      )}
       {projectsError ? (
         <p className="text-sm text-destructive">{projectsError}</p>
       ) : (
@@ -310,7 +406,10 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
       <div className="flex justify-end">
         <Button
           size="sm"
-          disabled={!chosen || linking || !session}
+          // AQU-1528: no corpus answer, no way forward — and since the
+          // confirm step is only reachable through here, the link action is
+          // unavailable until one is chosen too.
+          disabled={!chosen || !consumes || linking || !session}
           onClick={() => setReviewing(chosen)}
         >
           {t("projectSettings.linkSource.reviewButton")}

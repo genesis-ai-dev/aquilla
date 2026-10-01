@@ -3186,7 +3186,6 @@ export const fr: Catalog = {
   "onboarding.checklist.aiProvider.customDescription": "Auto-hébergé, local, ou tout serveur compatible OpenAI.",
   "onboarding.checklist.aiProvider.saveButton": "Enregistrer le fournisseur",
   "onboarding.checklist.aiModels.whisper.label": "Transcription Whisper",
-  "onboarding.checklist.aiModels.whisper.blurb": "Chronométrage au niveau du mot pour l'audio enregistré. S'exécute localement ; aucun réseau après le téléchargement.",
   "onboarding.checklist.aiModels.mms.label": "Voix multilingues MMS",
   "onboarding.checklist.aiModels.mms.blurb": "Voix locales pour de nombreuses langues — un modèle de langue par téléchargement.",
   "onboarding.checklist.aiModels.title": "Configurer la voix et la transcription",

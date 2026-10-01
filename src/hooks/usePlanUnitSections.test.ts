@@ -1,6 +1,6 @@
 // AQU-1098: which sections belong to which planning unit.
 import { describe, it, expect } from "vitest"
-import { sectionBelongsToUnit, unplacedLines } from "./usePlanUnitSections"
+import { sectionBelongsToUnit } from "./usePlanUnitSections"
 
 describe("sectionBelongsToUnit", () => {
   it("takes the chapters of the book it was asked for", () => {
@@ -30,28 +30,5 @@ describe("sectionBelongsToUnit", () => {
     // column of them reads as meaningless numbers.
     expect(sectionBelongsToUnit("t:3", "")).toBe(false)
     expect(sectionBelongsToUnit("t:3", "GEN")).toBe(false)
-  })
-})
-
-describe("unplacedLines (AQU-1493)", () => {
-  const s = (key: string, totalCount: number) => ({ key, totalCount })
-
-  it("counts the lines no chapter holds, and says a one-book file's book holds them", () => {
-    // Genesis: 40 + 38 verses in chapters, three lines added in the editor.
-    expect(unplacedLines(81, [s("GEN 1", 40), s("GEN 2", 38)])).toEqual({ count: 3, inUnit: true })
-    // Front matter keys by its bare book code; it is in the book, not unplaced.
-    expect(unplacedLines(81, [s("GEN", 3), s("GEN 1", 40), s("GEN 2", 38)])).toEqual({ count: 0, inUnit: true })
-  })
-
-  it("says no book holds them in a file of several books", () => {
-    expect(unplacedLines(12, [s("GEN 1", 5), s("EXO 1", 5)])).toEqual({ count: 2, inUnit: false })
-  })
-
-  it("counts a timed line with no reference as having no verse either", () => {
-    expect(unplacedLines(12, [s("GEN 1", 10), s("t:000000000000", 2)])).toEqual({ count: 2, inUnit: true })
-  })
-
-  it("never goes negative on a response whose rows disagree", () => {
-    expect(unplacedLines(5, [s("GEN 1", 10)]).count).toBe(0)
   })
 })

@@ -144,7 +144,7 @@ export function PlanInspector({
   // and let it through without a word. An empty unit still pauses, as it did.
   const validatedShort = unit.totalCount === 0 || unit.validatedCount < unit.totalCount
   const readoutTips = usePlanReadoutTips()
-  const { sections, unplaced } = usePlanUnitSections({ projectId, unit, getToken, lane })
+  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
   // AQU-1278. `audioFiles` comes from the board, which computes it over every
   // unit: whether audio is EXPECTED is a fact about the FILE, not about this
@@ -524,21 +524,6 @@ export function PlanInspector({
               )}
             </div>
 
-            {/* AQU-1493: lines no chapter holds — added in the editor, with no
-                verse reference. On a one-book file they are in this book's
-                bars and its "N cells to translate", so every chapter can read
-                complete while the book is short; on a file of several books
-                no book counts them at all. Either way the grid alone cannot
-                say so, and "Nothing left" beside six blank lines is how this
-                was found (ETEN, 2026-09-29). */}
-            {unplaced && unplaced.count > 0 && (
-              <p className="text-[11.5px] text-muted-foreground" data-testid="plan-unplaced-lines">
-                {t(unplaced.inUnit
-                  ? "org.projectOverview.plan.unplacedInBook"
-                  : "org.projectOverview.plan.unplacedInFile", { count: unplaced.count })}
-              </p>
-            )}
-
             {/* One chapter, opened from the grid: the same nested bars the unit
                 itself draws, so the part is measured exactly like the whole. */}
             {openSection && (
@@ -752,6 +737,7 @@ function PlanChapterCard({
     : []
   const fade = useScrollFade(rowRef, short.length)
   const firstCellId = verses?.status === "ready" ? verses.verses[0]?.cellId ?? null : null
+  const unnumbered = verses?.status === "ready" ? verses.verses.filter((v) => v.unnumbered).length : 0
 
   return (
     <div
@@ -839,13 +825,26 @@ function PlanChapterCard({
               data-testid={`plan-verse-chip-${v.cellId}`}
               // Text in the STATUS azure: `text-primary` is the pale accent
               // tuned for button fills, and on a chip this small it washed out.
-              className={`h-6 w-[46px] shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${PLAN_TONE.nearly_complete.text}`}
+              // AQU-1493: a line with no reference has no number to print, so
+              // its chip says what it is in words and grows to fit them.
+              className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
               onClick={() => onOpenCell?.(v.cellId)}
             >
-              {verseChipLabel(v.ref, section.key)}
+              {v.unnumbered
+                ? t("org.projectOverview.plan.unnumberedLine")
+                : verseChipLabel(v.ref, section.key)}
             </button>
           ))}
         </div>
+      )}
+      {/* AQU-1493: only on the chapter that holds them (Sam, 2026-10-01). A
+          line added with no verse reference counts with the chapter of the
+          line above it; this says so here, where the number it changes is,
+          and nowhere else. */}
+      {unnumbered > 0 && (
+        <p className="text-[11px] text-muted-foreground" data-testid="plan-chapter-unnumbered">
+          {t("org.projectOverview.plan.unnumberedInChapter", { count: unnumbered })}
+        </p>
       )}
     </div>
   )

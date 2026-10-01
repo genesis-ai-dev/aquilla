@@ -63,6 +63,12 @@ export interface SectionProgressDetailResponse {
      */
     recorded?: boolean
     audioValidated?: boolean
+    /**
+     * AQU-1493: a line with no verse reference of its own (`ref` is ''),
+     * listed in the chapter it is counted with — the chapter of the line above
+     * it. Absent on every numbered verse, and from a worker before `s5`.
+     */
+    unnumbered?: boolean
   }>
 }
 

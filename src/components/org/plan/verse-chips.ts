@@ -34,6 +34,12 @@ export interface ShortVerse {
    */
   recorded?: boolean
   audioValidated?: boolean
+  /**
+   * AQU-1493: a line with no verse reference, counted with this chapter
+   * because the line above it is here. Its `ref` is '' and its chip says so in
+   * words — see `org.projectOverview.plan.unnumberedLine`.
+   */
+  unnumbered?: boolean
 }
 
 /**

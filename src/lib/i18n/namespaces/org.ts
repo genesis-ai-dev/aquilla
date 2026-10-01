@@ -1478,13 +1478,10 @@ export const org = defineNamespace({
     // question the grid poses at a glance — how much of this is left — for a
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
-    "org.projectOverview.plan.unplacedInBook": plural({
-      one: "{count} line has no verse reference, so no chapter shows it. It still counts toward this book.",
-      other: "{count} lines have no verse reference, so no chapter shows them. They still count toward this book.",
-    }),
-    "org.projectOverview.plan.unplacedInFile": plural({
-      one: "{count} line in this file has no verse reference, so no book counts it.",
-      other: "{count} lines in this file have no verse reference, so no book counts them.",
+    "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
+    "org.projectOverview.plan.unnumberedInChapter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
     }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
@@ -3248,15 +3245,15 @@ export const org = defineNamespace({
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
       },
-      "org.projectOverview.plan.unplacedInBook": {
+      "org.projectOverview.plan.unnumberedLine": {
         description:
-          "Note under the inspector's chapter grid, in a file that holds one book. Lines added by hand have no verse reference, so no chapter tile includes them, yet the book's own bars and its 'cells to translate' count do. This says why the two disagree.",
-        placeholders: { count: "Lines with no verse reference — a number; it also selects the plural form." },
+          "Chip in the plan inspector's chapter card for a line that has no verse reference — usually one added by hand in the editor — where a numbered verse's chip would print '12:4'. The line counts with the chapter of the line above it. It may already hold text, so do not call it empty.",
+        maxLength: 20,
       },
-      "org.projectOverview.plan.unplacedInFile": {
+      "org.projectOverview.plan.unnumberedInChapter": {
         description:
-          "Note under the inspector's chapter grid, in a file that holds several books. Lines with no verse reference cannot be assigned to any of them, so no book on the board counts them; the file's own totals still do.",
-        placeholders: { count: "Lines with no verse reference — a number; it also selects the plural form." },
+          "Note in the plan inspector's chapter card, shown only when the selected chapter holds lines with no verse reference. Explains that they count toward this chapter's progress because the line above them is in it.",
+        placeholders: { count: "Lines with no verse reference in this chapter — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chaptersShort": {
         description:

@@ -292,42 +292,6 @@ describe("progress and navigation", () => {
   })
 })
 
-describe("lines with no verse reference (AQU-1493)", () => {
-  /** A file whose own total exceeds its chapters' by `extra` lines. */
-  const withExtraLines = (sections: ReturnType<typeof section>[], extra: number) => {
-    const placed = sections.reduce((n, x) => n + x.totalCount, 0)
-    vi.mocked(getFileProgress).mockResolvedValue({
-      fileId: "f1", revision: 1, validationCount: 1,
-      file: section("", { totalCount: placed + extra }), sections,
-    } as never)
-    return async () => "tok"
-  }
-
-  it("says a one-book file's added lines count toward the book but sit in no chapter", async () => {
-    // Every chapter reads complete; the book is still three lines short.
-    const getToken = withExtraLines([doneSection("GEN 1"), doneSection("GEN 2")], 3)
-    renderInspector(unit({ sectionKey: "GEN", fileName: "Genesis" }), true, false, getToken)
-    expect(await screen.findByTestId("plan-unplaced-lines")).toHaveTextContent(
-      "3 lines have no verse reference, so no chapter shows them. They still count toward this book.",
-    )
-  })
-
-  it("says no book counts them in a file of several books", async () => {
-    const getToken = withExtraLines([section("GEN 1"), section("EXO 1")], 1)
-    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
-    expect(await screen.findByTestId("plan-unplaced-lines")).toHaveTextContent(
-      "1 line in this file has no verse reference, so no book counts it.",
-    )
-  })
-
-  it("says nothing when every line has a chapter", async () => {
-    const getToken = withExtraLines([section("GEN 1"), section("GEN 2")], 0)
-    renderInspector(unit({ sectionKey: "GEN", fileName: "Genesis" }), true, false, getToken)
-    await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
-    expect(screen.queryByTestId("plan-unplaced-lines")).toBeNull()
-  })
-})
-
 describe("the chapter grid (AQU-1278)", () => {
   it("places every tile at its own chapter number and leaves the gap empty", async () => {
     // THE WHOLE POINT OF THE GRID'S PARSER. A section row exists only where
@@ -640,7 +604,9 @@ describe("the chapter card", () => {
   const verse = (
     cellId: string,
     ref: string,
-    over: Partial<{ filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean }> = {},
+    over: Partial<{
+      filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean; unnumbered: boolean
+    }> = {},
   ) => ({ cellId, ref, filled: true, validated: true, ...over })
 
   const openChapter = async (
@@ -714,6 +680,50 @@ describe("the chapter card", () => {
 
     fireEvent.click(screen.getByTestId("plan-verse-chip-c4"))
     expect(onOpenCell).toHaveBeenCalledWith("c4")
+  })
+
+  it("lists a line with no verse reference where it sits, as an unnumbered line (AQU-1493)", async () => {
+    // A line added by hand below 12:4 counts with chapter 12; the worker lists
+    // it right after 12:4. It has no number for its chip to print.
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 21, filledCount: 20, validatedCount: 18 })],
+      [
+        verse("c4", "GEN 12:4", { validated: false }),
+        verse("x1", "", { filled: false, validated: false, unnumbered: true }),
+        verse("c5", "GEN 12:5", { filled: false, validated: false }),
+      ],
+      { onOpenCell },
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Unnumbered line", "12:5"])
+    fireEvent.click(screen.getByTestId("plan-verse-chip-x1"))
+    expect(onOpenCell).toHaveBeenCalledWith("x1")
+  })
+
+  it("says so on the chapter that holds such lines, and only there (AQU-1493)", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 21, filledCount: 21, validatedCount: 18 })],
+      [verse("c4", "GEN 12:4"), verse("x1", "", { unnumbered: true })],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
+    )
+    // Inside the selected chapter's card — not under the grid, where it used
+    // to sit whether or not anyone had asked.
+    expect(screen.getByTestId("plan-chapter-detail")).toContainElement(screen.getByTestId("plan-chapter-unnumbered"))
+    expect(screen.getAllByTestId("plan-chapter-unnumbered")).toHaveLength(1)
+  })
+
+  it("says nothing about unnumbered lines on a chapter without them", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [verse("c4", "GEN 12:4", { validated: false })],
+    )
+    expect(screen.queryByTestId("plan-chapter-unnumbered")).toBeNull()
   })
 
   it("opens the chapter's FIRST cell from its title, short or not", async () => {

@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest"
 
-import { LANGUAGES, filterLanguages, isSettledLanguage, type LanguageEntry } from "./catalog"
+import {
+  LANGUAGES,
+  LANGUAGE_SUGGESTION_LIMIT,
+  filterLanguages,
+  isSettledLanguage,
+  type LanguageEntry,
+} from "./catalog"
 import {
   loadFullLanguageCatalog,
   parseIso639_3Table,
@@ -138,5 +144,90 @@ describe("the table stays out of the initial bundle", () => {
     expect(source).toContain('import("./iso-639-3-table")')
     expect(source).not.toMatch(/^\s*import\b[^\n]*iso-639-3-table/m)
     expect(source).not.toMatch(/^\s*export\b[^\n]*from[^\n]*iso-639-3-table/m)
+  })
+})
+
+/**
+ * AQU-1457 — with ~7,900 entries in reach, "does it match" is no longer the
+ * question; "is the language I meant near the top" is. These cases are the
+ * ticket's acceptance criteria.
+ */
+describe("ranking across the long tail", () => {
+  it("puts a word-start match above a mid-word one (the `arrernte` case)", () => {
+    const results = names("arrernte")
+    // SIL spells the other one "Western Arrarnta", which does not contain the
+    // query at all — so Arrernte proper is the whole of the word-start tier.
+    expect(results[0]).toBe("Eastern Arrernte")
+    expect(names("arrarnta")).toContain("Western Arrarnta")
+  })
+
+  it("ranks the plain language above its historic stages and creoles", () => {
+    const results = names("english")
+    expect(results[0]).toBe("English")
+    for (const later of [
+      "Old English (ca. 450-1100)",
+      "Middle English (1100-1500)",
+      "Jamaican Creole English",
+    ]) {
+      expect(results).toContain(later)
+      expect(results.indexOf(later)).toBeGreaterThan(0)
+    }
+  })
+
+  it("leads with the macrolanguage and its standard form (the `malay` case)", () => {
+    const results = names("malay")
+    expect(results[0]).toBe("Malay (macrolanguage)")
+    expect(results.slice(0, 3)).toContain("Standard Malay")
+    // The regression this guards: "Standard Malay" is a longer name than most
+    // of the regional varieties, so length alone buried it below them.
+    expect(results.indexOf("Standard Malay")).toBeLessThan(
+      results.indexOf("Pattani Malay"),
+    )
+  })
+
+  it("keeps the same rule for other macrolanguages", () => {
+    expect(names("arabic")[0]).toBe("Arabic")
+    expect(names("arabic").indexOf("Standard Arabic")).toBeLessThan(
+      names("arabic").indexOf("Algerian Arabic"),
+    )
+  })
+
+  it("still lets an exact code win outright", () => {
+    expect(names("eng")[0]).toBe("English")
+    expect(names("fr")[0]).toBe("French")
+    expect(names("msa")[0]).toBe("Malay (macrolanguage)")
+    expect(names("zsm")[0]).toBe("Standard Malay")
+  })
+
+  it("prefers the shorter name within a tier", () => {
+    const results = names("fulfulde")
+    expect(results.indexOf("Maasina Fulfulde")).toBeLessThan(
+      results.indexOf("Western Niger Fulfulde"),
+    )
+  })
+
+  it("folds diacritics in the catalog's own names", () => {
+    // SIL publishes English reference names, so "espanol" matches nothing;
+    // folding is what that criterion is really about, and these entries carry
+    // the diacritics that exercise it.
+    expect(names("aasax")).toContain("Aasáx")
+    expect(names("kalamse")).toContain("Kalamsé")
+    expect(names("espanol")).toEqual(names("español"))
+  })
+
+  it("brings the intended language inside the rendered cap", () => {
+    // The pre-AQU-1457 ranking could push it past the 50-row cap.
+    for (const [query, name] of [
+      ["arrernte", "Eastern Arrernte"],
+      ["malay", "Standard Malay"],
+      ["fulfulde", "Adamawa Fulfulde"],
+    ] as const) {
+      expect(names(query, { limit: LANGUAGE_SUGGESTION_LIMIT })).toContain(name)
+    }
+  })
+
+  it("still suggests nothing for a freeform register label", () => {
+    expect(filterLanguages("Grade 7 English", { catalog })).toEqual([])
+    expect(filterLanguages("Grade 7 English", { catalog })).toHaveLength(0)
   })
 })

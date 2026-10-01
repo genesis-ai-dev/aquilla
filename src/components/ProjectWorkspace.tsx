@@ -144,6 +144,7 @@ import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
+import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
@@ -768,6 +769,18 @@ export function ProjectWorkspace() {
     )
     return pending.length > 0 ? [...base, ...pending] : base
   }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
+
+  // AQU-1393: the Examples panel names where each match came from. Resolved
+  // here because the file inventory lives at this level and the editor table
+  // never receives it — the row only needs the answer for one fileId. An
+  // imported TMX is flagged as a translation memory rather than as one of the
+  // project's own files: a translator reading a 95% match needs to know whether
+  // the pair is their team's work or a memory someone shipped them.
+  const exampleOriginFor = useCallback((fileId: string): ExampleOrigin | undefined => {
+    const file = projectFiles.find((f) => f.id === fileId)
+    if (!file) return undefined
+    return { fileName: file.name, isTranslationMemory: file.type === "tmx" }
+  }, [projectFiles])
 
   // AQU-744: current visible file ids, readable from the long-lived WS
   // message handler without re-subscribing on every inventory change. A
@@ -11412,10 +11425,15 @@ export function ProjectWorkspace() {
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
+  //
+  // AQU-1497: returns whether the commit path validated the edit itself. The
+  // Target pane needs that to know the file's repeated segments are owed this
+  // text, and pays the debt once the translator leaves the cell (AQU-1484's
+  // settled-edit rule) — see `settleOwedRepetitions` in AgentContextPane.
   const handleAgentTargetCommit = useCallback(async (
     cellId: string,
     snapshot: { value: string; valueHtml: string },
-  ) => {
+  ): Promise<{ autoValidated: boolean }> => {
     if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       throw new Error("Your project role cannot edit translations.")
@@ -11453,6 +11471,7 @@ export function ProjectWorkspace() {
     }
 
     rememberPendingTargetCommit(cell.id, eventId, parentId)
+    let autoValidated = false
     if (shouldAutoValidateHumanEdit({
       value: snapshot.value,
       canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
@@ -11468,11 +11487,14 @@ export function ProjectWorkspace() {
           author: currentUsername,
           targetLang: activeLane,
         })
+        // Only a validation that actually landed owes the repetitions anything.
+        autoValidated = true
       } catch (error) {
         console.warn("[agent-target-auto-validate] emit failed:", error)
       }
     }
     await handleCellCommitted(cell.id, eventId, parentId)
+    return { autoValidated }
   }, [
     activeLane,
     applyOptimisticTargetEditWithCapture,
@@ -12740,6 +12762,7 @@ export function ProjectWorkspace() {
               validationRequirement: readValidationCount(project),
               canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
               onValidationChange: handleAgentValidationChange,
+              onCellValidated: handleCellValidated,
               cellLockHolders,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
@@ -13218,6 +13241,7 @@ export function ProjectWorkspace() {
             }
             isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
+            exampleOriginFor={exampleOriginFor}
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}

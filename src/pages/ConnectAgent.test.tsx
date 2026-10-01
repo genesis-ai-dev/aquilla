@@ -90,6 +90,18 @@ describe("agent consent", () => {
     fireEvent.click(authorize)
     await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", { user_code: "ABCD-EFGH", approve: true, mode: "ask", org_id: "1", code_confirmed: true }))
   })
+  it("defaults org scope to the only eligible org", async () => {
+    api.mockResolvedValue({ ...request, requestedProjectId: null })
+    const authorize = await review()
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("radio", { name: /whole organization/i }))
+    // "Guest org" is below the floor, so "Come and See" is the only choice.
+    expect(screen.getByRole("combobox", { name: "Organization" })).toHaveTextContent("Come and See")
+    expect(authorize).toBeEnabled()
+    api.mockResolvedValueOnce({ status: "approved" })
+    fireEvent.click(authorize)
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", expect.objectContaining({ org_id: "1" })))
+  })
   it("drops a selection that switching to act mode makes ineligible", async () => {
     // A contributor-level project is fine for ask and not for act; the button
     // must go back to disabled rather than submit a scope the server refuses.

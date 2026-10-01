@@ -37,6 +37,7 @@ import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
+import { stripInternalIds } from "./internal-id-names"
 import {
   characterFileKey,
   characterIdentity,
@@ -187,7 +188,16 @@ export function trackFolderNames(tracks: readonly { id: string; name: string }[]
   for (const track of tracks) {
     // No `|| "track"` fallback: `characterKey` already ends in `|| "unnamed"`,
     // so this cannot be empty and that arm was never reachable.
-    const base = characterFileKey(track.name)
+    //
+    // AQU-1461: an id is stripped out of the name FIRST. A track always derives a
+    // kind label ("Target audio", "Audio") when it has no override, so the id
+    // here comes from a stored rename, and a folder called
+    // `a89dec11-d60e-48c1-…/` tells whoever opens the zip nothing about which
+    // lane its takes are on. `characterFileKey` lands an all-id name on
+    // `NO_CHARACTER`, which is a character's word rather than a track's, so the
+    // readable part is taken first and only an empty result falls through.
+    const readable = stripInternalIds(track.name)
+    const base = readable.trim() ? characterFileKey(readable) : "track"
     let name = base
     let n = 2
     while (used.has(name.toLowerCase())) {
@@ -207,7 +217,10 @@ export function perLineFileName(
   ext: string,
   opts: { fileBase?: string; langCode: string },
 ): string {
-  const stem = opts.fileBase ? `${characterKey(opts.fileBase)}_` : ""
+  // AQU-1461: same guard as the character export — the stem is the file's
+  // display name, and an id in it rides into every entry of the zip.
+  const fileStem = opts.fileBase ? stripInternalIds(opts.fileBase) : ""
+  const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
   const line = String(clip.lineNumber).padStart(4, "0")
   return `${stem}${opts.langCode}_L${line}_${characterFileKey(clip.character)}.${ext}`
 }

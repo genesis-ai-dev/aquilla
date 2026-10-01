@@ -73,9 +73,11 @@ function ConnectAgentContent() {
   useEffect(() => {
     if (orgId && !orgOptions.some(o => String(o.id) === orgId)) setOrgId("")
   }, [orgId, orgOptions])
+  // With exactly one eligible org there is nothing to choose: default to it.
+  const effectiveOrgId = orgId || (orgOptions.length === 1 ? String(orgOptions[0].id) : "")
   const scopeChosen = scopeKind === "project"
     ? projectOptions.some(p => p.id === projectId)
-    : orgOptions.some(o => String(o.id) === orgId)
+    : orgOptions.some(o => String(o.id) === effectiveOrgId)
   async function review() {
     if (!jwt || inFlight.current) return
     inFlight.current = true; setBusy(true); setError(false)
@@ -96,7 +98,7 @@ function ConnectAgentContent() {
       await connectionRequest(jwt, "decision", { user_code: code.toUpperCase().trim(), approve,
         ...(approve ? {
           mode,
-          ...(scopeKind === "project" ? { project_id: projectId } : { org_id: orgId }),
+          ...(scopeKind === "project" ? { project_id: projectId } : { org_id: effectiveOrgId }),
           code_confirmed: confirmed,
         } : {}) })
       setResult(approve ? "approved" : "denied")
@@ -191,9 +193,9 @@ function ConnectAgentContent() {
                 ) : (
                   <Field>
                     <FieldLabel>{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
-                    <Select value={orgId} onValueChange={v => setOrgId(v ?? "")} disabled={busy}>
+                    <Select value={effectiveOrgId} onValueChange={v => setOrgId(v ?? "")} disabled={busy}>
                       <SelectTrigger aria-label={t("onboarding.apiTokens.orgLabel")}>
-                        <SelectValue placeholder={t("onboarding.connect.chooseOrg")}>{orgOptions.find(o => String(o.id) === orgId)?.name}</SelectValue>
+                        <SelectValue placeholder={t("onboarding.connect.chooseOrg")}>{orgOptions.find(o => String(o.id) === effectiveOrgId)?.name}</SelectValue>
                       </SelectTrigger>
                       <SelectContent><SelectGroup>{orgOptions.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })}</SelectItem>)}</SelectGroup></SelectContent>
                     </Select>

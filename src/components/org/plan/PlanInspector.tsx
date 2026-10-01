@@ -139,6 +139,10 @@ export function PlanInspector({
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
   const noteKind = planUnitNote(unit, now, audioFiles, textFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
+  // AQU-1493: whether Mark done should pause to say the unit is short, judged
+  // on the COUNTS. A rounded percentage once read 100 on a book six cells short
+  // and let it through without a word. An empty unit still pauses, as it did.
+  const validatedShort = unit.totalCount === 0 || unit.validatedCount < unit.totalCount
   const readoutTips = usePlanReadoutTips()
   const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
@@ -652,7 +656,7 @@ export function PlanInspector({
                 <div className="flex items-center gap-2">
                   <AppTooltip content={t("org.projectOverview.plan.markDoneTooltip")}>
                     <Button size="sm" disabled={busy} data-testid="plan-mark-done"
-                      onClick={() => (validatedPct < 100 ? setConfirmingDone(true) : markDone())}>
+                      onClick={() => (validatedShort ? setConfirmingDone(true) : markDone())}>
                       {t("org.projectOverview.plan.markDone")}
                     </Button>
                   </AppTooltip>

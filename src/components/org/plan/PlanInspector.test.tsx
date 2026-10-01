@@ -152,6 +152,14 @@ describe("marking done", () => {
     )
   })
 
+  it("pauses on a big book a few cells short, where rounding once read 100%", () => {
+    // AQU-1493: 1,194 of 1,200 validated rounded to 100 and skipped the nudge.
+    const { onPatch } = renderInspector(unit({ totalCount: 1200, filledCount: 1200, validatedCount: 1194 }))
+    fireEvent.click(screen.getByTestId("plan-mark-done"))
+    expect(screen.getByTestId("plan-done-nudge")).toHaveTextContent("99%")
+    expect(onPatch).not.toHaveBeenCalled()
+  })
+
   it("marks a fully validated unit done without a detour", async () => {
     const { onPatch } = renderInspector(unit({ validatedCount: 100 }))
     fireEvent.click(screen.getByTestId("plan-mark-done"))

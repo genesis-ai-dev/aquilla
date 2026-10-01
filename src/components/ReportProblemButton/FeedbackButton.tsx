@@ -41,10 +41,13 @@ export function FeedbackButton({ compact = false, className }: FeedbackButtonPro
           size={compact ? "icon-sm" : "sm"}
           aria-label={compact ? tooltip : undefined}
           onClick={() => setOpen(true)}
-          className={cn("shrink-0", className)}
+          className={cn("min-w-0 max-w-full shrink-0", className)}
         >
           <MessageSquarePlus />
-          {!compact && label}
+          {/* AQU-1523: the button sits on its own sidebar row now, so a long
+              translation of the label must ellipsize inside the rail rather
+              than spill past its 224px width (the base button is nowrap). */}
+          {!compact && <span className="truncate">{label}</span>}
         </Button>
       </AppTooltip>
       <ReportProblemDialog open={open} onOpenChange={setOpen} />

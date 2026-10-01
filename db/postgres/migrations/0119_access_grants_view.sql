@@ -1,4 +1,4 @@
--- 0117_access_grants_view.sql — AQU-1352 P1 (spec §3, §5).
+-- 0119_access_grants_view.sql — AQU-1352 P1 (spec §3, §5).
 --
 -- One read shape for every project/org grant. Behavior-preserving: no table
 -- changes, no caller switched yet. db/shared/access-grants.ts reads this view

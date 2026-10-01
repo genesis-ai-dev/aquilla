@@ -10,12 +10,13 @@
 - [OPEN] P3 lane permissions — Luke, AQU-1389, PRs #805/#831/#853
 - [OPEN] P5 drop mirrored tables; access_grants view → table cutover
 - [OPEN] D5 role rename (Manager/Translator) — Ryder decision
-- [OPEN] Prod: apply migrations 0117–0119 — Ryder
+- [OPEN] Prod: apply migrations 0119–0121 — Ryder
 ## Quality
 - [DONE 9442a27ee bec081c5e 03303d5c1] (fr-3..5) team-only PATCH peer demotion; org-access 404/403 enumeration; OrgAccessPage stale data on org switch. Fixer dispatched
 - [OPEN] Shadow mode doubles role-lookup queries in dev/local (acceptable for a time-boxed shadow period)
-- [OPEN] Preview stacks share dev Hyperdrive without the neon:status gate: apply 0117-0119 to dev Neon before preview QA, or team routes 500 on missing group_members.role_level
+- [OPEN] Preview stacks share dev Hyperdrive without the neon:status gate: apply 0119-0121 to dev Neon before preview QA, or team routes 500 on missing group_members.role_level
 - [DONE] Renumbered 0130-0132 → 0117-0119 after merging dev (which reached 0116)
+- [DONE] Renumbered 0117-0119 → 0119-0121 after merging dev again on 2026-10-01 (dev landed 0117_cells_lane_last_edit; open PR #479 holds 0118)
 - [OPEN] People & access: viewer below roster floor sees org name in tree[0] but hidden org crumb in people[].grants (safe, inconsistent)
 - [DONE d3c9e1960] (atk-3) Inspector chain labels team-scope grants as direct with empty path — access-payload.ts — fixer dispatched
 - [DONE d3c9e1960] (atk-4) People & access leaks team names below roster floor — org-access.ts — fixer dispatched
@@ -24,4 +25,4 @@
 ## [DONE]
 - [DONE cd4a6a02a] People & access tree listed a creator twice per project (live probe)
 - [DONE 9a857dead] create-targets labelled a shared legacy org Personal (live probe)
-- [NOTE] Local shared dev DB aquilla_dev predates dev's cells.lane_id NOT NULL; dev-stack reconcile fails there (unrelated to this branch). Probe ran on a throwaway DB. Migrations 0117-0119 were applied by hand to aquilla_dev (additive).
+- [NOTE] Local shared dev DB aquilla_dev predates dev's cells.lane_id NOT NULL; dev-stack reconcile fails there (unrelated to this branch). Probe ran on a throwaway DB. Migrations 0117-0119 (now 0119-0121) were applied by hand to aquilla_dev (additive).

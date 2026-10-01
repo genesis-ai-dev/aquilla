@@ -147,7 +147,7 @@ type SharedRole = { level: number; source: string }
 /**
  * Run `legacy` and/or the view resolver per `mode`. Shared with auth-worker's
  * resolveProjectRole so both layers apply the same flag semantics.
- *   - A throwing view query (e.g. migration 0117 not applied) degrades to the
+ *   - A throwing view query (e.g. migration 0119 not applied) degrades to the
  *     legacy answer, so an un-migrated env behaves exactly as today.
  *   - Legacy errors (auth-worker's AQU-996 RoleLookupError) propagate untouched.
  */

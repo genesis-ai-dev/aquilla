@@ -5,7 +5,7 @@
  * Why these cases matter:
  *   - shadow must never change an answer, only report drift, or turning it on
  *     in dev would itself be a behavior change;
- *   - an env where migration 0117 has not applied (no access_grants view) must
+ *   - an env where migration 0119 has not applied (no access_grants view) must
  *     keep answering exactly as today in every mode, or deploying the code
  *     before the migration would lock people out.
  */
@@ -116,7 +116,7 @@ describe("AQU-1352 shadow mode", () => {
   })
 })
 
-describe("AQU-1352 missing access_grants view (migration 0117 not applied)", () => {
+describe("AQU-1352 missing access_grants view (migration 0119 not applied)", () => {
   it.each(["shadow", "on"] as const)("auth-worker %s falls back to today's resolver", async (mode) => {
     await hideView(false)
     const role = await resolveProjectRole(envFor(mode), await loadUser(TEAM_ONLY), "p1")

@@ -31,7 +31,7 @@ Ends in: a reviewed PR to `dev`. Never push to `main`. Never apply migrations to
 - P1 is **behavior-preserving**: the resolver over the view must reproduce current semantics exactly,
   incl. AQU-1274 `orgPathContribution` and direct-row restriction. Pure max-over-ancestors is a separate,
   flagged policy switch with its own audit.
-- Migration numbers reserved for this swarm: 0130–0139 during the build; renumbered to 0117–0119 at PR time (log entries below keep the build-time numbers).
+- Migration numbers reserved for this swarm: 0130–0139 during the build; renumbered to 0117–0119 at PR time, then to 0119–0121 on 2026-10-01 when dev landed its own 0117 (log entries below keep the numbers of their day).
 - Forbidden (Luke / AQU-1389 owns): lane permissions — `project_member_lane_roles`, `project_member_scopes`,
   `lane-grants.ts`, `resolveVisibleLanes`, lane read wall, `sync-token-mint.ts` lane claims, PRs #805/#831/#853.
 - i18n: add strings to namespaces; orchestrator reconciles `source-hashes.json` via `pnpm i18n:check` at merge.

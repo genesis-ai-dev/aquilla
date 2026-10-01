@@ -1,10 +1,10 @@
--- 0119_access_grants_view_v2.sql — AQU-1352 P2 (spec §3, §5).
+-- 0121_access_grants_view_v2.sql — AQU-1352 P2 (spec §3, §5).
 --
--- Replaces the 0117 view:
---   1. WITH (security_invoker = true). 0117 ran with the owner's rights, which
+-- Replaces the 0119 view:
+--   1. WITH (security_invoker = true). 0119 ran with the owner's rights, which
 --      bypasses the AQU-289 RLS backstop on the underlying tables.
 --   2. Adds team-scope rows (scope_type 'team', scope_id = group id) for
---      group_members with a non-NULL role_level (migration 0118).
+--      group_members with a non-NULL role_level (migration 0120).
 -- Existing rows and columns are unchanged.
 CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,

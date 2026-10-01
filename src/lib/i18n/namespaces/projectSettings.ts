@@ -653,6 +653,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
       "its cell data is preserved and you can restore it anytime.",
+    // AQU-1464: "is anyone still working in here?" — shown inside the archive
+    // confirmation, above the Confirm button.
+    "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
+    "projectSettings.languages.lastChange": "Last change in this lane: {date} by {editor}",
+    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
+    "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
+    "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
@@ -1378,6 +1385,26 @@ export const projectSettings = defineNamespace({
         description: "Inline confirmation prompt shown before archiving one target lane.",
         placeholders: {
           lane: "The lane's language tag (data, not translated).",
+        },
+      },
+      "projectSettings.languages.lastChange": {
+        description:
+          "Inside the archive-lane confirmation: when this lane was last translated in, and " +
+          "by whom. Tells the project manager whether the lane is dormant or someone is " +
+          "working in it right now, because archiving locks the lane's translators out of " +
+          "editing. Shown only to people who may archive the lane.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+          editor: "The editing member's username (data, never translated).",
+        },
+      },
+      "projectSettings.languages.lastChangeUnknownEditor": {
+        description:
+          "Same as projectSettings.languages.lastChange, for a lane whose newest edit " +
+          "records no editor name (an imported or pre-attribution row). Keep the two " +
+          "wordings consistent — only the trailing \"by <name>\" is dropped.",
+        placeholders: {
+          date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
         },
       },
       "projectSettings.languages.archiveLaneAriaLabel": {

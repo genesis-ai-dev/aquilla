@@ -1,6 +1,6 @@
 // AQU-1352 P1 (spec §3, §5): one read shape for every grant, one pure resolver.
 //
-// `access_grants` (migration 0117) is a UNION ALL view over org_members,
+// `access_grants` (migration 0119) is a UNION ALL view over org_members,
 // project_members, group_members x group_project_grants and projects.created_by.
 // resolveFromGrants reproduces db/shared/project-roles.ts
 // resolveProjectRoleShared EXACTLY (AD-12 max-wins, AQU-435 floor, AQU-1274

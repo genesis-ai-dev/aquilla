@@ -153,7 +153,10 @@ export function LaneCombobox({
           placeholder={searchPlaceholder}
           aria-label={searchAriaLabel}
         />
-        <ComboboxSeparator className="mx-0 my-0" />
+        {/* No separator here: the search box already carries its own border
+            and background, so a line under it is redundant chrome, and the
+            list's own padding keeps the first lane off the box (AQU-1530).
+            The footer separator below is a real section break and stays. */}
         <ComboboxEmpty>{emptyText}</ComboboxEmpty>
         <ComboboxList>
           {(row: Row) =>

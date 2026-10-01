@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NavHistoryControls } from "./NavHistoryControls"
 import type { NavHistoryValue } from "@/context/NavHistoryContext"
 
@@ -48,7 +48,12 @@ describe("NavHistoryControls", () => {
     expect(group).toHaveClass("flex-col")
 
     const back = screen.getByRole("button", { name: "Back to Alpha" })
+    const forward = screen.getByRole("button", { name: "Forward" })
     const arrowGroup = back.closest("[data-slot=button-group]")
     expect(arrowGroup).toHaveAttribute("data-orientation", "vertical")
+    expect(arrowGroup).toContainElement(forward)
+    expect(screen.getByRole("button", { name: "Previously viewed" })).toBeInTheDocument()
+    fireEvent.click(back)
+    expect(nav.goBack).toHaveBeenCalledTimes(1)
   })
 })

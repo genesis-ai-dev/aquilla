@@ -32,6 +32,7 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualRunEvent,
   type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
@@ -50,6 +51,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
@@ -62,6 +64,7 @@ import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
@@ -449,15 +452,32 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
 
 /** Persist one live progress frame as a bounded product-activity fact. The
  * draft frame intentionally loses draft ids/text here: only count + cell ids
- * cross the durable telemetry boundary. */
+ * cross the durable telemetry boundary.
+ *
+ * This is the single server-side path that records narrative activity, so it
+ * is also where the shared team channel is fed (lib/team-ingest.ts). The
+ * write-through is best-effort by construction — `ingestRunActivity` never
+ * throws — so a channel outage cannot stop a run. */
 export async function persistContextualProgressFrame(
   db: AquillaDb,
   scope: { projectId: string; fileId: string },
   frame: ContextualProgressFrame,
 ): Promise<void> {
+  const event = await appendProgressFrameEvent(db, scope, frame)
+  if (event) await ingestRunActivity(db, event)
+}
+
+/** Every frame kind maps to exactly one durable event today. The `undefined`
+ *  tail is for a frame kind added later and not yet mapped: it records
+ *  nothing and feeds nothing, rather than half-writing. */
+async function appendProgressFrameEvent(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string },
+  frame: ContextualProgressFrame,
+): Promise<ContextualRunEvent | undefined> {
   switch (frame.type) {
     case "contextual.run.state":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -465,9 +485,8 @@ export async function persistContextualProgressFrame(
         status: frame.status,
         details: { done: frame.done, total: frame.total, failed: frame.failed ?? 0 },
       })
-      return
     case "contextual.span.start":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -476,9 +495,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         status: "started",
       })
-      return
     case "contextual.phase":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -487,9 +505,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         phase: frame.phase,
       })
-      return
     case "contextual.scene":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -502,9 +519,8 @@ export async function persistContextualProgressFrame(
           ambiguityCount: frame.ambiguityCount,
         },
       })
-      return
     case "contextual.drafts":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -518,9 +534,8 @@ export async function persistContextualProgressFrame(
           truncated: frame.truncated === true,
         },
       })
-      return
     case "contextual.memories":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -528,9 +543,8 @@ export async function persistContextualProgressFrame(
         status: frame.failed === true ? "failed" : "complete",
         details: { count: frame.count },
       })
-      return
     case "contextual.span":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -827,6 +841,8 @@ export interface TickDeps {
   /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
    *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
   concurrency?: number
+  /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
+  triage?: TriageCall
 }
 
 export interface TickResult {
@@ -1026,6 +1042,19 @@ async function processSpan(
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // Finding codes + a "needs a human?" call per flagged cell, stored on
+        // the draft for the PR view. Never blocks staging (triage.ts).
+        const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
+        const verdictsByCell = await triageVerdicts(
+          fresh.map((c) => ({
+            cellId: c.cellId,
+            ref: pairById.get(c.cellId)?.canonicalRef ?? null,
+            source: pairById.get(c.cellId)?.source ?? "",
+            text: c.text,
+            findings: c.findings ?? [],
+          })),
+          deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
+        )
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
@@ -1034,6 +1063,7 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
+            verdicts: verdictsByCell.get(c.cellId) ?? {},
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,

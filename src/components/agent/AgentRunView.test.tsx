@@ -6,7 +6,7 @@
  * half of the propose-then-apply trust model.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { AgentRunUi } from "@/lib/agent/run-state"
 import { AgentRunView } from "./AgentRunView"
@@ -23,7 +23,7 @@ function makeRun(overrides: Partial<AgentRunUi> = {}): AgentRunUi {
 }
 
 describe("AgentRunView", () => {
-  it("renders the prompt, tool chips with verdicts, and expandable result summaries", () => {
+  it("renders plain-language activity lines — raw SQL never shows collapsed", () => {
     render(
       <AgentRunView
         run={makeRun({
@@ -43,14 +43,32 @@ describe("AgentRunView", () => {
       />,
     )
     expect(screen.getByText("Draft the untranslated verses in this chapter")).toBeInTheDocument()
-    expect(screen.getByText("SELECT cell_id FROM cells WHERE …")).toBeInTheDocument()
+    // Social-workspace contract (2026-08-28 transcript): the collapsed line is a
+    // teammate's sentence, never a command — raw SQL stays behind the expand.
+    expect(screen.getByText("Checked the project records")).toBeInTheDocument()
+    expect(screen.queryByText(/SELECT cell_id/)).not.toBeInTheDocument()
+    // Human summaries (like emit's event count) still show as the detail.
+    expect(screen.getByText("Staged drafts for review")).toBeInTheDocument()
+    expect(screen.getByText("2 events")).toBeInTheDocument()
     expect(screen.getByLabelText("Step succeeded")).toBeInTheDocument()
     expect(screen.getByLabelText("Step running")).toBeInTheDocument()
 
-    // Result block is collapsed until the row is expanded.
+    // Result block (and the raw SQL) appear once the row is expanded.
     expect(screen.queryByText(/#c1\|MRK 4:1/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText("SELECT cell_id FROM cells WHERE …"))
+    fireEvent.click(screen.getByText("Checked the project records"))
     expect(screen.getByText(/#c1\|MRK 4:1/)).toBeInTheDocument()
+    expect(screen.getByText(/SELECT cell_id/)).toBeInTheDocument()
+  })
+
+  it("attributes assistant prose to the Coordinator persona", () => {
+    render(
+      <AgentRunView
+        run={makeRun({
+          items: [{ id: "i0", kind: "text", text: "I'll start by reading the chapter." }],
+        })}
+      />,
+    )
+    expect(screen.getByText("Coordinator")).toBeInTheDocument()
   })
 
   // AQU-842: tool-result tables (PassageCard & friends, rendered through the
@@ -168,5 +186,34 @@ describe("AgentRunView", () => {
       />,
     )
     expect(screen.getByText("Drafting MRK 4 — 3/12")).toBeInTheDocument()
+  })
+
+  // The model closes with "NEXT:" lines in the user's voice. They are an
+  // offer, not prose: shown as one-tap buttons on the latest settled run, and
+  // never printed as raw marker lines in the reply.
+  it("turns trailing NEXT: lines into buttons that send the suggestion", () => {
+    const onSuggestionSend = vi.fn()
+    render(
+      <AgentRunView
+        run={makeRun({
+          items: [{ id: "t1", kind: "text", text: "Drafted 4 verses.\nNEXT: Check MRK 4:1–4:8\nNEXT: Draft the next chapter" }],
+        })}
+        onSuggestionSend={onSuggestionSend}
+      />,
+    )
+    expect(screen.getByText("Drafted 4 verses.")).toBeInTheDocument()
+    expect(screen.queryByText(/NEXT:/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Check MRK 4:1–4:8" }))
+    expect(onSuggestionSend).toHaveBeenCalledWith("Check MRK 4:1–4:8")
+  })
+
+  it("offers no suggestion buttons on an older run, but still hides the markers", () => {
+    render(
+      <AgentRunView
+        run={makeRun({ items: [{ id: "t1", kind: "text", text: "Done.\nNEXT: Draft the next chapter" }] })}
+      />,
+    )
+    expect(screen.queryByRole("button", { name: "Draft the next chapter" })).toBeNull()
+    expect(screen.queryByText(/NEXT:/)).toBeNull()
   })
 })

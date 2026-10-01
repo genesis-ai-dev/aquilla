@@ -1,7 +1,4 @@
 import type { ReactNode } from "react"
-import { Navigate, useLocation, useParams } from "react-router-dom"
-import { useIsLgUp } from "@/hooks/useIsLgUp"
-import { editorReturnFromLocation } from "@/lib/navigation/org-paths"
 
 /**
  * Route element for **every** `/project/:id/...` workspace surface.
@@ -15,21 +12,12 @@ import { editorReturnFromLocation } from "@/lib/navigation/org-paths"
  * workbench showed "Choose a file" (AQU-1496). Wrapping every surface keeps the
  * type — and therefore the instance and its open file — stable across the hop.
  *
- * The AQU-806 guard itself still stands: the three-pane workbench must not
- * mount on a compact viewport, so the agent surface alone redirects back to the
- * editor there.
+ * It redirects nothing today. The AQU-806 guard it used to carry sent the agent
+ * surface back to the editor on a compact viewport, because the three-pane
+ * workbench did not fit there; the Team workspace is single-column below `lg`,
+ * so Agent stays reachable on a phone. A route-level guard that comes back
+ * belongs in here, keyed on the path — never as a wrapper on one surface.
  */
 export function ProjectWorkspaceRoute({ children }: { children: ReactNode }) {
-  const desktop = useIsLgUp()
-  const { id } = useParams()
-  const location = useLocation()
-
-  // Same path test `ProjectWorkspace` uses to derive its center surface.
-  const compactAgent = !desktop && location.pathname.endsWith("/agent")
-  if (!compactAgent) return <>{children}</>
-  if (!id) return <Navigate to="/orgs/all" replace />
-
-  const editorPath = editorReturnFromLocation(location.pathname, location.search, id)
-    ?? `/project/${id}/editor`
-  return <Navigate to={editorPath} replace />
+  return <>{children}</>
 }

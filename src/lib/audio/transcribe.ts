@@ -51,6 +51,9 @@ export interface TranscriptionOptions {
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
   trim?: PcmTrimWindow
+  /** The Transcribe button. A stored Cancel stays quiet on save, and this
+   *  press brings the download prompt back. */
+  askAgain?: boolean
 }
 
 const WHISPER_SAMPLE_RATE = 16000
@@ -190,7 +193,7 @@ export async function transcribeAudio(
     const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
     return transcribeHostedPcm(pcm, opts.session!.jwt, opts.projectId!, opts.language)
   }
-  const consented = await requestAiModelConsent(WHISPER_MODEL)
+  const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
   const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
   return runWhisperOnPcm(pcm, opts)
@@ -285,6 +288,8 @@ export interface TranscribeCellArgs {
    * trim wipe). An explicit argument cannot be silently omitted by a stub.
    */
   slot?: string
+  /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
+  askAgain?: boolean
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -307,7 +312,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language, slot: slotArg } = args
+  const { cell, session, projectId, language, slot: slotArg, askAgain } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -378,6 +383,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       session,
       projectId,
       language: whisperLanguageFromTag(language) ?? undefined,
+      askAgain,
       trim,
       onProgress: (p) => {
         setTranscribeStatus(audioId, {

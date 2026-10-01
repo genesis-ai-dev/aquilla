@@ -34,6 +34,8 @@ import {
   startMondayConnect,
   type MondayConnectionStatus,
 } from "@/lib/monday/api"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
@@ -124,6 +126,9 @@ export function OrgSettingsMonday() {
       )
       if (popup && !popup.closed) {
         popup.location.href = url
+      } else if (isTauriRuntime()) {
+        // The desktop WebView has no popups; use the system browser.
+        await openExternal(url)
       } else {
         // Popup still blocked (or closed) — same-tab navigation as fallback.
         window.location.assign(url)

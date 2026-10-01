@@ -21,6 +21,8 @@ import {
   startBillingPortal,
   type OrgBilling,
 } from "@/lib/sync/billing"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -93,7 +95,10 @@ export function OrgSettingsBilling() {
       const url = paid && workspace?.portalEnabled === true
         ? await startWorkspaceBillingPortal(jwt, activeOrgId)
         : await startBillingPortal(jwt, activeOrgId)
-      if (request.current === generation) window.location.assign(url)
+      if (request.current !== generation) return
+      await openExternal(url)
+      // Desktop opens Stripe in the system browser and stays on this page.
+      if (isTauriRuntime() && request.current === generation) setBusy(null)
     } catch (err) {
       if (request.current !== generation) return
       setError(err instanceof Error ? err.message : "Couldn't start Stripe.")

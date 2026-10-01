@@ -3249,7 +3249,6 @@ export const ru: Catalog = {
   "onboarding.checklist.aiProvider.customDescription": "Собственный, локальный или любой сервер, совместимый с OpenAI.",
   "onboarding.checklist.aiProvider.saveButton": "Сохранить поставщика",
   "onboarding.checklist.aiModels.whisper.label": "Расшифровка Whisper",
-  "onboarding.checklist.aiModels.whisper.blurb": "Пословный тайминг для записанного аудио. Работает локально; после загрузки сеть не нужна.",
   "onboarding.checklist.aiModels.mms.label": "Многоязычные голоса MMS",
   "onboarding.checklist.aiModels.mms.blurb": "Локальные голоса для многих языков — по одной языковой модели на загрузку.",
   "onboarding.checklist.aiModels.title": "Настроить голос и расшифровку",

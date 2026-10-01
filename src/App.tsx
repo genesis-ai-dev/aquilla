@@ -34,6 +34,7 @@ import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
+import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -297,6 +298,7 @@ export default function App() {
         <SyncingProvider>
           <PrivateModeBanner />
           <ConflictToast />
+          <OfflineLeaderWatchdog />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
           {/* AQU-885: a stored JWT that's already expired at boot goes straight to

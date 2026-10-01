@@ -29,6 +29,10 @@ import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import {
+  setUnresolvedCommentHighlight,
+  useUnresolvedCommentHighlight,
+} from "@/lib/store/unresolved-comment-highlight-pref"
+import {
   setLowMemoryMode,
   useLowMemoryMode,
   type LowMemoryMode,
@@ -129,6 +133,11 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const splitByMilestone = useMilestoneSplit()
+  // AQU-1259: like the milestone split, a device preference read straight from
+  // its store rather than plumbed through props — the menu is the only writer
+  // and EditorTable is the only reader, so a prop pair through
+  // ProjectWorkspace would be two more parameters carrying no extra meaning.
+  const highlightUnresolvedComments = useUnresolvedCommentHighlight()
   const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
@@ -333,6 +342,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 onCheckedChange={onHealthCalculationsChange}
               />
             )}
+            <SwitchRow
+              id="view-highlight-unresolved-comments"
+              label={t("editor.view.highlightUnresolvedComments")}
+              checked={highlightUnresolvedComments}
+              disabled={!fileOpen}
+              onCheckedChange={setUnresolvedCommentHighlight}
+            />
           </FieldGroup>
 
           {onTargetKeyTermHighlightModeChange && (

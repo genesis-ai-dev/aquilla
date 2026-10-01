@@ -12,7 +12,7 @@
 
 import { ExternalError } from './errors'
 import type { ExternalErrorCode } from './errors'
-import { ROLE } from '../events/role-policy'
+import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
 import { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './prepare'
@@ -202,6 +202,37 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'PatchSettings must be the sole command in its changeset, and — like every write — ' +
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',
+    },
+    // AQU-1175: terminology. Named explicitly because the read and the write
+    // live on DIFFERENT surfaces (a read tool; the EmitEvents door) and because
+    // matching is exact by default — the two things an agent got wrong.
+    terminology: {
+      readTool: 'list_terms',
+      writeVia: 'EmitEvents',
+      eventKinds: ['term.create', 'term.update', 'term.approve', 'term.reject', 'term.delete'],
+      minRoleLevel: REQUIRED_ROLE['term.create'],
+      note:
+        'List the termbase with list_terms, then write through an EmitEvents changeset (REST ' +
+        'POST .../changesets) carrying term.* events — there is no bespoke term endpoint; the ' +
+        'event log IS the term surface (AQU-1179). ALWAYS list before you write: a second ' +
+        'term.create for a sourceTerm that already has a concept does not merge, it leaves the ' +
+        'project two competing entries — patch the existing conceptId with term.update ' +
+        'instead. term.create takes an explicit status (\'draft\' to propose, \'active\' to ' +
+        'enforce immediately); status is NOT patchable by term.update — use term.approve / ' +
+        'term.reject so the audit trail separates "edited" from "approved". Approving needs ' +
+        'the org termbase-edit floor.\n' +
+        'MATCHING IS EXACT unless you say otherwise. `match` on create/update carries ' +
+        'forms (extra literal source forms treated as alternates of sourceTerm), ' +
+        'excludedForms (surfaces a human rejected), affixes (allow the project\'s configured ' +
+        'prefixes/suffixes) and foldMarks (ignore combining marks). In an inflected language a ' +
+        'concept with no forms matches the lemma ONLY, so a term staged without match.forms ' +
+        'will read back as configured and still flag none of its inflected forms. Like ' +
+        'renderings, `match` is replaced wholesale when present and left untouched when ' +
+        'absent — so send the FULL option set you want, and `match: {}` to clear every ' +
+        'option back to defaults. An unrecognized key inside `match` is an error, not an ' +
+        'ignored extra: `{ form: [...] }` is rejected rather than silently clearing `forms`. ' +
+        'Verify a landed term with get_prompt_preview (injectedTerms) and ' +
+        'read_term_consistency.',
     },
     // AQU-1178: the permanent exclusions. Published from the same module the
     // REST discovery map and the external 404 hints read, so the three cannot
@@ -789,6 +820,31 @@ async function readQuality(
   return runQualityRead(env, token, `${encodeURIComponent(projectId)}/quality${qs ? `?${qs}` : ''}`)
 }
 
+/**
+ * list_terms — the termbase read (AQU-1175).
+ *
+ * Not on `qualityParams`: this read pages by opaque cursor like the other list
+ * reads (comments, memory), not by fileId/lane — a termbase is project-scoped,
+ * it has no per-file slice.
+ */
+async function listTerms(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  if (args.includeDeleted === true) params.set('includeDeleted', '1')
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString()
+  return runQualityRead(env, token, `${encodeURIComponent(projectId)}/terms${qs ? `?${qs}` : ''}`)
+}
+
 async function readTermConsistency(
   env: ExternalEnv,
   token: string,
@@ -1336,6 +1392,8 @@ export async function callTool(
       return readQuality(env, token, args)
     case 'read_term_consistency':
       return readTermConsistency(env, token, args)
+    case 'list_terms':
+      return listTerms(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':

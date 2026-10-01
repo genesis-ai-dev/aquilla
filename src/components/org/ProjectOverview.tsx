@@ -142,6 +142,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { AnalysisReportDialog } from "@/components/analysis/AnalysisReportDialog"
+import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 
 
 function ProjectOverviewSkeleton() {
@@ -384,6 +387,20 @@ export function ProjectOverview() {
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
   // maintainer+ (the only role that can assign a PM); viewers never trigger the
   // roster read.
+  // AQU-1392: project-scope volume-analysis report. `jwtRef` keeps the token
+  // fetcher's identity stable across session refreshes, so opening the dialog
+  // doesn't restart its run when the JWT is renewed mid-walk.
+  const [analysisOpen, setAnalysisOpen] = useState(false)
+  const jwtRef = useRef(jwt)
+  jwtRef.current = jwt
+  const analysisFiles = useMemo(
+    () => (project?.files ?? []).map((f) => ({ fileId: f.id, name: f.name })),
+    [project?.files],
+  )
+  const analysisLoadSources = useMemo(
+    () => buildSourceLoader(id, buildFileScopedTokenFetcher(() => jwtRef.current, id)),
+    [id],
+  )
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
   const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
   const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
@@ -1101,7 +1118,6 @@ export function ProjectOverview() {
     )
   }, [planCsv, project?.name])
 
-  const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
   const canAssign = canOpenAssignUi(
     project?.syncRole?.level ?? null,
@@ -1552,13 +1568,13 @@ export function ProjectOverview() {
                         <Settings className="h-4 w-4" />
                       </Link>
                     )}
-                    {isOwner && isArchived && (
+                    {canManage && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
                         {t("common.restore")}
                       </Button>
                     )}
                     {/* Archive + Download + Lifecycle + Offline moved into overflow menu */}
-                    {(canManage || isOwner || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
+                    {(canManage || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -1614,7 +1630,7 @@ export function ProjectOverview() {
                               {t("org.projectOverview.removeOfflineCopy")}
                             </DropdownMenuItem>
                           )}
-                          {isOwner && (
+                          {canManage && (
                             <DropdownMenuItem
                               onClick={() => setArchiveConfirmOpen(true)}
                               disabled={busy}
@@ -1829,8 +1845,8 @@ export function ProjectOverview() {
                   title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
-                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
-                      : "Archive this project? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects."
+                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects.`
+                      : "Archive this project? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects."
                   }
                   confirmLabel="Archive"
                   checkboxLabel="I understand this project will be hidden from the active list."
@@ -2120,30 +2136,55 @@ export function ProjectOverview() {
                   </Button>
                 }
                 actions={
-                  orgSettings.canExport && planUnits.length > 0 ? (
-                    <ButtonGroup>
+                  <>
+                    {/* AQU-1392: the volume-analysis report over every file in
+                        the project — "how much new work is in here?", the
+                        question the plan board's status roll-up cannot answer. */}
+                    {analysisFiles.length > 0 && (
                       <Button
                         variant="outline"
                         size="sm"
-                        data-testid="plan-csv-copy"
-                        onClick={handleCopyPlanCsv}
+                        data-testid="project-analyze"
+                        onClick={() => setAnalysisOpen(true)}
                       >
-                        {planCsvCopied
-                          ? t("common.copied")
-                          : t("org.projectOverview.copyCsv")}
+                        {t("workspace.analysis.action")}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="plan-csv-download"
-                        onClick={handleDownloadPlanCsv}
-                      >
-                        {t("org.projectOverview.downloadCsv")}
-                      </Button>
-                    </ButtonGroup>
-                  ) : null
+                    )}
+                    {orgSettings.canExport && planUnits.length > 0 ? (
+                      <ButtonGroup>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="plan-csv-copy"
+                          onClick={handleCopyPlanCsv}
+                        >
+                          {planCsvCopied
+                            ? t("common.copied")
+                            : t("org.projectOverview.copyCsv")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="plan-csv-download"
+                          onClick={handleDownloadPlanCsv}
+                        >
+                          {t("org.projectOverview.downloadCsv")}
+                        </Button>
+                      </ButtonGroup>
+                    ) : null}
+                  </>
                 }
               />
+              {project && (
+                <AnalysisReportDialog
+                  open={analysisOpen}
+                  onClose={() => setAnalysisOpen(false)}
+                  scope="project"
+                  label={project.name}
+                  files={analysisFiles}
+                  loadSources={analysisLoadSources}
+                />
+              )}
 
               {/* AQU-656: original imported blobs. Hidden when the org export
                   floor forbids it, and when no file has a stored original —

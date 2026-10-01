@@ -81,9 +81,11 @@ pub fn run() {
                     auth::open_auth_browser,
                     auth::simulate_deep_link_callback,
                     connectivity::get_connectivity,
+                    connectivity::set_connectivity_probe_url,
                     llm_proxy::set_llm_config,
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
+                    shutdown_guard::restart_app,
                 ]
             }
             #[cfg(not(feature = "e2e-webdriver"))]
@@ -103,9 +105,11 @@ pub fn run() {
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
                     connectivity::get_connectivity,
+                    connectivity::set_connectivity_probe_url,
                     llm_proxy::set_llm_config,
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
+                    shutdown_guard::restart_app,
                 ]
             }
         })

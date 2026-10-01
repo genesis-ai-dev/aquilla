@@ -40,6 +40,10 @@ export const workspace = defineNamespace({
     }),
     "workspace.offline.conflictDismiss": "Dismiss",
     "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode: the local store's leader worker stopped persisting
+    // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
+    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
+    "workspace.offline.leaderStalledRestart": "Restart app",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -188,6 +192,11 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
     "workspace.aiConsent.enableAllTooltip": "Also pre-download the local AI models so they're ready next time",
     "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.justThisButton": "Just {model}",
+    "workspace.aiConsent.sizeNote":
+      "One-time download of about {size} MB — it stays on this device.",
+    "workspace.aiConsent.learnMore": "Learn more",
+    "workspace.aiConsent.genericModelName": "AI model",
 
     // -- AiModelDownloadChip --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
@@ -461,6 +470,27 @@ export const workspace = defineNamespace({
     "workspace.fileSort.lastUpdated": "Last updated",
     "workspace.fileSort.canonical": "Canonical order",
     "workspace.fileSort.alphabetical": "Alphabetical",
+
+    // -- AQU-1392: volume-analysis report (AnalysisReportDialog) --
+    "workspace.analysis.action": "Analyze word counts",
+    "workspace.analysis.title": "Analysis — {label}",
+    "workspace.analysis.starting": "Reading source text…",
+    "workspace.analysis.progress": "Analyzing file {done} of {total}…",
+    "workspace.analysis.col.band": "Match band",
+    "workspace.analysis.col.segments": "Segments",
+    "workspace.analysis.col.words": "Words",
+    "workspace.analysis.col.pct": "% of words",
+    "workspace.analysis.col.rate": "Rate",
+    "workspace.analysis.col.weighted": "Weighted words",
+    "workspace.analysis.totalSegments": "Segments",
+    "workspace.analysis.totalWords": "Total words",
+    "workspace.analysis.weightedWords": "Weighted words",
+    "workspace.analysis.saving": "Saving",
+    "workspace.analysis.exportCsv": "Export CSV",
+    "workspace.analysis.unpopulatedNote":
+      "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
+    "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
+    "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
   },
   context: {
     _context: {
@@ -503,6 +533,19 @@ export const workspace = defineNamespace({
         placeholders: {
           count: "How many translations couldn't sync.",
         },
+      },
+      "workspace.offline.leaderStalledToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when the " +
+          "on-device storage stops saving edits (its background worker died). " +
+          "Paired with a 'Restart app' action (workspace.offline.leaderStalledRestart). " +
+          "Two full sentences with periods. Plain language — no 'worker', 'store' " +
+          "or 'sync' jargon.",
+      },
+      "workspace.offline.leaderStalledRestart": {
+        description:
+          "Action button on the 'changes aren't being saved' toast; quits and " +
+          "relaunches the desktop app. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -1020,6 +1063,42 @@ export const workspace = defineNamespace({
         description:
           "Button that consents to and starts downloading every local AI " +
           "model at once, instead of just the one the current feature needs.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.justThisButton": {
+        description:
+          "Secondary action on the first-run local-model download prompt: " +
+          "consent to and download only the model named in {model}, not every " +
+          "local model. {model} is the short product name (Whisper, MMS) and " +
+          "stays untranslated.",
+        placeholders: {
+          model: "Short product name of the model being asked about (Whisper or MMS).",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.sizeNote": {
+        description:
+          "Sentence in the compact consent-prompt body stating the one-time " +
+          "download size and that the model stays on this device. Follows the " +
+          "model-specific short explanation. {size} is a whole number of megabytes.",
+        placeholders: {
+          size: "Approximate one-time download size in megabytes, e.g. 140.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.learnMore": {
+        description:
+          "Inline disclosure control on the local-model download prompt. " +
+          "Expands (and collapses) a fuller explanation in place — not a " +
+          "link out and not a second dialog. The expanded state is exposed " +
+          "via aria-expanded; the label does not change.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.genericModelName": {
+        description:
+          "Fallback display name interpolated into workspace.aiConsent." +
+          "downloadTitle when the pending model is unknown (dialog closing). " +
+          "Generic noun phrase, not a product name.",
         screenshot: "confirm-dialog",
       },
 
@@ -1903,6 +1982,67 @@ export const workspace = defineNamespace({
       },
       "workspace.fileSort.alphabetical": {
         description: "Sort-mode dropdown option: plain A-Z name order.",
+      },
+
+      "workspace.analysis.action": {
+        description:
+          "Menu item / button that opens the volume-analysis report for a file " +
+          "or a project. 'Analyze' here is the translation-industry sense — " +
+          "count how much new vs. repeated work a document holds — not a " +
+          "quality check.",
+      },
+      "workspace.analysis.title": {
+        description:
+          "Heading of the analysis dialog. {label} is the file or project the " +
+          "report covers.",
+        placeholders: { label: "Name of the file or project being analyzed." },
+      },
+      "workspace.analysis.progress": {
+        description:
+          "Status line while the report walks a project's files. Both numbers " +
+          "are file counts, not percentages.",
+        placeholders: {
+          done: "How many files have been analyzed so far.",
+          total: "How many files the report covers in total.",
+        },
+      },
+      "workspace.analysis.col.band": {
+        description:
+          "Column header: the match band a segment fell into (New, Repetitions, " +
+          "Internal fuzzy 75–99%, and the not-yet-filled TM/ICE/MT bands). " +
+          "'Band' is the TMS term for a tier of match quality.",
+        maxLength: 20,
+      },
+      "workspace.analysis.col.pct": {
+        description:
+          "Column header: this band's share of the report's total word count, " +
+          "shown as a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.col.rate": {
+        description:
+          "Column header: the percentage of a word that this band is charged " +
+          "at — a New word counts 100%, a repeated word 30%.",
+        maxLength: 12,
+      },
+      "workspace.analysis.col.weighted": {
+        description:
+          "Column header: words after the band rate is applied — the 'payable' " +
+          "count a project manager quotes from.",
+        maxLength: 18,
+      },
+      "workspace.analysis.saving": {
+        description:
+          "Label for the percentage by which weighting reduced the raw word " +
+          "count (a TMS 'saving on word count'). Shown next to a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.skipped": {
+        description:
+          "Warning under the report when one or more files could not be read, " +
+          "so their words are missing from the totals. {names} is a " +
+          "comma-separated list of file names.",
+        placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
     },
   },

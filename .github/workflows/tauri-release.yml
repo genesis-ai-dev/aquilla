@@ -20,10 +20,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    # Any push of a `v*` tag reaches this job and, further down, the six
+    # Apple/Windows/Tauri code-signing secrets — before that, it builds and runs
+    # the tagged commit's own code (npm lifecycle scripts, `cargo build`/`build.rs`,
+    # the Tauri CLI). A `v*` tag is not gated to any reviewed branch anywhere in
+    # this repo (unlike production web/worker deploys, which enter the `production`
+    # Environment restricted to `release/*/*/*` — see docs/DEPLOYMENT-ENVIRONMENTS.md
+    # and OPSEC.md D4). This Environment is the equivalent gate for the one
+    # pipeline that ships signed code to end users: it holds the job at the
+    # "Waiting" state, before checkout, until a required reviewer approves it in
+    # GitHub. Configure "desktop-release-signing" in Settings → Environments with
+    # required reviewers (and, if desired, a deployment tag policy of `v*` scoped
+    # to protected branches) — that repo setting is what gives this line teeth.
+    environment: desktop-release-signing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:

@@ -112,6 +112,10 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
+    // AQU-1071: the enterprise billing band is read off this number — distinct
+    // active target languages across the org, archived lanes excluded.
+    "org.orgHome.activeLanguages": "Active languages",
+    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -1044,6 +1048,18 @@ export const org = defineNamespace({
     "org.staffLanePopover.orgMemberPhrase": "org member",
     "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
     "org.staffLanePopover.searchPlaceholder": "Search your organization",
+    // AQU-731: the four ways the org roster comes back unusable, each named
+    // rather than collapsed into "no one in your organization yet".
+    "org.staffLanePopover.rosterLoading": "Loading your organization…",
+    "org.staffLanePopover.rosterNoOrg":
+      "No organization is selected, so there is no roster to search. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterHidden":
+      "Your organization hides its member list. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterNoAccess":
+      "You can staff this lane, but you can’t see this organization’s member list. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterLoadFailed": "Couldn’t load your organization’s members.",
+    "org.staffLanePopover.rosterEmpty": "No one in your organization yet.",
+    "org.staffLanePopover.rosterNoMatch": "No org members match.",
     // "Search org members" aria-label → org.teamDetail.searchOrgMembersAriaLabel (identical text)
     "org.staffLanePopover.searchScopeNote":
       "Searches your organization only. Adding someone from outside it?",
@@ -1189,6 +1205,9 @@ export const org = defineNamespace({
     "org.orgProjectsPage.roleFilter.all": "All roles",
     // AQU-1043: last-edit recency options. Fixed windows, not free-form
     // dates; "any time" is the default.
+    // AQU-1070: toolbar toggle that folds soft-archived projects into the list,
+    // greyed out, instead of sending the PM to the separate Archived page.
+    "org.orgProjectsPage.showArchived": "Show archived",
     "org.orgProjectsPage.updatedFilter.any": "Updated any time",
     "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
@@ -2613,6 +2632,22 @@ export const org = defineNamespace({
         description:
           "Subheading under org.staffLanePopover.staffLaneHeading explaining what the popover does. Rendered via RichMessage with {member} substituted as a bold span whose text is the translated org.staffLanePopover.orgMemberPhrase — supplied as a node (not raw data) so its emphasis and word position both survive translation.",
         placeholders: { member: "The already-translated, bold-styled 'org member' phrase (org.staffLanePopover.orgMemberPhrase) — do not interpolate it as plain data." },
+      },
+      "org.staffLanePopover.rosterNoAccess": {
+        description:
+          "Shown in place of the org member list when the roster fetch was refused because the operator is not a member of the org (403 without the roster-hidden policy flag). They can still staff the lane — the point is that this particular search can't help them, and the project-invite link below can. Do not translate as a permission error about staffing itself.",
+      },
+      "org.staffLanePopover.rosterHidden": {
+        description:
+          "Shown in place of the org member list when org policy hides the roster from this operator. Distinct from rosterNoAccess (no membership) and from rosterEmpty (the org really has no members).",
+      },
+      "org.staffLanePopover.rosterNoOrg": {
+        description:
+          "Shown in place of the org member list when no organization is in context at all, so no roster fetch was ever made.",
+      },
+      "org.staffLanePopover.rosterEmpty": {
+        description:
+          "Shown when the roster loaded successfully and the organization genuinely has no other members. Reserved for that one case — the unavailable-roster cases have their own keys.",
       },
       "org.staffLanePopover.addToLaneButton": {
         description: "Primary confirm button that grants the selected role scoped to the named lane.",

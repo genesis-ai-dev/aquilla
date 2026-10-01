@@ -66,6 +66,31 @@ afterEach(() => {
 })
 
 describe("AgentDocumentContext uses the live editor contract", () => {
+  it("propagates a paired row's accepted validation to repeated segments", async () => {
+    const data = workspace()
+    data.onCellValidated = vi.fn()
+    render(<AgentDocumentContext workspace={data} />)
+    const row = screen.getByRole("article", { name: "MRK 1:1" })
+    fireEvent.click(within(row).getByRole("button", { name: /Click to validate/ }))
+    await waitFor(() => expect(data.onCellValidated).toHaveBeenCalledWith("c1"))
+    expect(data.onCellValidated).toHaveBeenCalledTimes(1)
+  })
+
+  it("settles an auto-validated paired edit after leaving the focused editor", async () => {
+    const data = workspace()
+    data.onCellValidated = vi.fn()
+    data.onCommitTarget = vi.fn().mockResolvedValue({ autoValidated: true })
+    render(<AgentDocumentContext workspace={data} />)
+    const surface = await activateEditor()
+    act(() => { surface.editor.commands.setContent("Completed translation") })
+    await waitFor(() => expect(data.onCommitTarget).toHaveBeenCalledTimes(1), { timeout: 5_000 })
+    await act(async () => { await Promise.resolve() })
+    expect(data.onCellValidated).not.toHaveBeenCalled()
+    act(() => { fireEvent.blur(surface) })
+    await waitFor(() => expect(data.onCellValidated).toHaveBeenCalledWith("c1"))
+    expect(data.onCellValidated).toHaveBeenCalledTimes(1)
+  })
+
   it("mounts only the active editor, preserving rich-text snapshots, direction and focus/presence callbacks", async () => {
     const data = workspace()
     data.cells[0].targetTextDirection = "rtl"

@@ -397,6 +397,7 @@ export const editor = defineNamespace({
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.highlightUnresolvedComments": "Highlight open comments",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -484,6 +485,9 @@ export const editor = defineNamespace({
     "editor.tn.hide": "Hide translation notes",
     "editor.tn.focusHint": "Focus a translation cell to see notes for that verse.",
     "editor.tn.noneForRef": "No translation notes for {ref}.",
+    "editor.tn.originalPhraseLabel": "Original-language phrase this note is about:",
+    "editor.tn.occurrence": "occurrence {n}",
+    "editor.tn.support": "See: {article}",
 
     // — eBible target-import review panel ————————————————————————————
     "editor.ebible.matched": plural({
@@ -1761,6 +1765,9 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    // Tauri desktop: the on-device store stopped saving (src/lib/offline/leader-watchdog.ts).
+    "editor.outbox.notSavingLabel": "Not saving",
+    "editor.outbox.notSavingTooltip": "Changes on this device aren't being saved. Restart the app to fix this.",
     // AQU-1391 — the repetition badge on a source row and its tooltip.
     "editor.repetition.badge": "Repetition ×{count}",
     "editor.repetition.tooltip": plural({
@@ -3357,6 +3364,16 @@ export const editor = defineNamespace({
           "lightens the editor on very large files. Applies to this browser only.",
         maxLength: 32,
       },
+      "editor.view.highlightUnresolvedComments": {
+        description:
+          "Label of the switch that marks every row still carrying an unresolved " +
+          "comment thread with a strong accent down its leading edge, so a reviewer " +
+          "can scan a long file for the rows that still need them. 'Open' here means " +
+          "not yet resolved — the opposite of closed, not 'opened on screen'. Rows " +
+          "keep their small always-on comment badge when this is off. Applies to " +
+          "this browser only.",
+        maxLength: 32,
+      },
       "editor.view.lowMemory": {
         description:
           "Section heading for the setting that strips the editor back on a " +
@@ -3832,6 +3849,37 @@ export const editor = defineNamespace({
             "The verse reference in focus, e.g. 'MAT 3:16'. From the data — do not " +
             "translate. The app renders it in a monospace face, so keep it a " +
             "placeholder rather than writing a reference into the sentence.",
+        },
+      },
+      "editor.tn.originalPhraseLabel": {
+        description:
+          "Screen-reader-only label read immediately before a note's quoted Hebrew " +
+          "or Greek phrase, which is otherwise announced as bare foreign text with " +
+          "no introduction. Never drawn on screen, so length is free. 'Original " +
+          "language' means the language the scripture was written in, not the " +
+          "project's source language. Ends with a colon: the phrase follows.",
+      },
+      "editor.tn.occurrence": {
+        description:
+          "Marker under a note's quoted phrase when the verse contains that phrase " +
+          "more than once and the note addresses a later instance — so '2' means " +
+          "the second occurrence in this verse. Shown only for the 2nd and beyond. " +
+          "Lower case, no period: it is a caption, not a sentence, on one 10px line.",
+        maxLength: 18,
+        placeholders: {
+          n: "Which instance in the verse, as a numeral of 2 or more. Not translated.",
+        },
+      },
+      "editor.tn.support": {
+        description:
+          "Footer line of a note card, linking it to the translation-academy article " +
+          "it draws on. 'See:' introduces the article name that follows. One 10px " +
+          "line under the note prose.",
+        maxLength: 24,
+        placeholders: {
+          article:
+            "Name of the reference article, derived from the note's support reference, " +
+            "e.g. 'figs merism'. English resource identifier — not translated.",
         },
       },
       "editor.ebible.matched": {
@@ -6597,6 +6645,18 @@ export const editor = defineNamespace({
       "editor.outbox.syncedTooltip": {
         description:
           "Tooltip/aria-label of the outbox chip when the queue is empty.",
+      },
+      "editor.outbox.notSavingLabel": {
+        description:
+          "Short chip text (desktop app only) when edits are no longer being " +
+          "saved on this device at all. Replaces 'Synced' so the chip never " +
+          "reassures while work is being lost. Alarming but factual.",
+        maxLength: 12,
+      },
+      "editor.outbox.notSavingTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip in its not-saving state. Full " +
+          "sentences; tells the user what's wrong and the one fix (restart the app).",
       },
       // AQU-646, keyed 2026-08-20 — the audio-VTT import dialog, the character-
       // sheet import dialog, the character-check drawer and the pairing drawer.

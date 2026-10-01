@@ -167,3 +167,49 @@ describe("FileRow — file actions menu", () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 })
+
+// AQU-894 regression guard: a file the reader isn't assigned to recedes, but
+// stays fully usable. The point of the ticket is "make mine obvious" — not to
+// invent an access rule the server doesn't enforce.
+describe("FileRow — AQU-894 unassigned de-emphasis", () => {
+  function row(container: HTMLElement): HTMLElement {
+    return container.querySelector('[data-showcase="sidebar.file"]') as HTMLElement
+  }
+
+  it("leaves the row untouched by default", () => {
+    const { container } = renderRow()
+    expect(row(container).dataset.unassigned).toBeUndefined()
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("dims a row that is not the reader's", () => {
+    const { container } = renderRow({ unassigned: true })
+    expect(row(container).dataset.unassigned).toBe("true")
+    expect(row(container).className).toContain("opacity-55")
+    // Recovers on hover/focus, so a dimmed row never feels unreachable.
+    expect(row(container).className).toContain("hover:opacity-100")
+  })
+
+  it("does not dim the row the reader is currently in", () => {
+    const { container } = renderRow({ unassigned: true, active: true })
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("keeps the dimmed row selectable, so the dimming is never a lock", () => {
+    const onSelect = vi.fn()
+    const { container, getByRole } = renderRow({ unassigned: true, onSelect })
+    fireEvent.click(getByRole("button", { name: LONG_NAME }))
+    fireEvent.keyDown(row(container), { key: "Enter" })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("says WHY the row is dim, and that it can still be opened", () => {
+    // Dimming carries nothing to a screen reader, so the row states it in text
+    // — and states the second half too, or it is heard as a locked file.
+    const { container } = renderRow({ unassigned: true })
+    const note = container.querySelector(".sr-only")
+    expect(note?.textContent).toContain("Not assigned to you")
+    expect(note?.textContent).toContain("still open it")
+    expect(renderRow().container.querySelector(".sr-only")).toBeNull()
+  })
+})

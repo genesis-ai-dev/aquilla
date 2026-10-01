@@ -111,6 +111,7 @@
     "deploy:context": "npm run build:context && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
     "prepare": "husky",
     "seams:eval": "tsx scripts/seam-eval.ts",
+    "tags:eval": "tsx scripts/passage-tags-eval.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",
@@ -237,7 +238,7 @@
     "typescript-eslint": "8.65.0",
     "vite": "^8.2.0",
     "vite-plugin-node-polyfills": "^0.28.0",
-    "vitest": "^4.1.10",
+    "vitest": "^5.0.1",
     "webdriverio": "^9.31.9",
     "wrangler": "^4.130.0",
     "yaml": "^2.9.0"

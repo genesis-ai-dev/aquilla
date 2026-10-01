@@ -273,7 +273,7 @@ CREATE TABLE project_settings (
     -- default. Projected out of the blob for the same reason as the columns
     -- above: the agent read path must not load multiple MB to answer it.
     agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED,
-    -- 0118: the v3 agent-mode react switch, projected for the 5-minute react
+    -- 0123: the v3 agent-mode react switch, projected for the 5-minute react
     -- watcher — it asks "which projects have react on?" across the whole table
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
@@ -1051,6 +1051,10 @@ CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang
 -- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
 CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
+-- AQU-1464: newest target edit in ONE lane across every file, for the archive
+-- confirmation's "last change in this lane" lookup. The two indexes above lead
+-- with file_id, so neither serves a project+lane scan (migration 0117).
+CREATE INDEX idx_cells_lane_last_edit ON cells(project_id, lane_id, last_edit_at DESC) WHERE side = 'target';
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);
@@ -1952,7 +1956,7 @@ CREATE TABLE IF NOT EXISTS rule_applicability (
 );
 CREATE INDEX IF NOT EXISTS rule_applicability_rule ON rule_applicability (rule_id);
 
--- Durable team channel (0117_team_channel.sql; AQU-1049 port to the v2
+-- Durable team channel (0122_team_channel.sql; AQU-1049 port to the v2
 -- one-channel model). One shared, project-scoped history: the Coordinator
 -- narrates in the main channel (thread_id IS NULL) and every delegated piece
 -- of work owns a thread. Humans and agent personas post into the same table.

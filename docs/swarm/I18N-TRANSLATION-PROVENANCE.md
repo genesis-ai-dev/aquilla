@@ -2,6 +2,22 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `fr` (French) — AQU-1432, 2026-09-25
+>
+> Machine-translated by Claude Sonnet agents from the full `pnpm i18n:todo` packet (6,446
+> leaves, 5,660 of 5,810 keys written; the rest are formats, product names, cognates and
+> placeholder-only strings that `parseTranslatedCatalog` skips as identical to English). **No
+> French speaker has read it.** The brief asked for international (not Québécois) French,
+> *vous*, infinitive buttons, French typography, and a fixed glossary (cell → cellule, lane →
+> piste, changeset → ensemble de modifications, termbase → base terminologique,
+> back-translation → rétrotraduction). Mechanical checks: 0 placeholder or tag drift and 0
+> missing leaves after merge. Hand fixes: `org.projectOverview.deadlineDatePlaceholder` stays
+> English because `DatePicker` only parses the en-US shape (the same trap as
+> `common.datePlaceholder`), and ten short labels were tightened to fit their length hints.
+> About 170 strings still exceed a soft length hint, mostly long descriptions. A native
+> review should check these first: role names (réviseur / responsable de projet / mainteneur),
+> the audio voice-tone adjectives, and the milestone gender agreement ("Diapositive précédente").
+
 > ## Correction — the `mfa` catalog was not Patani Malay (AQU-1306)
 >
 > Everything below about `mfa` describes a catalog that **was standard Malay, not Patani

@@ -39,7 +39,7 @@ import { CONVERSATION_PARAM, isRunThreadId, TEAM_CHAT_CONVERSATION } from "@/lib
 import { readAgentWorkspaceView, type AgentWorkspaceView } from "@/lib/agent/workspace-location"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { AgentChatOptions } from "./AgentChatOptions"
-import type { AgentWorkbenchCell } from "./AgentContextPane"
+import type { AgentTargetCommitOutcome, AgentWorkbenchCell } from "./AgentContextPane"
 import { AgentDocumentContext } from "./AgentDocumentContext"
 import { TeamThreadsView } from "./TeamThreadsView"
 import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
@@ -89,7 +89,10 @@ export interface AgentWorkbenchProps {
     scopeAvailable?: boolean
     loading?: boolean
     editable?: boolean
-    onCommitTarget?: (cellId: string, snapshot: TranslatedEditorCommit) => void | Promise<void>
+    onCommitTarget?: (
+      cellId: string,
+      snapshot: TranslatedEditorCommit,
+    ) => AgentTargetCommitOutcome | void | Promise<AgentTargetCommitOutcome | void>
     isAnonymous?: boolean
     isCompletionConfigured?: boolean
     isCompletionAvailable?: boolean
@@ -103,6 +106,9 @@ export interface AgentWorkbenchProps {
     validationRequirement?: number
     canValidate?: boolean
     onValidationChange?: (cellId: string, validated: boolean) => unknown
+    /** AQU-1497: a settled human validation on the Target pane — the workspace
+     *  fills the file's repeated source segments from it (AQU-1391). */
+    onCellValidated?: (cellId: string) => unknown
     cellLockHolders?: ReadonlyMap<string, string>
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void

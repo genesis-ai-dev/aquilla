@@ -44,7 +44,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
-import { isBiblicaScriptureCell } from "@/lib/biblica/cell-kind"
+import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
@@ -54,7 +54,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
-import { ExamplePanel } from "./ExamplePanel"
+import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
@@ -81,7 +81,7 @@ import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-c
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
-import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
@@ -91,10 +91,12 @@ import {
   railFocusOwnerOnFocus,
 } from "@/lib/editor/cell-rail-pin"
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
+import { openActivationInputCapture, type ActivationInputCapture } from "@/lib/editor/activation-input-capture"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { displayFieldLabel, displayFieldValue, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange } from "@/lib/audio/timings"
+import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -155,6 +157,7 @@ import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
 import { compareAddresses, parseRef } from "@/lib/pericope/sections"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
+import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -808,6 +811,10 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
+  /** AQU-1393: resolves an example pair's origin (file name, and whether the
+   *  file is an imported TMX) for the Examples panel. Omit to render the panel
+   *  without origin lines. */
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   /** AQU-913: forget this cell's inline AI failures — the draft error, the
    *  back-translation error, and the per-cell "error" status behind them.
    *  Called when focus leaves the cell's row so a failure stops following the
@@ -971,7 +978,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors, previews, onClearCellErrors,
+  completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
   onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
@@ -2341,7 +2348,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // different jobs, so a verse row says so — the accent and badge are
           // the same shape the untimed rows use, and the reference pill already
           // carries the verse ("GEN 1:1") from the cell's globalReferences.
-          const isScriptureRow = isBiblicaScriptureCell(cell.metadata)
+          const isScriptureRow = isPartnerScriptureCell(cell.metadata)
           // p1-paragraph-ui-wiring (Task 3): only paragraph-start cells carry
           // group info; every other row gets undefined so its rail button
           // gate (paragraphGroupSize !== undefined) resolves false.
@@ -2488,6 +2495,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
           cellExamples={examples.get(cell.id) ?? EMPTY_EXAMPLES}
+          exampleOriginFor={exampleOriginFor}
           completingState={completing.get(cell.id)}
           cellError={errors.get(cell.id)}
           previewText={previews.get(cell.id)}
@@ -3526,6 +3534,8 @@ interface MemoizedRowProps {
    *  row even when only one cell's entry changed. Same reasoning for
    *  `completingState`, `cellError`, and `previewText` below. */
   cellExamples: ScoredPair[]
+  /** AQU-1393: resolves an example pair's file name / TMX flag for the panel. */
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   completingState?: string
   cellError?: string
   previewText?: string
@@ -3657,7 +3667,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, cellExamples, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3801,6 +3811,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         completionPreview={completionPreview}
         loadingPhase={loadingPhase}
         cellExamples={cellExamples}
+        exampleOriginFor={exampleOriginFor}
         highlights={highlights}
         error={error}
         healthRibbonPoint={healthRibbonPoint}
@@ -3962,6 +3973,7 @@ interface EditorRowProps {
    *  placeholder copy ("Looking up examples…" vs "Generating…"). */
   loadingPhase: "searching" | "generating" | null
   cellExamples: ScoredPair[]
+  exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
   healthRibbonPoint: HealthRibbonPoint
@@ -4900,7 +4912,7 @@ function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
-  cellExamples, highlights, error, healthRibbonPoint,
+  cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
@@ -4938,6 +4950,13 @@ function EditorRow({
 }: EditorRowProps) {
   const t = useT()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
+  // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
+  // speech-bubble badge below already say "this row has an open comment" once
+  // you are looking at the row; neither survives a scroll past at reading
+  // speed, which is how a consultant works through a file of notes. When this
+  // preference is on, the same rows also carry a solid leading-edge accent.
+  // Per-row subscription, like the media-cursor and presence hooks above it.
+  const highlightUnresolvedComments = useUnresolvedCommentHighlight()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -5120,6 +5139,18 @@ function EditorRow({
   // never loses the first character(s). See requestTargetEdit / handleGridRowKeyDown.
   const awaitingEditorFocusRef = useRef(false)
   const pendingActivationInputRef = useRef<string>("")
+  // AQU-1393: an exact-match target the Examples panel asked to insert while the
+  // editor was still a read view. Drained by TranslatedEditor on focus, the same
+  // way the buffered keystrokes above are.
+  const pendingExampleInsertRef = useRef<string | null>(null)
+  // AQU-1333: keydown is only one of the ways text enters a cell. CDP
+  // `Input.insertText` (browser agents, Playwright `fill`), IME composition, OS
+  // dictation and paste deliver text with no keydown at all, and need an
+  // *editing host* to fire on — which the plain row wrapper is not. So for the
+  // length of the activation window the row becomes one, with the caret parked
+  // in this throwaway span so nothing can splice into React-owned row DOM.
+  const activationCaretHostRef = useRef<HTMLSpanElement | null>(null)
+  const activationCaptureRef = useRef<ActivationInputCapture | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -5503,7 +5534,7 @@ function EditorRow({
   // We emit a `target.cell.commit` event chained off cell.targetEventId
   // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
   // the parent to revalidate useCells so the projection lands.
-  const handleEditorCommit = useCallback(async ({ value, valueHtml }: { value: string; valueHtml: string }): Promise<boolean> => {
+  const handleEditorCommit = useCallback(async ({ value, valueHtml, tmInsert }: { value: string; valueHtml: string; tmInsert?: true }): Promise<boolean> => {
     if (!editable) return false
     if (!project.id) return false
     // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
@@ -5582,7 +5613,12 @@ function EditorRow({
       // server's self-check reads cells.last_editor, which isn't committed yet
       // for this same-action commit+validate, so it can't catch this; the gate
       // has to be here. Default/undefined = allowed, preserving codex behavior.
-      if (shouldAutoValidateHumanEdit({
+      // AQU-1393: an exact-match Insert is the one commit through here that is
+      // not the translator's own wording — it is another cell's translation
+      // dropped in whole. It still lands as an ordinary edit (and so clears any
+      // prior validators), but it stays unvalidated until the translator
+      // validates it or edits it; that later edit commits without the flag.
+      if (!tmInsert && shouldAutoValidateHumanEdit({
         value,
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
@@ -5958,6 +5994,14 @@ function EditorRow({
     }
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
 
+  // AQU-1333: close the activation window — always through here, so the row can
+  // never be left as a stray editing host competing with the real editor.
+  const closeActivationCapture = useCallback(() => {
+    awaitingEditorFocusRef.current = false
+    activationCaptureRef.current?.close()
+    activationCaptureRef.current = null
+  }, [])
+
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
@@ -5969,8 +6013,43 @@ function EditorRow({
     awaitingEditorFocusRef.current = true
     pendingActivationInputRef.current = ""
     rowRef.current?.focus({ preventScroll: true })
+    // AQU-1333: and catch the text that never arrives as a keydown — agent
+    // insertText, IME, dictation, paste — into the same buffer, so the editor's
+    // existing replay-on-focus drains all of it together and in order.
+    activationCaptureRef.current?.close()
+    activationCaptureRef.current = rowRef.current && activationCaretHostRef.current
+      ? openActivationInputCapture({
+        host: rowRef.current,
+        caretHost: activationCaretHostRef.current,
+        onText: (text) => { pendingActivationInputRef.current += text },
+      })
+      : null
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  // A row unmounting mid-activation (virtualisation, lane switch, file change)
+  // would otherwise leave its listeners and `contenteditable` behind.
+  useEffect(() => closeActivationCapture, [closeActivationCapture])
+
+  /**
+   * AQU-1393: put an exact match's existing translation into this cell's target.
+   *
+   * It fills the EDITOR rather than committing behind it, so the insert is the
+   * same write the translator could have typed: they can edit or undo it before
+   * it settles. Unlike typing it carries no validation of its own — the editor
+   * tags the commit `tmInsert` and `handleEditorCommit` skips auto-validation
+   * for it. When the row is still a read view the text is queued and the editor
+   * is opened — TranslatedEditor drains the queue when it focuses.
+   */
+  const handleInsertExampleTarget = useCallback((target: string) => {
+    if (!editable || isLoading || lockHolderLabel || idmlConfiguration) return
+    if (isEditorActive) {
+      translatedEditorRef.current?.replacePlainText(target)
+      return
+    }
+    pendingExampleInsertRef.current = target
+    requestTargetEdit(null)
+  }, [editable, idmlConfiguration, isEditorActive, isLoading, lockHolderLabel, requestTargetEdit])
 
   const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
     onTargetPresenceSelection?.(cell.id, selection)
@@ -5980,17 +6059,22 @@ function EditorRow({
     editorFocusedRef.current = true
     // AQU-746: the editor now owns the caret — stop buffering; TranslatedEditor
     // replays whatever was captured during activation (see its onFocus).
-    awaitingEditorFocusRef.current = false
+    // AQU-1333 closes the row's editing host in the same breath, so the two
+    // never both look editable.
+    closeActivationCapture()
     onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
-  }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
+  }, [cell.id, closeActivationCapture, onActivateEditor, onClaimCell, onAckRemoteChange])
 
   const handleEditorBlurOuter = useCallback(() => {
     // AQU-746: activation was abandoned without the editor ever focusing — drop
     // any buffered keys so they can't leak into a later, unrelated activation.
-    awaitingEditorFocusRef.current = false
+    closeActivationCapture()
     pendingActivationInputRef.current = ""
+    // Same reasoning for the pending TM insert (AQU-1393): an abandoned
+    // activation must not leave a stale target queued for the next one.
+    pendingExampleInsertRef.current = null
     if (editorFocusedRef.current) {
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
@@ -5999,7 +6083,7 @@ function EditorRow({
     // already validated is settled now.
     settleOwedRepetitions()
     onDeactivateEditor(cell.id)
-  }, [cell.id, onDeactivateEditor, onReleaseCell, settleOwedRepetitions])
+  }, [cell.id, closeActivationCapture, onDeactivateEditor, onReleaseCell, settleOwedRepetitions])
 
   useEffect(() => {
     if (!isEditorActive) return
@@ -6174,20 +6258,29 @@ function EditorRow({
     () => !targetHasRichFormatting && segmentUsfmForDisplay(visibleTranslated ?? "") === null,
     [targetHasRichFormatting, visibleTranslated],
   )
+  // Play All sounds a queue element, not this row's player. While it is on
+  // this line, follow that clock. A take's clock already matches word timings;
+  // a shared source clip reports file time, so subtract the section start.
+  const queuePlayhead = useQueueCellPlayhead(cell.id)
+  const queueWordTime = queuePlayhead == null
+    ? null
+    : queueClockIsFileTime(cell) && typeof cell.startTime === "number" && Number.isFinite(cell.startTime)
+      ? queuePlayhead - cell.startTime
+      : queuePlayhead
+  const highlightTime = audioController.isPlaying
+    ? audioController.currentTime
+    : generatedVoiceController.isPlaying
+      ? generatedVoiceController.currentTime
+      : queueWordTime
+  const highlightTimings = audioController.isPlaying || (queueWordTime != null && hasAudio)
+    ? cellAudioTimings
+    : generatedVoiceController.isPlaying || queueWordTime != null
+      ? generatedVoiceTimings
+      : cellAudioTimings
   const karaokeReadRange = useMemo(() => {
-    if (!targetIsPlainText) return null
-    if (audioController.isPlaying) {
-      return activeWordRange(cellAudioTimings, audioController.currentTime)
-    }
-    if (generatedVoiceController.isPlaying) {
-      return activeWordRange(generatedVoiceTimings, generatedVoiceController.currentTime)
-    }
-    return null
-  }, [
-    targetIsPlainText, cellAudioTimings, generatedVoiceTimings,
-    audioController.isPlaying, audioController.currentTime,
-    generatedVoiceController.isPlaying, generatedVoiceController.currentTime,
-  ])
+    if (!targetIsPlainText || highlightTime == null) return null
+    return activeWordRange(highlightTimings, highlightTime)
+  }, [targetIsPlainText, highlightTimings, highlightTime])
 
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
@@ -6785,6 +6878,14 @@ function EditorRow({
         // reason as the line above: the ring it draws is the same gold as
         // multi-select's, so a class check cannot tell the two apart.
         data-queue-row={isQueueRow ? "true" : undefined}
+        // AQU-1259: the reviewer-scanning accent is on this row. Exposed as an
+        // attribute for the same reason as the two above — the accent is one
+        // more blue mark on a row that can already carry AQU-599's blue ring,
+        // so a class check could not tell the opt-in view from the always-on
+        // indicator.
+        data-unresolved-comments={
+          highlightUnresolvedComments && openCommentCount > 0 ? "true" : undefined
+        }
         // AQU-1422: a parked row only ever REACHES the table when its source
         // editor has "Show hidden cells" on — the display list drops it for
         // everyone else — so this attribute doubles as the assertion that the
@@ -6816,6 +6917,15 @@ function EditorRow({
           isMultiSelected && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Open-comments accent — a soft inset ring.
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
+          // AQU-1259: the opt-in scanning accent — a solid bar down the row's
+          // leading edge. A pseudo-element rather than another ring or a tint:
+          // a row can already be multi-selected, the media cursor, the queue
+          // row or mid-synth, and every one of those states owns the ring and
+          // the background. Adding a fifth competitor there would make the
+          // comment accent the one that loses on exactly the rows a reviewer is
+          // working. `start-0` keeps it on the reading edge in RTL.
+          highlightUnresolvedComments && openCommentCount > 0 &&
+            "before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:bg-blue-500 before:content-['']",
           // Timeline cursor (media lens): sky ring, same language as the
           // selected chip's ring.
           isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",
@@ -6851,6 +6961,17 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
+        {/* AQU-1333: caret park for the activation window. Inert and invisible
+            the rest of the time — it only becomes editable because the row it
+            sits in is made an editing host for those ~300 ms, and it exists so
+            text the browser inserts before we can cancel it (an uncancelable
+            IME composition) lands here instead of in row content React owns. */}
+        <span
+          ref={activationCaretHostRef}
+          data-activation-caret-host
+          aria-hidden="true"
+          className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
+        />
         {healthCalculationsEnabled && (
           <HealthRibbon
             point={healthRibbonPoint}
@@ -7022,6 +7143,7 @@ function EditorRow({
               voices={audioLens.voices}
               session={audioLens.session}
               username={audioLens.username}
+              controller={hasAudio ? audioController : hasGeneratedVoice ? generatedVoiceController : undefined}
               targetLang={activeLane || undefined}
               onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
               onAfterGenerate={audioLens.onAfterGenerate}
@@ -7252,7 +7374,21 @@ function EditorRow({
               />
             )}
             {cellExamples.length > 0 && (
-              <ExamplePanel examples={cellExamples} />
+              <ExamplePanel
+                examples={cellExamples}
+                // AQU-1393: the source the examples were retrieved FOR — what the
+                // match percentages and the word diff are measured against.
+                currentSource={displayedSourceText(cell, sourceDraft?.value)}
+                originFor={exampleOriginFor}
+                // Not offered at all when the row can't take the write — a
+                // button that quietly no-ops is worse than no button
+                // (09-design-and-ux "never disable silently").
+                onInsert={
+                  editable && !idmlConfiguration && !lockHolderLabel
+                    ? handleInsertExampleTarget
+                    : undefined
+                }
+              />
             )}
             {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
                 timecode, and that asymmetry with the lane above is deliberate:
@@ -7372,6 +7508,7 @@ function EditorRow({
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
                     pendingInputRef={pendingActivationInputRef}
+                    pendingReplaceRef={pendingExampleInsertRef}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
                     onSelectionChange={handleTargetPresenceSelection}
@@ -7391,8 +7528,8 @@ function EditorRow({
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
-                    audioTimings={cellAudioTimings}
-                    audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                    audioTimings={highlightTimings}
+                    audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
@@ -7433,8 +7570,24 @@ function EditorRow({
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
                     preserveWhitespace={Boolean(idmlConfiguration)}
+                    onMouseDown={(event) => {
+                      if (!targetIsPlainText) return
+                      const generatedPlaying = generatedVoiceController.isPlaying
+                      const timings = generatedPlaying ? generatedVoiceTimings : cellAudioTimings
+                      const seek = generatedPlaying
+                        ? generatedVoiceController.seek
+                        : hasAudio ? audioController.seek : undefined
+                      if (!seek) return
+                      const timing = timingFromClick(timings, targetReadContentRef.current, event.nativeEvent)
+                      if (!timing) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      seek(timing.t0)
+                    }}
                     onClick={(event) => {
                       event.stopPropagation()
+                      // Option/Alt+click seeks (onMouseDown); don't also enter edit.
+                      if (isWordSeekClick(event)) return
                       requestTargetEdit(idmlConfiguration
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
@@ -8133,6 +8286,7 @@ function EditorRow({
                     <CellTakeBlock
                       project={project}
                       owner={cell}
+                      controller={audioController}
                       timings={cellAudioTimings}
                       cellText={visibleTranslated}
                       editable={editable}
@@ -8182,6 +8336,7 @@ function EditorRow({
                       project={project}
                       owner={cell}
                       audioId={cell.selectedGeneratedVoiceAudioId}
+                      controller={generatedVoiceController}
                       timings={generatedVoiceTimings}
                       cellText={visibleTranslated}
                       editable={editable}

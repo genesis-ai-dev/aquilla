@@ -3202,7 +3202,6 @@ export const id: Catalog = {
   "onboarding.checklist.aiProvider.customDescription": "Swakelola, lokal, atau server apa pun yang kompatibel dengan OpenAI.",
   "onboarding.checklist.aiProvider.saveButton": "Simpan penyedia",
   "onboarding.checklist.aiModels.whisper.label": "Transkripsi Whisper",
-  "onboarding.checklist.aiModels.whisper.blurb": "Pewaktuan tingkat kata untuk audio yang direkam. Berjalan lokal; tanpa jaringan setelah diunduh.",
   "onboarding.checklist.aiModels.mms.label": "Suara multibahasa MMS",
   "onboarding.checklist.aiModels.mms.blurb": "Suara lokal untuk banyak bahasa — satu model bahasa per unduhan.",
   "onboarding.checklist.aiModels.title": "Atur suara & transkripsi",

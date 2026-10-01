@@ -53,7 +53,7 @@ import {
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
-import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
+import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
@@ -591,11 +591,17 @@ orgs.post("/:orgId/groups", zValidator("json", groupBody), async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   const { name, description } = c.req.valid("json")
   const group = await createGroup(c.env, orgId, name, description ?? null, user.id)
   if (!group) return c.json({ error: "a team with that name already exists" }, 409)
+  await auditMembershipChange(c.env, user, {
+    action: "team.create",
+    where: { scope: "team", orgId, groupId: group.id },
+    roleBefore: null,
+    roleAfter: null,
+  })
   return c.json(group)
 })
 
@@ -609,12 +615,18 @@ orgs.patch("/:orgId/groups/:groupId", zValidator("json", groupPatchBody), async 
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { name, description } = c.req.valid("json")
   const updated = await updateGroup(c.env, orgId, groupId, name, description)
   if (!updated) return c.json({ error: "a team with that name already exists" }, 409)
+  await auditMembershipChange(c.env, user, {
+    action: "team.update",
+    where: { scope: "team", orgId, groupId },
+    roleBefore: null,
+    roleAfter: null,
+  })
   return c.json(updated)
 })
 
@@ -623,10 +635,16 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await deleteGroup(c.env, orgId, groupId)
+  await auditMembershipChange(c.env, user, {
+    action: "team.delete",
+    where: { scope: "team", orgId, groupId },
+    roleBefore: null,
+    roleAfter: null,
+  })
   return c.json({ removed: true })
 })
 
@@ -657,6 +675,7 @@ async function grantGroupMemberOne(
   groupId: number,
   addedBy: number,
   username: string,
+  actor: AuthUser,
 ): Promise<GroupGrantOutcome> {
   const target = await lookupUserByUsername(env, username)
   if (!target) {
@@ -666,6 +685,13 @@ async function grantGroupMemberOne(
   if (result === "not-org-member") {
     return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
   }
+  await auditMembershipChange(env, actor, {
+    action: "team.member.add",
+    where: { scope: "team", orgId, groupId },
+    target: { id: target.id, username: target.username },
+    roleBefore: null,
+    roleAfter: null,
+  })
   return { ok: true, userId: target.id, username: target.username }
 }
 
@@ -674,8 +700,8 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
 
   const body = c.req.valid("json")
@@ -692,7 +718,7 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
       { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
     > = []
     for (const username of names) {
-      const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, username)
+      const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, username, user)
       results.push(
         outcome.ok
           ? { username, ok: true }
@@ -702,7 +728,7 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
     return c.json({ results })
   }
 
-  const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, body.username)
+  const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, body.username, user)
   if (!outcome.ok) {
     return c.json({ error: outcome.message }, GROUP_GRANT_ERROR_STATUS[outcome.code] ?? 400)
   }
@@ -715,10 +741,17 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
   const groupId = parseInt(c.req.param("groupId"), 10)
   const targetUserId = parseInt(c.req.param("userId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await removeGroupMember(c.env, groupId, targetUserId)
+  await auditMembershipChange(c.env, user, {
+    action: "team.member.remove",
+    where: { scope: "team", orgId, groupId },
+    target: { id: targetUserId },
+    roleBefore: null,
+    roleAfter: null,
+  })
   return c.json({ removed: true })
 })
 
@@ -735,12 +768,21 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   const targetUserId = parseInt(c.req.param("userId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const orgRole = (await getEffectiveOrgRole(c.env, orgId, user)) ?? 0
+  // AQU-1322: orgRole is the GENUINE org_members role. Admin power (700) is
+  // used only when neither genuine role passes the gate and the admin is
+  // elevated, so a genuine maintainer's caps stay at their own level.
+  let orgRole = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   const teamRole = (await getTeamMemberRole(c.env, groupId, user.id)) ?? 0
-  const callerLevel = Math.max(orgRole, teamRole)
   if (orgRole < ROLE.MAINTAINER && teamRole < ROLE.MAINTAINER) {
-    return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
+    if (!isPlatformAdminEmail(c.env, user.email)) {
+      return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
+    }
+    if (!(await hasActiveElevation(c))) {
+      return c.json({ error: TEAM_ELEVATION_ERROR }, 403)
+    }
+    orgRole = 700
   }
+  const callerLevel = Math.max(orgRole, teamRole)
   const { roleLevel } = c.req.valid("json")
   if (roleLevel != null && !TEAM_SCOPE_ROLES.includes(roleLevel)) {
     return c.json({ error: "team role must be maintainer, project lead, viewer, or none" }, 400)
@@ -758,6 +800,13 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
     return c.json({ error: "cannot change the team role of someone at or above you" }, 403)
   }
   await setTeamMemberRole(c.env, groupId, targetUserId, roleLevel)
+  await auditMembershipChange(c.env, user, {
+    action: "team.member.role",
+    where: { scope: "team", orgId, groupId },
+    target: { id: targetUserId },
+    roleBefore: current,
+    roleAfter: roleLevel,
+  })
   return c.json({ userId: targetUserId, teamRoleLevel: roleLevel })
 })
 
@@ -809,20 +858,46 @@ async function requireGenuineOwnerOrElevatedAdmin(
   c: Context<AuthHonoEnv>,
   orgId: number,
 ): Promise<Response | null> {
+  const role = await resolveOrgWriteRole(
+    c,
+    orgId,
+    ROLE.OWNER,
+    "only org owners can manage membership",
+    "elevation required to manage membership on an org you do not belong to",
+  )
+  return typeof role === "number" ? null : role
+}
+
+// AQU-1322: the same rule for every other org governance write (teams, team
+// members, team-to-project grants, invites). Admin power applies only while
+// elevated. A genuine org_members role that meets `minRole` proceeds with that
+// genuine role, and the handler's later caps (a grant above the caller's own
+// level) use it instead of the admin's 700. Otherwise a platform admin needs
+// an active elevation and then proceeds as 700; anyone else gets `deniedError`.
+async function resolveOrgWriteRole(
+  c: Context<AuthHonoEnv>,
+  orgId: number,
+  minRole: number,
+  deniedError: string,
+  elevationError: string,
+): Promise<Response | number> {
   const user = c.get("user")
-  const membership = await getOrgMemberRole(c.env, orgId, user.id)
-  if ((membership ?? 0) >= 700) return null
+  const membership = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
+  if (membership >= minRole) return membership
   if (!isPlatformAdminEmail(c.env, user.email)) {
-    return c.json({ error: "only org owners can manage membership" }, 403)
+    return c.json({ error: deniedError }, 403)
   }
   if (!(await hasActiveElevation(c))) {
-    return c.json(
-      { error: "elevation required to manage membership on an org you do not belong to" },
-      403,
-    )
+    return c.json({ error: elevationError }, 403)
   }
-  return null
+  return Math.max(membership, 700)
 }
+
+const TEAM_ELEVATION_ERROR = "elevation required to manage teams with platform-admin access"
+const INVITE_ELEVATION_ERROR = "elevation required to manage invites with platform-admin access"
+
+const resolveTeamWriteRole = (c: Context<AuthHonoEnv>, orgId: number) =>
+  resolveOrgWriteRole(c, orgId, ROLE.MAINTAINER, "org role >= maintainer required", TEAM_ELEVATION_ERROR)
 
 /**
  * Evaluate + apply a single org-member grant. Checks are per target so a batch
@@ -954,10 +1029,14 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.OWNER) {
-    return c.json({ error: "only org owners can invite members" }, 403)
-  }
+  const callerRole = await resolveOrgWriteRole(
+    c,
+    orgId,
+    ROLE.OWNER,
+    "only org owners can invite members",
+    INVITE_ELEVATION_ERROR,
+  )
+  if (typeof callerRole !== "number") return callerRole
 
   const { role, email, expires_in_days } = c.req.valid("json")
   let grantedRole = role ?? ROLE.CONTRIBUTOR
@@ -984,6 +1063,13 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
     console.error("[org-invites] create failed:", err)
     return c.json({ error: "Failed to create invite" }, 500)
   }
+  await auditMembershipChange(c.env, user, {
+    action: "org.invite.create",
+    where: { scope: "org", orgId },
+    roleBefore: null,
+    roleAfter: grantedRole,
+    email: email ?? null,
+  })
 
   if (email) {
     const baseUrl = c.env.BASE_URL || "https://aquilla.app"
@@ -1017,14 +1103,17 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
 })
 
 orgs.get("/:orgId/invites", async (c) => {
-  const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.OWNER) {
-    return c.json({ error: "only org owners can view invites" }, 403)
-  }
+  const callerRole = await resolveOrgWriteRole(
+    c,
+    orgId,
+    ROLE.OWNER,
+    "only org owners can view invites",
+    INVITE_ELEVATION_ERROR,
+  )
+  if (typeof callerRole !== "number") return callerRole
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, role_level, created_at, expires_at, email
@@ -1060,16 +1149,36 @@ orgs.delete("/:orgId/invites/:token", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const token = c.req.param("token")
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.OWNER) {
-    return c.json({ error: "only org owners can revoke invites" }, 403)
-  }
+  const callerRole = await resolveOrgWriteRole(
+    c,
+    orgId,
+    ROLE.OWNER,
+    "only org owners can revoke invites",
+    INVITE_ELEVATION_ERROR,
+  )
+  if (typeof callerRole !== "number") return callerRole
 
+  const invite = isAdminActor(c.env, user)
+    ? await c.env.AQUILLA_PG.prepare(
+        "SELECT role_level, email FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL",
+      )
+        .bind(token, orgId)
+        .first<{ role_level: number; email: string | null }>()
+    : null
   await c.env.AQUILLA_PG.prepare(
     `DELETE FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL`,
   )
     .bind(token, orgId)
     .run()
+  if (invite) {
+    await auditMembershipChange(c.env, user, {
+      action: "org.invite.revoke",
+      where: { scope: "org", orgId },
+      roleBefore: Number(invite.role_level),
+      roleAfter: null,
+      email: invite.email,
+    })
+  }
   return c.json({ ok: true })
 })
 
@@ -1225,14 +1334,17 @@ orgs.get("/:orgId/members/:userId/projects", async (c) => {
  * rows (no createdBy) as if they were project_invites rows.
  */
 orgs.get("/:orgId/project-invites", async (c) => {
-  const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < 700) {
-    return c.json({ error: "only org owners can list pending invites" }, 403)
-  }
+  const callerRole = await resolveOrgWriteRole(
+    c,
+    orgId,
+    700,
+    "only org owners can list pending invites",
+    INVITE_ELEVATION_ERROR,
+  )
+  if (typeof callerRole !== "number") return callerRole
 
   const invites = await listPendingInvitesInOrg(c.env, orgId)
   return c.json({
@@ -1260,14 +1372,21 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { projectId, roleLevel } = c.req.valid("json")
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
+  await auditMembershipChange(c.env, user, {
+    action: "team.project.attach",
+    where: { scope: "team", orgId, groupId },
+    projectId,
+    roleBefore: null,
+    roleAfter: roleLevel,
+  })
   return c.json({ projectId, roleLevel })
 })
 
@@ -1277,13 +1396,20 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   const groupId = parseInt(c.req.param("groupId"), 10)
   const projectId = c.req.param("projectId")
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { roleLevel } = c.req.valid("json")
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
   const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
   if (!ok) return c.json({ error: "attachment not found" }, 404)
+  await auditMembershipChange(c.env, user, {
+    action: "team.project.role",
+    where: { scope: "team", orgId, groupId },
+    projectId,
+    roleBefore: null,
+    roleAfter: roleLevel,
+  })
   return c.json({ projectId, roleLevel })
 })
 
@@ -1293,10 +1419,17 @@ orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const groupId = parseInt(c.req.param("groupId"), 10)
   const projectId = c.req.param("projectId")
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
-  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const callerRole = await resolveTeamWriteRole(c, orgId)
+  if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await detachGroupProject(c.env, groupId, projectId)
+  await auditMembershipChange(c.env, user, {
+    action: "team.project.detach",
+    where: { scope: "team", orgId, groupId },
+    projectId,
+    roleBefore: null,
+    roleAfter: null,
+  })
   return c.json({ removed: true })
 })
 

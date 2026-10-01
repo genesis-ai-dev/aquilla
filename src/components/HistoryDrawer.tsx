@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, Sparkles } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -12,6 +12,7 @@ import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { derivePostEditSeries, type HistoryPostEdit } from "@/lib/metrics/history-post-edit"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -44,6 +45,10 @@ interface EntryGroup {
   terminal: CellHistoryEntry
   // Original index in the full history array (for stable keys).
   startIndex: number
+  // Index of `terminal` in the full history array. The post-edit series is
+  // positional over that array, and the terminal is the entry this group
+  // actually renders, so this is how a group looks its own reading up.
+  terminalIndex: number
 }
 
 /**
@@ -61,8 +66,9 @@ function groupHistory(history: CellHistoryEntry[]): EntryGroup[] {
     if (last && isSameEditSession(last.entries[last.entries.length - 1], entry)) {
       last.entries.push(entry)
       last.terminal = entry
+      last.terminalIndex = i
     } else {
-      groups.push({ entries: [entry], terminal: entry, startIndex: i })
+      groups.push({ entries: [entry], terminal: entry, startIndex: i, terminalIndex: i })
     }
   }
   return groups
@@ -147,9 +153,17 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 
   // Prefer server + locally durable outbox history whenever either has an
   // entry. Fall back only for legacy cells without event-log history.
-  const history = enabled && d1History.length > 0
-    ? d1History
-    : cell.history || []
+  // Memoised because the fallback branch builds a fresh `[]` on every render,
+  // which would defeat any downstream memo keyed on this list.
+  const history = useMemo(
+    () => (enabled && d1History.length > 0 ? d1History : cell.history || []),
+    [enabled, d1History, cell.history],
+  )
+
+  // AQU-1321: how much of each AI draft survived the revision under it. Memoised
+  // because it runs a Levenshtein per draft/revision pair, unlike the cheap
+  // string comparisons grouping does.
+  const postEditSeries = useMemo(() => derivePostEditSeries(history), [history])
 
   const groups = groupHistory(history).slice().reverse() // most recent group first
   const hiddenCount = history.length - groups.length
@@ -248,6 +262,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                     key={group.terminal.eventId ?? `${group.terminal.timestamp}-${group.startIndex}`}
                     group={group}
                     isCurrent={i === currentGroupIndex}
+                    postEdit={postEditSeries[group.terminalIndex] ?? null}
                     refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
                     onPromote={onPromote}
                   />
@@ -262,14 +277,32 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   )
 }
 
+/**
+ * Badge colour for a draft-survival share. The scale runs the same direction as
+ * the project AI-metrics panel's effort colours but is inverted relative to it:
+ * that panel colours edit *distance* (low is green), this badge states how much
+ * was *kept* (high is green). Same five bands so the two surfaces agree about
+ * where "light" stops and "heavy" starts.
+ */
+function keptColor(keptFraction: number): string {
+  if (keptFraction >= 0.9) return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
+  if (keptFraction >= 0.7) return "bg-lime-100 text-lime-700 dark:bg-lime-950 dark:text-lime-400"
+  if (keptFraction >= 0.4) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-400"
+  if (keptFraction >= 0.15) return "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400"
+  return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+}
+
 function GroupItem({
   group,
   isCurrent,
+  postEdit,
   refForFirstStale,
   onPromote,
 }: {
   group: EntryGroup
   isCurrent: boolean
+  /** Post-editing distance for this entry, when it revised an AI draft. */
+  postEdit: HistoryPostEdit | null
   /** Ref attached to the first stale-branch group in the list, used by
    *  HistoryDrawer to scroll the user's attention to it when the drawer
    *  opens via the F6 banner. */
@@ -323,6 +356,23 @@ function GroupItem({
           {terminal.validated ? <Check className="h-3 w-3" /> : null}
           {terminal.validated ? t("editor.state.validated") : t("editor.state.unvalidated")}
         </span>
+        {postEdit && (
+          <AppTooltip content={t("editor.history.draftKeptTooltip")} className="max-w-xs">
+            <span
+              className={cn(
+                "flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium",
+                keptColor(postEdit.keptFraction),
+              )}
+            >
+              <Sparkles className="h-3 w-3" />
+              {postEdit.acceptedAsIs
+                ? t("editor.history.draftKeptAsIs")
+                : t("editor.history.draftKept", {
+                    pct: `${Math.round(postEdit.keptFraction * 100)}%`,
+                  })}
+            </span>
+          </AppTooltip>
+        )}
         {isStale && (
           <AppTooltip
             content={t("editor.history.staleTooltip")}

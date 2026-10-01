@@ -117,7 +117,9 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
       const result = await run("pnpm", ["exec", "wrangler", "preview", "base-config", "secret", "list",
         "--config", configPath, "--json"], { cwd, env: { ...env, WRANGLER_CI_OVERRIDE_NAME: PREVIEW_WORKERS[surface] } })
       const names = new Set(JSON.parse(result.stdout).map((secret) => secret.name))
-      const required = surface === "auth" ? ["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"] : ["SYNC_SECRET_KEY", "ADMIN_SECRET"]
+      // OPENROUTER_API_KEY backs hosted features (chat, hosted Whisper); without
+      // it they 503 on the preview and QA walks cannot exercise them.
+      const required = surface === "auth" ? ["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET", "OPENROUTER_API_KEY"] : ["SYNC_SECRET_KEY", "ADMIN_SECRET"]
       const missing = required.filter((key) => !names.has(key))
       if (missing.length) throw new Error(`${PREVIEW_WORKERS[surface]} Previews Base is missing: ${missing.join(", ")}`)
     }

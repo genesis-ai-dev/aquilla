@@ -43,6 +43,7 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
@@ -133,8 +134,8 @@ function effectiveSource(row: {
   medium: string | null
   transcription: string | null
 }): string {
-  if ((row.medium ?? "text") !== "media") return row.value
-  return row.transcription?.trim() ? row.transcription : ""
+  if ((row.medium ?? "text") !== "media") return stripTrailingBareMarkers(row.value)
+  return row.transcription?.trim() ? stripTrailingBareMarkers(row.transcription) : ""
 }
 
 /** Read a top-level settings key as a plain object, tolerating junk. */

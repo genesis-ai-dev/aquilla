@@ -28,6 +28,8 @@ interface RulesSettingsSectionProps {
   refreshProject?: () => void
   patchSettings?: UseProjectSettings["patch"]
   roleLevel?: number | null
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function RulesSettingsSection({
@@ -36,6 +38,8 @@ export function RulesSettingsSection({
   refreshProject,
   patchSettings: parentPatchSettings,
   roleLevel: parentRoleLevel,
+  activeLane,
+  onActiveLaneChange,
 }: RulesSettingsSectionProps) {
   const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
@@ -166,6 +170,8 @@ export function RulesSettingsSection({
         requestPromotion={requestPromotion}
         editingRuleId={editingRuleId}
         setEditingRuleId={setEditingRuleId}
+        activeLane={activeLane}
+        onActiveLaneChange={onActiveLaneChange}
       />
     </>
   )

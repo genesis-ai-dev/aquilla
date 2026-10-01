@@ -39,7 +39,6 @@ interface FileRowProps {
   onMove: () => void
   /** Opens the Export dialog for this file. */
   onExport?: () => void
-  onExportSource?: () => void
   onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
@@ -54,7 +53,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
+    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
     onApplySuggestion,
   } = props
   const t = useT()
@@ -91,7 +90,6 @@ export function FileRow(props: FileRowProps) {
       onRename={onStartRename}
       onMove={onMove}
       onExport={onExport}
-      onExportSource={onExportSource}
       onDownloadOriginal={onDownloadOriginal}
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}

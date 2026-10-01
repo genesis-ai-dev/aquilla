@@ -144,8 +144,48 @@
 > no RLS policy, unlike `cells`/`events`/`files`/etc. — recommended as a follow-up
 > migration, not a same-day fix.
 >
+> `docs/OPSEC-REVIEW-2026-09-24.md` covers the seventh pass on API security &
+> data exposure. OPS-39: comment `@mention` notifications
+> (`sync-worker/src/notification-email.ts`) resolved recipient emails from the
+> global `users` table with no project-membership check — unlike thread-participant
+> notifications, which were already scoped by `project_id` — so any contributor (or
+> an agent posting via the external Agent API) could `@mention` an arbitrary
+> registered username and leak a comment excerpt plus the project name to an
+> inbox with no role on the project. Fixed by filtering mentions through the same
+> grant-path union the write perimeter already uses (direct membership, creator,
+> org `MAINTAINER`+, group grant) before resolving emails.
+>
+> `docs/OPSEC-REVIEW-2026-09-28.md` takes up that follow-up and finds the reason it
+> should not be done yet, plus the live vulnerability that was resting on it.
+> **OPS-37**: the in-app agent's `sql` tool required only that the substring
+> `project_id = :project` appear *somewhere* in the query, so one correctly-scoped
+> table admitted an arbitrary unscoped one —
+> `SELECT i.token, i.role_level FROM cells c CROSS JOIN project_invites i WHERE
+> c.project_id = :project` returned **every live invite token on the platform**, each a
+> working project-access credential at a stated role (invite tokens are the one
+> credential table still stored in plaintext, OPS-26). Seven more shapes were
+> reproduced: deep-link tokens + PIN hashes, cross-project draft text, the
+> assignment graph, Living Memory, org settings (the unredacted vendor API keys of
+> D7), and `… OR 1 = 1` / `NOT (…)`, which satisfied the check while neutralising it
+> on *every* table. Fixed by replacing the blocklist with a 13-table allowlist and
+> rewriting every reference into a project-scoped derived table, so scoping is
+> structural rather than a property of the model's predicate. **OPS-38**: the guard's
+> own comments delegated that residual gap to the 0034 RLS backstop — which covers 21
+> of the schema's 55 project-scoped tables, was documented in `db/postgres/RLS.md` as
+> covering nine (one of them dropped 60 migrations earlier), and is probably not in
+> the request path at all: 19 project-scoped tables on ordinary request paths were
+> never granted to `app_runtime`, so nothing can be connecting as that role, and every
+> policy here is written `TO app_runtime`. `pnpm neon:status` could not have caught it
+> either — its grant parser did not understand 0034's 30-table `GRANT`, so it verified
+> no privilege for `cells`, `events`, `files` or `comments`. Now measured by
+> `scripts/rls-coverage.test.ts`, documented accurately, and with the one question the
+> repo cannot answer (which role Hyperdrive connects as, and whether it has
+> `BYPASSRLS`) written down as an operator action rather than assumed. This is V4a's
+> shape a third time, and worse: a second control was deliberately left thinner in
+> reliance on a control nobody had measured.
+>
 > `docs/OPSEC-REVIEW-2026-09-25.md` is the first pass scoped to **infrastructure &
-> deployment security** (the Friday slot). OPS-37: `tauri-release.yml` — the only
+> deployment security** (the Friday slot). OPS-40: `tauri-release.yml` — the only
 > pipeline that ships signed code straight to end users — triggered on any `v*` tag
 > push with no branch/reviewer gate, unlike the production web/worker deploy path,
 > which enters a `production` GitHub Environment restricted to `release/*/*/*`
@@ -158,7 +198,7 @@
 > holds the job at "Waiting" until a required reviewer approves it, once that
 > Environment's protection rules are configured in repo settings (out-of-band,
 > like every other GitHub-side control this series flags rather than assumes).
-> OPS-38: the Hetzner QA sandbox's containment (`scripts/hetzner-ci/
+> OPS-41: the Hetzner QA sandbox's containment (`scripts/hetzner-ci/
 > install-smart-host.sh`) firewalls PR-triggered containers with `iptables` only —
 > its own comment states the design goal as "reach public package/model endpoints,
 > not the host or LAN," but there was no `ip6tables` equivalent, so IPv6 was
@@ -197,8 +237,8 @@ Ranked by what it would cost us if it leaked, not by volume.
 |---|---|---|---|
 | D1 | **Signing keys** — `SECRET_KEY` (access tokens), `SYNC_SECRET_KEY` (sync tokens, and a plaintext admin bearer) | Worker secrets; `.dev.vars` locally | Holding either mints credentials for *any* user or project. Root of the whole trust tree. |
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
-| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. |
-| D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. `tauri-release.yml` now enters a `desktop-release-signing` GitHub Environment before touching these (OPS-37, `docs/OPSEC-REVIEW-2026-09-25.md`); the Environment still needs required reviewers configured in repo settings to actually hold the job. |
+| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. Comment `@mention` emails (D2 excerpt, routed by D3 username/email) are now scoped to actual project grants — OPS-39, `docs/OPSEC-REVIEW-2026-09-24.md`. |
+| D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. `tauri-release.yml` now enters a `desktop-release-signing` GitHub Environment before touching these (OPS-40, `docs/OPSEC-REVIEW-2026-09-25.md`); the Environment still needs required reviewers configured in repo settings to actually hold the job. |
 | D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
@@ -495,7 +535,7 @@ asset in §1, and none of this repo's controls apply to them.
   ship signed malicious software to users. They should not be reachable with the
   same session that reads a PR.
 - **Configure required reviewers on the `desktop-release-signing` GitHub
-  Environment (OPS-37).** `tauri-release.yml` now declares this Environment, but
+  Environment (OPS-40).** `tauri-release.yml` now declares this Environment, but
   a declared Environment with no protection rules holds nothing — the reviewer
   requirement (and, ideally, a deployment tag policy scoping it to `v*`) is a repo
   setting this code cannot enable on its own.
@@ -560,6 +600,8 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
 | PostHog input masking | Doesn't cover console output (V3) | Fixed at the source; keep console capture off in the PostHog project |
 | Environment separation | Explicitly defeated for signing keys (V7) | Open — recommendation #1 |
 | Dependency hygiene | Audited only during reviews like this one (V6) | Schedule a recurring audit; add `overrides` for transitive `tar` |
+| **0034 RLS backstop** | Cited by four passes as the layer that catches a mis-scoped query. Covers 21 of 55 project-scoped tables, was documented as nine, and no role that can evaluate its policies appears to be in the request path (OPS-38) | Coverage now measured (`scripts/rls-coverage.test.ts`) and documented (`db/postgres/RLS.md`). **Open:** confirm which Postgres role each environment's Hyperdrive uses and whether it is `BYPASSRLS`, then either finish the `app_runtime` grants and cut over with a soak, or stop counting RLS as a layer here |
+| Agent `sql` escape hatch | Was a blocklist over the whole database whose only scoping requirement was textual (OPS-37) | Fixed — allowlist plus a structural scoping rewrite; drift-guarded against `schema.sql` and the prompt's schema card |
 | Secret hygiene | Verified by hand in June, unenforced since (V5) | Fixed — `scan:secrets` in CI |
 
 ### Regressed or unchanged since June

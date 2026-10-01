@@ -2,7 +2,8 @@
 
 _Continues the standing series. Most recent entry: `docs/OPSEC-REVIEW-2026-09-23.md`
 (OPS-35…OPS-36, input validation & injection attacks). New findings continue the
-**OPS-n** series at **OPS-37**._
+**OPS-n** series at **OPS-40** — OPS-37…OPS-39 were taken by the
+2026-09-24 and 2026-09-28 passes, which merged first._
 
 **Scope for this pass: infrastructure & deployment security** — the Friday slot in
 the rotating weekly cycle (auth/session Mon, authz/access Tue, injection Wed,
@@ -36,7 +37,7 @@ without live infrastructure access this review doesn't have).
 
 ## Findings
 
-### OPS-37 — Desktop code-signing secrets were reachable by anyone who could push a `v*` tag, with no reviewer gate — **FIXED** [FACT]
+### OPS-40 — Desktop code-signing secrets were reachable by anyone who could push a `v*` tag, with no reviewer gate — **FIXED** [FACT]
 
 `.github/workflows/tauri-release.yml:1-4` triggers on `push: tags: ["v*"]` with no
 branch restriction, no `environment:` gate, and no equivalent of the
@@ -97,7 +98,7 @@ CODEOWNERS enforcement throughout). `docs/OPSEC.md` §5 now carries the specific
 action item. **This is the one piece of this finding that needs a human to
 actually close** — see the PR description and the tracked issue.
 
-### OPS-38 — The Hetzner QA sandbox's network containment was IPv4-only; IPv6 egress was unfiltered by default — **FIXED** [FACT]
+### OPS-41 — The Hetzner QA sandbox's network containment was IPv4-only; IPv6 egress was unfiltered by default — **FIXED** [FACT]
 
 `scripts/hetzner-ci/install-smart-host.sh:38-50` builds the firewall for
 `br-aquillaqa`, the bridge every PR-triggered QA container runs on. Its own
@@ -212,8 +213,8 @@ safe by category.
   unreviewed commit) — the file itself is correctly scoped to exactly the
   infra-sensitive paths this pass covers, but it only has teeth if "Require
   review from Code Owners" is turned on in branch protection, which — like
-  OPS-37's Environment reviewers — is a repo setting, not something visible from
-  this tree. Flagged in the PR/issue for the same human follow-up as OPS-37,
+  OPS-40's Environment reviewers — is a repo setting, not something visible from
+  this tree. Flagged in the PR/issue for the same human follow-up as OPS-40,
   since both are "a control this repo declared in code but GitHub settings must
   still switch on."
 
@@ -221,8 +222,8 @@ safe by category.
 
 | ID | Finding | Likelihood | Impact | Risk | State |
 |---|---|---|---|---|---|
-| OPS-37 | `tauri-release.yml` ran the tagged commit's own build tooling and then exposed six code-signing secrets, gated by nothing but tag-push permission | Medium — requires tag-push permission on the repo, which is a coarser bar than "passed review," but needs no further trickery once held | High — the one pipeline in this repo that can ship a signed, auto-updating malicious desktop build directly to real users | **High** | Fixed in code; needs a repo-settings follow-up to take effect (see above) |
-| OPS-38 | QA sandbox firewall had no IPv6 rules, so IPv6 egress/host-reachability was unfiltered wherever the host routes it | Low-Medium — depends on the host actually having IPv6 routing enabled, and on PR-authored code choosing to use it; reachable only by repo-write-access authors (webhook is same-repo-only), not arbitrary forks | Medium — bypasses the sandbox's stated containment boundary (reach public endpoints, not host/LAN), potential data exfiltration or host-reachability path | **Medium** | Fixed |
+| OPS-40 | `tauri-release.yml` ran the tagged commit's own build tooling and then exposed six code-signing secrets, gated by nothing but tag-push permission | Medium — requires tag-push permission on the repo, which is a coarser bar than "passed review," but needs no further trickery once held | High — the one pipeline in this repo that can ship a signed, auto-updating malicious desktop build directly to real users | **High** | Fixed in code; needs a repo-settings follow-up to take effect (see above) |
+| OPS-41 | QA sandbox firewall had no IPv6 rules, so IPv6 egress/host-reachability was unfiltered wherever the host routes it | Low-Medium — depends on the host actually having IPv6 routing enabled, and on PR-authored code choosing to use it; reachable only by repo-write-access authors (webhook is same-repo-only), not arbitrary forks | Medium — bypasses the sandbox's stated containment boundary (reach public endpoints, not host/LAN), potential data exfiltration or host-reachability path | **Medium** | Fixed |
 
 ## Countermeasures applied in this change
 
@@ -232,12 +233,12 @@ safe by category.
 | `docs/OPSEC.md` D4 row and operator-side §5 updated with the new Environment and the outstanding repo-settings step | `docs/OPSEC.md` |
 | QA bridge (`br-aquillaqa`) firewall now drops all IPv6 traffic (`INPUT` and forwarded, mirroring the existing IPv4 `AQUILLA_QA` chain into a new `AQUILLA_QA6`), guarded by an `ip6tables` presence check | `scripts/hetzner-ci/install-smart-host.sh` |
 
-No UX/UI change: both fixes are CI/infra-only. OPS-37 adds one manual-approval
+No UX/UI change: both fixes are CI/infra-only. OPS-40 adds one manual-approval
 click to the desktop release process for whoever pushes the release tag — this
 is the one piece of friction this pass added, and it's deliberate: it's gating
 the single highest-blast-radius action in the entire pipeline (shipping signed
 code to end users), matching the friction the production web/worker deploy path
-already accepts for the equivalent action. OPS-38 is invisible to any legitimate
+already accepts for the equivalent action. OPS-41 is invisible to any legitimate
 QA run; the runner never depended on IPv6 in the first place.
 
 ## Verification
@@ -263,7 +264,7 @@ QA run; the runner never depended on IPv6 in the first place.
 
 1. **Configure GitHub Environment protection rules for `desktop-release-signing`**
    (required reviewers; optionally a tag deployment policy of `v*`). This is the
-   part of OPS-37 that only a repository admin can complete — see the PR
+   part of OPS-40 that only a repository admin can complete — see the PR
    description and the linked Linear issue.
 2. **Confirm "Require review from Code Owners" is enabled in branch protection**
    for the branches CODEOWNERS is meant to protect — same category of follow-up,

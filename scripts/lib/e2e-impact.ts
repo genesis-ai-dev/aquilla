@@ -7,6 +7,11 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    // AQU-1479: captions, media bytes, and staged attachments publish together.
+    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/timeline-import)/i,
+    sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
+  },
+  {
     source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
@@ -106,6 +111,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
+    source: /^(?:src\/hooks\/useMediaPictureUrl\.|src\/lib\/sync\/bulk-import\.|sync-worker\/src\/events\/import-route\.)/,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
     // `parsers` and the partner integrations are the importer's own reading layer
     // — a change there only reaches a user through an import, so it selects the
     // import sentinel rather than falling through to the generic shared-runtime
@@ -122,7 +131,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
+const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

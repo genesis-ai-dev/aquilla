@@ -159,6 +159,17 @@ describe("AudioRecordingModal — the film", () => {
     expect((screen.getByTestId("rec-video") as HTMLVideoElement).muted).toBe(false)
   })
 
+  it("resolves the imported picture beside the recorder", async () => {
+    render(modal({
+      ...projectWithFilm,
+      files: [{ ...projectWithFilm.files[0],
+        coreMediaUrl: "frontier-audio://imported.mp4" }],
+    }))
+    await waitFor(() => expect(
+      screen.getByTestId("rec-video").getAttribute("src"),
+    ).toContain("/audio/p1/f1/imported.mp4?t=sync-tok"))
+  })
+
   // ONE canvas from the countdown into the take. The waveform owns an
   // AudioContext attached to the live microphone, and a remount at zero closes
   // and reopens that context at the exact moment nothing may touch the audio

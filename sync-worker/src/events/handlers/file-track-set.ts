@@ -83,7 +83,7 @@ const TRACK_KINDS = new Set([
  */
 const RESERVED_SLOT_IDS = new Set(['recording', 'generatedVoice'])
 
-const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId'])
+const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId', 'contentFileId'])
 
 /**
  * A palette ID, and validated as a SHAPE rather than against a list of the ids
@@ -277,6 +277,15 @@ export function handleFileTrackSet(
           reason: `file.track.set event ${event.id} sets sourceTrackId on default track ${trackId}`,
         }
       }
+    }
+  }
+
+  if (patch?.contentFileId != null) {
+    if (typeof patch.contentFileId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(patch.contentFileId)) {
+      return { ok: false, status: 400, reason: `file.track.set event ${event.id} carries an unusable contentFileId` }
+    }
+    if (patch.contentFileId === event.fileId) {
+      return { ok: false, status: 400, reason: `file.track.set event ${event.id} references its own content` }
     }
   }
 

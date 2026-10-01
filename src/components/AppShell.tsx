@@ -337,12 +337,14 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* AQU-1523: two footer rows, not one. The labelled Feedback button
-          (AQU-1028) left the build label (AQU-1023) no width in a 224px
-          sidebar — it truncated to nothing, so support could no longer read a
-          release off a screenshot. Feedback now owns the row directly under
-          the account row; build, connectivity, Help and localization share the
-          row below it. Help stays compact beside localization; the org-only
+      {/* AQU-1523: three footer rows, not one. The labelled Feedback button
+          (AQU-1028) and the build label (AQU-1023) shared a single row, and in
+          a 224px sidebar the label lost — it fitted to 13px ("v0" and nothing
+          else), so support could no longer read a release off a screenshot.
+          Removing Feedback from that row was not enough: see the release row
+          below for the width arithmetic. So the rows are now
+          Feedback / build label / connectivity + Help + localization, under
+          the account row. Help stays compact beside localization; the org-only
           Tour remains hidden in the project editor. Both sidebar layouts (org
           chrome and the project dock) render this same footer. */}
       <div
@@ -365,17 +367,31 @@ export function AppShell({
               the Help dropdown — the stuck user has to be able to see it. */}
           <FeedbackButton compact={chromeCollapsed} />
         </div>
+        {/* The build label gets a line to itself. Nothing else can share it:
+            at the footer's 10px monospace the label needs ~190px, and the
+            sidebar's 224px leaves ~208px once the footer's own padding is
+            taken — so a 68px Help+localization pair beside it starves the
+            label however the row is justified. A preview walk measured
+            exactly that, with the label fitted to 13px ("v0"). */}
         <div
           data-slot="app-shell-sidebar-release-row"
+          className={cn("flex min-w-0 items-center", chromeCollapsed && "w-full")}
+        >
+          <VersionTag />
+        </div>
+        <div
+          data-slot="app-shell-sidebar-utility-row"
           className={cn(
             "flex items-center gap-2",
             chromeCollapsed ? "w-full flex-col gap-1" : "justify-between",
           )}
         >
-          <div className="flex min-w-0 items-center gap-1.5">
-            <VersionTag />
-            {/* Same overflow reasoning as BetaBadge above: no room for a text
-                chip in the 40px collapsed icon rail. */}
+          {/* Always-present left child: the chip renders null off the Tauri
+              runtime (i.e. in every browser), and without a placeholder
+              `justify-between` would drop Help and localization to the start
+              edge instead of holding them at the end. Hidden in the 40px rail
+              for the same reason as BetaBadge above — no room for a text chip. */}
+          <div className="flex min-w-0 items-center">
             {!chromeCollapsed && <ConnectivityStatusChip />}
           </div>
           <div

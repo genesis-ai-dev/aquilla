@@ -219,12 +219,13 @@ describe("AppShell main-content error containment", () => {
     // AQU-1523: the footer stacks two rows; `justify-between` moved onto the
     // release row that still holds build, Help and localization.
     expect(footer).toHaveClass("flex-col", "px-2", "pb-2")
-    const releaseRow = trigger.closest('[data-slot="app-shell-sidebar-release-row"]')
-    expect(releaseRow).toHaveClass("justify-between")
+    const utilityRow = trigger.closest('[data-slot="app-shell-sidebar-utility-row"]')
+    expect(utilityRow).toHaveClass("justify-between")
     const version = screen.getByRole("button", { name: "Copy build info" })
-    expect(version.parentElement).not.toHaveClass("flex-1")
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
-    expect(version.closest('[data-slot="app-shell-sidebar-release-row"]')).toBe(releaseRow)
+    // The build label owns its row; Help and localization are on the next one.
+    expect(version.closest('[data-slot="app-shell-sidebar-release-row"]')).not.toBeNull()
+    expect(version.closest('[data-slot="app-shell-sidebar-utility-row"]')).toBeNull()
     const help = screen.getByRole("button", { name: /help & community/i })
     expect(footer).toContainElement(help)
     expect(help.nextElementSibling).toBe(trigger)
@@ -259,7 +260,7 @@ describe("AppShell main-content error containment", () => {
     const version = screen.getByRole("button", { name: "Copy build info" })
     const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
     expect(footer).toHaveClass("flex-col")
-    expect(language.closest('[data-slot="app-shell-sidebar-release-row"]')).toHaveClass(
+    expect(language.closest('[data-slot="app-shell-sidebar-utility-row"]')).toHaveClass(
       "justify-between",
     )
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
@@ -300,20 +301,55 @@ describe("AppShell main-content error containment", () => {
 
     const feedbackRow = feedback.closest('[data-slot="app-shell-sidebar-feedback-row"]')
     const releaseRow = version.closest('[data-slot="app-shell-sidebar-release-row"]')
+    const utilityRow = help.closest('[data-slot="app-shell-sidebar-utility-row"]')
     expect(feedbackRow).not.toBeNull()
     expect(releaseRow).not.toBeNull()
-    // The regression itself: Feedback must not share a row with the build label.
-    expect(feedbackRow).not.toBe(releaseRow)
-    expect(releaseRow).not.toContainElement(feedback)
-    // …while build, Help and localization still share the release row.
-    expect(releaseRow).toContainElement(help)
-    expect(releaseRow).toContainElement(language)
+    expect(utilityRow).not.toBeNull()
 
-    // Order: account row (end of the sidebar content) → Feedback → release.
+    // The regression, stated as the invariant that failed the preview walk:
+    // NOTHING shares the build label's row. Feedback starved it first; with
+    // Feedback moved, the environment badge plus Help plus localization still
+    // left it 13px of fitted text. The label's row holds the label alone.
+    expect(releaseRow).not.toContainElement(feedback)
+    expect(releaseRow).not.toContainElement(help)
+    expect(releaseRow).not.toContainElement(language)
+    expect(releaseRow?.querySelectorAll("button")).toHaveLength(1)
+    // Help and localization keep each other's company one row down.
+    expect(utilityRow).toContainElement(language)
+
+    // Order: account row (end of the sidebar content) → Feedback → build label
+    // → connectivity/Help/localization.
     const footer = feedback.closest('[data-slot="app-shell-sidebar-footer"]')
     expect(footer).toContainElement(version)
     expect(feedbackRow?.nextElementSibling).toBe(releaseRow)
+    expect(releaseRow?.nextElementSibling).toBe(utilityRow)
     expect(footer?.previousElementSibling).toContainElement(screen.getByTestId("sidebar"))
+  })
+
+  // AQU-1523: the label is the row's reason to exist, so it must be allowed to
+  // use the whole width. A fixed or content-sized label would re-create the
+  // starvation the preview walk measured, just with a different culprit.
+  it("lets the build label span the whole footer width", async () => {
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <AppShell
+            header={<div data-testid="header">header</div>}
+            statusBar={null}
+            sidebar={<div data-testid="sidebar">sidebar</div>}
+            main={<div data-testid="content">content</div>}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    const version = await screen.findByRole("button", { name: "Copy build info" })
+    expect(version).toHaveClass("w-full", "min-w-0")
+    // Truncation stays the degradation for a narrower-than-default rail.
+    expect(version.querySelector("span")).toHaveClass("truncate")
+    // The environment badge stacks above the label rather than beside it.
+    const block = version.closest('[data-slot="version-tag"]')
+    expect(block).toHaveClass("flex-col", "w-full")
   })
 
   it("keeps Feedback an icon-only control in the collapsed dock rail", async () => {

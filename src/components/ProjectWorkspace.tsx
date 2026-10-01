@@ -11412,10 +11412,15 @@ export function ProjectWorkspace() {
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
+  //
+  // AQU-1497: returns whether the commit path validated the edit itself. The
+  // Target pane needs that to know the file's repeated segments are owed this
+  // text, and pays the debt once the translator leaves the cell (AQU-1484's
+  // settled-edit rule) — see `settleOwedRepetitions` in AgentContextPane.
   const handleAgentTargetCommit = useCallback(async (
     cellId: string,
     snapshot: { value: string; valueHtml: string },
-  ) => {
+  ): Promise<{ autoValidated: boolean }> => {
     if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       throw new Error("Your project role cannot edit translations.")
@@ -11453,6 +11458,7 @@ export function ProjectWorkspace() {
     }
 
     rememberPendingTargetCommit(cell.id, eventId, parentId)
+    let autoValidated = false
     if (shouldAutoValidateHumanEdit({
       value: snapshot.value,
       canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
@@ -11468,11 +11474,14 @@ export function ProjectWorkspace() {
           author: currentUsername,
           targetLang: activeLane,
         })
+        // Only a validation that actually landed owes the repetitions anything.
+        autoValidated = true
       } catch (error) {
         console.warn("[agent-target-auto-validate] emit failed:", error)
       }
     }
     await handleCellCommitted(cell.id, eventId, parentId)
+    return { autoValidated }
   }, [
     activeLane,
     applyOptimisticTargetEditWithCapture,
@@ -12740,6 +12749,7 @@ export function ProjectWorkspace() {
               validationRequirement: readValidationCount(project),
               canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
               onValidationChange: handleAgentValidationChange,
+              onCellValidated: handleCellValidated,
               cellLockHolders,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,

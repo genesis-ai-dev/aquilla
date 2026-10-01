@@ -198,6 +198,12 @@ export const IMPORT_MILESTONE_KINDS = [
   "time-range",
   "group",
   "part",
+  // A division the app proposed from scored cell boundaries rather than read
+  // out of the file (AQU-1387). The kind itself is the provenance marker: a
+  // renderer can badge it as a suggestion, and anything that must not act on a
+  // guess can filter it out, without a parallel boolean that older persisted
+  // envelopes would be missing.
+  "ai-section",
 ] as const
 
 export type ImportMilestoneKind = (typeof IMPORT_MILESTONE_KINDS)[number]
@@ -215,6 +221,45 @@ export interface ImportMilestone {
   label: string
   /** Compact picker badge, e.g. "1–2", "P", or "3". */
   shortLabel: string
+}
+
+/** Where a suggested passage's boundaries came from. */
+export const PASSAGE_SOURCES = ["section-counts", "model"] as const
+export type PassageSource = (typeof PASSAGE_SOURCES)[number]
+
+/**
+ * A suggested passage: the pericope-sized run of cells a translator actually
+ * works in (AQU-1387). Passages layer *under* whatever divisions the file
+ * already has — a scripture file keeps its chapters and gains passages inside
+ * them — so they are returned beside the milestone assignment rather than in
+ * place of it.
+ *
+ * Both sources emit this one shape on purpose: the "suggest the next few
+ * ranges" flow (AQU-515) then works identically on a Bible, on an EBL
+ * workbook, and on a media transcript.
+ */
+export interface ImportPassage {
+  /** Stable within one file and across deterministic re-imports. */
+  key: string
+  /** Opening words, or the verse range when both edges carry scripture refs. */
+  label: string
+  /** First unit of the passage, in file order. */
+  startUnitKey: string
+  /** Last unit of the passage, inclusive. */
+  endUnitKey: string
+  /** Units covered, inclusive of both edges. */
+  unitCount: number
+  /** Canonical refs of the edges, when they carry scripture addresses. */
+  startRef?: string
+  endRef?: string
+  /**
+   * Confidence that the passage's opening boundary is real, in [0,1]. For
+   * `section-counts` this is the share of the dataset's 20 translations that
+   * start a section there; for `model` it is the classifier's confidence.
+   * A caller ranking suggestions sorts on this.
+   */
+  strength: number
+  source: PassageSource
 }
 
 export type ImportAddress =

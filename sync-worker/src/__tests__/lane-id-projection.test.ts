@@ -156,7 +156,7 @@ describe('lane_id resolution — canonical per-event projection', () => {
            (project_id, file_id, cell_id, side, target_lang, value, event_id,
             last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
          VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
-         ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+         ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
            value   = excluded.value,
            lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
         [PROJECT, FILE],

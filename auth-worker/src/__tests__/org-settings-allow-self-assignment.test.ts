@@ -117,3 +117,71 @@ describe("org-settings PATCH allowSelfAssignment validation (AQU-496)", () => {
     expect(second.status).toBe(200)
   })
 })
+
+// ── AQU-581: allowScopedLaneAssignment, the lane-delegate sibling ──────────
+//
+// Same boolean shape and the same OWNER-only write gate as allowSelfAssignment
+// above. Kept in this file so the two assignment-authority keys are validated
+// side by side and can't drift apart.
+
+describe("org-settings PATCH allowScopedLaneAssignment validation (AQU-581)", () => {
+  it("400s when allowScopedLaneAssignment is a string ('true')", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    const res = await patchSettings(ownerJwt, { allowScopedLaneAssignment: "true" })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/allowScopedLaneAssignment/)
+  })
+
+  it("400s when allowScopedLaneAssignment is a number (1)", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    const res = await patchSettings(ownerJwt, { allowScopedLaneAssignment: 1 })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/allowScopedLaneAssignment/)
+  })
+
+  it("403s when a maintainer (600) tries to set allowScopedLaneAssignment", async () => {
+    await seed()
+    const maintainerJwt = await jwtFor("bob")
+    const res = await patchSettings(maintainerJwt, { allowScopedLaneAssignment: true })
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/owner/)
+  })
+
+  it("200s when an owner (700) sets allowScopedLaneAssignment to true", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    const res = await patchSettings(ownerJwt, { allowScopedLaneAssignment: true })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { settings: Record<string, unknown> }
+    expect(body.settings.allowScopedLaneAssignment).toBe(true)
+  })
+
+  it("200s when an owner explicitly sets allowScopedLaneAssignment to false", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    const res = await patchSettings(ownerJwt, { allowScopedLaneAssignment: false })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { settings: Record<string, unknown> }
+    expect(body.settings.allowScopedLaneAssignment).toBe(false)
+  })
+
+  it("a maintainer echoing back the unchanged current value does not trip the owner-only gate", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    const maintainerJwt = await jwtFor("bob")
+    const first = await patchSettings(ownerJwt, { allowScopedLaneAssignment: true })
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as { version: number }
+    const second = await patchSettings(
+      maintainerJwt,
+      { allowScopedLaneAssignment: true, someOtherKey: "value" },
+      firstBody.version,
+    )
+    expect(second.status).toBe(200)
+  })
+})

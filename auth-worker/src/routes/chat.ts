@@ -1,4 +1,4 @@
-import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
@@ -266,17 +266,24 @@ chat.post(
         // passthrough in this codebase (see import-sandbox.ts) already caps
         // what reaches the client. Bearer key itself was never in the body,
         // but "never was" isn't a reason to keep forwarding it whole.
-        const errorText = (await upstream.text()).slice(0, 500)
+        const detail = await upstream.text()
+        const headers: Record<string, string> = { "Content-Type": "application/json" }
+        // AQU-1241: a rejection the provider decided before any generation
+        // existed cost nothing, so its reservation must be released rather than
+        // left counting against the workspace's allowance. Anything less
+        // certain stays held for reconciliation.
+        if (usage) {
+          headers["X-Billing-Usage-Status"] = providerRejectedPreModel(upstream.status, detail)
+            ? await releaseChatUsage(c.env, usage)
+            : "pending"
+        }
         return new Response(
           JSON.stringify({
             error: "openrouter_error",
             status: upstream.status,
-            message: errorText,
+            message: detail.slice(0, 500),
           }),
-          {
-            status: upstream.status,
-            headers: { "Content-Type": "application/json" },
-          },
+          { status: upstream.status, headers },
         )
       }
 

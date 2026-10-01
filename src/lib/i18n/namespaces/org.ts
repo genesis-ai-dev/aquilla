@@ -525,6 +525,8 @@ export const org = defineNamespace({
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
+    "org.projectOverview.membersVisibilityDescription":
+      "Who can see the member roster on this project.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -806,6 +808,8 @@ export const org = defineNamespace({
     "org.overviewLaneTable.openAction": "Open",
     "org.overviewLaneTable.staffAction": "Staff…",
     "org.overviewLaneTable.addLanguageAction": "Add language",
+    "org.overviewLaneTable.archivedGroup": "Archived ({count})",
+    "org.overviewLaneTable.archivedBadge": "Archived",
 
     // -- ProjectLaneSubRows: expanded per-lane detail for an OrgHome project row --
     "org.projectLaneSubRows.noActivity": "No activity",
@@ -946,6 +950,9 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.editScopesAriaLabel": "Edit {username}'s lane scopes on this project",
     "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
     "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
+    "org.memberLaneScopeEditor.languagesLegend": "Languages they can work in",
+    "org.memberLaneScopeEditor.mainLanguageFallback": "Main language",
+    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language in this project)",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "Lane code (e.g. es)",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
     // "Add" → common.add (identical text)
@@ -2311,6 +2318,21 @@ export const org = defineNamespace({
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
       },
+      "org.overviewLaneTable.archivedGroup": {
+        description:
+          "Toggle for the collapsible group under the project overview's Languages table " +
+          "that tucks the project's archived (retired) target-language lanes out of the " +
+          "main list; expanding it lists them, each with an 'Archived' badge. A heading " +
+          "naming the group, with the count in parentheses — not a verb.",
+        placeholders: { count: "Number of archived lanes in the group." },
+      },
+      "org.overviewLaneTable.archivedBadge": {
+        description:
+          "Small outline badge beside one lane's name inside the expanded Archived group " +
+          "on the project overview, marking that language lane as archived (retired). It " +
+          "describes the lane, so where the word must agree with a noun it agrees with " +
+          "the word used for a language lane.",
+      },
       "org.orgProjectsDataTable.unitsColumn": {
         description:
           "Column header on the org projects table: how many of a project's planning " +
@@ -2468,6 +2490,26 @@ export const org = defineNamespace({
         description:
           "Popover heading naming whose lane/file scopes are being edited, in the matrix's freeform scope editor.",
         placeholders: { username: "The member's username — not translated." },
+      },
+      "org.memberLaneScopeEditor.languagesLegend": {
+        description:
+          "Heading over a checkbox list of a project's target languages, in the " +
+          "popover that limits one member to some of them. Ticking none leaves the " +
+          "member free to work in every language.",
+      },
+      "org.memberLaneScopeEditor.mainLanguageFallback": {
+        description:
+          "Name shown for a project's main target language in that checkbox list " +
+          "when the project has not named its main language.",
+      },
+      "org.memberLaneScopeEditor.unknownLane": {
+        description:
+          "A checkbox in the same list for a language this member is limited to " +
+          "that the project doesn't have (an old typo or a removed language), " +
+          "shown so it can be unticked.",
+        placeholders: {
+          lane: "The language code as stored on the member.",
+        },
       },
       "org.memberLaneScopeEditor.newLaneCodeAriaLabel": {
         description:

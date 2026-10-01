@@ -1,0 +1,24 @@
+name: Playwright Chromium
+description: >-
+  Install Playwright's Chromium from a cache. Run after pnpm install.
+  GitHub's Ubuntu image already has Chrome's system libraries, and apt is the
+  slow step (one run fetched 35 MB at 100 kB/s for 6 minutes), so apt runs
+  only when Chromium cannot start without it.
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: echo "playwright=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-chromium-${{ runner.os }}-${{ steps.version.outputs.playwright }}
+    - shell: bash
+      run: |
+        pnpm exec playwright install chromium
+        if ! pnpm exec node -e "require('@playwright/test').chromium.launch().then((browser) => browser.close())"; then
+          echo "::notice::Chromium needs system libraries; installing them with apt."
+          pnpm exec playwright install-deps chromium
+        fi

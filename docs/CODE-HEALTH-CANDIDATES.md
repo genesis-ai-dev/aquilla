@@ -688,3 +688,81 @@ still-pending `rules.*` / `onboarding` orphan keys once `context.test.ts` is gre
 
   The 2026-09-21 run's `ArchivedProjects.test.tsx` / `RecordingVideoSurface.test.tsx` timing
   flakes did **not** fire in either the baseline or the final run this time.
+
+## 2026-09-28 — type-tightening run; i18n catalog still frozen, and two baseline notes
+
+**Done this run** (theme: type tightening, 4 files, 12 lines): removed the last 12 redundant
+array/tuple-index non-null assertions in `src/`, closing out the sweep the 2026-08-24 entry
+opened. All twelve are plain index reads on a non-optional element type, and
+`tsconfig.app.json` still has `strict: true` without `noUncheckedIndexedAccess`, so each `!`
+was a compile-time no-op erased before emit — `pnpm build` (`tsc -b`) is the proof.
+
+- `src/lib/export/audio-chapter.ts` (7) — `cells[i]`/`cells[j]` inside `chaptersForCells`'s
+  `i < cells.length` / `j < cells.length` loops, `headings[h]` under its three
+  `h < headings.length` guards in `orderClips`, and `chapterWavs[0]` under an explicit
+  `chapterWavs.length === 1`.
+- `src/lib/biblica/ebl/notes.ts` (3) — `unit.slots[index]` / `unit.locator.slotIndexes[index]`
+  over a `keep` array built from `unit.slots.flatMap((slot, index) => …)`, and
+  `unit.slots[last]`. `IdmlTranslationUnit.slots` is `readonly IdmlTextSlot[]` and
+  `IdmlLocator.slotIndexes` is `readonly number[]` (`packages/idml-roundtrip/src/types.ts`),
+  both non-optional element types. The neighbouring `keep.at(-1)!` was **left alone** —
+  `Array.prototype.at` genuinely returns `T | undefined`, so that one is a real assertion.
+- `src/lib/egress/build-project-export.ts` (1) — `items[index]` in `mapWithConcurrency`, whose
+  parameter is `items: readonly T[]` and which already guards `index >= items.length`.
+- `src/lib/audio/inworld-design-locales.ts` (1) — `inFamily[0]` under an explicit
+  `inFamily.length === 0` early return.
+
+**The `!`-assertion sweep is now exhausted.** A fresh
+`grep -rEn '\w+\[[a-zA-Z0-9_+. -]+\]!' src` (excluding `*.test.*`) returns exactly one
+remaining site: `src/lib/audio/whisper-worker.ts:186`, which the 2026-09-11 run already
+verified is **not** redundant (`c.timestamp` is an explicit `[number | null, number | null]`
+tuple and the `!` narrows past a `.filter()` guard TS can't carry through the chained
+`.map()`). Future runs should not re-open this theme against `src/` without a new source of
+assertions; the worker packages were never swept and would be the place to look.
+
+### Still frozen: the `rules.*` / `audio.recordingModal.*` / `onboarding` orphan-key sweep
+
+Re-checked this run and **unchanged**: `src/lib/i18n/context.test.ts` is still red on `dev`
+with the same two failures and the same six issues, all in one namespace —
+`onboarding.connect.{account,agent,confirm}` each need their own context entry and each has an
+undocumented placeholder (`{username}`, `{name}`, `{code}`). By the routine's "a file whose
+tests are already red is frozen" rule that still freezes every `src/lib/i18n/namespaces/*.ts`,
+so the fully-scoped 9-file / ~460-line orphan-key sweep logged in the 2026-09-21 entry above
+(plus the five `audio.recordingModal.*` keys the 2026-09-23 run added to it) could **not** be
+taken this run either — the fourth run in a row it has been blocked by the same three keys.
+
+Fixing those three context entries is itself out of this routine's remit (a pre-existing
+failure is out of scope, and turning a red suite green is not behaviour-preserving), so this
+needs a human or a non-code-health change. It is a ~10-line fix in
+`src/lib/i18n/namespaces/onboarding.ts` and it unblocks ~460 lines of queued dead-string
+deletion; worth filing as its own ticket. Nothing else in the catalog is affected — the
+2026-09-21 simulation of the sweep still holds (the `rules.createDialog.descriptionLabel`
+exception in `duplicate-exceptions.ts` is still the only one that stops colliding, and
+`nav.report.descriptionFieldLabel` is still the only other key rendering "Description").
+
+### Baseline recorded 2026-09-28 (`origin/dev` `900ec3b7`) — `dev` is greener than on 2026-09-23
+
+- **`pnpm build`** — green.
+- **`pnpm lint`** — exit 2, **129 errors**, 918 warnings (was 130/901 on 2026-09-23). Same
+  composition: the `i18n/no-unkeyed-string` billing-surface block dominates, plus the carried-over
+  `sync-worker/src/external/commands.ts:39-42` unused type imports,
+  `auth-worker/src/routes/changeset-approvals.ts:34` unused `ROLE`,
+  `src/components/org/ProjectAutopilotPanel.test.tsx:439` `prefer-const`, and
+  `scripts/migrate-daemon/loop.ts:251` `no-unused-expressions`. Stale
+  `eslint-suppressions.json` entries still reported.
+- **`pnpm test`** — exit 1, **3 files / 8 tests** (was 6 files on 2026-09-23). The four
+  `OrgProjectsPage.*.test.tsx` collection errors are **gone** — that `vi.mock` staleness was
+  fixed on `dev`, so `OrgProjectsDataTable.tsx` and `src/lib/offline/download.ts` are no
+  longer frozen. Remaining:
+  - `src/lib/i18n/context.test.ts` — 2 tests, the `onboarding.connect.*` gap above, unchanged
+    since 2026-09-21.
+  - `scripts/cloudflare-preview-comment.test.mjs` — collection error, carried over
+    (`node:test` import swept in by the root vitest config).
+  - `scripts/tag-release.test.ts` — **new, and an environment artifact rather than a `dev`
+    regression.** All 6 failures are `expect(run().status).toBe(0)` receiving `1`.
+    `tag-release.sh` requires a usable `GITHUB_TOKEN` and shells out to
+    `record-github-deployment.mjs`, which calls the GitHub API; in this sandbox `GITHUB_TOKEN`
+    is a proxy-injected placeholder and `gh` is absent, so every invocation dies at
+    `ECONNREFUSED 127.0.0.1:3000` before the tagging logic runs. Expect these 6 in any
+    sandboxed baseline; do **not** log them as a trunk regression, and do not treat
+    `scripts/tag-release.*` as frozen on their account alone.

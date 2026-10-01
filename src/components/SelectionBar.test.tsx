@@ -17,6 +17,18 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+import { toast } from "@/components/ui/toast"
+import posthog from "@/lib/posthog"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+
+// AQU-1503: posthog-js is never init'd under happy-dom, so the real module's
+// `capture` is not a spyable property. Stub the app's wrapper instead — these
+// tests care that the batch-validate event FIRES, which is precisely what the
+// surface could not previously prove.
+vi.mock("@/lib/posthog", () => ({
+  default: { capture: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
+}))
+import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
@@ -411,6 +423,85 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
   })
 })
 
+/**
+ * AQU-1503 — the bulk validate must SAY what it did, including what it left
+ * alone. The old loop reported exactly one class of skip ("already
+ * validated"); an untouched AI draft, an out-of-scope cell or an unsaved edit
+ * dropped out of the count with nothing said, so a user who selected five
+ * cells and watched two change had no way to learn why.
+ */
+describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", () => {
+  function renderFor(cells: CellData[], myScopes: MemberScope[] = []) {
+    return renderBar(makeProject(ROLE.CONTRIBUTOR), cells, myScopes, "", {
+      onValidationCommitted: vi.fn(),
+    })
+  }
+
+  it("validates the eligible cells and names EVERY reason the rest were skipped", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
+      new Set(["ok-1", "ok-2", "draft", "empty", "mine"]),
+    )
+    renderFor([
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "empty", translated: "" }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(2)
+    const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
+    expect(description).toMatch(/untouched AI draft/i)
+    expect(description).toMatch(/still needs? a translation/i)
+    expect(description).toMatch(/already validated/i)
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("says nothing extra when every selected cell was validated", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1"]))
+    renderFor([makeCell({ id: "ok-1", translated: "bonjour" })])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    const call = added.mock.calls.at(-1)?.[0]
+    expect(call?.type).toBe("success")
+    expect(call?.description).toBeUndefined()
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("reports every attempt to PostHog with its cell count and outcome", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const captured = vi.mocked(posthog.capture)
+    captured.mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "draft"]))
+    renderFor([
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    // The surface used to emit NOTHING of its own, which is why the original
+    // repro could only be argued from an absence of events.
+    const batch = captured.mock.calls.find(([name]) => name === BATCH_VALIDATE_ATTEMPTED)
+    expect(batch?.[1]).toMatchObject({
+      source: "selection",
+      outcome: "partial",
+      validated_count: 1,
+      skipped_ai_draft: 1,
+    })
+    vi.restoreAllMocks()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // AQU-490 — bulk validating recordings
 // ---------------------------------------------------------------------------
@@ -500,6 +591,90 @@ describe("SelectionBar — Validate recordings", () => {
     const arg = vi.mocked(emitCellAudioUnvalidate).mock.calls[0][0] as unknown as Record<string, unknown>
     expect(arg).not.toHaveProperty("targetLang")
     expect(arg).not.toHaveProperty("targetUsername")
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-1459 — the selection bar's Translate must ask the SAME permission the
+ * commit asks, and ask it BEFORE the model is called.
+ *
+ * A validator (Reviewer 300) passes the `cell.validate` check that keeps the
+ * whole bar on screen, so the bar stayed up and Translate stayed live for
+ * them. Clicking it called `completeBatch` — real tokens — and only then did
+ * `commitCompletedCells` refuse every draft with "You do not have permission
+ * to commit target cells". This suite is the guard: for a role below the
+ * `target.cell.commit` floor the button is disabled, the tooltip names the
+ * permission rather than a post-hoc commit failure, and `completeBatch` is
+ * never called; the reviewer actions on the same bar are untouched.
+ */
+describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)", () => {
+  function translateButton() {
+    return screen.getByRole("button", { name: /^Translate/i })
+  }
+
+  /** Untranslated cells: Translate would otherwise be enabled with a count. */
+  const UNTRANSLATED = [
+    makeCell({ id: "cell-1", translated: "" }),
+    makeCell({ id: "cell-2", translated: "" }),
+  ]
+
+  it("disables Translate for a REVIEWER (300) who cannot commit target cells", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.REVIEWER), UNTRANSLATED)
+    const btn = translateButton()
+    expect(btn).toBeDisabled()
+    await expectTooltip(btn, "You need contributor role to draft translations")
+    vi.restoreAllMocks()
+  })
+
+  it("never calls the model for a REVIEWER, even on a full 20-cell selection", () => {
+    const cells = Array.from({ length: MAX_SELECTED }, (_, i) =>
+      makeCell({ id: `cell-${i + 1}`, translated: "" }),
+    )
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
+      new Set(cells.map((c) => c.id)),
+    )
+    const completeBatch = vi.fn()
+    renderBar(makeProject(ROLE.REVIEWER), cells, [], "", { completeBatch })
+
+    fireEvent.click(translateButton())
+
+    expect(completeBatch).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it("leaves the reviewer's own validate actions alone", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(makeProject(ROLE.REVIEWER), [makeCell({ id: "cell-1", translated: "bonjour" })])
+    expect(screen.getByRole("button", { name: /^Validate text/i })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /remove my text validations/i })).toBeDisabled()
+    vi.restoreAllMocks()
+  })
+
+  it("still runs Translate for a CONTRIBUTOR (400), who can commit", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const completeBatch = vi.fn()
+    renderBar(makeProject(ROLE.CONTRIBUTOR), UNTRANSLATED, [], "", { completeBatch })
+    const btn = translateButton()
+    expect(btn).toBeEnabled()
+
+    fireEvent.click(btn)
+
+    expect(completeBatch).toHaveBeenCalledTimes(1)
+    expect(completeBatch.mock.calls[0][0]).toHaveLength(2)
+    vi.restoreAllMocks()
+  })
+
+  it("fails open for a local project with no syncRole", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const completeBatch = vi.fn()
+    renderBar(makeProject(null), UNTRANSLATED, [], "", { completeBatch })
+    expect(translateButton()).toBeEnabled()
+
+    fireEvent.click(translateButton())
+
+    expect(completeBatch).toHaveBeenCalledTimes(1)
     vi.restoreAllMocks()
   })
 })

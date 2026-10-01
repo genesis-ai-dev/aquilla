@@ -13,6 +13,7 @@ import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
 // The unified create/clone modal is heavy (audio/network) — stub to a marker
 // that records the props the panel wires in.
@@ -61,6 +62,51 @@ describe("VoiceLibraryPanel (selector)", () => {
     // The narrator (default) row carries a star whose tooltip is just "Narrator".
     await expectTooltip(screen.getByTestId("voice-narrator-star"), "Narrator")
     expect(screen.getByRole("button", { name: /New voice/ })).toBeTruthy()
+  })
+
+  // AQU-959: a partner opened Voices as a contributor, found "New voice" greyed
+  // out, and got no tooltip, no message and no path forward — the demo stalled
+  // until the host changed her role by hand. The role gate and its denial
+  // sentence were already here (AQU-365); what was missing is that a disabled
+  // button swallows hover, so the sentence could never surface. Asserting the
+  // hover would prove nothing (happy-dom dispatches on disabled elements and a
+  // browser does not) — assert that the tooltip's trigger is a real, focusable
+  // element that is not the disabled button.
+  it("explains why New voice is dead for a contributor instead of going silent", () => {
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.CONTRIBUTOR}
+      />,
+    )
+
+    const button = screen.getByRole("button", { name: /New voice/ })
+    expect(button).toBeDisabled()
+
+    const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')
+    expect(standIn).not.toBeNull()
+    expect(standIn).not.toHaveAttribute("disabled")
+    expect(standIn).toContainElement(button)
+    // Full-width button: the stand-in must carry the width or the row collapses.
+    expect(standIn).toHaveClass("w-full")
+  })
+
+  // The other half of the AC: a user who CAN create voices gains no new chrome.
+  it("adds no stand-in trigger for a maintainer who can create voices", () => {
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.MAINTAINER}
+      />,
+    )
+    expect(screen.getByRole("button", { name: /New voice/ })).not.toBeDisabled()
+    expect(document.querySelector('[data-slot="tooltip-disabled-trigger"]')).toBeNull()
   })
 
   it("filters rows by the search query", () => {

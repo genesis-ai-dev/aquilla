@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // Main-thread orchestrator: audio bytes → 16kHz Float32 PCM → Whisper worker
 // → word-level timings. No Y.Doc dependency — timings are written back via the
 // Postgres event log (cell.audio.attach with timings payload).
@@ -18,6 +19,7 @@ import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { t } from "@/lib/i18n/standalone"
+import { transcribeHostedPcm } from "./transcribe-hosted"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -41,6 +43,8 @@ export interface TranscriptionResult {
 }
 
 export interface TranscriptionOptions {
+  session?: FrontierSession | null
+  projectId?: string
   language?: string
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
@@ -182,6 +186,10 @@ export async function transcribeAudio(
   bytes: Uint8Array,
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
+  if (usesHostedTranscription(opts.session, opts.projectId)) {
+    const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
+    return transcribeHostedPcm(pcm, opts.session!.jwt, opts.projectId!, opts.language)
+  }
   const consented = await requestAiModelConsent(WHISPER_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
   const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
@@ -367,6 +375,8 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       : undefined
 
     const raw = await transcribeAudioImpl(bytes, {
+      session,
+      projectId,
       language: whisperLanguageFromTag(language) ?? undefined,
       trim,
       onProgress: (p) => {

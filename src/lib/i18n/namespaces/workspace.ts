@@ -163,6 +163,10 @@ export const workspace = defineNamespace({
     "workspace.metrics.weeklyTrendHeading": "Weekly trend",
     "workspace.metrics.filteredTo": "— filtered to {user}",
     "workspace.metrics.noUserData": "No data for this user yet.",
+    "workspace.metrics.byFileHeading": "By file",
+    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for scripture)",
+    "workspace.metrics.fileColumn": "File",
+    "workspace.metrics.acceptedAsIsColumn": "Kept as-is",
     "workspace.metrics.byReviewerHeading": "By reviewer",
     "workspace.metrics.byReviewerHint": "(click a row to filter the trend above)",
     "workspace.metrics.disclosure":
@@ -250,6 +254,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    // AQU-1405. Painted over the page for the moment between a stale-chunk
+    // failure and the automatic reload that recovers from it.
+    "workspace.updateNotice.reloading": "Updating {app}…",
 
     // -- GenerateOverwriteDialog --
     "workspace.generateOverwrite.dontAskAgain": "Don't ask again when replacing a translation",
@@ -286,6 +293,8 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    "workspace.alignment.contributorRequired":
+      "Contributor+ required to confirm or reject alignments",
 
     // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
     "workspace.alignment.originalHeading": "Original language",
@@ -711,20 +720,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },
@@ -951,6 +960,29 @@ export const workspace = defineNamespace({
         description:
           "Shown instead of the weekly chart when the selected reviewer has no " +
           "weeks with data (edge case after filtering).",
+      },
+      "workspace.metrics.byFileHeading": {
+        description: "Heading over the per-file breakdown table of AI post-edit effort.",
+      },
+      "workspace.metrics.byFileHint": {
+        description:
+          "Small parenthetical note after workspace.metrics.byFileHeading, saying " +
+          "the rows are the project's imported files, and that for a scripture " +
+          "project one file is one book — so a reader looking for a per-book " +
+          "breakdown knows this is it.",
+      },
+      "workspace.metrics.fileColumn": {
+        description:
+          "Column header naming the file each row of the per-file table covers. " +
+          "One word; it sits over file names in a narrow column.",
+        maxLength: 14,
+      },
+      "workspace.metrics.acceptedAsIsColumn": {
+        description:
+          "Column header for the count of AI drafts in that file which a reviewer " +
+          "approved without editing. Short — it sits over numbers in a narrow " +
+          "column. 'As-is' means unchanged.",
+        maxLength: 16,
       },
       "workspace.metrics.byReviewerHeading": {
         description: "Heading over the by-reviewer breakdown table.",
@@ -1228,6 +1260,16 @@ export const workspace = defineNamespace({
           "that reloads the page.",
       },
 
+      "workspace.updateNotice.reloading": {
+        description:
+          "Full-screen status message shown for the moment between a stale " +
+          "code-chunk load failure (a new version was deployed while this tab " +
+          "was open) and the automatic reload that recovers from it.",
+        placeholders: {
+          app: "The product name for the current brand (e.g. 'Aquilla'), never translated.",
+        },
+      },
+
       "workspace.generateOverwrite.dontAskAgain": {
         description:
           "Checkbox label in the confirm dialog shown before an AI draft " +
@@ -1330,6 +1372,13 @@ export const workspace = defineNamespace({
           srcToken: "The source-language word/token — not translated.",
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
+      },
+      "workspace.alignment.contributorRequired": {
+        description:
+          "AQU-1408. Tooltip and accessible name on the disabled confirm/reject " +
+          "buttons for a member below the contributor rung, who may read the " +
+          "alignment but not teach it. Mirror editor.bt.contributorRequired; keep " +
+          "the 'or above' sense of the trailing plus.",
       },
       "workspace.alignment.originalHeading": {
         description:

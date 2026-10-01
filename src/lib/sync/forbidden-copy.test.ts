@@ -55,6 +55,21 @@ describe("forbiddenReasonCopy", () => {
   it("falls back to the raw reason for an unmapped message", () => {
     expect(forbiddenReasonCopy("some brand new server reason")).toBe("some brand new server reason")
   })
+
+  it("names the lane when a write was refused because it was archived (AQU-1462)", () => {
+    expect(forbiddenReasonCopy("lane 'Spanish' is archived")).toBe("the Spanish lane was archived")
+    expect(forbiddenBannerMessage([entry("lane 'Spanish' is archived")])).toBe(
+      "1 change wasn't saved — the Spanish lane was archived.",
+    )
+  })
+
+  it("does not name a lane the caller is not allowed to know (AQU-1462)", () => {
+    expect(forbiddenReasonCopy("lane does not exist")).toBe("that lane does not exist")
+    expect(forbiddenBannerMessage([entry("lane does not exist")])).toBe(
+      "1 change wasn't saved — that lane does not exist.",
+    )
+    expect(forbiddenReasonCopy("lane does not exist")).not.toMatch(/archived|german|spanish/i)
+  })
 })
 
 describe("forbiddenBannerMessage", () => {

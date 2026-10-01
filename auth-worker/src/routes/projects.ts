@@ -77,6 +77,7 @@ import {
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
   applyInviteLaneScopes,
@@ -1026,6 +1027,23 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
   if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+
+  // Names on this roster are the member list. An owner-only roster floor must
+  // hide them here too — the Team card is how a maintainer still "sees" the
+  // roster after the Members card has closed, under a badge that still reads
+  // "only maintainers & owners".
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (project?.org_id != null) {
+    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    if (!canViewRoster(role.level, rosterMinRole)) {
+      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+    }
+  }
+
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })
@@ -1301,6 +1319,7 @@ async function grantProjectMemberOne(
   callerRole: { level: number; name: string },
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<ProjectGrantOutcome> {
   const { username, role } = entry
   // Caller cannot grant a role higher than their own level.
@@ -1342,6 +1361,7 @@ async function grantProjectMemberOne(
     }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "project", projectId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -1352,6 +1372,13 @@ async function grantProjectMemberOne(
   )
     .bind(projectId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "project.member.grant" : "project.member.role",
+    where: { scope: "project", projectId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -1404,7 +1431,7 @@ projects.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry)
+        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry, user)
         if (outcome.ok) {
           notifyRoleChangeBestEffort(c, projectId, {
             userId: outcome.userId,
@@ -1422,7 +1449,7 @@ projects.post(
     }
 
     // Single-user mode — response + error statuses preserved exactly.
-    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body)
+    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, PROJECT_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1494,6 +1521,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  await auditMembershipChange(c.env, user, {
+    action: "project.member.remove",
+    where: { scope: "project", projectId },
+    target: { id: targetUserId, username: targetUser?.username },
+    roleBefore: Number(existing.role_level),
+    roleAfter: null,
+  })
   // The per-request memo may hold the pre-delete role (an owner removing
   // their own direct row resolved it above as the caller).
   forgetProjectRole(c.env, projectId, targetUserId)
@@ -1928,6 +1962,21 @@ projects.post(
       : invite.role_level
 
     try {
+      // [Pen test 2026-09-29] Claim the single-use invite (compare-and-swap)
+      // BEFORE granting membership, so two concurrent redeemers can't both be
+      // admitted. Same-user re-redeem (used_at already set) skips the claim.
+      if (!invite.used_at) {
+        const claim = await c.env.AQUILLA_PG.prepare(
+          `UPDATE project_invites
+           SET used_by = ?, used_at = CURRENT_TIMESTAMP
+           WHERE token = ? AND used_at IS NULL`,
+        )
+          .bind(user.id, token)
+          .run()
+        if (claim.meta.changes === 0) {
+          return c.json({ error: "Invite already used", code: "used" }, 410)
+        }
+      }
       if (existing) {
         await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
@@ -1956,15 +2005,6 @@ projects.post(
           finalRole,
         )
       }
-      // Atomic stamp: only the first concurrent redeemer wins; subsequent
-      // concurrent calls lose the WHERE race and are treated as same-user re-redeem.
-      await c.env.AQUILLA_PG.prepare(
-        `UPDATE project_invites
-         SET used_by = ?, used_at = CURRENT_TIMESTAMP
-         WHERE token = ? AND used_at IS NULL`,
-      )
-        .bind(user.id, token)
-        .run()
     } catch (err) {
       console.error("[invites] accept failed:", err)
       return c.json({ error: "Failed to accept invite" }, 500)

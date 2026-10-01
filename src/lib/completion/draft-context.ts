@@ -95,3 +95,37 @@ export function gatherFollowingSource(
   }
   return out // already in document order (forward scan)
 }
+
+/**
+ * Merge the approved discourse window with the drafts THIS RUN has already
+ * produced, and trim to the configured budget (AQU-1386 §3).
+ *
+ * Batch drafting sends several calls in sequence. The corpus snapshot is read
+ * once before the loop and `gatherPrecedingContext` admits only validated
+ * targets, so without this every call after the first starts its discourse
+ * cold — which is why long files drift in connectives and participant
+ * reference partway down.
+ *
+ * The carried rows are marked `draft` so the prompt labels them as unreviewed
+ * and the model weighs them below approved work. The rule that unapproved text
+ * never becomes a retrieval EXAMPLE is untouched: these rows are in-run
+ * context, are never persisted, and never reach another run.
+ *
+ * Newest-last, and the budget is applied to the COMBINED list so a run's own
+ * drafts displace the oldest approved rows rather than being appended past the
+ * window. A budget of 0 yields nothing — note that `slice(-0)` would instead
+ * return everything, which is the bug this function exists to make untestable
+ * at the call site.
+ */
+export function mergeInRunDraftContext(
+  approved: readonly { source: string; target: string }[],
+  inRunDrafts: readonly { source: string; target: string }[],
+  budget: number,
+): { source: string; target: string; draft?: boolean }[] {
+  if (budget <= 0) return []
+  const combined = [
+    ...approved,
+    ...inRunDrafts.map((d) => ({ source: d.source, target: d.target, draft: true })),
+  ]
+  return combined.slice(-budget)
+}

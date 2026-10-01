@@ -33,7 +33,7 @@ export function interpolate(template: string, vars?: TVars): string {
  * `translate()` is this followed by `interpolate()`. `<RichMessage>` needs the
  * two steps apart, because selection vars and interpolation vars are not the
  * same set: a counted sentence whose NUMBER carries markup ("**3** endorsements
- * · support **72**%") has to choose its plural form from that number while
+ * · health **72**%") has to choose its plural form from that number while
  * leaving `{count}` in the template for the markup to be substituted into.
  * Interpolating it there would render the digits as bare text and there would be
  * nothing left to wrap.

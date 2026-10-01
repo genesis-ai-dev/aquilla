@@ -20,6 +20,7 @@ import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
+import { shortCellId } from "@/lib/cells/short-cell-id"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
@@ -234,7 +235,7 @@ function OccurrenceRow({
     >
       {/* Cell ref */}
       <span className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground pt-0.5">
-        {cell.context || cell.group || cell.id.slice(0, 8)}
+        {cell.context || cell.group || shortCellId(cell.id)}
       </span>
 
       {/* Source snippet */}
@@ -283,7 +284,7 @@ function OccurrenceRow({
           size="icon-sm"
           className="shrink-0"
           aria-label={t("terminology.termDetail.goToCellAria", {
-            ref: cell.context || cell.group || cell.id.slice(0, 8),
+            ref: cell.context || cell.group || shortCellId(cell.id),
           })}
           onClick={() => onJumpToCell({ cellId: cell.id, fileId: cell.fileId })}
         >
@@ -450,7 +451,9 @@ export function TerminologyTermDetail({
   }, [newRendering, concept.renderings, concept.id, onRenderingsChange])
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    // AQU-1272: the e2e page object scopes its "N occurrences" assertion to
+    // this panel — page-wide, the same string appears in the term list too.
+    <div className="flex flex-col min-h-screen bg-background" data-testid="term-detail">
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <Button

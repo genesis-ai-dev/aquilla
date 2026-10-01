@@ -1,7 +1,8 @@
 // LanguagesSection — AQU-538 slice 2 "project settings UI: manage target lanes",
 // AQU-1240 slice 1: `settings.targetLanes` is the COMPLETE lane registry
-// (primary included). This section still shows the primary target language
-// read-only (set on Project Info) plus the registered lanes in `targetLanes`.
+// (primary included). This section shows the primary target language
+// read-only (set on Project Info) and the other registered lanes. The
+// primary is not listed again as an additional lane (AQU-1473).
 //
 // AQU-601: lanes are ARCHIVED, not deleted. Archiving records a lane's tag in
 // `settings.archivedLanes` — the lane stays in `targetLanes` (its cell data and
@@ -25,6 +26,7 @@ import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 const MAX_LANE_LENGTH = 64
@@ -128,8 +130,11 @@ export function LanguagesSection({
     .slice()
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
 
-  const active = activeLanes(targetLanes, archivedLanes)
-  const archived = archivedRegisteredLanes(targetLanes, archivedLanes)
+  // The primary is shown in the default-language field above. Listing it again
+  // from the complete registry made a new project's first language appear twice.
+  const registryExtras = extraRegistryLanes(targetLanes, defaultTargetLanguage)
+  const active = activeLanes(registryExtras, archivedLanes)
+  const archived = archivedRegisteredLanes(registryExtras, archivedLanes)
 
   // AQU-988 / AQU-1240: suggestions skip the primary and every registered
   // lane (active or archived) so the dropdown never offers a pointless

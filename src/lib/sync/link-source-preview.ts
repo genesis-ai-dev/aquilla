@@ -1,0 +1,96 @@
+// AQU-1526 — what linking an established project to an upstream will bring in.
+//
+// Linking is additive (AQU-1525): the mirror seeds the upstream's source files
+// alongside whatever this project already holds, and a file sharing a name with
+// an upstream file is allowed and simply appears twice. That is the right
+// behaviour — the original keeps the team's translations and the mirrored copy
+// arrives with empty targets — but it used to happen with no warning, so the
+// first a Project Lead learned of it was a doubled file list. An established
+// project has very often already imported some of the same material (that is
+// usually *why* someone wants to link it), so the clash is the common case, not
+// the edge one.
+//
+// This module answers the confirm step's three questions ahead of the link:
+// which upstream, how many files arrive, and which of them collide by name. It
+// warns; it never blocks. The decision (Matthew, 2026-10-01) is "add alongside
+// and warn first" — do not refuse the link on a name clash, and do not merge
+// into the existing file.
+//
+// Kept separate from LinkSourceSection so the Import dialog's "From another
+// project" entry point (AQU-1527) shows the same preview rather than growing a
+// second, divergent one.
+
+import { fetchProject } from "./projects-read"
+import type { ProjectFileSummary } from "./projects-read-types"
+
+export interface LinkSourcePreview {
+  /** The upstream project's display name, as the server knows it. */
+  upstreamName: string
+  /**
+   * How many files the link will add. Every non-deleted upstream file mirrors:
+   * `file.create` is itself a lane-relevant kind for a `consumes: 'source'`
+   * link (sync-worker `events/link-sync.ts` → `LANE_KINDS_SOURCE`), so even an
+   * upstream file with no source cells yet arrives. This is therefore the
+   * upstream's whole file list, which is what makes the stated count equal the
+   * number that actually turns up after confirming.
+   */
+  fileCount: number
+  /**
+   * Upstream file names that collide with a file this project already has,
+   * compared ignoring letter case, in the upstream's own order. Each of these
+   * will appear twice after linking. Empty means no warning is shown.
+   */
+  clashingNames: string[]
+}
+
+/**
+ * Case-insensitive name clash between an upstream's files and this project's.
+ *
+ * Case-insensitive because the collision users care about is the one they can
+ * see: `MRK` and `mrk` read as the same file in the sidebar, and the server
+ * treats neither as a duplicate (`files.id` is the key, not the name — see
+ * `deterministicDownstreamFileId`), so both really would sit there side by
+ * side.
+ *
+ * The upstream's spelling is what gets reported: that is the name the mirrored
+ * copy will carry, so it is the one that will be on screen afterwards. Repeated
+ * upstream spellings of the same name collapse to one entry — the warning lists
+ * names, not rows.
+ */
+export function buildLinkSourcePreview(
+  upstream: { name: string; files: readonly Pick<ProjectFileSummary, "name">[] },
+  existingFiles: readonly Pick<ProjectFileSummary, "name">[],
+): LinkSourcePreview {
+  const existing = new Set(existingFiles.map((f) => f.name.toLowerCase()))
+  const clashingNames: string[] = []
+  const seen = new Set<string>()
+  for (const file of upstream.files) {
+    const key = file.name.toLowerCase()
+    if (!existing.has(key) || seen.has(key)) continue
+    seen.add(key)
+    clashingNames.push(file.name)
+  }
+  return { upstreamName: upstream.name, fileCount: upstream.files.length, clashingNames }
+}
+
+/**
+ * Read both file lists and build the preview.
+ *
+ * Both sides come from the same endpoint (auth-worker `GET /api/v2/projects/:id`)
+ * so the clash compares like with like. The upstream read is the one that can
+ * fail in a way the user needs to see — the caller shows the failure and offers
+ * a retry rather than rendering a count of zero, which would read as "an empty
+ * upstream" and is a different, linkable situation.
+ */
+export async function loadLinkSourcePreview(
+  jwt: string,
+  projectId: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<LinkSourcePreview> {
+  const [upstream, self] = await Promise.all([
+    fetchProject(upstreamProjectId, jwt, apiUrl),
+    fetchProject(projectId, jwt, apiUrl),
+  ])
+  return buildLinkSourcePreview(upstream, self.files)
+}

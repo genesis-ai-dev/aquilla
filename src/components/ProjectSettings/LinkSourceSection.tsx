@@ -23,11 +23,19 @@
 // Linking is ADDITIVE: the server seeds the upstream's source cells alongside
 // whatever this project already holds, so existing files, translations and
 // validation state are untouched. A file sharing a name with an upstream file
-// is allowed and simply appears twice (the preview/warning for that is a
-// follow-up slice, AQU-1526).
+// is allowed and simply appears twice.
+//
+// AQU-1526: because that duplicate is the COMMON case — an established project
+// is usually being linked precisely because it already holds some of the same
+// material — picking an upstream no longer links it. It opens a confirm step
+// that first says what the link will bring in: the upstream's name, how many
+// files arrive, and any upstream file whose name collides with one already
+// here. The warning does not block; confirming still links. The preview itself
+// lives in `lib/sync/link-source-preview.ts` so the Import dialog's "From
+// another project" entry point (AQU-1527) shows the same one.
 
-import { useMemo, useState } from "react"
-import { Link2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { AlertTriangle, Link2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -35,6 +43,10 @@ import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import {
+  loadLinkSourcePreview,
+  type LinkSourcePreview,
+} from "@/lib/sync/link-source-preview"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -64,6 +76,16 @@ export function LinkSourceSection({ projectId, onLinked, roleLevel }: LinkSource
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // AQU-1526: the id under review in the confirm step. Separate from `chosen`
+  // so backing out of the confirm step returns to the picker with the pick
+  // still in it, and so the preview below is only ever fetched for a pick the
+  // user has actually asked to review.
+  const [reviewing, setReviewing] = useState<string | null>(null)
+  const [preview, setPreview] = useState<LinkSourcePreview | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  // Bumped by "Try again" so the effect re-runs for the same upstream.
+  const [previewAttempt, setPreviewAttempt] = useState(0)
+
   // Never offer this project itself (the server 400s on a self-link), and
   // never an archived one.
   const options = useMemo(
@@ -74,14 +96,53 @@ export function LinkSourceSection({ projectId, onLinked, roleLevel }: LinkSource
     [projects, projectId],
   )
 
+  const jwt = session?.jwt
+
+  // The upstream's name from the picker is the fallback heading while the
+  // preview loads or after it fails — the confirm step must name the project
+  // even when its file list could not be read.
+  const reviewingName = useMemo(
+    () => options.find((o) => o.id === reviewing)?.name ?? "",
+    [options, reviewing],
+  )
+
+  useEffect(() => {
+    if (!reviewing || !jwt) return
+    let cancelled = false
+    // No reset needed on entry: `reviewing` only ever goes null → an id (the
+    // picker is the one caller, and it is only on screen while `reviewing` is
+    // null), and both backToPicker and the retry handler clear these first.
+    void loadLinkSourcePreview(jwt, projectId, reviewing)
+      .then((result) => {
+        if (!cancelled) setPreview(result)
+      })
+      .catch(() => {
+        // The message is a fixed sentence, not the server's: a count the user
+        // cannot see is the whole failure, and "nothing has been linked" is the
+        // part that needs saying. Retry is a button, not a reload.
+        if (!cancelled) setPreviewFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reviewing, jwt, projectId, previewAttempt])
+
+  const backToPicker = useCallback(() => {
+    setReviewing(null)
+    setPreview(null)
+    setPreviewFailed(false)
+    setError(null)
+  }, [])
+
   async function handleLink() {
-    const jwt = session?.jwt
-    if (!chosen || !jwt || linking) return
+    // AQU-1526: the upstream under review, not the picker's value — what gets
+    // linked is exactly what the preview above described.
+    if (!reviewing || !jwt || linking) return
     setLinking(true)
     setError(null)
     try {
       const result = await linkProjectSource(jwt, projectId, {
-        sourceProjectId: chosen,
+        sourceProjectId: reviewing,
         mode: "live",
         consumes: "source",
       })
@@ -90,6 +151,8 @@ export function LinkSourceSection({ projectId, onLinked, roleLevel }: LinkSource
       // file list. Same fallback ProjectCreateDialog does.
       if (result.seeded === false) await triggerLinkSync(jwt, projectId)
       setChosen("")
+      setReviewing(null)
+      setPreview(null)
       onLinked()
     } catch (err) {
       const facing = toUserFacingError(err, "project")
@@ -120,51 +183,141 @@ export function LinkSourceSection({ projectId, onLinked, roleLevel }: LinkSource
           {t("projectSettings.linkSource.description")}
         </div>
         {canLink ? (
-          <>
-            <Field>
-              <FieldLabel htmlFor="link-source-project">
-                {t("projectSettings.linkSource.pickerLabel")}
-              </FieldLabel>
-              <ProjectCombobox
-                id="link-source-project"
-                options={options}
-                value={chosen}
-                onValueChange={(value) => {
-                  setChosen(value)
-                  setError(null)
-                }}
-                placeholder={t("projectSettings.linkSource.pickerPlaceholder")}
-                searchPlaceholder={t("projectSettings.linkSource.pickerSearchPlaceholder")}
-                searchAriaLabel={t("projectSettings.linkSource.pickerSearchAriaLabel")}
-                emptyText={t("projectSettings.linkSource.pickerNoMatches")}
-              />
-            </Field>
-            {projectsError ? (
-              <p className="text-sm text-destructive">{projectsError}</p>
-            ) : (
-              !isLoading &&
-              options.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {t("projectSettings.linkSource.noProjectsNote")}
+          reviewing ? (
+            // ── AQU-1526 confirm step: what the link will add, before it does ──
+            <>
+              <p className="text-sm font-medium">
+                {t("projectSettings.linkSource.previewTitle", {
+                  upstream: preview?.upstreamName || reviewingName,
+                })}
+              </p>
+              {previewFailed ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-destructive" role="alert">
+                    {t("projectSettings.linkSource.previewLoadError")}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setPreviewFailed(false)
+                      setPreviewAttempt((n) => n + 1)
+                    }}
+                  >
+                    {t("projectSettings.linkSource.previewRetryButton")}
+                  </Button>
+                </div>
+              ) : !preview ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("projectSettings.linkSource.previewLoading")}
                 </p>
-              )
-            )}
-            <p className="text-xs text-muted-foreground">
-              {t("projectSettings.linkSource.additiveNote")}
-            </p>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                disabled={!chosen || linking || !session}
-                onClick={handleLink}
-              >
-                {linking
-                  ? t("projectSettings.linkSource.linkingButton")
-                  : t("projectSettings.linkSource.linkButton")}
-              </Button>
-            </div>
-          </>
+              ) : (
+                <>
+                  <p className="text-sm">
+                    {preview.fileCount === 0
+                      ? t("projectSettings.linkSource.previewEmptyUpstream")
+                      : t("projectSettings.linkSource.previewCount", {
+                          count: preview.fileCount,
+                        })}
+                  </p>
+                  {/* The clash is a warning, never a refusal: the confirm
+                      button below stays live beside it. */}
+                  {preview.clashingNames.length > 0 && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                    >
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="space-y-1">
+                        <p>
+                          {t("projectSettings.linkSource.clashWarningHeading", {
+                            count: preview.clashingNames.length,
+                          })}
+                        </p>
+                        <ul className="list-inside list-disc font-medium">
+                          {preview.clashingNames.map((name) => (
+                            <li key={name.toLowerCase()}>{name}</li>
+                          ))}
+                        </ul>
+                        <p>
+                          {t("projectSettings.linkSource.clashWarningBody", {
+                            count: preview.clashingNames.length,
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t("projectSettings.linkSource.additiveNote")}
+              </p>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={linking}
+                  onClick={backToPicker}
+                >
+                  {t("projectSettings.linkSource.cancelButton")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={linking || !session || previewFailed}
+                  onClick={handleLink}
+                >
+                  {linking
+                    ? t("projectSettings.linkSource.linkingButton")
+                    : t("projectSettings.linkSource.linkButton")}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Field>
+                <FieldLabel htmlFor="link-source-project">
+                  {t("projectSettings.linkSource.pickerLabel")}
+                </FieldLabel>
+                <ProjectCombobox
+                  id="link-source-project"
+                  options={options}
+                  value={chosen}
+                  onValueChange={(value) => {
+                    setChosen(value)
+                    setError(null)
+                  }}
+                  placeholder={t("projectSettings.linkSource.pickerPlaceholder")}
+                  searchPlaceholder={t("projectSettings.linkSource.pickerSearchPlaceholder")}
+                  searchAriaLabel={t("projectSettings.linkSource.pickerSearchAriaLabel")}
+                  emptyText={t("projectSettings.linkSource.pickerNoMatches")}
+                />
+              </Field>
+              {projectsError ? (
+                <p className="text-sm text-destructive">{projectsError}</p>
+              ) : (
+                !isLoading &&
+                options.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("projectSettings.linkSource.noProjectsNote")}
+                  </p>
+                )
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t("projectSettings.linkSource.additiveNote")}
+              </p>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  disabled={!chosen || linking || !session}
+                  onClick={() => setReviewing(chosen)}
+                >
+                  {t("projectSettings.linkSource.reviewButton")}
+                </Button>
+              </div>
+            </>
+          )
         ) : (
           <p className="text-xs text-muted-foreground">
             {t("projectSettings.linkSource.roleGateNote")}

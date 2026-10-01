@@ -236,6 +236,13 @@ UI chrome that used to be one smoke file per click is covered under
   appear while the pre-existing file's translations survive) is NOT yet a smoke journey —
   AQU-1525 left it open because it could not be executed where the fix was made; it is
   the remaining item on that issue's automated-coverage checklist.
+  The pre-link confirm step (AQU-1526) is RTL/unit too: the clash arithmetic — matched
+  ignoring letter case, reported in the upstream's spelling, listed once per name — in
+  `link-source-preview.test.ts`, and the step's states (count, same-name warning that
+  does not block, empty upstream, an unreadable upstream file list that is never shown
+  as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
+  is at risk before confirming and the step crosses no second service, so per the rules
+  above it stays RTL rather than becoming a smoke journey.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

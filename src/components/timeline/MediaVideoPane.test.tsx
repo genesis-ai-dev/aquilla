@@ -194,6 +194,55 @@ describe("MediaVideoPane", () => {
       }
     })
 
+    // 2026-09-30: when the picture is the transport it takes the floor — a
+    // take sounding on a waveform stops — and the next thing to start stops
+    // the picture. It used to go on under a take (the throttled browser pass).
+    it("takes the floor when it starts, and a take that starts stops it", async () => {
+      const { claimActiveAudio, clearActiveAudioIf, getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+      const pause = vi.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {})
+      try {
+        let takePlaying = true
+        const take = { isPlaying: () => takePlaying, play: async () => { takePlaying = true }, pause: vi.fn(() => { takePlaying = false }) }
+        claimActiveAudio(take)
+        renderStandalone()
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "paused", { value: false, configurable: true })
+        fireEvent.play(video)
+        expect(take.pause).toHaveBeenCalledTimes(1)
+        expect(getActiveAudio()).not.toBe(take)
+        // Now a take starts: the picture is paused through its own controller.
+        const next = { isPlaying: () => true, play: async () => {}, pause: vi.fn() }
+        claimActiveAudio(next)
+        expect(pause).toHaveBeenCalled()
+        clearActiveAudioIf(next)
+      } finally {
+        pause.mockRestore()
+      }
+    })
+
+    it("lets go of the floor when it pauses", async () => {
+      const { getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+      renderStandalone()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "paused", { value: false, configurable: true })
+      fireEvent.play(video)
+      expect(getActiveAudio()).not.toBeNull()
+      Object.defineProperty(video, "paused", { value: true, configurable: true })
+      fireEvent.pause(video)
+      expect(getActiveAudio()).toBeNull()
+    })
+
+    it("never takes the floor from the queue it follows (slaved)", async () => {
+      const { claimActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+      const queue = { isPlaying: () => true, play: async () => {}, pause: vi.fn() }
+      claimActiveAudio(queue)
+      // renderPane()'s CELLS are media cells with the shared clip → slaved.
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
+      fireEvent.play(screen.getByTestId("video-pane-media"))
+      expect(queue.pause).not.toHaveBeenCalled()
+      clearActiveAudioIf(queue)
+    })
+
     it("ignores Space when the QUEUE is the transport — two writers would fight", () => {
       const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
       try {

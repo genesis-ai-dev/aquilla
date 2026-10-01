@@ -31,7 +31,6 @@ import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { fmtClock } from "@/components/timeline/format"
 import { CellTakeBlock } from "@/components/CellTakeBlock"
-import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 
 interface Shared {
@@ -63,9 +62,6 @@ export interface RecordingTakesProps extends Shared {
     performs?: readonly string[]
     partOfSplit?: boolean
   }>
-  /** The row's own players, by the take each plays (AQU-1211): a take the row
-   *  plays is played through them here, so the cell's word highlight follows. */
-  players?: ReadonlyMap<string, UseCellAudioResult>
 }
 
 /**
@@ -108,7 +104,6 @@ function OwnerTakes({
   owner,
   trackFileId,
   header,
-  players,
   offerWhenEmpty = false,
   project,
   session,
@@ -120,8 +115,6 @@ function OwnerTakes({
    *  colours, added ones) are the subtitle file's (Sam, 2026-09-30). */
   trackFileId: string
   header?: React.ReactNode
-  /** The row's players, by take — the row's own cell only. */
-  players?: ReadonlyMap<string, UseCellAudioResult>
   /** A heard line nobody has recorded yet: say so and offer New take, rather
    *  than draw nothing (Sam, 2026-09-29 — a line split across heard lines). */
   offerWhenEmpty?: boolean
@@ -215,7 +208,7 @@ function OwnerTakes({
       )}
       {/* A media line whose only audio is its section of the programme. */}
       {!defaultPlays && sourceClip && (
-        <CellTakeBlock {...shared} owner={owner} audioId={sourceClip.audioId} timings={owner.audioTimings?.[sourceClip.audioId]} controller={players?.get(sourceClip.audioId)} />
+        <CellTakeBlock {...shared} owner={owner} audioId={sourceClip.audioId} timings={owner.audioTimings?.[sourceClip.audioId]} />
       )}
       {groups.map((group) => {
         const playing = playingTakeId(group, entry)
@@ -247,7 +240,6 @@ function OwnerTakes({
                 {...shared}
                 owner={owner}
                 audioId={playing}
-                controller={players?.get(playing)}
                 timings={owner.audioTimings?.[playing]}
                 readOnlyTranscript={generated}
                 provenance={history.get(playing) ?? null}
@@ -285,7 +277,7 @@ function OwnerTakes({
   )
 }
 
-export function RecordingTakes({ cell, linkedTakes, players, ...shared }: RecordingTakesProps) {
+export function RecordingTakes({ cell, linkedTakes, ...shared }: RecordingTakesProps) {
   const t = useT()
   const { cellStore } = useEditorActions()
   /**
@@ -312,7 +304,7 @@ export function RecordingTakes({ cell, linkedTakes, players, ...shared }: Record
   }
   return (
     <div data-testid="recording-takes" className="flex flex-col gap-4">
-      <OwnerTakes {...shared} owner={cell} trackFileId={cell.fileId} players={players} />
+      <OwnerTakes {...shared} owner={cell} trackFileId={cell.fileId} />
       {linkedTakes?.map((heard) => {
         const { cell: cue, sharedWith } = heard
         // Only a heard line performing exactly this line says this line's

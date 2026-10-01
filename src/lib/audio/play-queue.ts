@@ -19,7 +19,7 @@ import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { setActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
+import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 
@@ -1185,7 +1185,10 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   }
   audio.onplay = () => {
     if (seq !== currentSeq) return
-    setActiveAudio(coordinatorController)
+    // CLAIM (2026-09-29): starting the timeline silences a waveform or a chip
+    // preview that is sounding — it used to only record itself, and a take
+    // playing in an expanded line's Recording tab went on over the timeline.
+    claimActiveAudio(coordinatorController)
     for (const e of overlayPool) if (e.element) void e.element.play().catch(() => { /* user-driven */ })
     setState({ kind: "playing", ...progStateCell() })
   }
@@ -2565,7 +2568,10 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
 
   audio.onplay = () => {
     if (seq !== currentSeq) return
-    setActiveAudio(coordinatorController)
+    // CLAIM (2026-09-29): starting the timeline silences a waveform or a chip
+    // preview that is sounding — it used to only record itself, and a take
+    // playing in an expanded line's Recording tab went on over the timeline.
+    claimActiveAudio(coordinatorController)
     // The dub overlays ride the master's transport (rounds 5-7).
     for (const e of overlayPool) {
       if (e.element) void e.element.play().catch(() => { /* user-driven, ignore */ })

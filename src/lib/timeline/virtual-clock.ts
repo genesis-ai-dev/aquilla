@@ -35,6 +35,7 @@
 
 import { useSyncExternalStore } from "react"
 import type { VideoController } from "./video-controller"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 
 /**
  * How often the position is republished.
@@ -77,6 +78,21 @@ let driving = false
 let timer: ReturnType<typeof setInterval> | null = null
 
 const listeners = new Set<() => void>()
+
+/**
+ * THE CLOCK TAKES THE FLOOR WHEN IT STARTS (2026-09-30). One sound at a time:
+ * a take playing on a waveform, or a chip's preview, stops when the timeline
+ * starts — the play queue has done this since 09-29, and a subtitle file with
+ * neither film nor source audio runs on this clock instead, so pressing play
+ * there left the take sounding under the timeline (found in the throttled
+ * browser pass). Holding the floor also means the next thing to start stops
+ * the clock. Released on pause, stop and at the end, like a chip preview.
+ */
+const clockAudio: ActiveAudioController = {
+  isPlaying: () => getVirtualClockPlaying(),
+  play: async () => { virtualClockPlay() },
+  pause: () => { virtualClockPause() },
+}
 
 /**
  * Republish, then wake the subscribers — in that order, always.
@@ -144,6 +160,7 @@ export function tickVirtualClock(): void {
     reanchor(durationSec)
     playing = false
     stopTimer()
+    clearActiveAudioIf(clockAudio)
   }
   notify()
 }
@@ -173,6 +190,7 @@ export function stopVirtualClock(): void {
   driving = false
   playing = false
   anchorSec = 0
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 
@@ -184,6 +202,7 @@ export function virtualClockPlay(): void {
   playing = true
   reanchor(anchorSec)
   startTimer()
+  claimActiveAudio(clockAudio)
   notify()
 }
 
@@ -192,6 +211,7 @@ export function virtualClockPause(): void {
   reanchor()
   playing = false
   stopTimer()
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 
@@ -278,6 +298,7 @@ export function resetVirtualClockForTests(): void {
   rate = 1
   volume = 1
   durationSec = 0
+  clearActiveAudioIf(clockAudio)
   notify()
 }
 

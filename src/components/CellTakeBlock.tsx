@@ -31,6 +31,7 @@ import { TakeTextVerdict } from "./audio/TakeTextVerdict"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { TakeWaveform } from "./audio/TakeWaveform"
+import { TakeTimeReadout } from "./audio/TakeTimeReadout"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
@@ -236,30 +237,36 @@ function CellTakeBlockView({
   // same removal as the takes lists. Nothing is chosen in its place: the line
   // plays its generated voice if it has one, and otherwise says no take plays.
   const [deleting, setDeleting] = useState(false)
+  // Only the player's play/pause state and its pause, not the whole player:
+  // the player is a new object on every frame of playback.
+  const { isPlaying: takePlaying, pause: pauseTake } = controller
   const handleDelete = useCallback(async () => {
     if (!selectedAudioId || !attachment) return
     setDeleting(true)
+    const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
+    const lane = targetLang ? { targetLang } : {}
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username }
+    if (takePlaying) pauseTake()
+    // THE TRY HOLDS THE AWAIT AND NOTHING ELSE, deliberately: the React
+    // Compiler cannot compile a try/finally, or a conditional inside a try,
+    // and skips the WHOLE component for either — which left this block
+    // re-rendering all its tooltips and popovers on every frame of playback
+    // (2026-09-30). The catch swallows everything, so the lines after it run
+    // whatever happens, as a finally would.
+    let removed = false
     try {
-      if (controller.isPlaying) controller.pause()
-      await removeTake({
-        projectId: project.id,
-        fileId: owner.fileId,
-        cellId: owner.id,
-        audioId: selectedAudioId,
-        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT),
-        ...(targetLang ? { targetLang } : {}),
-        author: username,
-      })
-      const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
-        audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
-      }))
-      if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
+      await removeTake(removal)
+      removed = true
     } catch {
       // The remove overlay drops itself and refetches; the take comes back.
-    } finally {
-      setDeleting(false)
     }
-  }, [selectedAudioId, attachment, controller, project.id, owner, username, onLastTakeRemoved, targetLang])
+    setDeleting(false)
+    if (!removed) return
+    const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
+      audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
+    }))
+    if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
+  }, [selectedAudioId, attachment, takePlaying, pauseTake, project.id, owner, username, onLastTakeRemoved, targetLang])
 
   // Renameable in place, as every take in the lists is (Sam, 2026-09-29).
   // The new name shows at once, for as long as the take still carries the
@@ -281,11 +288,12 @@ function CellTakeBlockView({
     // that unchanged would turn the placeholder into a real name.
     if (!selectedAudioId || !label || label === (shownLabel ?? t("audio.takesStrip.takeFallback"))) return
     setRenamed({ audioId: selectedAudioId, from: storedLabel, to: label })
+    // Worked out before the try: a conditional inside one makes the React
+    // Compiler skip the whole component (see handleDelete).
+    const lane = targetLang ? { targetLang } : {}
+    const rename = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username, ...lane }
     try {
-      await renameTake({
-        projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username,
-        ...(targetLang ? { targetLang } : {}),
-      })
+      await renameTake(rename)
     } catch {
       setRenamed(null)
     }
@@ -541,7 +549,17 @@ function CellTakeBlockView({
         trimEditable={editable}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
-      />
+      >
+        {/* The running time, as on the Audio view card (Sam, 2026-09-29). */}
+        <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+          <TakeTimeReadout
+            currentTime={controller.currentTime}
+            duration={controller.duration}
+            kept={kept}
+            testId="cell-take-time"
+          />
+        </span>
+      </TakeWaveform>
       {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

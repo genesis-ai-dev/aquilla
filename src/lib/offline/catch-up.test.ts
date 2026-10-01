@@ -236,3 +236,18 @@ describe("catchUpProject — project level", () => {
     expect(project?.syncedAt?.getTime()).toBeGreaterThan(0)
   })
 })
+
+describe("catchUpProject — batching", () => {
+  it("lands a bulk sync as a few batched events, not one event per row", async () => {
+    const rows = Array.from({ length: 600 }, (_, i) => [row(`c${i}`, "source", `src ${i}`), row(`c${i}`, "target", `tgt ${i}`)]).flat()
+    const commit = vi.spyOn(store, "commit")
+
+    const result = await catchUpProject(store, P, "tok", makeDeps({ pages: [{ rows, maxServerSeq: 5, projectEpoch: 1 }] }))
+
+    expect(result.rowsChanged).toBe(1200)
+    expect(store.query(tables.cells.select().where({ projectId: P }))).toHaveLength(1200)
+    const names = commit.mock.calls.flatMap((args) => args.map((e) => (e as { name: string }).name))
+    expect(names.filter((n) => n === "v1.CellsSynced")).toHaveLength(3)
+    expect(names).not.toContain("v1.CellSynced")
+  })
+})

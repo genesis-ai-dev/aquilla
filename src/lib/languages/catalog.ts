@@ -2,6 +2,14 @@
  * AQU-988 — bundled ISO 639-1 language catalog backing the select-or-type
  * language fields (see `@/components/LanguageComboboxInput`).
  *
+ * AQU-1456 — this bundled set is now only the *head start*: the pickers load
+ * the full SIL ISO 639-3 catalog (~7,900 languages, `./full-catalog`) on first
+ * focus/keystroke and filter that instead, so low-resource languages are
+ * suggested too. The ranking and settled-state helpers below are shared by
+ * both catalogs, so pass the loaded one in via `filterLanguages`'s `catalog`
+ * option. Keep `LANGUAGES` as-is in shape: `src/lib/audio/inworld-languages.ts`
+ * reads its two-letter `code` synchronously to map lanes onto Inworld tags.
+ *
  * Suggestions only. Language fields stay freeform: the product contract is
  * "any label works — a BCP-47 tag, a language name, or a register description
  * (e.g. 'Grade 7 English')". Picking an entry stores its `name` (the display
@@ -11,10 +19,19 @@
  */
 
 export type LanguageEntry = {
-  /** ISO 639-1 two-letter code. Searchable; never the stored value. */
+  /**
+   * Primary code — ISO 639-1 in `LANGUAGES`, ISO 639-3 in the full catalog.
+   * Shown next to the name as a hint, searchable, never the stored value.
+   */
   code: string
   /** English display name — this is what gets stored when picked. */
   name: string
+  /**
+   * AQU-1456 — a second searchable code for the same language, so a 639-3
+   * entry still answers to its two-letter form ("fr" and "fra" both find
+   * French). Not displayed.
+   */
+  altCode?: string
 }
 
 /** ISO 639-1, English display names, sorted by name. */
@@ -228,12 +245,18 @@ function fold(value: string): string {
 function rank(entry: LanguageEntry, query: string): number | null {
   const name = fold(entry.name)
   const code = fold(entry.code)
-  if (code === query) return 0
+  const altCode = entry.altCode ? fold(entry.altCode) : null
+  if (code === query || altCode === query) return 0
   if (name === query) return 1
   if (name.startsWith(query)) return 2
-  if (code.startsWith(query)) return 3
+  if (code.startsWith(query) || altCode?.startsWith(query)) return 3
   if (name.includes(query)) return 4
   return null
+}
+
+/** 0 for a language with an ISO 639-1 code, 1 otherwise. See `filterLanguages`. */
+function majorFirst(entry: LanguageEntry): number {
+  return entry.altCode ? 0 : 1
 }
 
 /**
@@ -252,22 +275,30 @@ export function isSettledLanguage(
 
 /**
  * Filter the catalog by display name or code. An empty query returns the head
- * of the full list (the plain "dropdown" case).
+ * of the catalog (the plain "dropdown" case).
  *
  * `exclude` drops entries already chosen (case-insensitively) so a chips field
  * never suggests a language that is already a chip.
  */
 export function filterLanguages(
   query: string,
-  options: { limit?: number; exclude?: readonly string[] } = {},
+  options: {
+    limit?: number
+    exclude?: readonly string[]
+    /**
+     * AQU-1456 — catalog to search. Defaults to the bundled ISO 639-1 set;
+     * the pickers pass the lazily loaded ISO 639-3 catalog once it resolves.
+     */
+    catalog?: readonly LanguageEntry[]
+  } = {},
 ): LanguageEntry[] {
-  const { limit = LANGUAGE_SUGGESTION_LIMIT, exclude } = options
+  const { limit = LANGUAGE_SUGGESTION_LIMIT, exclude, catalog = LANGUAGES } = options
   const excluded = exclude?.length
     ? new Set(exclude.map((value) => fold(value.trim())))
     : null
   const allowed = excluded
-    ? LANGUAGES.filter((entry) => !excluded.has(fold(entry.name)))
-    : LANGUAGES
+    ? catalog.filter((entry) => !excluded.has(fold(entry.name)))
+    : catalog
 
   const folded = fold(query.trim())
   if (!folded) return allowed.slice(0, limit)
@@ -277,7 +308,13 @@ export function filterLanguages(
     const score = rank(entry, folded)
     if (score !== null) scored.push({ entry, score })
   }
-  // Stable within a rank: the catalog is already name-sorted.
-  scored.sort((a, b) => a.score - b.score)
+  // AQU-1456 — within a rank, a language that also carries an ISO 639-1 code
+  // comes first. Without this, widening the catalog from ~184 to ~7,900 buries
+  // the majors behind alphabetically-earlier obscure codes ("ger" surfacing
+  // "Geragew" ahead of "German"). Richer ranking across the long tail —
+  // word-start matches, shortest name first — is AQU-1457's job; this only
+  // keeps the pre-AQU-1456 ordering of the majors intact.
+  // Stable beyond that: the catalog is already name-sorted.
+  scored.sort((a, b) => a.score - b.score || majorFirst(a.entry) - majorFirst(b.entry))
   return scored.slice(0, limit).map((item) => item.entry)
 }

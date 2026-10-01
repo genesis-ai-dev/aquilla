@@ -81,6 +81,9 @@ const ProjectSettingsDialog = lazy(() =>
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
 // the main content area. These top-level lazy imports are intentionally removed.
+const OrgAccessPage = lazy(() =>
+  import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
+)
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
@@ -396,6 +399,7 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />

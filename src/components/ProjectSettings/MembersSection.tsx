@@ -34,6 +34,8 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { RevokeAllDialog } from "@/components/ProjectMembersPage"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectScopePath } from "@/hooks/useProjectScopePath"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
 import {
@@ -69,6 +71,7 @@ function memberMatchesFilter(m: ProjectMember, filter: AccessFilter): boolean {
 }
 
 export function MembersSection({ projectId }: { projectId: string }) {
+  const scopePath = useProjectScopePath(projectId)
   const t = useT()
   const { session } = useFrontierSession()
   const {
@@ -176,6 +179,12 @@ export function MembersSection({ projectId }: { projectId: string }) {
   return (
     <>
       <div id="section-members" data-testid="settings-members-section" className="space-y-4">
+        {/* AQU-1352 §3.9 rule 1: the scope's breadcrumb is the page title. */}
+        {scopePath.length > 0 && (
+          <h2 className="font-heading text-base font-semibold" data-testid="settings-members-scope">
+            <ScopeBreadcrumb path={scopePath} />
+          </h2>
+        )}
         {error && (
           <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -348,6 +357,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
 
       <AddProjectMemberDialog
         projectId={projectId}
+        scopePath={scopePath}
         open={addOpen}
         onOpenChange={setAddOpen}
         members={members}

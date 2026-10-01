@@ -73,6 +73,9 @@ import invitesRoutes from "./routes/invites"
 import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
+import meRoutes from "./routes/me"
+import accessRoutes from "./routes/access"
+import orgAccessRoutes from "./routes/org-access"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
@@ -117,6 +120,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
@@ -259,6 +263,9 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/users", accessRoutes)
+app.route("/api/v2/me", meRoutes)
+app.route("/api/v2/orgs", orgAccessRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -430,6 +437,8 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // AQU-1352 P1: resolveProjectRoleShared (internal AI routes) reads the mode off this handle.
+  setAccessGrantsMode(shim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
   // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their

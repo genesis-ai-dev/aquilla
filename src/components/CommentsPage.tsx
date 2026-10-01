@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useComments } from "@/hooks/useComments"
+import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
@@ -925,11 +926,13 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
     // Only navigate to live files (tombstoned files have no route to open)
     const { exists } = resolveFileName(root.fileId, fileMap, t)
     if (!exists) return
-    // Append ?cellId= so ProjectWorkspace can scroll to the right cell on load.
-    const params = root.cellId
-      ? `?cellId=${encodeURIComponent(root.cellId)}`
-      : ""
-    navigate(`/project/${projectId}/editor/file/${encodeURIComponent(root.fileId)}${params}`)
+    // AQU-1259: ?cellId= scrolls to the row, and `&comments=1` opens that
+    // cell's thread on arrival. Scrolling alone was the gap the consultant hit:
+    // the user clicks a thread here and lands on a row with the thread still
+    // collapsed, so the comment they just clicked has to be hunted for again.
+    // Resolved threads take the same link — the drawer lists them too, which is
+    // where "reopen" lives.
+    navigate(editorCommentHref(projectId, root.fileId, root.cellId))
   }
 
   const activeFilterCount = countActiveFilters(filter)

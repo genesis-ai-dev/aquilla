@@ -5,10 +5,15 @@ import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Input } from "@/components/ui/input"
 import {
+  LANGUAGES,
   filterLanguages,
   isSettledLanguage,
   type LanguageEntry,
 } from "@/lib/languages/catalog"
+import {
+  loadFullLanguageCatalog,
+  peekFullLanguageCatalog,
+} from "@/lib/languages/full-catalog"
 
 /**
  * AQU-988 — select-or-type language fields.
@@ -32,6 +37,13 @@ import {
  *     "Grade 7 English" therefore still never matches a suggestion.
  *  2. The list never writes back into the input on its own. Only an explicit
  *     click, or Enter on a highlighted row, calls `onSelect`/`onEnterSelect`.
+ *
+ * AQU-1456 — the catalog itself is lazy. Suggestions start from the bundled
+ * ISO 639-1 set and switch to the full SIL ISO 639-3 catalog (~7,900 languages)
+ * as soon as it has loaded; the load is kicked off by the first focus or
+ * keystroke on any language field, so the initial app load never pays for it.
+ * Loading is purely additive — it widens `items`, and the two rules above are
+ * what still decide whether Enter picks a row.
  *
  * Opening is deliberately narrow: the list appears only when a real keystroke
  * produced the edit (or on ArrowDown), never on bare focus and never on a
@@ -124,14 +136,43 @@ export function useLanguageSuggestions({
   const typedRef = React.useRef(false)
   const listId = React.useMemo(() => `language-suggestions-${++listIdSeq}`, [])
 
+  // AQU-1456 — the bundled 639-1 set until the full 639-3 catalog arrives.
+  const [catalog, setCatalog] = React.useState<readonly LanguageEntry[]>(
+    () => peekFullLanguageCatalog() ?? LANGUAGES,
+  )
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  /** Idempotent; called on the first focus and on every text-producing key. */
+  const requestFullCatalog = React.useCallback(() => {
+    const loaded = peekFullLanguageCatalog()
+    if (loaded) {
+      setCatalog(loaded)
+      return
+    }
+    void loadFullLanguageCatalog().then(
+      (entries) => {
+        if (mountedRef.current) setCatalog(entries)
+      },
+      () => {
+        // Chunk fetch failed (offline, cache miss). Stay on the bundled set —
+        // the next keystroke retries, and the field is freeform regardless.
+      },
+    )
+  }, [])
+
   const items = React.useMemo(() => {
     if (disabled) return []
-    const matches = filterLanguages(query, { exclude })
+    const matches = filterLanguages(query, { exclude, catalog })
     // Nothing left to offer once the text IS the only match — hide rather than
     // suggest the user's own value back at them (and keep the popup from
     // covering the controls under a fully-filled field).
     return isSettledLanguage(query, matches) ? [] : matches
-  }, [disabled, exclude, query])
+  }, [catalog, disabled, exclude, query])
 
   const close = React.useCallback(() => {
     setOpen(false)
@@ -204,6 +245,12 @@ export function useLanguageSuggestions({
       "aria-autocomplete": "list",
       "aria-activedescendant":
         open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined,
+      onFocus: (event) => {
+        props.onFocus?.(event)
+        // Warm the catalog before the first keystroke so the widened list is
+        // already there when the user types. Does NOT open the list.
+        if (!disabled) requestFullCatalog()
+      },
       onChange: (event) => {
         const field = event.currentTarget
         const typed = typedRef.current
@@ -233,6 +280,8 @@ export function useLanguageSuggestions({
             event.key === "Process"
           ) {
             typedRef.current = true
+            // Covers fields filled without a focus event ever firing.
+            requestFullCatalog()
           }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             if (items.length > 0) {
@@ -275,7 +324,7 @@ export function useLanguageSuggestions({
         props.onKeyDown?.(event)
       },
     }),
-    [activeIndex, close, disabled, items, listId, open, pick],
+    [activeIndex, close, disabled, items, listId, open, pick, requestFullCatalog],
   )
 
   const visible = open && items.length > 0 && rect !== null

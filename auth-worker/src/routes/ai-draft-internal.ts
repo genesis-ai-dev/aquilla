@@ -50,6 +50,8 @@ const bodySchema = z.object({
   /** Explicit cells only — the caller has already rejected wildcards. */
   cellIds: z.array(z.string().min(1)).min(1).max(MAX_COMPLETION_BATCH_SIZE),
   instructions: z.string().max(2000).optional(),
+  /** AQU-1447: the target-language lane to draft into; absent = default lane. */
+  laneId: z.string().min(1).max(64).optional(),
 })
 
 function resolveOpenRouterUrl(env: Env): string {
@@ -166,6 +168,7 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
     {
       projectId: body.projectId,
       focusedFileId: body.fileId,
+      lane: body.laneId ?? "",
       aliases: new AliasMap(),
       sourceLanguage,
       targetLanguage,

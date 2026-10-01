@@ -3,7 +3,7 @@ import {
   type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
-import { clearBiblicaApostropheGlue } from "@/lib/biblica/apostrophe-glue"
+import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import { plainTextFromProtectedHtml } from "./protected-html"
 
@@ -166,7 +166,7 @@ export function normalizeProtectedCompletion(
   // apostrophe glue copies it through, gluing a stray `'` onto translated
   // words. Clearing the slot keeps its span — and so the anchor sequence — but
   // leaves the English typesetting out of the target text.
-  const withoutGlue = clearBiblicaApostropheGlue(
+  const withoutGlue = normalizePartnerIdmlTargetHtml(
     cell.metadata,
     cell.originalHtml,
     normalizedHtml,

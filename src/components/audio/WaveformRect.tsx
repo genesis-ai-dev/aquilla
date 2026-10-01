@@ -96,6 +96,12 @@ export interface WaveformRectProps {
   edges?: readonly WaveformEdge[]
   /** Overlaid in the middle: a load button, an error, a "missing" note. */
   status?: ReactNode
+  /**
+   * The shape is on its way. Until `peaks` arrive a placeholder pulses where
+   * it will be drawn, in the take's own ink: a flat body reads as a silent
+   * take (Sam, 2026-10-01, from the 3G pass).
+   */
+  loading?: boolean
   className?: string
   style?: CSSProperties
   testId?: string
@@ -136,6 +142,7 @@ export function WaveformRect({
   seekLabel = "",
   edges = [],
   status,
+  loading = false,
   className,
   style,
   testId,
@@ -248,6 +255,15 @@ export function WaveformRect({
         >
           <path d={d} />
         </svg>
+      )}
+      {loading && !d && (
+        <div
+          aria-hidden
+          data-testid={testId ? `${testId}-loading` : undefined}
+          // The app's skeleton pulse. The colour carries the transparency, so
+          // the pulse's own opacity steps stay its own.
+          className="pointer-events-none absolute inset-x-[10%] inset-y-[30%] animate-pulse rounded-full bg-current/15 motion-reduce:animate-none"
+        />
       )}
 
       {/* The trimmed-off audio: still drawn, washed out. */}

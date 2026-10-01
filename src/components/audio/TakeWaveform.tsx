@@ -17,8 +17,9 @@
 //     section's own timing. It is drawn as that section alone and never
 //     offers edges — retime the section on the timeline instead.
 //
-// Loading, needs-a-click, missing and failed are CellWaveform's states,
-// carried over unchanged (the design pass parked restyling them).
+// Needs-a-click, missing and failed are CellWaveform's states, carried over
+// unchanged (the design pass parked restyling them). Loading is a placeholder
+// shape pulsing where the take will be drawn (2026-10-01).
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, CloudDownload, Download, RotateCw } from "lucide-react"
@@ -126,6 +127,11 @@ export function TakeWaveform({
     return peaks.slice(a, b)
   }, [peaks, isSection, dur, viewStart, viewEnd])
   const toFrac = (sec: number) => (viewLen > 0 ? (sec - viewStart) / viewLen : 0)
+  // Still on its way — downloading, waiting its turn to decode, decoding. The
+  // frame before the request starts counts too, or every take would flash flat
+  // first. (A flat body read as a silent take: the 3G pass, Sam 2026-10-01.)
+  const shapeLoading = !(drawnPeaks && drawnPeaks.length > 0) &&
+    (peaksState === "loading" || (peaksState === "idle" && shouldLoad && Boolean(audioId)))
 
   const keep = !isSection && dur > 0 && (trim.start != null || trim.end != null)
     ? { start: toFrac(trim.start ?? 0), end: toFrac(trim.end ?? dur) }
@@ -231,12 +237,10 @@ export function TakeWaveform({
       seekLabel={t("common.seek")}
       edges={edges}
       status={status}
+      loading={shapeLoading}
       className={className}
       testId={testId}
     >
-      {peaksState === "loading" && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-2 top-1/2 h-px animate-pulse bg-foreground/30" />
-      )}
       {state === "error" && error && (
         <span className="sr-only" role="status">{error.message}</span>
       )}

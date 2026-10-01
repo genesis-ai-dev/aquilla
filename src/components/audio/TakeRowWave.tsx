@@ -32,6 +32,9 @@ export function TakeRowWave({
   trackVars?: Record<string, string>
 }) {
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
+  // Which take's read has come back (with a shape or without one): until then
+  // the rectangle pulses a placeholder instead of standing flat.
+  const [settledFor, setSettledFor] = useState<string | null>(null)
   const load = autoLoadsPeaks(strategy)
   const getSyncToken = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
   useEffect(() => {
@@ -44,7 +47,11 @@ export function TakeRowWave({
       fileId,
       bins: WAVEFORM_BINS,
       getSyncToken,
-    }).then((p) => { if (live) setPeaks(p) })
+    }).then((p) => {
+      if (!live) return
+      setPeaks(p)
+      setSettledFor(att.audioId)
+    })
     return () => { live = false }
   }, [load, att.audioId, att.url, projectId, fileId, getSyncToken])
   // The trimmed-off ends, faded, as on every other waveform off the timeline.
@@ -59,6 +66,7 @@ export function TakeRowWave({
       kind={generated ? "generated" : "take"}
       trackVars={trackVars}
       keep={keep}
+      loading={load && settledFor !== att.audioId}
       className="w-14 shrink-0"
       testId={`take-row-wave-${att.audioId}`}
     />

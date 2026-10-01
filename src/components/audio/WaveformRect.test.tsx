@@ -36,6 +36,24 @@ describe("WaveformRect", () => {
   it("draws the body alone with no peaks yet", () => {
     render(<WaveformRect peaks={[]} height={56} testId="w" />)
     expect(screen.queryByTestId("w-shape")).toBeNull()
+    expect(screen.queryByTestId("w-loading")).toBeNull()
+  })
+
+  // The 3G pass (Sam, 2026-10-01): a body with no shape read as a silent take
+  // for the seconds its audio took to arrive.
+  it("pulses a placeholder in the take's own ink while the shape is on its way", () => {
+    render(<WaveformRect peaks={null} height={56} loading testId="w" />)
+    const placeholder = screen.getByTestId("w-loading")
+    expect(placeholder.className).toContain("animate-pulse")
+    expect(placeholder.className).toContain("bg-current/15")
+    expect(placeholder.getAttribute("aria-hidden")).toBe("true")
+    expect(screen.queryByTestId("w-shape")).toBeNull()
+  })
+
+  it("drops the placeholder the moment the shape arrives", () => {
+    render(<WaveformRect peaks={peaks} height={56} loading testId="w" />)
+    expect(screen.getByTestId("w-shape")).toBeInTheDocument()
+    expect(screen.queryByTestId("w-loading")).toBeNull()
   })
 
   it("fades the trimmed-off ends", () => {

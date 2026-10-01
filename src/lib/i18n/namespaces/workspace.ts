@@ -40,6 +40,10 @@ export const workspace = defineNamespace({
     }),
     "workspace.offline.conflictDismiss": "Dismiss",
     "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode: the local store's leader worker stopped persisting
+    // writes (src/lib/offline/leader-watchdog.ts). A reload restarts it.
+    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Reload to fix this — changes made since it started may be lost.",
+    "workspace.offline.leaderStalledReload": "Reload",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -503,6 +507,19 @@ export const workspace = defineNamespace({
         placeholders: {
           count: "How many translations couldn't sync.",
         },
+      },
+      "workspace.offline.leaderStalledToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when the " +
+          "on-device storage stops saving edits (its background worker died). " +
+          "Paired with a 'Reload' action (workspace.offline.leaderStalledReload). " +
+          "Two full sentences with periods. Plain language — no 'worker', 'store' " +
+          "or 'sync' jargon.",
+      },
+      "workspace.offline.leaderStalledReload": {
+        description:
+          "Action button on the 'changes aren't being saved' toast; reloads the " +
+          "app window. Short imperative verb.",
       },
       "workspace.projectCard.deletedBy": {
         description:

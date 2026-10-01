@@ -1762,6 +1762,9 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    // Tauri desktop: the on-device store stopped saving (src/lib/offline/leader-watchdog.ts).
+    "editor.outbox.notSavingLabel": "Not saving",
+    "editor.outbox.notSavingTooltip": "Changes on this device aren't being saved. Reload the app to fix this.",
     // AQU-1391 — the repetition badge on a source row and its tooltip.
     "editor.repetition.badge": "Repetition ×{count}",
     "editor.repetition.tooltip": plural({
@@ -6608,6 +6611,18 @@ export const editor = defineNamespace({
       "editor.outbox.syncedTooltip": {
         description:
           "Tooltip/aria-label of the outbox chip when the queue is empty.",
+      },
+      "editor.outbox.notSavingLabel": {
+        description:
+          "Short chip text (desktop app only) when edits are no longer being " +
+          "saved on this device at all. Replaces 'Synced' so the chip never " +
+          "reassures while work is being lost. Alarming but factual.",
+        maxLength: 12,
+      },
+      "editor.outbox.notSavingTooltip": {
+        description:
+          "Tooltip/aria-label of the outbox chip in its not-saving state. Full " +
+          "sentences; tells the user what's wrong and the one fix (reload).",
       },
       // AQU-646, keyed 2026-08-20 — the audio-VTT import dialog, the character-
       // sheet import dialog, the character-check drawer and the pairing drawer.

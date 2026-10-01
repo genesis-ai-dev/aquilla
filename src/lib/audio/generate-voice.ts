@@ -57,6 +57,8 @@ export interface GenerateAndAttachArgs {
   session: FrontierSession
   /** Frontier username — author of the cell.audio.attach event. */
   username: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   /** Round 8c: TTS is a TAKE — its permanent name, set at birth. */
   label?: string
   diffusionSteps?: number
@@ -119,6 +121,7 @@ export async function generateAndAttachCellVoice(
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       ...(args.label ? { label: args.label } : {}),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author: args.username,
     })
     // Round 8: shadow-inject so the sparkle chip appears at its real length
@@ -273,6 +276,7 @@ export async function generateAndAttachCellVoice(
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     ...(args.label ? { label: args.label } : {}),
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     author: args.username,
   })
   // Round 8: shadow-inject (see the hosted-TTS branch's comment).

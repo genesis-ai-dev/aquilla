@@ -55,6 +55,8 @@ export interface EmitStageContext {
   /** Focused file/cell for :file / :cell resolution. */
   fileId?: string
   cellId?: string
+  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  lane: string
   aliases: AliasMap
 }
 
@@ -133,13 +135,17 @@ async function fetchCellPair(
   projectId: string,
   fileId: string,
   cellId: string,
+  lane: string,
 ): Promise<{ source: CellRow | null; target: CellRow | null }> {
+  // AQU-1447: the target row is the ACTIVE lane's, never another lane's head.
+  // Source rows always live at target_lang = '' (see selectCellPairs).
   const { results } = await db
     .prepare(
       `SELECT side, event_id, value, canonical_ref FROM cells
-       WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+       WHERE project_id = ? AND file_id = ? AND cell_id = ?
+         AND ((side = 'source' AND target_lang = '') OR (side = 'target' AND target_lang = ?))`,
     )
-    .bind(projectId, fileId, cellId)
+    .bind(projectId, fileId, cellId, lane)
     .all<CellRow>()
   return {
     source: results.find((r) => r.side === "source") ?? null,
@@ -279,7 +285,7 @@ async function stageOne(
       if (typeof anchor !== "string") {
         return { kind: "rejected", reason: "anchorCellId must be a string or null" }
       }
-      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor)
+      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, ctx.lane)
       if (!anchorPair.source && !anchorPair.target) {
         return {
           kind: "rejected",
@@ -291,7 +297,7 @@ async function stageOne(
     }
 
     if (cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId)
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
       const occupied = kind === "source.cell.create" ? pair.source : pair.target
       if (occupied) {
         const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
@@ -317,7 +323,7 @@ async function stageOne(
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }
     if (fileId && cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId)
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
       display.canonicalRef =
         pair.target?.canonical_ref ?? pair.source?.canonical_ref ?? undefined
 
@@ -350,6 +356,10 @@ async function stageOne(
         // Provenance injection (AQU-292): machine-drafted, attributable to the run.
         payload.ai_suggestion = true
         payload.agent_run_id = ctx.runId
+        // AQU-1447: the lane rides on payload.targetLang; absent = default lane.
+        // The run's lane always wins over anything the model wrote.
+        if (ctx.lane) payload.targetLang = ctx.lane
+        else delete payload.targetLang
         payload.sourceEventId = pair.source?.event_id ?? null
         sourceValue = pair.source?.value
       } else if (kind === "cell.validate") {

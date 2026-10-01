@@ -1,6 +1,7 @@
 // AQU-538 §3.3 — the per-project lane table shown on ProjectOverview directly
-// under the header StatTiles, rendered ONLY when the project has more than one
-// target-language lane (N=1 projects see no change). One row per lane:
+// under the header StatTiles. A project with one active lane and nothing
+// archived sees no change. Archived lanes (AQU-1458) are not rows in this
+// table; they sit in a collapsed group under it. One row per active lane:
 //
 //   Language | Translated % | Validated % | People | Last activity | ⋯
 //
@@ -19,14 +20,16 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { UserPlus, Users } from "lucide-react"
+import { ChevronRight, UserPlus, Users } from "lucide-react"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
   ADMIN_TABLE_CLASS,
   ADMIN_TABLE_SECTION_CONTENT,
   ADMIN_TABLE_SECTION_HEADER,
 } from "@/components/admin/shared"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DataTable,
   DataTableColumnHeader,
@@ -53,8 +56,10 @@ export interface OverviewLaneTableProps {
   /** Org that owns the project — for StaffLanePopover's roster + AssignModal. */
   orgId: number | null
   jwt: string | null
-  /** Per-lane rollups (default '' lane first) from PortfolioProject.lanes. */
+  /** Active per-lane rollups (default '' lane first) from PortfolioProject.lanes. */
   lanes: PortfolioLane[]
+  /** Archived lanes, in portfolio order. Omitted or empty renders no group. */
+  archivedLanes?: PortfolioLane[]
   /** Human label for the default ('') lane — the project's targetLanguage. */
   defaultLanguageLabel: string
   /** Non-default lane registry (project.targetLanes) — AssignModal's lane select. */
@@ -78,10 +83,10 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
-function laneOpenTo(projectId: string, lane: string): string {
-  return lane
-    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
-    : `/project/${projectId}/editor`
+function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
+  const key = lane.laneId || lane.lane
+  if (!key) return `/project/${projectId}/editor?lane=`
+  return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
 }
 
 /** People avatars for a lane, with an overflow "+N" bubble past the cap. */
@@ -121,6 +126,7 @@ export function OverviewLaneTable({
   orgId,
   jwt,
   lanes,
+  archivedLanes = [],
   defaultLanguageLabel,
   extraLanes,
   files,
@@ -140,6 +146,7 @@ export function OverviewLaneTable({
   // they were launched from (⋯ menu), matching the workspace's one-modal pattern.
   const [assignLane, setAssignLane] = useState<string | null>(null)
   const [staffLane, setStaffLane] = useState<string | null>(null)
+  const [archivedOpen, setArchivedOpen] = useState(false)
 
   // Scopable members = below project_lead (leads are unscoped, see every lane).
   const scopableUserIds = useMemo(
@@ -180,17 +187,18 @@ export function OverviewLaneTable({
     return map
   }, [members, scopesByUser])
 
-  const laneLabel = (lane: string) => (lane === "" ? defaultLanguageLabel : lane)
+  const laneLabel = (lane: PortfolioLane) =>
+    lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane)
 
   const columns = useMemo<ColumnDef<PortfolioLane>[]>(
     () => [
       {
         id: "language",
-        accessorFn: (l) => laneLabel(l.lane).toLowerCase(),
+        accessorFn: (l) => laneLabel(l).toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
         meta: { className: "min-w-[7rem]" },
         cell: ({ row }) => (
-          <span className="text-sm font-medium text-foreground">{laneLabel(row.original.lane)}</span>
+          <span className="text-sm font-medium text-foreground">{laneLabel(row.original)}</span>
         ),
       },
       {
@@ -248,7 +256,7 @@ export function OverviewLaneTable({
             meta: { align: "right" as const, className: "w-10" },
             cell: ({ row }: { row: { original: PortfolioLane } }) => {
               const tagId = laneTagId(row.original.lane)
-              const label = laneLabel(row.original.lane)
+              const label = laneLabel(row.original)
               return (
                 <span className="inline-flex items-center justify-end gap-0.5">
                   <DataTableRowActionsButton
@@ -333,8 +341,8 @@ export function OverviewLaneTable({
         dense
         className={ADMIN_TABLE_CLASS}
         initialSorting={[{ id: "language", desc: false }]}
-        onRowClick={(l) => navigate(laneOpenTo(projectId, l.lane))}
-        rowLink={{ columnId: "language", to: (l) => laneOpenTo(projectId, l.lane) }}
+        onRowClick={(l) => navigate(laneOpenTo(projectId, l))}
+        rowLink={{ columnId: "language", to: (l) => laneOpenTo(projectId, l) }}
         renderRowMenuItems={canManageLanes ? (l) => {
           const tagId = laneTagId(l.lane)
           return (
@@ -357,6 +365,41 @@ export function OverviewLaneTable({
           )
         } : undefined}
       />
+
+      {archivedLanes.length > 0 && (
+        <Collapsible open={archivedOpen} onOpenChange={setArchivedOpen} className="mt-3">
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
+            <ChevronRight className={`size-4 transition-transform ${archivedOpen ? "rotate-90" : ""}`} />
+            <span data-testid="overview-lane-archived-toggle">
+              {t("org.overviewLaneTable.archivedGroup", { count: archivedLanes.length })}
+            </span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="mt-1 flex flex-col gap-1" data-testid="overview-lane-archived-list">
+              {archivedLanes.map((lane) => {
+                const label = laneLabel(lane)
+                return (
+                  <li
+                    key={lane.laneId || lane.lane}
+                    data-testid={`overview-lane-archived-row-${laneTagId(lane.lane)}`}
+                    className="flex flex-wrap items-center gap-3 rounded px-2 py-1.5 text-muted-foreground"
+                  >
+                    <Link
+                      to={laneOpenTo(projectId, lane)}
+                      className="min-w-28 text-sm text-muted-foreground underline-offset-2 hover:underline"
+                    >
+                      {label}
+                    </Link>
+                    <Badge variant="outline">{t("org.overviewLaneTable.archivedBadge")}</Badge>
+                    <LaneProgressBar pct={laneTranslatedPct(lane)} fillClass="bg-amber-500/70" />
+                    <LaneProgressBar pct={laneValidatedPct(lane)} fillClass="bg-emerald-500/70" />
+                  </li>
+                )
+              })}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* One shared AssignModal, pinned to the lane row it was launched from. */}
       <AssignModal

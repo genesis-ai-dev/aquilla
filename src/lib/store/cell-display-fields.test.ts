@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react"
 import {
   __resetCellDisplayFieldsCache,
   displayFieldLabel,
+  displayFieldValue,
   getCellDisplayFields,
   setCellDisplayField,
   useCellDisplayFields,
@@ -75,5 +76,28 @@ describe("displayFieldLabel", () => {
     expect(displayFieldLabel({ a: 1 })).toBeNull()
     expect(displayFieldLabel([["a"]])).toBeNull()
     expect(displayFieldLabel([{ url: "https://x" }])).toBeNull()
+  })
+})
+
+describe("displayFieldValue", () => {
+  // WHY: importers namespace their fields (SDBH writes `metadata.sdbh.lemma`),
+  // so a switched-on key must reach one level down or those cells never label.
+  it("reads a top-level key", () => {
+    expect(displayFieldValue({ quote: "λόγος" }, "quote")).toBe("λόγος")
+  })
+
+  it("reads a parent.child key one level down", () => {
+    expect(displayFieldValue({ sdbh: { lemma: "אָב" } }, "sdbh.lemma")).toBe("אָב")
+  })
+
+  it("prefers an exact top-level key that contains a dot", () => {
+    expect(displayFieldValue({ "a.b": "flat", a: { b: "nested" } }, "a.b")).toBe("flat")
+  })
+
+  it("is undefined when the cell doesn't carry the key", () => {
+    expect(displayFieldValue(null, "sdbh.lemma")).toBeUndefined()
+    expect(displayFieldValue({ quote: "x" }, "sdbh.lemma")).toBeUndefined()
+    expect(displayFieldValue({ sdbh: ["lemma"] }, "sdbh.0")).toBeUndefined()
+    expect(displayFieldValue({ sdbh: { lemma: "x" } }, "sdbh.toString")).toBeUndefined()
   })
 })

@@ -16,6 +16,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { applyStagedEvent, type ApplyContext } from "@/lib/agent/apply"
+import { shortCellId } from "@/lib/cells/short-cell-id"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 
 export interface ValidationQueueCardProps {
@@ -74,7 +75,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
           return (
             <div key={`${ev.cellId}-${idx}`} className="flex items-start gap-2 px-3 py-1.5 text-xs">
               <span className="w-16 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
-                {ev.display.canonicalRef ?? ev.cellId?.slice(0, 8) ?? "·"}
+                {ev.display.canonicalRef ?? (ev.cellId ? shortCellId(ev.cellId) : "·")}
               </span>
               <span dir="auto" className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                 {ev.display.before || "∅"}
@@ -95,7 +96,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                     disabled={!canValidate || state === "applying"}
                     onClick={() => void confirm(ev, idx)}
                     aria-label={t("agent.validation.confirmAriaLabel", {
-                      ref: ev.display.canonicalRef ?? ev.cellId ?? "cell",
+                      ref: ev.display.canonicalRef ?? (ev.cellId ? shortCellId(ev.cellId) : "cell"),
                     })}
                   >
                   {state === "applying" && <Spinner className="size-3" />}

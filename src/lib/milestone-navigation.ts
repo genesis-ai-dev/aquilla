@@ -1,4 +1,6 @@
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
+import { aiSectionMilestones, type BoundarySource } from "@/lib/import/ai-sections"
+import { areAiSectionMilestonesEnabled } from "@/lib/import/ai-sections-flag"
 import {
   FALLBACK_MILESTONE_SIZE,
   TIMELINE_MILESTONE_MS,
@@ -51,13 +53,37 @@ export function readImportMilestone(
   return milestone(envelope?.milestone)
 }
 
+export interface MilestoneNavigationOptions {
+  /**
+   * Scored cell boundaries for this file, from AQU-1386's seam cache (AQU-1387).
+   *
+   * Passed in rather than read from the cache here so this module stays a pure
+   * derivation: the hook that owns the cache decides when answers exist, and a
+   * test can hand over a fixture. Absent — the default — leaves navigation
+   * exactly as it was.
+   */
+  boundaries?: BoundarySource
+  /**
+   * Override the AI-section kill switch. Omitted, the switch decides; `false`
+   * is how a surface that must show stable divisions opts out regardless.
+   */
+  aiSections?: boolean
+}
+
 /**
  * Build navigation in the caller's display order. New imports use persisted
  * assignments; legacy imports derive from canonical refs, normalized addresses,
  * Biblica metadata, structural headings, timing, then deterministic parts.
+ *
+ * When `options.boundaries` has answers, the app-invented divisions — "Part N"
+ * and the 5-minute buckets, and only those — are replaced by AI sections cut at
+ * the scored boundaries (AQU-1387). Divisions read out of the file are never
+ * touched, which is a structural guarantee rather than a rule to remember: the
+ * overlay only ever looks at `part` and `time-range` assignments.
  */
 export function deriveMilestoneNavigation(
   cells: readonly MilestoneNavigationCell[],
+  options: MilestoneNavigationOptions = {},
 ): DerivedMilestoneNavigation {
   const seeds = cells.map(legacyMilestoneSeed)
   const scriptureMode = seeds.some((seed) => (
@@ -115,6 +141,8 @@ export function deriveMilestoneNavigation(
     }
   }
 
+  applyAiSections(cells, resolved, options)
+
   const milestoneByCellId = new Map<string, ImportMilestone>()
   const groups = new Map<string, {
     milestone: ImportMilestone
@@ -167,6 +195,73 @@ export function cellIdsForMilestonePage(
     if (subsection) return subsection.cellIds
   }
   return entry.cellIds
+}
+
+/**
+ * Replace app-invented divisions with AI sections, in place.
+ *
+ * Works run by run rather than over the whole file: a file can be part
+ * structured and part not (a USFM with an unreferenced tail, a transcript with
+ * one titled segment), and only the unstructured stretches are the app's to
+ * re-cut. Each run is planned independently with the seam indices offset to the
+ * run's start, so a section can never straddle a division that came out of the
+ * file.
+ */
+function applyAiSections(
+  cells: readonly MilestoneNavigationCell[],
+  resolved: ImportMilestone[],
+  options: MilestoneNavigationOptions,
+): void {
+  const { boundaries } = options
+  if (!boundaries) return
+  if (!(options.aiSections ?? areAiSectionMilestonesEnabled())) return
+
+  let runStart: number | null = null
+  for (let index = 0; index <= cells.length; index += 1) {
+    const invented = index < cells.length && isAppInventedKind(resolved[index]?.kind)
+    if (invented) {
+      if (runStart === null) runStart = index
+      continue
+    }
+    if (runStart === null) continue
+    replaceRun(cells, resolved, runStart, index - 1, boundaries)
+    runStart = null
+  }
+}
+
+/** Divisions the app made up when the file offered none. */
+function isAppInventedKind(kind: ImportMilestoneKind | undefined): boolean {
+  return kind === "part" || kind === "time-range"
+}
+
+function replaceRun(
+  cells: readonly MilestoneNavigationCell[],
+  resolved: ImportMilestone[],
+  start: number,
+  end: number,
+  boundaries: BoundarySource,
+): void {
+  const timeline = resolved[start]?.kind === "time-range"
+  const assignments = aiSectionMilestones(
+    cells.slice(start, end + 1).map((cell) => ({
+      key: cell.id,
+      text: cell.original,
+      ...(cell.startMs === undefined ? {} : { startMs: cell.startMs }),
+    })),
+    (seam) => boundaries(start + seam),
+    {
+      clockPrefix: timeline,
+      // A run whose cells are all empty gets the bare vocabulary word; the
+      // milestone's shortLabel still carries the ordinal, so the picker can
+      // tell two of them apart. Composing "Section" + a number here would be
+      // the frame-filling this module's header argues against.
+      fallbackLabel: () => translate(undefined, "editor.milestone.vocab.section"),
+    },
+  )
+  if (!assignments) return
+  for (let index = 0; index < assignments.length; index += 1) {
+    resolved[start + index] = assignments[index]
+  }
 }
 
 function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | undefined {
@@ -358,6 +453,7 @@ function isMilestoneKind(value: string | undefined): value is ImportMilestoneKin
     || value === "time-range"
     || value === "group"
     || value === "part"
+    || value === "ai-section"
 }
 
 function friendlyMemberLabel(memberPath: string, fallback: string): string {

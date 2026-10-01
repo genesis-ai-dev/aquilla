@@ -63,6 +63,18 @@ describe("buildPrompt", () => {
     expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
   })
 
+  it("strips trailing bare markers from source, examples and context (AQU-1465)", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "In the beginning.\n\\p",
+      examples: [{ source: "God created.\n\\p", target: "Dieu crea.\n\\p" }],
+      precedingContext: [{ source: "Earlier.\n\\p", target: "Avant.\n\\p" }],
+    })
+    const user = messages[1].content
+    expect(user).not.toContain("\\p")
+    expect(user).toContain("Source: In the beginning.\nTranslation:")
+  })
+
   it("builds a prompt with examples and source text", () => {
     const messages = buildPrompt({
       sourceLanguage: "English", targetLanguage: "French",
@@ -507,6 +519,12 @@ describe("complete", () => {
   }
 
   const msg = [{ role: "user" as const, content: "hi" }]
+
+  it("commits a reply without its trailing bare marker (AQU-1465)", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "Premier verset.\n\\p" } }] }))
+    const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+    expect(out).toBe("Premier verset.")
+  })
 
   it("frontier: POSTs to Frontier URL with Bearer JWT and model='default' when blank", async () => {
     fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
@@ -1710,5 +1728,63 @@ describe("activeProjectIdFromPath", () => {
     expect(activeProjectIdFromPath("/settings/ai")).toBeNull()
     // /projects/archived is a static list page, not a project id.
     expect(activeProjectIdFromPath("/projects/archived")).toBeNull()
+  })
+})
+
+describe("unreviewed in-run draft context (AQU-1386)", () => {
+  const base = {
+    sourceLanguage: "English",
+    targetLanguage: "French",
+    systemPrompt: "Translate.",
+    examples: [],
+  }
+
+  it("labels a carried draft as unreviewed in the batch prompt", () => {
+    // A multi-call batch carries its own earlier drafts forward. They must be
+    // distinguishable from approved translations in the prompt, or the model
+    // treats unreviewed machine output as the project's settled style.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [
+        { source: "approved src", target: "approved tgt" },
+        { source: "drafted src", target: "drafted tgt", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: approved tgt")
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("labels a carried draft in the single-cell prompt too", () => {
+    const [, user] = buildPrompt({
+      ...base,
+      sourceText: "live source",
+      precedingContext: [{ source: "drafted src", target: "drafted tgt", draft: true }],
+    })
+    expect(user.content).toContain("Translation (unreviewed draft): drafted tgt")
+  })
+
+  it("renders an unflagged row exactly as before", () => {
+    // Every existing call site omits `draft`, so the rendered prompt must be
+    // byte-identical for them.
+    const [, user] = buildBatchPrompt({
+      ...base,
+      cells: [{ source: "live source" }],
+      precedingContext: [{ source: "approved src", target: "approved tgt" }],
+    })
+    expect(user.content).toContain("Source: approved src\nTranslation: approved tgt")
+    expect(user.content).not.toContain("unreviewed")
+  })
+
+  it("strips a trailing bare marker from a carried draft and keeps its label (AQU-1465)", () => {
+    // A batch reply can leave "\p" inside a cell's tag, so the carried draft
+    // reaches the next call's window with the marker still on it.
+    const precedingContext = [{ source: "drafted src\n\\p", target: "drafted tgt\n\\p", draft: true }]
+    const [, batchUser] = buildBatchPrompt({ ...base, cells: [{ source: "live source" }], precedingContext })
+    const [, singleUser] = buildPrompt({ ...base, sourceText: "live source", precedingContext })
+    for (const user of [batchUser, singleUser]) {
+      expect(user.content).toContain("Source: drafted src\nTranslation (unreviewed draft): drafted tgt\n")
+      expect(user.content).not.toContain("\\p")
+    }
   })
 })

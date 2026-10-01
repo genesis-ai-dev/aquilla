@@ -284,6 +284,24 @@ describe('AQU-1524 billing card inset', () => {
     expect(insetInsideCard(screen.getByRole('link', { name: 'Discuss AI capacity' }))).toBe(true)
   })
 
+  // The paid-plan AC the QA bot's Free workspace cannot reach: these lines only
+  // render for a workspace with an entitlement, and they live in the same block.
+  it('insets the paid-plan Workspace billing lines the same way', async () => {
+    const workspace = paidWorkspace('pro')
+    workspace.entitlement!.access = { offer: 'pro', reason: 'paid',
+      paidThrough: '2026-10-01T00:00:00.000Z', cancelAtPeriodEnd: false }
+    workspace.usagePercent = 42
+    workspace.usageResetsAt = '2026-10-08T00:00:00.000Z'
+    vi.mocked(getBillingWorkspace).mockResolvedValue(workspace)
+    renderBilling()
+
+    expect(insetInsideCard(await screen.findByTestId('billing-access'))).toBe(true)
+    expect(insetInsideCard(screen.getByTestId('billing-usage-percent'))).toBe(true)
+    // Compare new plans is absent on a paid workspace; AI usage is still inset.
+    expect(screen.queryByText(/Compare personal and shared team capacity/)).toBeNull()
+    expect(insetInsideCard(screen.getByTestId('billing-usage'))).toBe(true)
+  })
+
   it('sizes Refresh billing to its label rather than stretching it across the column', async () => {
     mockGet.mockResolvedValue(unpaid)
     renderBilling()

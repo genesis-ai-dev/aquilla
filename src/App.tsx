@@ -44,6 +44,7 @@ import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
+import { AdminElevationPrompt } from "@/components/admin/AdminElevationPrompt"
 import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
 import { useAccounts } from "@/hooks/useAccounts"
 import {
@@ -310,6 +311,8 @@ export default function App() {
           <OfflineLeaderWatchdog />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
+          {/* AQU-1322: admin step-up dialog; renders nothing until a 403 "elevation required" lands. */}
+          <AdminElevationPrompt />
           {/* AQU-885: a stored JWT that's already expired at boot goes straight to
               re-auth instead of rendering a shell that silently empties out. */}
           <ExpiredSessionGate />

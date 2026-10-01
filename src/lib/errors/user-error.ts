@@ -64,7 +64,10 @@ export function messageForStatus(
       }
     case 403:
       return {
-        message: roleRequiredMessage(raw) ?? t("error.network.forbidden", { contextSuffix }),
+        message:
+          (isElevationRequiredBody(raw) ? t("error.network.elevationRequired") : null) ??
+          roleRequiredMessage(raw) ??
+          t("error.network.forbidden", { contextSuffix }),
         raw,
         category: "forbidden",
         status,
@@ -112,6 +115,19 @@ export function messageForStatus(
         category: "unknown",
         status,
       }
+  }
+}
+
+/** AQU-1322: part-2 step-up denials all carry an `error` starting "elevation required". */
+export const ELEVATION_REQUIRED_PREFIX = "elevation required"
+
+export function isElevationRequiredBody(raw: string): boolean {
+  try {
+    const body: unknown = JSON.parse(raw)
+    const error = body && typeof body === "object" ? (body as { error?: unknown }).error : null
+    return typeof error === "string" && error.startsWith(ELEVATION_REQUIRED_PREFIX)
+  } catch {
+    return false
   }
 }
 

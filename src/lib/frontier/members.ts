@@ -1,5 +1,6 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import { throwIfElevationRequired } from "./elevation";
 import { ROLE } from "@/lib/frontier/roles";
 import { createRequestCoalescer } from "@/lib/request-coalescer";
 import type { ScopePath } from "@/lib/access/types";
@@ -243,6 +244,7 @@ export async function addProjectMember(
       body: JSON.stringify({ username, role }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -283,6 +285,7 @@ export async function addProjectMembers(
       body: JSON.stringify({ members }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -300,6 +303,7 @@ export async function removeProjectMember(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}`,
     { method: "DELETE", headers: authHeaders(jwt) }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -345,6 +349,7 @@ export async function revokeAllProjectAccess(
       headers: authHeaders(jwt),
     },
   )
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "")
     throw new UserError(res.status, text, "project")

@@ -289,6 +289,7 @@ export const audio = defineNamespace({
       "Recording is {warnMinutes} minutes — it stops automatically at {hardStopMinutes}.",
     "audio.recordingModal.capturedNotice": "Captured — review, then keep or retake.",
     "audio.recordingModal.noTimedWindow": "This line has no timed window.",
+    "audio.recordingModal.readyTakeCaption": "{label} · {seconds}s",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -1289,6 +1290,17 @@ export const audio = defineNamespace({
             "A short auto-generated label for the line: its position number plus " +
             "the start of its translated text, e.g. '1. In the beginning God…'. " +
             "User content — do not translate the substituted value.",
+        },
+      },
+      "audio.recordingModal.readyTakeCaption": {
+        description:
+          "Caption above the waveform of the line's selected take in the recorder, " +
+          "shown before recording (AQU-1217): the take's name and how long the " +
+          "part of it that plays is, so the operator can judge it against the " +
+          "line's target length at a glance.",
+        placeholders: {
+          label: "The take's name, e.g. \"Take 3\" or a name the user gave it. User data, not translated.",
+          seconds: "Length of the part that plays, in seconds with one decimal, e.g. 3.3.",
         },
       },
       "audio.boundaryEditor.dividerLabel": {

@@ -17,6 +17,41 @@ export async function connectionRequest<T>(jwt: string, path: string, body: obje
   return response.json() as Promise<T>
 }
 
+/** An MCP host's authorization request as the consent page described it. */
+export interface McpOAuthClient {
+  /** Self-declared; never shown without clientHost. */
+  clientName: string
+  /** Domain that served the client's metadata document — the verified part. */
+  clientHost: string
+  /** Where the browser goes back to after the decision. */
+  redirectHost: string
+  mode: "ask" | "act"
+}
+
+export type McpOAuthResult<T> =
+  | { ok: true; data: T }
+  /** `redirect` is set when the error must go back to the client (OAuth). */
+  | { ok: false; status: number; redirect?: string }
+
+/** Session call to the identity worker's MCP OAuth consent API. Unlike
+ *  connectionRequest, an error body is returned rather than thrown: a 400 may
+ *  carry the URL that hands the error back to the requesting app. */
+export async function mcpOAuthCall<T>(jwt: string, path: "request" | "decision", body: object): Promise<McpOAuthResult<T>> {
+  const response = await fetchWithTimeout(`${AUTH_BASE}/api/v2/mcp-oauth/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify(body),
+  })
+  const parsed = (await response.json().catch(() => null)) as (T & { redirect?: string }) | null
+  if (response.ok && parsed) return { ok: true, data: parsed }
+  return { ok: false, status: response.status, redirect: parsed?.redirect }
+}
+
+/** Leave Aquilla for the requesting app. Its own function so tests can stub it. */
+export function leaveForClient(url: string): void {
+  window.location.assign(url)
+}
+
 /** Shown after approval for the human to paste back to an agent whose polling
  * gave up. Carries only the (already used) user code and the public endpoint;
  * the agent redeems with the device_code it kept, so no secret crosses chat. */

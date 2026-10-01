@@ -2087,6 +2087,27 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
 
+-- 0118: OAuth 2.1 authorization codes for MCP hosts (ChatGPT plugin, Claude,
+-- Codex). Hash-only; five-minute, single-use; a replay revokes credential_id.
+CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  resource TEXT,
+  user_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+  project_id TEXT,
+  org_id TEXT,
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'consumed')),
+  credential_id UUID,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((project_id IS NULL) <> (org_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
+
 -- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh

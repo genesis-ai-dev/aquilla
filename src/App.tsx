@@ -115,6 +115,11 @@ const OrgSettingsKnowledge = lazy(() =>
 const ConnectAgent = lazy(() =>
   import("@/pages/ConnectAgent").then((m) => ({ default: m.ConnectAgent })),
 )
+// OAuth consent for MCP hosts (ChatGPT plugin, Claude, Codex) — the identity
+// worker's /oauth/authorize redirects here.
+const OAuthConsent = lazy(() =>
+  import("@/pages/OAuthConsent").then((m) => ({ default: m.OAuthConsent })),
+)
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
 )
@@ -348,6 +353,7 @@ function AppRoutes() {
         {/* The workspace entry. `/` is marketing at the edge, so this is the
             URL that opens the app — marketing "Open app" CTAs point here. */}
         <Route path="/connect-agent" element={<LazyRoute><ConnectAgent /></LazyRoute>} />
+        <Route path="/oauth/consent" element={<LazyRoute><OAuthConsent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />

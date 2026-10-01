@@ -55,6 +55,15 @@ export const onboarding = defineNamespace({
     "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
     "onboarding.connect.copy": "Copy connection instructions",
     "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+    // — OAuth consent for MCP hosts (ChatGPT, Claude, Codex): /oauth/consent ———
+    "onboarding.oauth.title": "Connect {client} to Aquilla",
+    "onboarding.oauth.titleGeneric": "Connect an app to Aquilla",
+    "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it may reach.",
+    "onboarding.oauth.verified": "Request from {host}. The app supplies its own name; Aquilla checked only the domain.",
+    "onboarding.oauth.return": "After you choose, you return to {host}.",
+    "onboarding.oauth.approve": "Allow access",
+    "onboarding.oauth.redirecting": "Returning you to {host}…",
+    "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
 
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
@@ -774,6 +783,26 @@ export const onboarding = defineNamespace({
         description:
           "Small footer line in the agent-credits popover, stating remaining daily allowance.",
         placeholders: { remaining: "Agent credits remaining today, already locale-formatted." },
+      },
+      "onboarding.oauth.title": {
+        description:
+          "Heading of the consent page an AI app (for example ChatGPT) opens when a person connects it to Aquilla. The person is deciding whether that app may act on their projects.",
+        placeholders: {
+          client: "The app's display name as the app itself declares it (for example 'ChatGPT'). Not translated and not verified — the line below the heading shows the verified domain.",
+        },
+      },
+      "onboarding.oauth.verified": {
+        description:
+          "Security note under the heading of the app-consent page. It tells the person that the app name is self-declared and that only the web domain was checked, so they can spot an impostor.",
+        placeholders: { host: "The web domain that identified the app, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.return": {
+        description: "Line on the app-consent page saying which website the browser goes back to after the person allows or denies access.",
+        placeholders: { host: "The web domain the browser returns to, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.redirecting": {
+        description: "Status shown on the app-consent page while the browser leaves Aquilla and goes back to the app.",
+        placeholders: { host: "The web domain the browser is going back to. Not translated." },
       },
     },
   },

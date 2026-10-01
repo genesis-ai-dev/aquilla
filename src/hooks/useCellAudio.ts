@@ -148,6 +148,10 @@ export function useCellAudio(
       bytesPromiseRef.current = null
       peaksRequestedRef.current = null
       peaksReadyRef.current = false
+      // A trim belongs to ONE take. Carried across a swap it would play the
+      // new take through the old one's window (AQU-1217); callers re-apply
+      // theirs when the take they show changes.
+      trimRef.current = { start: null, end: null }
       if (coordinatorControllerRef.current) clearActiveAudioIf(coordinatorControllerRef.current)
       setState("idle")
       setIsPlaying(false)
@@ -315,8 +319,11 @@ export function useCellAudio(
     if (audioRef.current) {
       const a = audioRef.current
       const { start, end } = trimRef.current
-      // Restart from the window start if we're outside it (e.g. ended at trimEnd).
-      if (start != null && (a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
+      // Restart from the window start if we're outside it (e.g. ended at
+      // trimEnd). `ended` covers a take trimmed only at its head that played to
+      // the file's natural end: a replay would otherwise restart at 0 and play
+      // the trimmed-off head (AQU-1217).
+      if (start != null && (a.ended || a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
         a.currentTime = start
       }
       try { await a.play() } catch (e) {
@@ -378,7 +385,14 @@ export function useCellAudio(
       audio.onloadedmetadata = () => {
         if (Number.isFinite(audio.duration)) setDuration(audio.duration)
         const { start } = trimRef.current
-        if (start != null && start > 0) { audio.currentTime = start; setCurrentTime(start) }
+        // Never seek a clip whose length is still unknown: a MediaRecorder
+        // webm reports Infinity until indexed, and seeking one makes Chrome
+        // fire \`ended\` at once, so the take is never heard (play-queue's
+        // wireOverlayElement refuses the same seek).
+        if (start != null && start > 0 && Number.isFinite(audio.duration)) {
+          audio.currentTime = start
+          setCurrentTime(start)
+        }
       }
       audio.ontimeupdate = () => {
         const { start, end } = trimRef.current
@@ -560,8 +574,16 @@ export function useCellAudio(
   playRef.current = play
   pauseRef.current = pause
 
+  // The element (or the decode) reports the real length, but a waveform
+  // served from the peaks cache arrives with neither — and with no length the
+  // strip can't place its playhead or a trim. The attachment already carries
+  // the length the recorder or importer measured; use it until then.
+  const attachmentDurationSec = typeof attachment?.durationMs === "number" && attachment.durationMs > 0
+    ? attachment.durationMs / 1000
+    : 0
+
   return {
-    state, error, isPlaying, currentTime, duration, peaks, peaksState,
+    state, error, isPlaying, currentTime, duration: duration > 0 ? duration : attachmentDurationSec, peaks, peaksState,
     play, pause, seek, setVolume, setTrim, requestPeaks, ensureBytes,
   }
 }

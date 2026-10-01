@@ -364,7 +364,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
     // AQU-646: imported media segments share one clip — transcribe only this
-    // cell's trim window. Recorded takes have no trims (whole clip). And route
+    // cell's trim window (and, AQU-1210, a take only its kept part). And route
     // the language through the Whisper tag mapper (raw project language names
     // were being fed to transformers.js verbatim; unmapped → auto-detect).
     //
@@ -375,9 +375,20 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // comes from the audioId seed (source clip = fileId, takes = cellId).
     const isMediaCell = cell.medium === "media"
     const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+    // AQU-1210: a TAKE is transcribed through its trim too, so the transcript
+    // is of the part that plays — the operator trimmed that silence (or a
+    // false start) off for a reason. An untrimmed take is still the whole clip.
+    // Unlike a source section, a take's word times stay on the CLIP's clock
+    // (WordTiming.t0 is "seconds from the start of the audio clip"), so they
+    // are shifted back by the head trim below.
+    const takeTrim = !isSourceSegment && attachment &&
+      ((attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null)
+      ? { trimStartMs: attachment.trimStartMs ?? null, trimEndMs: attachment.trimEndMs ?? null }
+      : undefined
     const trim = isSourceSegment
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
-      : undefined
+      : takeTrim
+    const takeHeadSec = takeTrim?.trimStartMs ? takeTrim.trimStartMs / 1000 : 0
 
     const raw = await transcribeAudioImpl(bytes, {
       session,
@@ -424,7 +435,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // AQU-646: for SOURCE segments align timings against the transcript itself
       // (there's no target text yet — the transcript IS the text karaoke maps);
       // takes (incl. dub takes on media cells) align against the translation.
-      const timings = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const aligned = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const timings = takeHeadSec > 0
+        ? aligned.map((w) => ({ ...w, t0: w.t0 + takeHeadSec, t1: w.t1 + takeHeadSec }))
+        : aligned
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual

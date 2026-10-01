@@ -33,7 +33,8 @@
 // Undoing whatever shift was actually stored lands on the cue every time;
 // subtracting a nominal margin would leave exactly the drift Sam kept seeing.
 
-import { MIN_TARGET_LEN_SEC } from "@/lib/timeline/lane-timing"
+import { MIN_TARGET_LEN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import type { CellData } from "@/hooks/useCells"
 
 /** Tail runway kept inside the window, after the stop press (Sam's number).
  *  Smaller than any head allowance would be: a decaying sound is far more
@@ -89,4 +90,94 @@ export function takeTrims(input: TakeTrimInput): {
     ...(start > 0 ? { trimStartMs: start } : {}),
     ...(end < durationMs ? { trimEndMs: end } : {}),
   }
+}
+
+// ── AQU-1210: the operator's trim, before saving ─────────────────────────────
+//
+// After Stop the recorder now shows the take with its two trim lines, starting
+// at the window it would be born with anyway (`defaultTakeWindow`). If the
+// operator moves them, `composeTakeWindow` turns their window into what Save
+// stores. Two promises, both pinned by tests:
+//
+//   - UNTOUCHED IS UNCHANGED. With no operator window the result is exactly the
+//     default: same trims, same retime, byte for byte what Save sent before
+//     this feature existed.
+//   - THE KEPT PART STILL STARTS ON THE CUE. A head trim moves the take so its
+//     first kept sample lands on the cue's own start (audible start = anchor +
+//     head trim = cue start, the standing invariant above). Trimming silence
+//     off the front therefore PULLS the speech onto the cue rather than leaving
+//     it playing late by the trimmed amount — otherwise the timing check the
+//     trim exists for would be meaningless. The tail line just closes the
+//     window earlier and never moves the take.
+
+export interface TakeCueTiming {
+  /** The cue's start in seconds, or null/undefined for an untimed line. */
+  startTime?: number | null
+}
+
+export interface TakeWindow {
+  /** The lane offset to store (see TakeTrimInput.targetOffsetMs), or null for
+   *  "emit no retime" — an untimed line, or a take nobody placed. */
+  laneOffsetMs: number | null
+  trimStartMs?: number
+  trimEndMs?: number
+}
+
+/** The window a freshly stopped take is born with — exactly what Save has
+ *  always computed, lifted out so the preview can show it first. */
+export function defaultTakeWindow(input: {
+  cue: TakeCueTiming
+  preRollMs?: number
+  tailGraceMs?: number
+  durationMs: number
+}): TakeWindow {
+  const { cue, durationMs } = input
+  const preRollMs = input.preRollMs ?? 0
+  // Exactly what Save has always stored: the pre-roll's shift, through the
+  // same helper (clamped so a take is never anchored before file zero).
+  const laneOffsetMs = preRollMs > 0 && cue.startTime != null && Number.isFinite(cue.startTime)
+    ? targetOffsetMsFor({ startTime: cue.startTime } as CellData, cue.startTime - preRollMs / 1000)
+    : null
+  return {
+    laneOffsetMs,
+    ...takeTrims({ targetOffsetMs: laneOffsetMs ?? undefined, tailGraceMs: input.tailGraceMs, durationMs }),
+  }
+}
+
+/** Save's window: the default, or the operator's if they moved a line. */
+export function composeTakeWindow(input: {
+  cue: TakeCueTiming
+  defaults: TakeWindow
+  /** The operator's window in ms, null on a side for the clip's edge; null
+   *  altogether when they never touched it. */
+  operator: { startMs: number | null; endMs: number | null } | null
+  durationMs: number
+}): TakeWindow {
+  const { cue, defaults, operator, durationMs } = input
+  if (!operator) return defaults
+  const startMs = operator.startMs != null && operator.startMs > 0 ? Math.round(operator.startMs) : undefined
+  const endMs = operator.endMs != null && operator.endMs < durationMs ? Math.round(operator.endMs) : undefined
+  const cueStartMs = cue.startTime != null && Number.isFinite(cue.startTime) ? Math.round(cue.startTime * 1000) : null
+  // Placement follows the head: the first kept sample goes on the cue's start.
+  // An untimed line has no cue to land on and is never retimed. A take whose
+  // head was not moved off the default keeps the default's retime exactly
+  // (including "none" for a compressed take that was only tail-trimmed).
+  const headUnchanged = (startMs ?? 0) === (defaults.trimStartMs ?? 0)
+  const laneOffsetMs = cueStartMs == null
+    ? null
+    : headUnchanged
+      ? defaults.laneOffsetMs
+      : offsetForAnchorMs(cueStartMs, cueStartMs - (startMs ?? 0))
+  return {
+    laneOffsetMs,
+    ...(startMs != null ? { trimStartMs: startMs } : {}),
+    ...(endMs != null ? { trimEndMs: endMs } : {}),
+  }
+}
+
+/** Same arithmetic as lane-timing's targetOffsetMsFor, in ms: the offset that
+ *  puts sample zero at `anchorMs`, clamped at file zero. */
+function offsetForAnchorMs(cueStartMs: number, anchorMs: number): number {
+  const floored = Math.max(-cueStartMs, anchorMs - cueStartMs)
+  return floored === 0 ? 0 : floored
 }

@@ -46,16 +46,19 @@ import {
 import { DEFAULT_TRACK_IDS, type TimelineTrack } from "@/lib/timeline/tracks"
 import type { useT } from "@/lib/i18n/I18nProvider"
 
+/**
+ * PER-TRACK VALUES, not one value for the whole list — stage 3c. One call, so
+ * it is still a single enqueue.
+ *
+ * ITS OWN CALLBACK, LIKE RENAME, NOT PART OF `TrackEditingActions` (Sam,
+ * 2026-09-26). A colour is how a track LOOKS — the Audio view now draws a
+ * file's takes in it and offers the picker on projects that never turn track
+ * editing on — so it rides the maintainer clearance alone, and the server
+ * agrees (track-editing-authority.ts: colour is an ungated key).
+ */
+export type SetTrackColor = (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => void
+
 export interface TrackEditingActions {
-  /**
-   * PER-TRACK VALUES, not one value for the whole list — stage 3c.
-   *
-   * Colour became two independent axes, so "make these five tracks lime" means
-   * "set each one's PRIMARY to lime and leave its own secondary alone", and the
-   * five resulting strings can all differ. One call, so it is still a single
-   * enqueue.
-   */
-  onSetColor(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
   onLeaveFolder(trackIds: readonly string[]): void
   onCreateFolderFrom(trackIds: readonly string[]): void
   onDelete(trackIds: readonly string[]): void
@@ -87,10 +90,12 @@ export const isAddedTrack = (track: TimelineTrack) => !DEFAULT_TRACK_IDS.has(tra
 export function trackMenuScopes({
   targets,
   canRename,
+  canColour,
   canEdit,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
+  canColour: boolean
   canEdit: boolean
 }) {
   const only = targets.length === 1 ? targets[0] : null
@@ -128,7 +133,7 @@ export function trackMenuScopes({
   return {
     only,
     rename: canRename ? only : null,
-    colourable: canEdit ? colourable : [],
+    colourable: canColour ? colourable : [],
     foldable: canEdit ? foldable : [],
     inAFolder: canEdit ? inAFolder : [],
     deletable: canEdit ? deletable : [],
@@ -150,6 +155,7 @@ export function trackMenuItems({
   targets,
   t,
   onRename,
+  onSetColor,
   editing,
 }: {
   /**
@@ -161,6 +167,8 @@ export function trackMenuItems({
   t: ReturnType<typeof useT>
   /** Maintainer clearance. NOT gated on the track-editing setting. */
   onRename?: (trackId: string) => void
+  /** Maintainer clearance too, and not gated on the setting either. */
+  onSetColor?: SetTrackColor
   /** Maintainer clearance AND the setting. Absent withholds every item below
    *  the separator — which is the whole affordance, not a disabled one. */
   editing?: TrackEditingActions
@@ -169,6 +177,7 @@ export function trackMenuItems({
   const { rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
+    canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
   })
 
@@ -199,7 +208,7 @@ export function trackMenuItems({
           the operating system, and a context menu closes on that — and with the
           custom picker gone so is the reason. A submenu recolours in one click
           instead of three, which is the whole point of simplifying it. */}
-      {editing && colourable.length > 0 && (
+      {onSetColor && colourable.length > 0 && (
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <Palette className="h-3.5 w-3.5" />
@@ -240,7 +249,7 @@ export function trackMenuItems({
                   value={hue.hex}
                   className="gap-2"
                   onClick={() =>
-                    editing.onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
+                    onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
                   }
                 >
                   <span

@@ -18,15 +18,13 @@
 // only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef } from "react"
-import { CopyPlus, Pause, Play, Volume2, VolumeX } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { CopyPlus, Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
-import { CropButton } from "./CropEditor"
+import { TakeWaveform } from "@/components/audio/TakeWaveform"
+import { takeBadgeState } from "./audio-validation-state"
 import { VoiceCombobox } from "@/components/voice/VoiceCombobox"
-import { audioIdSeededWith } from "@/lib/audio/upload"
-import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -35,8 +33,9 @@ import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
-import { emitCellAudioTrim } from "@/lib/sync/events-emit"
-import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { keptWindowSec } from "@/lib/audio/kept-window"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -83,70 +82,6 @@ function fmtTime(s: number): string {
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
 
-// Deterministic bar heights (%) seeded off the cell id, so a line's waveform is
-// stable across renders. Purely decorative — the real clip isn't decoded; the
-// strip doubles as the seek surface. Heights are taller toward the middle.
-function buildBars(seed: string, n: number): number[] {
-  let s = 0
-  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0
-  const out: number[] = []
-  for (let i = 0; i < n; i++) {
-    s = (s * 1103515245 + 12345) >>> 0
-    const r = (s % 1000) / 1000
-    const env = Math.sin((i / Math.max(1, n - 1)) * Math.PI) // 0 → 1 → 0
-    out.push(Math.round(22 + (30 + r * 48) * (0.45 + 0.55 * env)))
-  }
-  return out
-}
-
-/** A waveform-styled seek surface: decorative bars that fill as the clip plays
- *  and seek on click/drag. Keeps slider semantics for a11y. */
-function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f: number) => void; seed: string }) {
-  const t = useT()
-  const ref = useRef<HTMLDivElement | null>(null)
-  const bars = useMemo(() => buildBars(seed, 56), [seed])
-  const fracFromClientX = (clientX: number): number => {
-    const el = ref.current
-    if (!el) return 0
-    const r = el.getBoundingClientRect()
-    return clamp01((clientX - r.left) / Math.max(1, r.width))
-  }
-  const handleDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture?.(e.pointerId)
-    onSeek(fracFromClientX(e.clientX))
-  }
-  const handleMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.buttons !== 1) return
-    onSeek(fracFromClientX(e.clientX))
-  }
-  const active = clamp01(fraction)
-  return (
-    <div
-      ref={ref}
-      role="slider"
-      aria-label={t("common.seek")}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(active * 100)}
-      tabIndex={0}
-      onPointerDown={handleDown}
-      onPointerMove={handleMove}
-      className="flex h-full touch-none items-center gap-px"
-    >
-      {bars.map((h, i) => {
-        const on = (i + 0.5) / bars.length <= active
-        return (
-          <span
-            key={i}
-            className={cn("flex-1 rounded-md transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
-            style={{ height: `${h}%` }}
-          />
-        )
-      })}
-    </div>
-  )
-}
 
 function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
   const t = useT()
@@ -279,98 +214,48 @@ export function CellVoicePanel({
 
   const ownedAudio = useCellAudio(project, cellForAudio, cell.fileId)
   const audio = controller ?? ownedAudio
-  const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
+  const { currentTime, duration, play, setVolume } = audio
 
-  // Round 5: is the panel playing the SHARED imported source clip? Then the
-  // playback window is the cell's section on the film timeline (never the
-  // whole film), and the crop tool goes away — a crop here would silently
-  // overwrite the section's stored source trim (retime the section in the
-  // timeline instead).
-  const isSourceClip =
-    cell.medium === "media" &&
-    playableId != null &&
-    playableId === cell.selectedAudioId &&
-    !audioIdSeededWith(playableId, cell.id)
-  const sectionWindow =
-    isSourceClip &&
-    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
-    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
-    cell.endTime > cell.startTime
-      ? { start: cell.startTime, end: cell.endTime }
-      : null
 
-  // Per-cell volume + non-destructive crop, client-owned (localStorage) and
-  // reactive — a write from here OR from "voice together" (which writes slices
-  // across many cells at once) updates this player live. Pushed into the
-  // controller; null trim bounds = no constraint. Source clips ignore the
-  // crop pref: their window IS the section.
+  // Volume is a per-device preference (localStorage), pushed into the player.
   const pref = useCellPref(projectId, cell.id)
   const volume = pref.volume ?? 1
-  const trimStart = sectionWindow ? sectionWindow.start : (pref.trimStart ?? null)
-  const trimEnd = sectionWindow ? sectionWindow.end : (pref.trimEnd ?? null)
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
-  useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {
     setCellPref(projectId, cell.id, { volume: clamp01(v) })
   }, [projectId, cell.id])
-  // Persist a manual crop server-side by re-attaching the selected clip with
-  // the new trim (ms). Debounced so dragging the handles doesn't spam events;
-  // localStorage (above) updates live for instant feedback.
-  const trimEmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const persistTrimToServer = useCallback((start: number | null, end: number | null) => {
-    if (!playableId) return
-    // Round 5 guard: never rewrite the SOURCE clip's per-section trims — the
-    // crop UI is hidden for source clips, this is the belt-and-braces.
-    if (isSourceClip) return
+
+  // The TRIM is not a preference (AQU-1217, 2026-09-25). It lives on the take
+  // itself — the attachment's trimStartMs/trimEndMs, which the timeline chip
+  // and the Recording tab read too. It used to be copied into a per-device,
+  // per-LINE preference, so switching the line to another take carried the old
+  // take's trim across. The shared SOURCE clip's window is its section's
+  // timing (round 5), never a trim, and is not edited here — retime the
+  // section on the timeline.
+  const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
+  const kept = keptWindowSec(cell, playableId, playableAtt)
+  const isSourceClip = kept.kind === "section"
+
+  // Trimmed right on the card (Sam, 2026-09-25; the Crop popover is retired).
+  // One event per finished drag or nudge.
+  const commitTrim = useCallback((start: number | null, end: number | null) => {
+    if (!playableId || isSourceClip) return
     const att = cell.attachments?.[playableId]
     if (!att) return
-    // AQU-646: the clip's own slot; the comparison is only a fallback for a
-    // clip that reached us without one.
-    const slot = att.slot ?? (playableId === cell.selectedAudioId ? "recording" : "generatedVoice")
-    // Round 7: overlay the new trims onto the merged cells instantly so the
-    // timeline chip resizes without waiting on flush + refetch. SUB-48: the
-    // overlay rides the emit promise so it lives exactly as long as the event.
-    //
-    // 2026-08-14: a trim is its own event now. This call site is the reason the
-    // distinction had to be made explicit rather than inferred — dragging a
-    // handle back to the clip's edge CLEARS a bound, and it used to say so by
-    // omitting the field, which is indistinguishable from a re-attach that
-    // simply has no opinion about trims. Now `null` says it out loud.
-    const trimP = emitCellAudioTrim({
+    void persistTakeTrim({
       projectId,
       fileId: cell.fileId,
       cellId: cell.id,
       audioId: playableId,
-      trimStartMs: start != null ? Math.round(start * 1000) : null,
-      trimEndMs: end != null ? Math.round(end * 1000) : null,
+      att,
+      selectedAudioId: cell.selectedAudioId,
+      trimStartMs: trimMs(start),
+      trimEndMs: trimMs(end),
       ...(targetLang ? { targetLang } : {}),
       author: username,
     })
-    injectOptimisticAudioTrim(cell.fileId, cell.id, {
-      audioId: playableId,
-      url: att.url,
-      slot,
-      mimeType: null,
-      voiceId: att.voiceId ?? null,
-      referenceAudioId: att.referenceAudioId ?? null,
-      durationMs: att.durationMs ?? null,
-      // AQU-490: carried, because this overlay REPLACES the attachment and a
-      // missing optional field silently reads as "nobody validated this". The
-      // second of the two trim call sites; both have to say it.
-      ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
-      ...(att.validators ? { validators: att.validators } : {}),
-      trimStartMs: start != null ? Math.round(start * 1000) : null,
-      trimEndMs: end != null ? Math.round(end * 1000) : null,
-    }, trimP)
-    void trimP
-    notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username, targetLang])
+  }, [playableId, isSourceClip, cell.attachments, cell.fileId, cell.id, cell.selectedAudioId, projectId, username, targetLang])
 
-  const changeTrim = useCallback((start: number | null, end: number | null) => {
-    setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
-    if (trimEmitTimer.current) clearTimeout(trimEmitTimer.current)
-    trimEmitTimer.current = setTimeout(() => persistTrimToServer(start, end), 500)
-  }, [projectId, cell.id, persistTrimToServer])
 
   // Generate → autoplay: when the magic button generates a fresh take, start
   // playback as soon as the attachment lands (a re-render flips `hasTake`).
@@ -403,12 +288,6 @@ export function CellVoicePanel({
     void generate(true, voiceId)
   }, [isVoicing, canGenerate, projectId, onAssign, generate])
 
-  // The play/pause button only appears once a line is voiced.
-  const onPrimary = useCallback(() => {
-    if (isVoicing || !hasTake) return
-    if (isPlaying) pause()
-    else void play()
-  }, [isVoicing, hasTake, isPlaying, pause, play])
 
   // Order the cast for the combobox list: most-recently-used voices first so the
   // ones you reach for are right at the top. The whole cast (60+ voices) lives
@@ -436,6 +315,7 @@ export function CellVoicePanel({
     ...(targetLang ? { targetLang } : {}),
   })
   const voiceValidationTakes = audioValidation.takeFor(cell, playableId)
+  const cardBadge = playableAtt ? takeBadgeState(playableAtt, username, audioValidation.validationRequirement) : null
 
   if (isParatext) return null
 
@@ -446,14 +326,11 @@ export function CellVoicePanel({
     )
   }
 
-  const audioLoading = audioState === "loading"
-  // Scrubber maps over the cropped window (full clip when untrimmed).
-  const effStart = trimStart ?? 0
-  const effEnd = trimEnd ?? duration
+  // The running time is over the part that plays (the whole clip untrimmed).
+  const effStart = kept.start ?? 0
+  const effEnd = kept.end ?? duration
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
-  const fraction = effDur > 0 ? effCurrent / effDur : 0
-  const primaryLabel = isPlaying ? t("common.pause") : t("editor.audio.play")
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
@@ -468,11 +345,6 @@ export function CellVoicePanel({
           variant="inline"
         />
       )}
-      {/* Round 5: no crop on the shared source clip — its window is the
-          section's timing; retime the section in the timeline. */}
-      {!isSourceClip && (
-        <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
-      )}
       <VolumeButton volume={volume} onChange={changeVolume} />
       <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
         <CopyPlus className="h-3.5 w-3.5" />
@@ -485,27 +357,36 @@ export function CellVoicePanel({
       className="rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
       dir="ltr"
     >
-      {/* Voiced: waveform with a centered play/pause + running time. Crop /
-          volume / clone live on the cast row below — never on the waveform. */}
+      {/* Voiced: the real recording, drawn as its timeline chip (AQU-1217 —
+          these bars used to be generated from the cell id, the same whatever
+          was recorded). Play from its corner, trim by dragging its lines, the
+          running time bottom-left. Volume / clone live on the cast row below. */}
       {hasTake && (
-        <div className="relative mb-2 h-12">
-          <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <Button
-              type="button"
-              size="icon-lg"
-              variant="default"
-              onClick={onPrimary}
-              aria-label={primaryLabel}
-              className="shadow-md"
-            >
-              {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-            </Button>
-          </div>
-          <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
+        <TakeWaveform
+          controller={audio}
+          audioId={playableId}
+          kept={kept}
+          height={48}
+          // A source section wears the lighter rung, as the source row's own
+          // chips do; a take the dub track's (or its own track's) colour.
+          kind={isSourceClip || playableId === cell.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+          trackVars={takeTrackVars({
+            files: project.files,
+            fileId: cell.fileId,
+            slot: playableAtt?.slot,
+            sourceSection: isSourceClip,
+          })}
+          strategy={project.audioMediaStrategy ?? "lazy"}
+          trimEditable={!isSourceClip}
+          onCommitTrim={commitTrim}
+          validation={cardBadge === "self" || cardBadge === "full" ? cardBadge : null}
+          className="mb-2"
+          testId="voice-card-waveform"
+        >
+          <span className="pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
             {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
           </span>
-        </div>
+        </TakeWaveform>
       )}
 
       {/* Unvoiced: a quiet hint above the cast strip (hidden while voicing —

@@ -2,7 +2,7 @@
 //
 // `allowTrackEditing` (project settings; the write route is maintainer-gated)
 // decides whether a project's timelines may be restructured at all — tracks
-// added and deleted, grouped into folders, recoloured. It is the sibling of
+// added and deleted, grouped into folders. It is the sibling of
 // timing-authority.ts, and it fails safe to OFF because the affordance is the
 // liability the setting exists to contain.
 //
@@ -25,6 +25,12 @@
 // way to keep drag-to-reorder and rename working — which they must, since both
 // already ship and a new setting defaulting to off must not take an existing
 // capability away from every project that has one.
+//
+// RECOLOURING JOINED THEM (Sam, 2026-09-26). The Audio view now draws a file's
+// takes in its dub track's colour and offers the picker there, on Bible
+// projects that will never turn track editing on. A colour changes how a track
+// LOOKS, not what the timeline holds — the same standing as a rename — so it is
+// maintainer work with the setting off too.
 
 /**
  * Does this patch REQUIRE the setting, or is it ordinary maintainer work?
@@ -36,11 +42,11 @@
  * Three clauses, and the first is NOT a special case of the second:
  *
  *   1. `patch === null` is gated, ALWAYS.
- *   2. A patch naming any key outside {name, order} is gated.
+ *   2. A patch naming any key outside {name, order, color} is gated.
  *   3. Everything else is ungated.
  *
  * Clause 1 has to be written out because the tempting one-liner — "ungated iff
- * the keys are a subset of {name, order}" — is wrong in the PERMISSIVE
+ * the keys are a subset of {name, order, color}" — is wrong in the PERMISSIVE
  * direction: null has no keys, so it is vacuously a subset and a delete would
  * sail straight through the gate that exists to stop it.
  *
@@ -48,7 +54,7 @@
  * innocently as "reset this row to its defaults". The projection implements it
  * as `meta #- ARRAY['trackOverrides', <id>]` — it deletes the whole entry — so
  * resetting the target-audio row also clears its colour, its group and its
- * rename in one write. Three of those four are gated fields.
+ * rename in one write — and a group is a gated field.
  *
  * Unknown keys are gated rather than ignored, which is the safe direction: the
  * handler rejects them a moment later anyway (its PATCH_KEYS allow-list), so
@@ -116,7 +122,7 @@ export function trackPatchRequiresExisting(trackId: string, patch: unknown): boo
   return !DEFAULT_TRACK_IDS.has(trackId)
 }
 
-const UNGATED_PATCH_KEYS = new Set(['name', 'order'])
+const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color'])
 
 export function isGatedTrackPatch(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return true

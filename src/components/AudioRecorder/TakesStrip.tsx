@@ -18,6 +18,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
@@ -164,11 +165,29 @@ export function TakesStrip({
     }
   }, [activeTakeId, optimisticSelectedId])
 
+  // AQU-1217: one sound at a time. An audition registers with the audio
+  // coordinator, so starting the recorder's selected-take waveform silences it
+  // and starting an audition silences the waveform. Built on first use, inside
+  // a callback — never read during render.
+  const auditionRef = useRef<ActiveAudioController | null>(null)
+
   const stopPlayback = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
+    if (auditionRef.current) clearActiveAudioIf(auditionRef.current)
     setPlayingId(null)
   }, [])
+
+  const audition = useCallback((): ActiveAudioController => {
+    if (!auditionRef.current) {
+      auditionRef.current = {
+        isPlaying: () => Boolean(audioRef.current && !audioRef.current.paused),
+        play: async () => {},
+        pause: () => stopPlayback(),
+      }
+    }
+    return auditionRef.current
+  }, [stopPlayback])
 
   useEffect(() => () => stopPlayback(), [stopPlayback])
 
@@ -194,6 +213,7 @@ export function TakesStrip({
       const audio = new Audio(src)
       audioRef.current = audio
       audio.onended = () => stopPlayback()
+      claimActiveAudio(audition())
       await audio.play()
       setPlayingId(att.audioId)
     } catch {
@@ -201,7 +221,7 @@ export function TakesStrip({
     } finally {
       setLoadingId((cur) => (cur === att.audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, session, projectId, fileId])
+  }, [playingId, stopPlayback, audition, session, projectId, fileId])
 
   const circle = useCallback(async (audioId: string) => {
     // Effective selected = optimistic override if in-flight, else server value.

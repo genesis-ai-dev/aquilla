@@ -39,7 +39,6 @@ import {
 } from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
@@ -160,6 +159,7 @@ import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-spli
 import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
+import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -741,6 +741,13 @@ interface EditorTableProps {
   onEditTargetLanguage?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
+  /**
+   * Audio mode: the file's dub-track colour token (null = the default green),
+   * which the takes are drawn in, and — for maintainers only — the way to
+   * change it. Absent `onSetAudioTrackColor` withholds the picker.
+   */
+  audioTrackColor?: string | null
+  onSetAudioTrackColor?: (hueId: string) => void
   /** 2026-08-07: the character gutter — a voice circle per speaking row,
    *  aligned to the source's first line. On ONLY in the stacked media lens
    *  (Sam's call: not the Text lens, not the voice-panel table). */
@@ -991,6 +998,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
+  audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
@@ -1383,23 +1391,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
     setActiveEditorCellId((current) => current === cellId ? null : current)
   }, [])
-
-  // Hydrate the per-cell trim cache (localStorage, seconds — what the player
-  // reads) from the server attachment's trim (ms). Server is authoritative on
-  // load, so combined/cropped slices set on another device appear here.
-  useEffect(() => {
-    for (const [cellId, entry] of audioByCellId) {
-      const sel = entry.selectedAudioId ?? entry.selectedGeneratedVoiceAudioId
-      if (!sel) continue
-      const att = entry.attachments[sel]
-      if (!att || (att.trimStartMs == null && att.trimEndMs == null)) continue
-      const start = att.trimStartMs != null ? att.trimStartMs / 1000 : undefined
-      const end = att.trimEndMs != null ? att.trimEndMs / 1000 : undefined
-      const cur = getCellPref(project.id, cellId)
-      if (cur?.trimStart === start && cur?.trimEnd === end) continue
-      setCellPref(project.id, cellId, { trimStart: start, trimEnd: end })
-    }
-  }, [audioByCellId, project.id])
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
@@ -2790,6 +2781,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {castGutter ? (
               <span className="md:hidden">{audioLens ? t("editor.column.controls") : t("editor.column.source")}</span>
             ) : audioLens ? t("editor.column.controls") : t("editor.column.source")}
+            {/* Sam, 2026-09-26: the colour the file's takes are drawn in, beside
+                the heading of the column they sit in. Maintainers only. */}
+            {audioLens && onSetAudioTrackColor && (
+              <AudioTrackColorPicker color={audioTrackColor} onPick={onSetAudioTrackColor} />
+            )}
             {!castGutter && !audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}

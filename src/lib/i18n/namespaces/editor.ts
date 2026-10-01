@@ -143,6 +143,8 @@ export const editor = defineNamespace({
     "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click retry",
     "editor.waveform.retryTooltip": "Couldn't load this clip's waveform; click to retry",
     "editor.waveform.retry": "Retry waveform",
+    "editor.waveform.trimStart": "Start of the kept audio",
+    "editor.waveform.trimEnd": "End of the kept audio",
 
     // — Per-cell audio upload ————————————————————————————————————
     "editor.audio.upload": "Upload audio file",
@@ -169,13 +171,6 @@ export const editor = defineNamespace({
     "editor.attachments.previewAlt": "Attachment preview: {name}",
     "editor.attachments.openInDrawer": "Show in the attachments panel",
     "editor.attachments.cellGroupUnlabelled": "Unlabelled cell",
-
-    // — Audio crop popover ————————————————————————————————————————
-    "editor.crop.open": "Crop audio",
-    "editor.crop.title": "Crop",
-    "editor.crop.reset": "Reset to full clip",
-    "editor.crop.start": "Crop start",
-    "editor.crop.end": "Crop end",
 
     // — Empty / loading / error states where the table would be ——————
     "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
@@ -1505,6 +1500,8 @@ export const editor = defineNamespace({
 
     // — Table header, lane switcher and whole-file empty states ——————
     "editor.column.controls": "Controls",
+    "editor.audioLens.trackColorAria": "Audio colour for this file: {color}",
+    "editor.audioLens.trackColorLabel": "Audio colour for this file",
     "editor.lane.activeAria": "Active translation lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
@@ -2314,6 +2311,19 @@ export const editor = defineNamespace({
           "not the recording.",
         maxLength: 18,
       },
+      "editor.waveform.trimStart": {
+        description:
+          "Screen-reader name of the vertical line marking where the part of a " +
+          "recording that plays begins. Dragging it (or focusing it and pressing " +
+          "the arrow keys) trims silence off the start; nothing is deleted. A " +
+          "noun phrase naming the line, not a command.",
+      },
+      "editor.waveform.trimEnd": {
+        description:
+          "Screen-reader name of the vertical line marking where the part of a " +
+          "recording that plays ends. Dragging it trims silence off the end; " +
+          "nothing is deleted. A noun phrase naming the line, not a command.",
+      },
       "editor.audio.upload": {
         description:
           "Tooltip and screen-reader name of the upload button in a cell's action " +
@@ -2434,33 +2444,6 @@ export const editor = defineNamespace({
           "has no canonical reference (no verse address) to name it by. A noun " +
           "phrase standing in for that missing label.",
         maxLength: 20,
-      },
-      "editor.crop.open": {
-        description:
-          "Screen-reader name of the scissors button that opens the crop popover " +
-          "for a cell's recording. Cropping trims the start and end of the clip " +
-          "non-destructively — nothing is re-encoded or deleted.",
-      },
-      "editor.crop.title": {
-        description:
-          "Heading of the crop popover. A noun naming the operation (trimming the " +
-          "start/end of an audio clip), not an imperative.",
-        maxLength: 14,
-      },
-      "editor.crop.reset": {
-        description:
-          "Screen-reader name of the small reset control in the crop popover, which " +
-          "clears both trim points so the whole recording plays again.",
-      },
-      "editor.crop.start": {
-        description:
-          "Screen-reader name of the draggable handle marking where the cropped " +
-          "clip begins. A noun phrase naming the handle, not a command.",
-      },
-      "editor.crop.end": {
-        description:
-          "Screen-reader name of the draggable handle marking where the cropped " +
-          "clip stops. A noun phrase naming the handle, not a command.",
       },
       "editor.file.loadErrorTitleNamed": {
         description:
@@ -5624,6 +5607,20 @@ export const editor = defineNamespace({
           "per-line voice and playback controls sit instead of source text. Replaces " +
           "editor.column.source in that mode, so it must read as a column heading.",
         maxLength: 14,
+      },
+      "editor.audioLens.trackColorAria": {
+        description:
+          "Screen-reader name of a small coloured dot beside the 'Controls' heading " +
+          "in the audio lens. Pressing it opens six colours to choose from; the one " +
+          "chosen colours every recording in this file, for everyone on the project " +
+          "(the same colour the timeline shows for the file's dub track).",
+        placeholders: { color: "The name of the colour currently chosen, e.g. 'Green'." },
+      },
+      "editor.audioLens.trackColorLabel": {
+        description:
+          "Small heading at the top of that colour menu, above the six colour names. " +
+          "Says the choice applies to the whole file's audio, not to one line.",
+        maxLength: 32,
       },
       "editor.lane.activeAria": {
         description:

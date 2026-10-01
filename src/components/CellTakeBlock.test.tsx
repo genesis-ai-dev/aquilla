@@ -12,6 +12,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
 const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; askAgain?: boolean }> = []
+const trimCalls: Array<[number | null, number | null]> = []
+const setTrimSpy = (start: number | null, end: number | null) => { trimCalls.push([start, end]) }
 
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: (_project: unknown, cell: { metadata?: Record<string, unknown> }, fileId: string) => {
@@ -24,7 +26,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
       state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 3,
       peaks: null, peaksState: "idle",
       play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
-      setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+      setTrim: setTrimSpy, requestPeaks: vi.fn(), ensureBytes: vi.fn(),
     }
   },
 }))
@@ -42,8 +44,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 
 // A corrected transcript rides a cell.audio.attach into the outbox — not what
 // these tests are about.
+const trimEmits: Array<Record<string, unknown>> = []
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async () => "evt-1"),
+  emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
 }))
 
 import { CellTakeBlock } from "./CellTakeBlock"
@@ -95,6 +99,8 @@ function draw(over: Partial<React.ComponentProps<typeof CellTakeBlock>> = {}) {
 beforeEach(() => {
   audioCalls.length = 0
   transcribeCalls.length = 0
+  trimCalls.length = 0
+  trimEmits.length = 0
   localStorage.clear()
 })
 
@@ -127,6 +133,124 @@ describe("whose recording it plays", () => {
     owner.attachments!["gen-1"] = { type: "audio", url: "frontier-audio://gen" } as never
     draw({ owner, audioId: "gen-1" })
     expect(audioCalls[0].selectedAudioId).toBe("gen-1")
+  })
+})
+
+// AQU-1217: the tab used to play the WHOLE file — an untrimmed take, and on an
+// imported source-audio section the entire source reading.
+describe("which part of the recording it plays", () => {
+  it("plays a take through its stored trim", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    owner.attachments![id] = { ...owner.attachments![id], trimStartMs: 300, trimEndMs: 2700 } as never
+    draw({ owner })
+    expect(trimCalls.at(-1)).toEqual([0.3, 2.7])
+  })
+
+  it("plays an untrimmed take whole", () => {
+    draw()
+    expect(trimCalls.at(-1)).toEqual([null, null])
+  })
+
+  it("plays only its section of a shared source-audio clip, not the whole reading", () => {
+    // The imported clip is seeded with the FILE id, so it is not this cell's
+    // take; its window is the section's own timing, not its transcription trim.
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(),
+      startTime: 17.6,
+      endTime: 23.1,
+      selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src", trimStartMs: 17_900, trimEndMs: 22_800 } },
+    } as unknown as CellData
+    draw({ owner })
+    expect(trimCalls.at(-1)).toEqual([17.6, 23.1])
+  })
+})
+
+// Sam, 2026-09-26: off the timeline a take wears its TRACK'S colour, the one
+// stored with its file — not grey.
+describe("its colour", () => {
+  const hue = () => screen.getByTestId("cell-take-waveform").style.getPropertyValue("--tl-track-hue")
+  const withFiles = (trackOverrides: Record<string, unknown>) =>
+    ({ ...project, files: [{ id: "cue-sibling", trackOverrides }] }) as unknown as ProjectRecord
+
+  it("is the file's dub-track colour for its main recording", () => {
+    draw({ project: withFiles({ "target-audio": { color: "violet" } }) })
+    expect(hue()).toBe("#865deb")
+  })
+
+  it("is the media view's default green where nobody picked one", () => {
+    draw()
+    expect(hue()).toBe("#40c06e")
+  })
+
+  it("is an added track's own colour for a take made on it", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const onTrack = { ...owner, attachments: { [id]: { ...owner.attachments![id], slot: "trk-es" } } } as unknown as CellData
+    draw({
+      owner: onTrack,
+      project: withFiles({ "target-audio": { color: "violet" }, "trk-es": { kind: "audio", name: "Spanish", order: 4, color: "amber" } }),
+    })
+    expect(hue()).toBe("#eba720")
+  })
+
+  it("is the source row's lighter blue for a source-audio section", () => {
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(), startTime: 17.6, endTime: 23.1, selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src" } },
+    } as unknown as CellData
+    draw({ owner, project: withFiles({ "target-audio": { color: "violet" } }) })
+    expect(hue()).toBe("#0e9bd6")
+    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-gen)]")
+  })
+})
+
+// Sam, 2026-09-25: trim right where you see it. The Crop popover is retired.
+describe("trimming in place", () => {
+  function sized() {
+    const root = screen.getByTestId("cell-take-waveform")
+    root.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 56, width: 400, height: 56, x: 0, y: 0, toJSON: () => ({}) })
+  }
+
+  it("drags the start line and saves the trim on the cell that holds the take", () => {
+    draw()
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(line, { clientX: 40, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 40 })
+    expect(trimEmits).toHaveLength(1)
+    expect(trimEmits[0]).toMatchObject({
+      fileId: "cue-sibling", cellId: "cue-1", audioId: "audio-cue-1-1700000000-take.webm",
+      trimStartMs: 300, trimEndMs: null,
+    })
+  })
+
+  it("nudges a focused line with the arrow keys", () => {
+    draw()
+    const line = screen.getByRole("slider", { name: /end of the kept audio/i })
+    fireEvent.keyDown(line, { key: "ArrowLeft", shiftKey: true })
+    expect(trimEmits.at(-1)).toMatchObject({ trimStartMs: null, trimEndMs: 2900 })
+  })
+
+  it("shows the trim but offers no dragging to someone who cannot edit", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    owner.attachments![id] = { ...owner.attachments![id], trimStartMs: 300 } as never
+    draw({ owner, editable: false })
+    expect(screen.getByRole("slider", { name: /start of the kept audio/i })).toHaveAttribute("aria-readonly", "true")
+  })
+
+  it("never offers trim lines on a source-audio section — its window is the section", () => {
+    const source = "audio-mark-reading-1700000000-src.wav"
+    const owner = {
+      ...cueOwner(), startTime: 1, endTime: 2, selectedAudioId: source,
+      attachments: { [source]: { type: "audio", url: "frontier-audio://src" } },
+    } as unknown as CellData
+    draw({ owner })
+    expect(screen.queryByRole("slider", { name: /kept audio/i })).toBeNull()
   })
 })
 

@@ -167,6 +167,25 @@ describe("EditorTable — audio validation across the whole gutter", () => {
     // The text column is untouched.
     expect(screen.getAllByTestId("validation-gutter")).toHaveLength(2)
   })
+
+  // …and neither does the header, whose marks stand over the rows' columns.
+  it("marks only the text checks in the header of a file with no audio", async () => {
+    audioState.byCellId = new Map()
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    const marks = screen.getByTestId("table-check-marks")
+    expect(within(marks).getByRole("img", { name: "Text validation" })).toBeInTheDocument()
+    expect(within(marks).queryByRole("img", { name: "Audio validation" })).toBeNull()
+  })
+
+  it("marks both checks in the header of a file with audio", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    await rowOf("bonjour cell-1")
+    const marks = screen.getByTestId("table-check-marks")
+    expect(within(marks).getByRole("img", { name: "Text validation" })).toBeInTheDocument()
+    expect(within(marks).getByRole("img", { name: "Audio validation" })).toBeInTheDocument()
+  })
 })
 
 // AQU-1495, from Joel's report of the 2026-09-29 call: the board's audio bar

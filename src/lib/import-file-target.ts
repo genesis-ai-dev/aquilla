@@ -157,6 +157,11 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   alreadyThere?: boolean
   /** For a `sourceDiffers` row: the source text the uploaded row carries. */
   incomingSource?: string
+  /** For a reference match: the row's reference as the file wrote it, when
+   *  that differs from the line's own (`gen 1:2` for `GEN 1:2`). The review
+   *  names the row by the line's reference and shows this beside it
+   *  (AQU-1375). */
+  writtenAs?: string
 }
 
 /** Why an incoming row found no line. One code per reason, each with its own
@@ -471,7 +476,13 @@ export function matchTargetRowsByRef(
       return
     }
     matchedCellIds.add(cell.cellId)
-    matched.push({ ...toMatchedCell(cell, row.text, row.ref), rowIndex: index })
+    // Named by the line's own reference, not however the file spelled it.
+    const lineRef = cell.canonicalRef || row.ref
+    matched.push({
+      ...toMatchedCell(cell, row.text, lineRef),
+      rowIndex: index,
+      ...(row.ref !== lineRef ? { writtenAs: row.ref } : {}),
+    })
   })
 
   const uncovered = uncoveredLines(cells, matched)

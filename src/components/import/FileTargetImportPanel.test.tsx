@@ -981,7 +981,7 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
       await mapAndReview("source,target\nIn the beginning,Uno\nSomething else entirely,Dos\n")
       const row = rowOf("Dos")
       expect(within(row).getByText("Source differs")).toBeInTheDocument()
-      expect(within(row).getByText("Source in the file: Something else entirely")).toBeInTheDocument()
+      expect(within(row).getByText("Source in this row: Something else entirely")).toBeInTheDocument()
       expect(checkboxIn(row).checked).toBe(false)
       expect(screen.getByRole("tab", { name: /To check 1/ })).toBeInTheDocument()
       // The counts agree with the Import button: the unticked row is to check,
@@ -1045,6 +1045,20 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
       expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
       expect(screen.getByText("Dos").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
     })
+  })
+
+  it("names a matched row by its line's reference, with the file's spelling beside it, and an unmatched one as typed", async () => {
+    renderPanel()
+    await selectFile(makeFile("ref,target\ngen 1:1,Uno\nGEN 1:2,Dos\nGNE 1:3,Tres\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
+    expect(within(rowOf("Uno")).getByText("GEN 1:1")).toBeInTheDocument()
+    expect(within(rowOf("Uno")).getByText("as written: gen 1:1")).toBeInTheDocument()
+    expect(within(rowOf("Dos")).getByText("GEN 1:2")).toBeInTheDocument()
+    expect(within(rowOf("Dos")).queryByText(/as written/)).not.toBeInTheDocument()
+    openList(/Rows that didn't find a line/)
+    expect(within(entryOf("Tres")).getByText("GNE 1:3")).toBeInTheDocument()
   })
 
   it("lists a spreadsheet's unmatched rows as rows", async () => {

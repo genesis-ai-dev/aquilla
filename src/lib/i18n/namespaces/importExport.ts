@@ -1193,7 +1193,8 @@ export const importExport = defineNamespace({
     "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.rowSourceDiffersPill": "Source differs",
     "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
-    "importExport.review.rowIncomingSource": "Source in the file: {text}",
+    "importExport.review.rowIncomingSource": "Source in this row: {text}",
+    "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
       "line are left unticked.",
     "importExport.review.reasonSourceNotInFile": "No line has this source text",
@@ -3452,12 +3453,24 @@ export const importExport = defineNamespace({
           "the uploaded row's original (source) text doesn't match the source text of " +
           "the line it was paired with. One sentence, no closing full stop.",
       },
+      "importExport.review.rowWrittenAs": {
+        description:
+          "Small grey note beside the reference of one row in the match-review list, " +
+          "shown when the uploaded file spelled the reference differently from the " +
+          "line it matched (for example 'gen 1:2' for GEN 1:2): the row is labelled " +
+          "with the line's own reference, and this says how the file wrote it. " +
+          "Lower-case fragment, label then colon then the reference as typed.",
+        placeholders: {
+          ref: "The reference exactly as the uploaded file wrote it, such as 'gen 1:2'.",
+        },
+      },
       "importExport.review.rowIncomingSource": {
         description:
           "Small amber line inside one row of the match-review list, under the " +
           "paired line's own source text, showing the source text the uploaded " +
           "spreadsheet row carries — so the two can be compared when they don't " +
-          "match. Label, colon, then the text (truncated if long).",
+          "match. 'This row' is the uploaded spreadsheet row, not the open file. " +
+          "Label, colon, then the text (truncated if long).",
         placeholders: {
           text: "The original (source) text from the uploaded row.",
         },

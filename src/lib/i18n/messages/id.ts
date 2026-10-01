@@ -4357,7 +4357,7 @@ export const id: Catalog = {
   "importExport.review.replacesExisting": "Menggantikan: {text}",
   "importExport.review.rowSourceDiffersPill": "Sumber berbeda",
   "importExport.review.rowSourceDiffers": "Teks sumber baris ini tidak sama dengan sel pasangannya",
-  "importExport.review.rowIncomingSource": "Sumber di file: {text}",
+  "importExport.review.rowIncomingSource": "Sumber di baris ini: {text}",
   "importExport.review.sourceAligned": "Dipasangkan ke sel berdasarkan teks sumber. Baris yang sumbernya tidak sama dengan selnya dibiarkan tidak dicentang.",
   "importExport.review.reasonSourceNotInFile": "Tidak ada sel dengan teks sumber ini",
   "importExport.review.rowAlreadyThere": "Sudah ada",

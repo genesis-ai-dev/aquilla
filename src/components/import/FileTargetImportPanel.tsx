@@ -293,6 +293,11 @@ const ReviewRow = memo(function ReviewRow({
           <div className="flex-1 min-w-0">
             <p className="font-mono text-[10px] text-muted-foreground">
               {rowLabel(t, locale, kind, m.ref, m.rowIndex)}
+              {m.writtenAs && (
+                <span className="ms-1.5 text-muted-foreground/70">
+                  {t("importExport.review.rowWrittenAs", { ref: m.writtenAs })}
+                </span>
+              )}
               {m.alreadyThere && (
                 <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
               )}

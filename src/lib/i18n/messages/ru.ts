@@ -4392,7 +4392,7 @@ export const ru: Catalog = {
   "importExport.review.replacesExisting": "Заменяет: {text}",
   "importExport.review.rowSourceDiffersPill": "Источник отличается",
   "importExport.review.rowSourceDiffers": "Исходный текст этой строки не совпадает с ячейкой, с которой она сопоставлена",
-  "importExport.review.rowIncomingSource": "Источник в файле: {text}",
+  "importExport.review.rowIncomingSource": "Источник в этой строке: {text}",
   "importExport.review.sourceAligned": "Сопоставлено с ячейками по исходному тексту. Строки, чей источник не совпадает с ячейкой, оставлены неотмеченными.",
   "importExport.review.reasonSourceNotInFile": "Нет ячейки с этим исходным текстом",
   "importExport.review.rowAlreadyThere": "Уже есть",

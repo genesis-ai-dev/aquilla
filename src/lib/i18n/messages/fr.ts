@@ -4326,7 +4326,7 @@ export const fr: Catalog = {
   "importExport.review.replacesExisting": "Remplace : {text}",
   "importExport.review.rowSourceDiffersPill": "Source différente",
   "importExport.review.rowSourceDiffers": "Le texte source de cette ligne ne correspond pas à la cellule associée",
-  "importExport.review.rowIncomingSource": "Source dans le fichier : {text}",
+  "importExport.review.rowIncomingSource": "Source dans cette ligne : {text}",
   "importExport.review.sourceAligned": "Associées aux cellules par texte source. Les lignes dont la source ne correspond pas à leur cellule restent décochées.",
   "importExport.review.reasonSourceNotInFile": "Aucune cellule n'a ce texte source",
   "importExport.review.rowAlreadyThere": "Déjà en place",

@@ -183,7 +183,7 @@ describe("matchTargetRowsByRef — reference spellings (AQU-1375)", () => {
     cell({ cellId: "h1", canonicalRef: "GEN 1:s1" }),
   ]
 
-  it("matches a verse however its reference is spelled, labelled as the file spelled it", () => {
+  it("matches a verse however its reference is spelled, named by the line's own reference", () => {
     const result = matchTargetRowsByRef(
       [
         { ref: "Genesis 1:4", text: "four" },
@@ -193,13 +193,21 @@ describe("matchTargetRowsByRef — reference spellings (AQU-1375)", () => {
       ],
       cells,
     )
-    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref])).toEqual([
-      ["c4", "four", "Genesis 1:4"],
-      ["c3", "three", "gen 1:3"],
-      ["c5", "five", "GEN 1.5"],
-      ["c1", "one", "genesis 1.1"],
+    // The row reads as its line ("GEN 1:4"), with the file's own spelling
+    // kept beside it for the review's "as written" note.
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref, m.writtenAs])).toEqual([
+      ["c4", "four", "GEN 1:4", "Genesis 1:4"],
+      ["c3", "three", "GEN 1:3", "gen 1:3"],
+      ["c5", "five", "GEN 1:5", "GEN 1.5"],
+      ["c1", "one", "GEN 1:1", "genesis 1.1"],
     ])
     expect(result.orphans).toEqual([])
+  })
+
+  it("adds no \"as written\" when the file spelled the reference as the line does", () => {
+    const result = matchTargetRowsByRef([{ ref: "GEN 1:4", text: "four" }], cells)
+    expect(result.matched[0].ref).toBe("GEN 1:4")
+    expect(result.matched[0]).not.toHaveProperty("writtenAs")
   })
 
   it("still matches a heading's synthetic ref exactly, and only exactly", () => {

@@ -1450,6 +1450,8 @@ export const editor = defineNamespace({
     "editor.audioValidation.unavailableTooltip": "Audio validation unavailable",
     "editor.audioValidation.noAudioTooltip": "No audio to validate",
     "editor.audioValidation.ariaNoAudio": "No audio to validate — {ref}.",
+    "editor.audioValidation.checkingTooltip": "Checking for audio…",
+    "editor.audioValidation.ariaChecking": "Checking for audio — {ref}.",
     "editor.audioValidation.ownRecordingTooltip": "You recorded this — someone else must validate it",
     "editor.audioValidation.ariaValidated":
       "Audio validated — {ref}. Click to remove your validation.",
@@ -5468,6 +5470,20 @@ export const editor = defineNamespace({
         description:
           "Screen-reader label for the faded microphone on a line with no recording. " +
           "{ref} is the line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.audioValidation.checkingTooltip": {
+        description:
+          "Tooltip on the grey pulsing placeholder in a line's audio-validation slot " +
+          "while the file's recordings are still loading. It is not yet known whether " +
+          "the line has audio. Not an error.",
+      },
+      "editor.audioValidation.ariaChecking": {
+        description:
+          "Screen-reader label for the placeholder shown while a line's recordings are " +
+          "still loading. {ref} is the line's reference, e.g. 'MRK 4:1'.",
         placeholders: {
           ref: "The cell's reference or fallback row number. Do not translate.",
         },

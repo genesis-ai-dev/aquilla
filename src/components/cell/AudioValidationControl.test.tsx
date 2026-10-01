@@ -100,6 +100,31 @@ describe("the readout", () => {
     expect(screen.queryByTestId("audio-validation-gutter")).toBeNull()
   })
 
+  // Sam, 2026-10-01 (the 3G pass): while the line's recordings are still
+  // being read, an empty set is not "no audio". The slot pulses in the app's
+  // skeleton style instead — not a button, and saying what it waits for.
+  it("holds a placeholder, not the faded mic, while the recordings are being read", () => {
+    draw([], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    const placeholder = screen.getByTestId("audio-validation-checking")
+    expect(placeholder.tagName).toBe("SPAN")
+    expect(placeholder).toHaveAccessibleName(/checking for audio/i)
+    expect(placeholder.querySelector("[data-slot=skeleton]")).not.toBeNull()
+  })
+
+  it("holds the placeholder even over takes it already knows, so no count changes under it", () => {
+    draw([take({ audioId: "a" })], { checking: true })
+    expect(button()).toBeNull()
+    expect(screen.getByTestId("audio-validation-checking")).toBeInTheDocument()
+  })
+
+  it("ignores it inline, where it only ever stands beside a take", () => {
+    draw([take({ audioId: "a" })], { checking: true, variant: "inline" })
+    expect(button()).not.toBeNull()
+    expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
+  })
+
   // Sam, 2026-09-21: on a second account, a line somebody else had already
   // validated looked exactly like one nobody had touched. The text control
   // fills its circle for that state; this one only stepped the grey, which is

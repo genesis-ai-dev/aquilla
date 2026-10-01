@@ -857,6 +857,9 @@ interface EditorTableProps {
    * behaves exactly as before.
    */
   linkedTakesByCell?: ReadonlyMap<string, LinkedTake[]>
+  /** A dubbing file whose heard lines' takes are still being read (they arrive
+   *  after the line's own audio). Until then no line can say "no audio". */
+  heardLinesLoading?: boolean
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -990,6 +993,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
   linkedTakesByCell,
+  heardLinesLoading = false,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
@@ -1326,7 +1330,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // Until the file's recordings have been read — and in a dubbing file, its
+  // heard lines' too — an empty answer means "not read yet", and each row's
+  // audio check shows a placeholder instead of claiming there is no audio.
+  const audioChecking = !audioLoaded || heardLinesLoading
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2460,6 +2468,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
+          audioChecking={audioChecking}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2584,6 +2593,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClearCellErrors,
     activeLane,
     audioByCellId,
+    audioChecking,
     audioLens,
     castGutter,
     ttsSettings,
@@ -3474,6 +3484,8 @@ interface MemoizedRowProps {
   /** The heard lines performing this row that hold a recording — see
    *  `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
+  /** The file's recordings have not been read yet — see `audioChecking`. */
+  audioChecking: boolean
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3666,7 +3678,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioChecking, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3788,6 +3800,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         linkedTakes={linkedTakes}
+        audioChecking={audioChecking}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3909,6 +3922,9 @@ interface EditorRowProps {
   /** The heard lines performing this row that hold a recording, in film order
    *  — see `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
+  /** The file's recordings have not been read yet: the audio check shows a
+   *  placeholder rather than "no audio". */
+  audioChecking: boolean
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4906,7 +4922,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioChecking, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -6799,6 +6815,7 @@ function EditorRow({
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationLine.takes}
+      checking={audioChecking}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide

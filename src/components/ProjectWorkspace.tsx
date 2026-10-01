@@ -3167,7 +3167,12 @@ export function ProjectWorkspace() {
       })
   }, [hydratedProject?.files])
 
-  const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
+  const {
+    audioCues,
+    isLoading: audioCuesLoading,
+    refresh: refreshAudioCues,
+    patchTiming: patchAudioCueTiming,
+  } = useAudioCueCells({
     projectId: project?.id ?? null,
     // AQU-1326: the cue sibling is a second whole-file read. Deferred behind
     // the first cell page so it doesn't race the editor's own stream.
@@ -3214,6 +3219,7 @@ export function ProjectWorkspace() {
     rows: cueLinkRows,
     rejected: cueLinkRejections,
     error: cueLinksError,
+    hasLoaded: cueLinksLoaded,
     setLinkLocally: setCueLinkLocally,
     refresh: refreshCueLinks,
   } = useFileCellLinks({
@@ -3242,11 +3248,19 @@ export function ProjectWorkspace() {
   // is a one-shot read — they are a transcript of a finished film and no event
   // ever edits them). Only their ATTACHMENTS are live, which is exactly what
   // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+  const { byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
   )
+  // A dubbing file's lines are performed by heard lines, whose takes arrive by
+  // three reads of their own, later than the line's own audio: the cue cells
+  // (deferred behind the first page — null until they start), their links to
+  // the subtitle lines, and their recordings. Until all three are back, a
+  // line's audio check cannot say "no audio" — it does not know yet.
+  const heardLinesLoading =
+    audioCueSibling != null &&
+    (audioCues === null || audioCuesLoading || !cueLinksLoaded || !cueAudioLoaded)
   // Dragging a take on a cue: the anchor the drag writes lands in the CUE
   // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
   // transcript, no live sync, nothing to invalidate). Without a local overlay
@@ -13269,6 +13283,7 @@ export function ProjectWorkspace() {
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
             linkedTakesByCell={linkedTakesByCell}
+            heardLinesLoading={heardLinesLoading}
             cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}

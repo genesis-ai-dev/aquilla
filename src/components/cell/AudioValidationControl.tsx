@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type SyntheticEvent } from "rea
 import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
@@ -69,6 +70,13 @@ interface AudioValidationControlProps {
    * withdraw buttons and "Validate this take" are not there.
    */
   readOnly?: boolean
+  /**
+   * The line's recordings have not been read yet (the gutter only). Until they
+   * have, an empty set means "not known", not "nothing recorded", so the slot
+   * holds a placeholder instead of the faded "no audio" mic — and instead of a
+   * partial count that would change as the heard lines' takes arrive.
+   */
+  checking?: boolean
 }
 
 type PreventableReactEvent<T> = SyntheticEvent<T> & {
@@ -84,6 +92,7 @@ export function AudioValidationControl({
   onValidationChange,
   variant = "gutter",
   readOnly = false,
+  checking = false,
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -351,6 +360,27 @@ export function AudioValidationControl({
   // validated yet". A span, not a disabled button — no tab stop, and it still
   // takes the hover that says why. Inline surfaces (the take block, the chips)
   // only ever mount beside a take, so there it is still nothing.
+  // Still reading the file's recordings (Sam, 2026-10-01, from the 3G pass:
+  // every line said "No audio to validate" for seconds, then changed its
+  // mind). The app's skeleton pulse holds the slot: no click, no tab stop,
+  // and a hover that says what it is waiting for.
+  if (checking && variant === "gutter") {
+    return (
+      <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
+        <AppTooltip key="checking" content={t("editor.audioValidation.checkingTooltip")}>
+          <span
+            role="img"
+            data-testid="audio-validation-checking"
+            aria-label={t("editor.audioValidation.ariaChecking", { ref: cellRef })}
+            className="flex h-6 w-6 cursor-default items-center justify-center"
+          >
+            <Skeleton className="size-3.5 rounded-full" />
+          </span>
+        </AppTooltip>
+      </div>
+    )
+  }
+
   if (state === "empty") {
     if (variant === "inline") return null
     return (

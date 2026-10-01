@@ -234,6 +234,11 @@ function keepShadow(
 export interface UseFileAudioAttachmentsResult {
   byCellId: Map<string, CellAudioEntry>
   isLoading: boolean
+  /** True once this file has an answer: its first read came back (or failed),
+   *  or there is nothing to read — no file, or nobody signed in. Until then an
+   *  empty map means "not read yet", not "no recordings"; a refetch never
+   *  turns it false again. */
+  hasLoaded: boolean
   revalidate: () => void
 }
 
@@ -250,7 +255,7 @@ export function useFileAudioAttachments(
   projectId: string | null,
   fileId: string | null,
 ): UseFileAudioAttachmentsResult {
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const sessionRef = useRef(session)
   useEffect(() => {
     sessionRef.current = session
@@ -268,6 +273,11 @@ export function useFileAudioAttachments(
 
   const [byCellId, setByCellId] = useState<Map<string, CellAudioEntry>>(EMPTY)
   const [isLoading, setIsLoading] = useState(false)
+  // The project/file whose read last came back. Keyed rather than a boolean so
+  // a file switch reads as "not loaded" at once, with no reset to forget.
+  const [settledKey, setSettledKey] = useState<string | null>(null)
+  const readKey = projectId && fileId ? `${projectId}/${fileId}` : null
+  const hasLoaded = readKey === null || (!jwt && !sessionLoading) || settledKey === readKey
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -359,7 +369,10 @@ export function useFileAudioAttachments(
       // rather than the editor crashing. The next poke retries.
       if (gen === generationRef.current) setByCellId(EMPTY)
     } finally {
-      if (gen === generationRef.current) setIsLoading(false)
+      if (gen === generationRef.current) {
+        setIsLoading(false)
+        setSettledKey(`${projectId}/${fileId}`)
+      }
     }
   }, [projectId, fileId, getToken, jwt])
 
@@ -423,7 +436,7 @@ export function useFileAudioAttachments(
     })
   }, [fileId])
 
-  return { byCellId, isLoading, revalidate: doFetch }
+  return { byCellId, isLoading, hasLoaded, revalidate: doFetch }
 }
 
 // Fold the per-file audio read (`byCellId`) into a cell list, populating the

@@ -11,7 +11,7 @@
  * Real EditorTable, real rows, mocked list virtualiser (happy-dom has no
  * layout) and a mocked per-file audio read so the takes can be shaped exactly.
  */
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
@@ -43,10 +43,12 @@ vi.mock("@legendapp/list/react", async () => {
   }
 })
 // The takes, shaped per test. Everything else in that module stays real.
-const audioState = vi.hoisted(() => ({ byCellId: new Map<string, CellAudioEntry>() }))
+const audioState = vi.hoisted(() => ({ byCellId: new Map<string, CellAudioEntry>(), hasLoaded: true }))
 vi.mock("@/hooks/useFileAudioAttachments", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useFileAudioAttachments: () => ({ byCellId: audioState.byCellId, isLoading: false, revalidate: vi.fn() }),
+  useFileAudioAttachments: () => ({
+    byCellId: audioState.byCellId, isLoading: false, hasLoaded: audioState.hasLoaded, revalidate: vi.fn(),
+  }),
 }))
 // The votes, caught rather than sent; the flush-then-refresh after one is a
 // no-op here.
@@ -259,5 +261,46 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
       "aria-label", expect.stringContaining("validated"),
     )
     expect(within(row).getByTestId("audio-validation-button").className).toContain("text-green-500")
+  })
+})
+
+// The 3G pass (Sam, 2026-10-01): until the file's recordings had been read,
+// every line said "No audio to validate", then changed its mind seconds later.
+// An empty answer before the read means "not known yet" — the slot holds a
+// placeholder, and in a dubbing file it waits for the heard lines' takes too,
+// so a line never shows a count that is about to change.
+describe("EditorTable — the audio check waits for the file's recordings", () => {
+  afterEach(() => { audioState.hasLoaded = true })
+
+  it("holds a placeholder on every line until the recordings have been read", async () => {
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.getAllByTestId("audio-validation-checking")).toHaveLength(2)
+    expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
+    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+  })
+
+  it("in a dubbing file, waits for the heard lines' takes before saying anything", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    const ui = (heardLinesLoading: boolean) => (
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} heardLinesLoading={heardLinesLoading} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>
+    )
+    const { rerender } = render(ui(true))
+    await screen.findByText("bonjour cell-1")
+    // The line's own take is known, but a heard line may add another: no
+    // control yet, on either line.
+    expect(screen.getAllByTestId("audio-validation-checking")).toHaveLength(2)
+    expect(screen.queryByTestId("audio-validation-button")).toBeNull()
+
+    rerender(ui(false))
+    const withTake = await rowOf("bonjour cell-1")
+    const without = await rowOf("bonjour cell-2")
+    expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
+    expect(within(withTake).getByTestId("audio-validation-button")).toBeInTheDocument()
+    expect(within(without).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
   })
 })

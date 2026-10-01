@@ -296,6 +296,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "name and an item's lifecycle status are different concepts sharing one " +
     "English participle; several languages would render a place-name and a " +
     "state-of-an-item differently.",
+  "org.overviewLaneTable.archivedBadge":
+    "Inline status badge beside one retired target-LANGUAGE LANE in the project " +
+    "overview's collapsed Archived group (AQU-1458) — it says that lane is " +
+    "archived. autopilot.evidence.status.archived is one value of the fixed " +
+    "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
+    "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
+    "org.orgSidebar.archived above names a destination. A language lane and an " +
+    "evidence item are unrelated referents, and where a participle agrees with the " +
+    "noun it describes the two cannot share a form — the ar catalog already gives " +
+    "the evidence state and the sidebar name different genders, and ru renders " +
+    "them as different phrases altogether.",
   "org.membersPage.orgPage.unknownInviter":
     "Lower-case filler substituted into the middle of a byline sentence ('by " +
     "{username}') when the inviter is unavailable — grammatically the object of " +
@@ -370,11 +381,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "vs a report-style detail-row label for the same underlying value read very " +
     "differently in languages that distinguish an editable field from a fact.",
   "projectSettings.decay.summary":
-    "Collapsed-details summary for this project's AD-14 confidence-propagation " +
+    "Collapsed-details summary for this project's AD-14 health-propagation " +
     "tuning (max hops / attention threshold). editor.expansion.retrievalSupport " +
-    "is the cell-level badge shown on an individual cell's expansion panel. A " +
-    "settings-panel heading and a per-cell status badge naming the same feature " +
-    "at two different granularities read as different parts of speech.",
+    "is the cell-level health badge shown on an individual cell's expansion " +
+    "panel. A settings-panel heading and a per-cell status badge naming the same " +
+    "feature at two different granularities read as different parts of speech.",
   "projectSettings.share.tabMembers":
     "Tab label in the Share dialog switching to the per-project member list. " +
     "editor.navTitle.members is the breadcrumb/nav title for the standalone " +

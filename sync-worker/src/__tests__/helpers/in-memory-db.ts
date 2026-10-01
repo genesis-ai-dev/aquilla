@@ -629,7 +629,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       // AQU-538/AQU-1240: optional lane filter — target rows only; source rows
       // are always included. Dual-read binds projectId, tag, tag after cellIds.
       const hasLane =
-        normalized.includes("OR (lane_id IS NULL AND target_lang = ?)") ||
+        normalized.includes("lane_id = (SELECT id FROM public.lanes") ||
         normalized.includes("AND (side = 'source' OR target_lang = ?)")
       const hasTimecodes = normalized.includes("start_ms") && normalized.includes("end_ms")
       // bind order: [pid, fid, side?, ...cellIds, lane?]
@@ -645,10 +645,9 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         : null
       let lane: string | null = null
       if (hasLane) {
-        if (normalized.includes("OR (lane_id IS NULL AND target_lang = ?)")) {
+        if (normalized.includes("lane_id = (SELECT id FROM public.lanes")) {
           bindIdx += 1 // projectId
           lane = args[bindIdx++] as string
-          bindIdx += 1 // tag again
         } else {
           lane = args[bindIdx++] as string
         }

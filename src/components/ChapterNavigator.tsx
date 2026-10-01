@@ -223,7 +223,12 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   }
   if (kinds.size === 1 && kinds.has("slide")) return VOCABULARIES.slide
   if (kinds.size === 1 && kinds.has("story")) return VOCABULARIES.story
-  if (kinds.size === 1 && kinds.has("section")) return VOCABULARIES.section
+  // An AI section (AQU-1387) is a section a translator navigates the same way;
+  // only its provenance differs, so it shares the section vocabulary rather
+  // than falling through to the generic "milestone" wording.
+  if ([...kinds].every((kind) => kind === "section" || kind === "ai-section")) {
+    return VOCABULARIES.section
+  }
   if (kinds.size === 1 && kinds.has("time-range")) return VOCABULARIES.timeRange
   if (kinds.size === 1 && kinds.has("part")) return VOCABULARIES.part
   if (kinds.size === 1 && kinds.has("group")) return VOCABULARIES.group

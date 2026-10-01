@@ -1,11 +1,14 @@
 // GET /cell-validators?fileId=&cellId=
 
 import { verifyTokenForFile } from '../auth'
+import { grantedLaneIds, targetVisibilityClause, visibleLanesForRead } from './lane-read-wall'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 
 export interface ValidatorsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
+  LANE_READ_WALL?: string
 }
 
 export async function handleValidatorsReadRequest(
@@ -45,19 +48,25 @@ export async function handleValidatorsReadRequest(
   // the additive targetLang field); an explicit ?lane=<tag> dual-reads to it
   // (prefer lane_id once backfill has populated it).
   const lane = url.searchParams.get('lane')
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  const wall = targetVisibilityClause({
+    laneIds: await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes),
+    laneIdExpr: 'lane_id',
+  })
+  const wallSql = wall ? `\n      ${wall.sql}` : ''
 
   // DELETE-on-unvalidate: a row's presence IS "active". No is_active column.
   const sql = lane === null
     ? `
     SELECT event_id, username, decided_ts, target_lang, lane_id
     FROM cell_validators
-    WHERE project_id = ? AND file_id = ? AND cell_id = ?
+    WHERE project_id = ? AND file_id = ? AND cell_id = ?${wallSql}
     ORDER BY decided_ts DESC
   `
     : `
     SELECT event_id, username, decided_ts, target_lang, lane_id
     FROM cell_validators
-    WHERE project_id = ? AND file_id = ? AND cell_id = ? AND ${targetLaneDualReadSql()}
+    WHERE project_id = ? AND file_id = ? AND cell_id = ? AND ${targetLaneDualReadSql()}${wallSql}
     ORDER BY decided_ts DESC
   `
 
@@ -70,9 +79,10 @@ export async function handleValidatorsReadRequest(
   }
 
   const stmt = env.AQUILLA_PG.prepare(sql)
+  const wallBinds = wall?.binds ?? []
   const res = await (lane === null
-    ? stmt.bind(projectId, fileId, cellId)
-    : stmt.bind(projectId, fileId, cellId, ...targetLaneDualReadBinds(projectId, lane))
+    ? stmt.bind(projectId, fileId, cellId, ...wallBinds)
+    : stmt.bind(projectId, fileId, cellId, ...targetLaneDualReadBinds(projectId, lane), ...wallBinds)
   ).all<Row>()
 
   const validators = res.results.map((r) => ({

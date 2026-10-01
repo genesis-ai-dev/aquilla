@@ -5,7 +5,8 @@ argument-hint: [AQU-### | next | debug "desc" | improve "desc"] [--deploy] [--no
 
 You are running the **issue lifecycle workflow** for codex-web-app. Every bug fix,
 improvement, validation, and QA hand-off in this repo flows through the Linear board
-(team `Aquilla`, key `AQU`, project `Prototype Debugging`). This command is the
+(team `Aquilla`, key `AQU`; issues live in the `<Area> V1` projects under the **Road to V1**
+initiative or in `Prototype Debugging`, the maintenance bucket). This command is the
 single entry point — it figures out *where the issue is* and does *the next right thing*.
 
 Arguments: $ARGUMENTS
@@ -13,7 +14,12 @@ Arguments: $ARGUMENTS
 ## Constants
 
 - Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
-- Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
+- Linear projects: the `<Area> V1` projects (`Editor V1`, `Importing V1`, … — one per `Area`
+  label, all under the **Road to V1** initiative) hold work that gates V1; `Prototype
+  Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`) is the maintenance bucket for
+  everything V1 ships without. `list_projects` for the live set.
+- Area: every issue carries exactly one label from the team's `Area` label group
+  (`list_issue_labels` for the live list).
 - Status pipeline (see AGENTS.md → "Issue workflow"):
   `Triage → Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
   - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) is the **human / HITL queue** — it sits
@@ -40,13 +46,16 @@ Arguments: $ARGUMENTS
 Parse `$ARGUMENTS`:
 
 - **`AQU-###`** → operate on that specific issue. `get_issue` to read its current status.
-  If it has no milestone, set one (its Road to V1 area — `list_milestones` the project)
-  before working it.
-- **`next`** (or empty) → `list_issues` filtered to project + status `Todo` (the agent-ready
-  queue — **never `Triage`/`Backlog`**), pick the highest-priority / lowest-numbered one, and
-  operate on it.
+  If it has no `Area` label, set one (`list_issue_labels` for the live list) before working
+  it. If it has no project, put it in `Prototype Debugging` and say so.
+- **`next`** (or empty) → `list_issues` filtered to team `Aquilla` + status `Todo` (the
+  agent-ready queue — **never `Triage`/`Backlog`**), across every project — the V1 projects
+  and `Prototype Debugging` alike. Skip anything labelled `HITL`. Pick the
+  highest-priority / lowest-numbered one and operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
-  Create the issue first (`save_issue` into the project, team, priority from your judgment)
+  Create the issue first (`save_issue` with the team, a project per the placement rule —
+  `Prototype Debugging` unless the user says the work gates V1, then the area's `<Area> V1`
+  project — and priority from your judgment)
   **from the team's issue template** — pass `template`: **`Bug Report`** for `debug`,
   **`Feature Request`** for a new user-facing capability, **`Task`** otherwise. The template
   applies the category label itself; author the description using the template's exact
@@ -56,9 +65,9 @@ Parse `$ARGUMENTS`:
   embed status `Todo`; an explicitly passed `state` overrides that — confirm the create
   response actually says `Triage`, and re-save if not. Leave it **unassigned**: the team's
   rotation auto-assigns at create time — if the response shows an assignee, clear it with a
-  follow-up `assignee: null` save. Set a **milestone** (`milestone` on `save_issue`):
-  Prototype Debugging's milestones are the Road to V1 areas — `list_milestones` the project
-  for the live list; every issue in the project carries exactly one. Then:
+  follow-up `assignee: null` save. Set an **`Area` label** (pass it in `labels` on
+  `save_issue`): the team's `Area` label group holds the codebase areas —
+  `list_issue_labels` for the live list; every issue carries exactly one. Then:
   - **Interactive session** (a human just typed this command): the invocation *is* the
     triage decision — if the issue is fully specified and agent-ready, promote it to `Todo`
     and proceed as if the user passed that `AQU-###`; if it needs a human decision/review

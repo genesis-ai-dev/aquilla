@@ -35,6 +35,13 @@ import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authoriz
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
+import { loadProjectSettings } from '../../../db/shared/projects'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import {
+  archiveCheckApplies,
+  archivedLaneReason,
+  archivedTagsFromSettings,
+} from '../../../src/lib/lanes/archived-lane'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -170,7 +177,16 @@ function collectRefs(events: readonly EmitEventInput[]) {
   const assignmentIds = new Set<string>()
   const conceptIds = new Set<string>()
   for (const e of events) {
-    if (PIN_KINDS.has(e.kind) || e.kind === 'cell.waive' || e.kind === 'cell.unwaive') {
+    if (
+      PIN_KINDS.has(e.kind) ||
+      e.kind === 'cell.waive' ||
+      e.kind === 'cell.unwaive' ||
+      // AQU-1426: HideCell/ShowCell desugar to this kind. It takes no pin (the
+      // event sets a flag and never touches the chain), but the cell has to
+      // still EXIST at commit — the projection's UPDATE would otherwise match
+      // zero rows and land an event with no effect, silently.
+      e.kind === 'source.cell.visibility.set'
+    ) {
       cellRefs.push({ fileId: e.fileId!, cellId: e.cellId!, ...(e.laneId ? { laneId: e.laneId } : {}) })
     }
     if (e.kind === 'comment.create') {
@@ -246,6 +262,32 @@ export async function prepareEmitEvents(
 
   const failed = (i: number, message: string, details?: unknown): Response =>
     errorResponse('validation_failed', `events[${i}]: ${message}`, details)
+
+  const namedLaneEvents = cmd.events.some((e) => e.laneId && archiveCheckApplies(e.kind))
+  if (namedLaneEvents) {
+    const projectSettings = await loadProjectSettings(db, projectId)
+    const lanes = (projectSettings.lanes ?? [])
+      .filter((lane) => lane.role === 'target')
+      .map((lane) => ({
+        id: lane.id,
+        name: lane.name,
+        legacyTag: lane.legacyTag,
+        archivedAt: lane.archivedAt,
+      }))
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      callerRoleLevel,
+    )
+    for (const [i, e] of cmd.events.entries()) {
+      if (!e.laneId || !archiveCheckApplies(e.kind)) continue
+      const archived = archivedLaneReason({ tag: e.laneId, lanes, archivedTags, visibleLaneIds })
+      if (archived) return failed(i, archived)
+    }
+  }
 
   const preconditionByKey = new Map<string, CellPrecondition>()
   const plannedEmit: NonNullable<PlannedEventIds['emitEvents']> = []
@@ -456,7 +498,14 @@ export async function prepareEmitEvents(
         label: '',
       })
   }
-  for (const entry of byKind.values()) entry.label = emitKindEffectLabel(entry.kind, entry.count)
+  for (const entry of byKind.values()) {
+    // AQU-1426: hand the label one representative payload — a kind that carries
+    // a direction (source.cell.visibility.set: hide vs show) cannot be phrased
+    // from kind + count alone. Safe because prepare refuses a plan that mixes
+    // the two directions, so the first event of a group speaks for all of them.
+    const sample = normalized.find((e) => e.kind === entry.kind)?.payload
+    entry.label = emitKindEffectLabel(entry.kind, entry.count, sample)
+  }
   // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
   // text as the server currently reads it, so the approver endorses specific
   // sentences rather than a count. Batches are capped at
@@ -494,6 +543,12 @@ export async function prepareEmitEvents(
   })
 }
 
+/** AQU-1462: stamp the lane so authorize can refuse an archived one. */
+function withLaneTag(kind: string, laneId: string | undefined, payload: Record<string, unknown>): Record<string, unknown> {
+  if (!laneId || !archiveCheckApplies(kind)) return payload
+  return { ...payload, targetLang: laneId }
+}
+
 /** Build the compiled payload for one plan event, filling server-resolved pins
  *  from the stored precondition and minted ids from the planned ledger. */
 function compilePayload(
@@ -514,10 +569,13 @@ function compilePayload(
       }
     case 'cell.backtranslation.set':
       if (!pin?.targetHeadEventId) return null
-      return { ...e.payload, targetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, { ...e.payload, targetEventId: pin.targetHeadEventId })
     case 'target.cell.repin':
       if (!pin?.targetHeadEventId || !pin.sourceEventId) return null
-      return { sourceEventId: pin.sourceEventId, expectedTargetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, {
+        sourceEventId: pin.sourceEventId,
+        expectedTargetEventId: pin.targetHeadEventId,
+      })
     case 'comment.create': {
       const scope: CommentScope =
         e.fileId && e.cellId
@@ -556,7 +614,8 @@ function compilePayload(
     default:
       // comment.edit/delete/resolve, cell.waive/unwaive, file.*,
       // assignment.unassign: the normalized payload IS the wire payload.
-      return { ...e.payload }
+      // AQU-1462 stamps targetLang only for kinds the archive check reads.
+      return withLaneTag(e.kind, e.laneId, { ...e.payload })
   }
 }
 
@@ -601,6 +660,18 @@ export async function commitEmitEvents(
       if (e.kind === 'cell.waive' || e.kind === 'cell.unwaive' || (e.kind === 'comment.create' && e.cellId)) {
         const s = states.get(laneCellKey(e.fileId!, e.cellId!, e.kind === 'comment.create' ? undefined : e.laneId))
         if (!s || (!s.sourceExists && !s.targetExists)) {
+          return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
+        }
+      }
+      // AQU-1426 hide/show: the flag lives on the SOURCE row, so a surviving
+      // target row is not enough — a deleted source row means there is nothing
+      // left to park. Deliberately NOT re-checking the cell's current
+      // visibility: the compiled event SETS the flag rather than toggling it, so
+      // a human hiding the same cell between prepare and approval leaves commit
+      // landing exactly the state that was approved.
+      if (e.kind === 'source.cell.visibility.set') {
+        const s = states.get(laneCellKey(e.fileId!, e.cellId!))
+        if (!s?.sourceExists) {
           return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
         }
       }

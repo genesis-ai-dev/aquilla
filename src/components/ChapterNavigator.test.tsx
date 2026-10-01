@@ -58,6 +58,25 @@ function pickerSearch(vocabulary = "chapter") {
 }
 
 describe("MilestoneNavigator", () => {
+  it("gives AI sections the section vocabulary, not the generic milestone wording", () => {
+    // AQU-1387: an ai-section is a section a translator navigates the same way;
+    // only its provenance differs. Falling through to VOCABULARIES.milestone
+    // would label the picker "Milestones" on an ordinary unstructured file.
+    const aiSections: MilestoneNavigationItem[] = [
+      { key: "ai-section:c0", kind: "ai-section", label: "The village of Ban Mai", shortLabel: "1", description: "18 cells", translated: 4, validated: 0, total: 18 },
+      { key: "ai-section:c18", kind: "ai-section", label: "Three years later the road arrived", shortLabel: "2", description: "22 cells", translated: 0, validated: 0, total: 22 },
+    ]
+    render(<MilestoneNavigator items={aiSections} activeKey="ai-section:c0" onSelect={() => {}} />)
+
+    const trigger = screen.getByRole("combobox", {
+      name: /Current section: The village of Ban Mai/,
+    })
+    expect(trigger).toHaveTextContent("The village of Ban Mai")
+    fireEvent.click(trigger)
+    expect(pickerSearch("section")).toBeInTheDocument()
+    expect(screen.getByText("Three years later the road arrived")).toBeInTheDocument()
+  })
+
   it("keeps the current chapter and its verse range visible, fixed-width from xl up", () => {
     render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:1" onSelect={() => {}} />)
     const trigger = screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })

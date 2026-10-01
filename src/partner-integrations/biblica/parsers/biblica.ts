@@ -32,6 +32,8 @@ export interface BiblicaStudyNotesParseResult {
    * (the maps volume is artwork) rather than the wrong edition.
    */
   frontBackMatter: boolean
+  /** Scripture paragraphs that became verse-keyed cells. */
+  scriptureUnitCount: number
   skipped: Pick<BiblicaStudyNoteSelection, "verseUnitCount" | "otherUnitCount">
 }
 
@@ -64,6 +66,9 @@ export async function extractBiblicaStudyNoteStrings(
       ? { splitSentences: options.splitSentences }
       : {}),
     frontBackMatter,
+    // A book volume's scripture is content: every verse becomes a cell so it
+    // can be edited or swapped. A front/back volume holds none at all.
+    includeScripture: !frontBackMatter,
   })
 
   const bookCodes: string[] = []
@@ -80,11 +85,15 @@ export async function extractBiblicaStudyNoteStrings(
     const chapterSection = note.bookCode
       ? `${note.bookCode} ${note.chapterLabel}`
       : note.chapterLabel
+    const reference = note.verse?.reference ?? note.bookCode
     return {
       ...value,
       ...(milestone ? { milestone, section: milestone.label } : {}),
       ...(!milestone && chapterSection ? { section: chapterSection } : {}),
-      ...(note.bookCode ? { globalReferences: [note.bookCode] } : {}),
+      // A scripture cell — and the superscription that opens one — is keyed to
+      // its verse, so the reference on the cell is "GEN 1:1" rather than the
+      // book a study note comments somewhere inside.
+      ...(reference ? { globalReferences: [reference] } : {}),
       metadata: {
         ...value.metadata,
         // A sentence cell shares its line's locator, so this bucket is the only
@@ -101,7 +110,10 @@ export async function extractBiblicaStudyNoteStrings(
           : {}),
         biblica: {
           version: 1,
-          contentType: frontBackMatter ? "front-back-matter" : "notes",
+          contentType: frontBackMatter
+            ? "front-back-matter"
+            : note.kind === "scripture" ? "scripture" : "notes",
+          ...(note.verse ? { verseReference: note.verse.reference } : {}),
           ...(note.chapterLabel ? { chapterLabel: note.chapterLabel } : {}),
           ...(note.section
             ? { sectionId: note.section.id, sectionLabel: note.section.label }
@@ -119,6 +131,7 @@ export async function extractBiblicaStudyNoteStrings(
     strings,
     bookCodes,
     frontBackMatter,
+    scriptureUnitCount: selection.scriptureUnitCount,
     skipped: {
       verseUnitCount: selection.verseUnitCount,
       otherUnitCount: selection.otherUnitCount,

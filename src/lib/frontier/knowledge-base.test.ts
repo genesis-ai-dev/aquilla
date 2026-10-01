@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   getKnowledgeDocumentContent,
+  isKnowledgeIndexStalled,
+  KB_INDEX_STALE_MS,
   listKnowledgeDocuments,
   uploadKnowledgeDocument,
 } from "./knowledge-base"
@@ -59,5 +61,45 @@ describe("Knowledge Base API client", () => {
     expect(fetchSpy.mock.calls[0]?.[0]).toMatch(
       /\/knowledge\/doc%2F3\/content\?nodeId=n1\.2$/,
     )
+  })
+})
+
+// AQU-1376: indexing is a fire-and-forget worker job with no cron behind it, so
+// the read side is what has to notice a job that never came back.
+describe("isKnowledgeIndexStalled", () => {
+  const at = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
+
+  it("flags a pending doc whose job can no longer be running", () => {
+    expect(isKnowledgeIndexStalled({
+      indexStatus: "pending",
+      updatedAt: at(KB_INDEX_STALE_MS + 1_000),
+    })).toBe(true)
+  })
+
+  it("leaves a doc inside its normal processing window alone", () => {
+    // The negative case that matters: a slow-but-live job must not be called a
+    // failure, or a retry would cancel work that was about to land.
+    expect(isKnowledgeIndexStalled({
+      indexStatus: "pending",
+      updatedAt: at(KB_INDEX_STALE_MS - 1_000),
+    })).toBe(false)
+  })
+
+  it("never flags a terminal status, however old", () => {
+    for (const indexStatus of ["ready", "failed"] as const) {
+      expect(isKnowledgeIndexStalled({ indexStatus, updatedAt: at(KB_INDEX_STALE_MS * 100) }))
+        .toBe(false)
+    }
+  })
+
+  it("treats an unparseable timestamp as not-stalled rather than guessing", () => {
+    expect(isKnowledgeIndexStalled({ indexStatus: "pending", updatedAt: "not a date" }))
+      .toBe(false)
+  })
+
+  it("stays clear of the worker's own 60s enrichment ceiling", () => {
+    // If this window ever slipped under the worker's fetch timeout, a job still
+    // inside its budget would be shown as stalled.
+    expect(KB_INDEX_STALE_MS).toBeGreaterThan(60_000)
   })
 })

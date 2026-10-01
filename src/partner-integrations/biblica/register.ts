@@ -13,6 +13,7 @@
 import { BookOpen } from "lucide-react"
 import type { PartnerIntegration } from "@/lib/partners/types"
 import { clearBiblicaApostropheGlue } from "./apostrophe-glue"
+import { isBiblicaScriptureCell } from "./cell-kind"
 
 const biblica: PartnerIntegration = {
   id: "biblica",
@@ -27,6 +28,9 @@ const biblica: PartnerIntegration = {
   // AQU-1174: the "source serif" apostrophe glue is English typesetting in
   // Biblica's templates, not text, so it must not ride into a translation.
   idmlTargetHtmlNormalizers: [clearBiblicaApostropheGlue],
+  // AQU-1285: a study-Bible volume carries its verses as cells next to the
+  // notes; the editor marks those rows through this hook.
+  isScriptureCell: isBiblicaScriptureCell,
 }
 
 export default biblica

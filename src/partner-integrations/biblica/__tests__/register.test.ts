@@ -24,4 +24,11 @@ describe("partner registry — this tree", () => {
     expect(biblica?.importScreen?.titleKey).toBe("importExport.landing.biblica.title")
     expect(biblica?.idmlTargetHtmlNormalizers).toHaveLength(1)
   })
+
+  /** Without this hook the editor silently stops marking Biblica verse rows (AQU-1285). */
+  it("marks Biblica scripture cells through the generic seam", async () => {
+    const { isPartnerScriptureCell } = await import("@/lib/partners/registry")
+    expect(isPartnerScriptureCell({ biblica: { contentType: "scripture" } })).toBe(true)
+    expect(isPartnerScriptureCell({ biblica: { contentType: "notes" } })).toBe(false)
+  })
 })

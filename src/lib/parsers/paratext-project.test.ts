@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   detectParatextProject,
   assembleParatextProject,
+  isRequiredProjectEntry,
   type ProjectEntry,
 } from "./paratext-project"
 
@@ -151,5 +152,31 @@ describe("assembleParatextProject", () => {
     expect(proj.books[0].displayName).toBe("إنجيل متى") // from BookNames short
     expect(proj.settings.rightToLeft).toBe(true) // inferred from Arabic content
     expect(proj.settings.languageIsoCode).toBe("") // unknown without Settings
+  })
+})
+
+// AQU-1406: which members an import may not fail over. PTXprint writes layout
+// helpers — including .sfm fragments — under the project's shared/ folder.
+describe("isRequiredProjectEntry", () => {
+  it.each([
+    "01GEN.SFM",
+    "44ACTSibtatar.SFM",
+    "sibtatar/41MAT.usfm",
+    "Settings.xml",
+    "sibtatar/BookNames.xml",
+    "project.ssf",
+  ])("needs %s", (name) => {
+    expect(isRequiredProjectEntry(name)).toBe(true)
+  })
+
+  it.each([
+    "shared/ptxprint/Default/FRTlocal.sfm",
+    "sibtatar/shared/ptxprint/Default/ptxprint.cfg",
+    "Notes.xml",
+    "figures/map.jpg",
+    "support/license.txt",
+    "unique.id",
+  ])("does not need %s", (name) => {
+    expect(isRequiredProjectEntry(name)).toBe(false)
   })
 })

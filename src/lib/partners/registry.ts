@@ -87,3 +87,19 @@ export function normalizePartnerIdmlTargetHtml(
     metadata,
   )
 }
+
+/**
+ * Whether any given partner reads this cell as its Bible text (AQU-1285). With
+ * no partner folders the list is empty and the answer is always false — a
+ * generic file has no partner scripture to mark.
+ */
+export function isScriptureCellWith(
+  integrations: readonly PartnerIntegration[],
+  cellMetadata: unknown,
+): boolean {
+  return integrations.some((integration) => integration.isScriptureCell?.(cellMetadata) === true)
+}
+
+export function isPartnerScriptureCell(cellMetadata: unknown): boolean {
+  return isScriptureCellWith(INTEGRATIONS, cellMetadata)
+}

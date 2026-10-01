@@ -307,6 +307,14 @@ describe("external prompt preview", () => {
       expect((body as unknown as { error: { code: string } }).error.code).toBe("not_found")
     })
 
+    it("shows no trailing bare marker in the previewed source (AQU-1465)", async () => {
+      await insertCell(testDb, { cellId: "cell-p", seq: 10, source: "First verse.\n\\p" })
+      const { body } = await preview(testDb, token, "cell-p")
+      expect(body.sourceText).toBe("First verse.")
+      expect(body.messages[1].content.endsWith("Source: First verse.\nTranslation:")).toBe(true)
+      expect(body.messages.map((m) => m.content).join("\n")).not.toContain("\\p")
+    })
+
     it("warns when the cell has no effective source text", async () => {
       // A media section whose ASR has not run: `value` is the import filename,
       // so there is no source text and the copilot refuses to draft it.

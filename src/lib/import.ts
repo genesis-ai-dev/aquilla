@@ -36,6 +36,7 @@ import {
   type ProjectEntry,
   type ProjectEntryCollection,
   type ProjectSourceArtifact,
+  type SkippedProjectEntry,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
@@ -1893,6 +1894,10 @@ export interface ParatextPlan {
   /** Whole ZIP/folder package, including Settings, BookNames, support files,
    * and any media members. One immutable artifact binds to every book file. */
   sourceArtifact?: ProjectSourceArtifact
+  /** Support members the archive reader could not read and left out (AQU-1406).
+   *  They still travel inside the preserved package; the commit phase reports
+   *  them so a consultant sees what was passed over. */
+  skippedEntries?: SkippedProjectEntry[]
 }
 
 /**
@@ -1923,7 +1928,12 @@ export async function prepareParatextProject(
     assertSourceUploadSize(bytes)
     sourceArtifact = { ...entries.sourceArtifact, bytes: async () => bytes }
   }
-  return { project, books, ...(sourceArtifact ? { sourceArtifact } : {}) }
+  return {
+    project,
+    books,
+    ...(sourceArtifact ? { sourceArtifact } : {}),
+    ...(entries.skippedEntries?.length ? { skippedEntries: entries.skippedEntries } : {}),
+  }
 }
 
 async function preserveParatextPackage(
@@ -1997,6 +2007,13 @@ export async function importParatextProject(
   return commitParatextProject(plan, ctx, onProgress)
 }
 
+/** Members the archive reader left out before parsing, in the shape the import
+ *  summary lists — so an unreadable support file is accounted for next to any
+ *  book-level skips instead of vanishing (AQU-1406). */
+function archiveSkips(plan: ParatextPlan): { book: string; reason: string }[] {
+  return (plan.skippedEntries ?? []).map((entry) => ({ book: entry.name, reason: entry.reason }))
+}
+
 /**
  * Upload a prepared (client-side-parsed, user-confirmed) Paratext plan: each
  * book becomes one Aquilla File via the bulk endpoint. Progress fires per
@@ -2009,7 +2026,7 @@ export async function commitParatextProject(
   onProgress?: (p: ParatextImportProgress) => void,
 ): Promise<ParatextImportResult> {
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plan.books.length
   // Source language defaults to the project's ISO code so the Aquilla project
   // inherits it (caller may override per source/target choice).
@@ -2143,7 +2160,7 @@ export async function importParatextAsTarget(
   const project = plan.project
   const plans = buildBilingualPlan(project.books, sourceVerses, project.bookNames)
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
+  const skipped = archiveSkips(plan)
   const total = plans.length
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   // Overall cell budget: source cells + target commits per non-skipped book.

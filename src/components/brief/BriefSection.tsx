@@ -26,6 +26,13 @@ export function BriefSection(props: BriefSectionProps) {
       <div className="flex items-center gap-2 mb-2">
         <h2 className="text-sm font-semibold">{t("autopilot.readiness.brief.label")}</h2>
         <Badge variant="secondary" className="text-[10px] capitalize">{status}</Badge>
+        {/* AQU-912: two partner users read the brief as required and as the same
+            thing as the AI instructions. The qualifier sits where the decision is
+            made — the empty state, before anyone has invested in a brief. Reuses
+            the shared "(optional)" note rather than adding a fourth phrasing. */}
+        {status === "none" && (
+          <span className="text-[10px] text-muted-foreground">{t("common.optionalFieldNote")}</span>
+        )}
         {brief && stale && <Badge variant="outline" className="text-[10px]">{t("agent.brief.summaryOutOfDate")}</Badge>}
       </div>
 

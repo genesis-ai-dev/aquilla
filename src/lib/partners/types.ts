@@ -130,4 +130,10 @@ export interface PartnerIntegration {
   id: string
   importScreen?: PartnerImportScreen
   idmlTargetHtmlNormalizers?: readonly IdmlTargetHtmlNormalizer[]
+  /**
+   * True for a cell that holds the partner's published Bible text rather than
+   * apparatus about it (AQU-1285), so the editor can mark verse rows. Must be
+   * synchronous and cheap — it runs once per rendered row.
+   */
+  isScriptureCell?: (cellMetadata: unknown) => boolean
 }

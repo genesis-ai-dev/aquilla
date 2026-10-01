@@ -13,6 +13,7 @@ import { describe, it, expect, vi } from "vitest"
 import type { IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
 import {
   integrationsFrom,
+  isScriptureCellWith,
   normalizeIdmlTargetHtmlWith,
   partnerIntegrations,
 } from "./registry"
@@ -33,6 +34,10 @@ describe("partner registry — stripped tree", () => {
     expect(
       normalizeIdmlTargetHtmlWith([], { biblica: {} }, "<p>source</p>", "<p>target</p>", METADATA),
     ).toBe("<p>target</p>")
+  })
+
+  it("marks no cell as partner scripture when no partner is present", () => {
+    expect(isScriptureCellWith([], { biblica: { contentType: "scripture" } })).toBe(false)
   })
 
   it("skips a register module that exports no default rather than throwing", () => {
@@ -60,6 +65,17 @@ describe("partner registry — discovery", () => {
     expect(normalizeIdmlTargetHtmlWith(integrations, null, "<p>s</p>", "t", METADATA))
       .toBe("t+first+second")
     expect(first).toHaveBeenCalledWith(null, "<p>s</p>", "t", METADATA)
+  })
+})
+
+describe("partner registry — scripture cells", () => {
+  it("asks every present partner and is true if any recognises the cell", () => {
+    const integrations = [
+      fake("a", { isScriptureCell: () => false }),
+      fake("b", { isScriptureCell: (m) => m === "verse" }),
+    ]
+    expect(isScriptureCellWith(integrations, "verse")).toBe(true)
+    expect(isScriptureCellWith(integrations, "note")).toBe(false)
   })
 })
 

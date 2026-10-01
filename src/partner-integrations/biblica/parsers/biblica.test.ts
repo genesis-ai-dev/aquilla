@@ -28,35 +28,73 @@ describe("Biblica study-notes parser adapter", () => {
       async () => parsed,
     )
 
-    expect(strings.map((cell) => [cell.original, cell.section])).toEqual([
-      [SAMPLE_NOTES.preface, "GEN Preface"],
-      [SAMPLE_NOTES.afterChapterOne, "GEN 1"],
-      [SAMPLE_NOTES.afterChaptersTwoToThree, "GEN 2-3"],
-      [SAMPLE_NOTES.psalmHeading, "GEN 2"],
-      [SAMPLE_NOTES.psalmNote, "GEN 2"],
+    // Scripture and notes arrive interleaved, in the order the volume sets them
+    // (AQU-1285): a verse of scripture is a cell keyed to its own verse, sitting
+    // between the notes that comment on it.
+    expect(strings.map((cell) => [
+      cell.original,
+      cell.section,
+      (cell.metadata?.biblica as { contentType?: string }).contentType,
+    ])).toEqual([
+      [SAMPLE_NOTES.preface, "GEN Preface", "notes"],
+      ["In the beginning God created the heavens and the earth.", "GEN 1", "scripture"],
+      [SAMPLE_NOTES.afterChapterOne, "GEN 1", "notes"],
+      // The drop cap opens chapter 2, and the run-on verse keeps its key across
+      // the paragraph break the layout put in the middle of it.
+      ["No shrub had yet appeared,", "GEN 2", "scripture"],
+      [" and no one was working the ground.", "GEN 2", "scripture"],
+      ["But streams came up from the earth.", "GEN 2", "scripture"],
+      ["Now the serpent was more crafty than any other.", "GEN 3", "scripture"],
+      [SAMPLE_NOTES.afterChaptersTwoToThree, "GEN 2-3", "notes"],
+      [SAMPLE_NOTES.psalmHeading, "GEN 2", "notes"],
+      [SAMPLE_NOTES.psalmNote, "GEN 2", "notes"],
       // One cell per line of the reference-list paragraph.
-      [SAMPLE_NOTES.referenceList[0], "GEN 2"],
-      [SAMPLE_NOTES.referenceList[1], "GEN 2"],
-      [SAMPLE_NOTES.referenceList[2], "GEN 2"],
-      [SAMPLE_NOTES.noteBlock, "GEN 2"],
+      [SAMPLE_NOTES.referenceList[0], "GEN 2", "notes"],
+      [SAMPLE_NOTES.referenceList[1], "GEN 2", "notes"],
+      [SAMPLE_NOTES.referenceList[2], "GEN 2", "notes"],
+      [SAMPLE_NOTES.noteBlock, "GEN 2", "notes"],
     ])
     expect(bookCodes).toEqual(["GEN"])
-    expect(skipped).toEqual({ verseUnitCount: 5, otherUnitCount: 2 })
+    // Nothing is skipped as scripture any more — every verse paragraph became a
+    // cell. The two skipped paragraphs are the running head and the book marker.
+    expect(skipped).toEqual({ verseUnitCount: 0, otherUnitCount: 2 })
+
+    const scripture = strings.filter((cell) => (
+      (cell.metadata?.biblica as { contentType?: string }).contentType === "scripture"
+    ))
+    const notes = strings.filter((cell) => !scripture.includes(cell))
+    expect(scripture.map((cell) => cell.globalReferences)).toEqual([
+      ["GEN 1:1"], ["GEN 2:5"], ["GEN 2:5"], ["GEN 2:6"], ["GEN 3:1"],
+    ])
+    for (const cell of scripture) {
+      expect(cell.metadata?.biblica).toMatchObject({
+        version: 1,
+        contentType: "scripture",
+        bookCode: "GEN",
+        verseReference: cell.globalReferences![0],
+      })
+    }
+    // A study note still carries only the book: it comments on a passage rather
+    // than holding one verse.
+    for (const cell of notes) expect(cell.globalReferences).toEqual(["GEN"])
 
     for (const cell of strings) {
-      expect(cell.globalReferences).toEqual(["GEN"])
       expect(cell.type).toBe("text")
       expect(cell.sourceLocator).toMatchObject({ kind: "idml", memberPath: BIBLICA_STORY_PATH })
       expect(cell.metadata?.idml).toMatchObject({ version: 2 })
-      expect(cell.metadata?.biblica).toMatchObject({ version: 1, contentType: "notes", bookCode: "GEN" })
+      expect(cell.metadata?.biblica).toMatchObject({ version: 1, bookCode: "GEN" })
     }
-    // The paragraph style is retained so a note's role stays auditable after import.
-    expect(strings[1].metadata?.biblica).toMatchObject({
+    // The paragraph style is retained so a cell's role stays auditable after import.
+    expect(notes[1]!.metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/intro%3aipi",
     })
     // JOB-SNG sets Psalm labels in `head:cl`, not `intro:*`.
-    expect(strings[3].metadata?.biblica).toMatchObject({
+    expect(notes[3]!.metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/head%3acl",
+    })
+    // Scripture keeps the publisher's own verse-paragraph style.
+    expect(scripture[0]!.metadata?.biblica).toMatchObject({
+      paragraphStyle: "ParagraphStyle/cv%3ap",
     })
   })
 
@@ -76,10 +114,14 @@ describe("Biblica study-notes parser adapter", () => {
       { version: 1, index: 1, count: 3, ranges: [expect.any(Object)] },
       { version: 1, index: 2, count: 3, ranges: [expect.any(Object)] },
     ])
-    // Whole-unit cells carry no bucket, so nothing changes for them on export.
-    for (const cell of strings.filter((candidate) => !sentences.includes(candidate))) {
-      expect(cell.metadata?.idmlRejoin).toBeUndefined()
-    }
+    // Whole-unit note cells carry no bucket, so nothing changes for them on
+    // export. A scripture cell always carries one: it is one verse of a
+    // paragraph that also holds the chapter and verse numbers.
+    const others = strings.filter((candidate) => (
+      !sentences.includes(candidate)
+      && (candidate.metadata?.biblica as { contentType?: string }).contentType !== "scripture"
+    ))
+    for (const cell of others) expect(cell.metadata?.idmlRejoin).toBeUndefined()
   })
 
   it("keeps the note block whole when sentence splitting is turned off", async () => {
@@ -91,14 +133,17 @@ describe("Biblica study-notes parser adapter", () => {
 
     expect(strings.map((cell) => cell.original)).toContain(SAMPLE_NOTES.noteBlock)
     expect(strings.some((cell) => cell.original === SAMPLE_NOTES.noteBlockSentences[0])).toBe(false)
-    expect(strings.every((cell) => cell.metadata?.idmlRejoin === undefined)).toBe(true)
+    const noteCells = strings.filter((cell) => (
+      (cell.metadata?.biblica as { contentType?: string }).contentType !== "scripture"
+    ))
+    expect(noteCells.every((cell) => cell.metadata?.idmlRejoin === undefined)).toBe(true)
   })
 
   it("keeps every cell's identity and protected anchors identical to its selected unit", async () => {
     const buffer = await makeBiblicaIdml()
     const parsed = await parseIdml(buffer)
     const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
-    const { notes } = selectBiblicaStudyNotes(parsed.units)
+    const { notes } = selectBiblicaStudyNotes(parsed.units, { includeScripture: true })
 
     expect(strings).toHaveLength(notes.length)
     expect(new Set(strings.map((cell) => cell.id)).size).toBe(strings.length)

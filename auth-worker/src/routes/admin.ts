@@ -25,6 +25,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { parseAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
+import { countTargetLanesByOrg } from "../lib/billing/words"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
@@ -366,7 +367,7 @@ admin.get("/overview", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/orgs — every org with owner + member/project counts. */
+/** GET /api/v2/admin/orgs — every org with owner + member/project/language counts. */
 admin.get("/orgs", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT o.id, o.name, o.created_at,
@@ -384,6 +385,14 @@ admin.get("/orgs", async (c) => {
     member_count: number
     project_count: number
   }>()
+  // AQU-1071: the billing band was only legible one org at a time, on the
+  // Billing tab. One grouped query gives the whole tenants list its active
+  // language count — deliberately not a per-row subquery, which would add a
+  // query per org to a cross-tenant table.
+  const { byOrg } = await countTargetLanesByOrg(
+    c.env.AQUILLA_PG,
+    results.map((r) => r.id),
+  )
   return c.json({
     orgs: results.map((r) => ({
       id: r.id,
@@ -392,6 +401,7 @@ admin.get("/orgs", async (c) => {
       ownerUsername: r.owner_username,
       memberCount: r.member_count,
       projectCount: r.project_count,
+      activeLanguageCount: byOrg.get(r.id) ?? 0,
     })),
   })
 })

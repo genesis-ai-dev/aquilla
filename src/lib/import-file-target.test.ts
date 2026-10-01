@@ -488,6 +488,111 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
   })
 })
 
+// AQU-1375: matched by position alone, one stray row at the top of a
+// spreadsheet put EVERY row one line off — 5 of 5 wrong — and the review said
+// only "1 unmatched row". With the Source column mapped, rows pair by it.
+describe("matchTargetRowsByOrder — pairing by source text (AQU-1375)", () => {
+  const SOURCES = [
+    "In the beginning God created the heavens and the earth.",
+    "The earth was without form and void, and darkness was over the deep.",
+    "And God said, Let there be light: and there was light.",
+    "And God saw the light, that it was good.",
+    "And God called the light Day, and the darkness he called Night.",
+  ]
+  const lines = SOURCES.map((original, i) => cell({ cellId: `l${i + 1}`, original }))
+  const sheet = (sources: string[]): TargetRow[] => sources.map((source, i) => ({ source, text: `T${i}:${source.slice(0, 12)}` }))
+  const pairs = (rows: TargetRow[]) => {
+    const result = matchTargetRowsByOrder(rows, lines)
+    return result.matched.map((m) => [m.cellId, m.incomingText.slice(m.incomingText.indexOf(":") + 1), m.flag ?? null])
+  }
+
+  it("a stray title row at the top shifts nothing, and is listed as not in the file", () => {
+    const rows = sheet(["Genesis — translation draft 3", ...SOURCES])
+    const result = matchTargetRowsByOrder(rows, lines)
+    expect(result.alignedBy).toBe("source")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2", "l3", "l4", "l5"])
+    expect(result.matched.every((m) => m.incomingText.slice(m.incomingText.indexOf(":") + 1) === m.sourceText.slice(0, 12))).toBe(true)
+    expect(result.matched.some((m) => m.flag)).toBe(false)
+    expect(result.orphans).toEqual([{ ref: "Row 1", text: rows[0].text, reason: "sourceNotInFile" }])
+  })
+
+  it("a row deleted from the spreadsheet leaves its line uncovered and every other row in place", () => {
+    const result = matchTargetRowsByOrder(sheet([SOURCES[0], SOURCES[1], SOURCES[3], SOURCES[4]]), lines)
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2", "l4", "l5"])
+    expect(result.uncovered.map((u) => u.cellId)).toEqual(["l3"])
+  })
+
+  it("ignores punctuation, case, spacing and markup, and survives a small edit unflagged", () => {
+    const rows = sheet([
+      "in the beginning god created the heavens and the earth",
+      "The earth was  without form and void and darkness was over the deep",
+      "And God said, Let there be light: and there was LIGHT!",
+      "And God saw the light, that it was very good.",
+      "And God called the light Day, and the darkness he called Night.",
+    ])
+    const withMarkup = lines.map((l, i) => (i === 4 ? { ...l, original: "\\w And|strong=\"H1\"\\w* God called the light Day, and the darkness he called Night." } : l))
+    const result = matchTargetRowsByOrder(rows, withMarkup)
+    expect(result.matched.map((m) => [m.cellId, m.flag ?? null])).toEqual([
+      ["l1", null], ["l2", null], ["l3", null], ["l4", null], ["l5", null],
+    ])
+  })
+
+  it("flags and unticks a row whose source doesn't match the line it was paired with", () => {
+    const rows = sheet([SOURCES[0], "Something else entirely, not in the file.", SOURCES[2], SOURCES[3], SOURCES[4]])
+    const result = matchTargetRowsByOrder(rows, lines)
+    // Same length on both sides of the gap: the text doesn't settle it, so
+    // position does — and says so.
+    const second = result.matched.find((m) => m.cellId === "l2")!
+    expect(second.flag).toBe("sourceDiffers")
+    expect(second.incomingSource).toBe("Something else entirely, not in the file.")
+    expect(result.matched.filter((m) => m.flag).map((m) => m.cellId)).toEqual(["l2"])
+  })
+
+  it("pairs a reworded row to its own line, not a neighbour, when a stray row sits beside it", () => {
+    const rows = sheet(["Draft 3", SOURCES[0], "The earth was without form and empty, and darkness was over the deep.", SOURCES[2]])
+    expect(pairs(rows)).toEqual([
+      ["l1", SOURCES[0].slice(0, 12), null],
+      ["l2", "The earth wa", null],
+      ["l3", SOURCES[2].slice(0, 12), null],
+    ])
+  })
+
+  it("repeated source text pairs in order", () => {
+    const repeated = ["Amen.", "Selah.", "Amen.", "Selah."].map((original, i) => cell({ cellId: `r${i + 1}`, original }))
+    const result = matchTargetRowsByOrder(sheet(["Title", "Amen.", "Selah.", "Amen.", "Selah."]), repeated)
+    expect(result.matched.map((m) => [m.cellId, m.flag ?? null])).toEqual([
+      ["r1", null], ["r2", null], ["r3", null], ["r4", null],
+    ])
+    expect(result.orphans.map((o) => o.reason)).toEqual(["sourceNotInFile"])
+  })
+
+  it("an empty translation keeps its row's place but commits nothing, and a spacer row takes no part", () => {
+    const rows: TargetRow[] = [
+      { source: SOURCES[0], text: "one" },
+      { source: "", text: "" },
+      { source: SOURCES[1], text: "" },
+      { source: SOURCES[2], text: "three" },
+    ]
+    const result = matchTargetRowsByOrder(rows, lines.slice(0, 3))
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([["l1", "one"], ["l3", "three"]])
+    expect(result.orphans).toEqual([])
+  })
+
+  it("without a source column, order matching is exactly as before", () => {
+    const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], lines)
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2"])
+  })
+
+  it("a long file whose every source was reworded still pairs by position — every row flagged", () => {
+    const many = Array.from({ length: 150 }, (_, i) => cell({ cellId: `m${i}`, original: `Original wording of verse number ${i} here` }))
+    const rows = Array.from({ length: 151 }, (_, i) => ({ source: `Totally different words ${i * 7919}`, text: `t${i}` }))
+    const result = matchTargetRowsByOrder(rows, many)
+    expect(result.matched).toHaveLength(150)
+    expect(result.matched.every((m) => m.flag === "sourceDiffers")).toBe(true)
+  })
+})
+
 describe("usfmToTargetRows", () => {
   it("extracts verses and headings with the same refs the source import produces", () => {
     const usfm = [

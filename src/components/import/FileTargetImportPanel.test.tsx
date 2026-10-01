@@ -943,6 +943,42 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     expect(screen.getByText(/^Cues in this file: 2\. Lines in the open file: 1\./)).toBeInTheDocument()
   })
 
+  describe("a spreadsheet with a source column pairs rows by it", () => {
+    const mapAndReview = async (csv: string) => {
+      renderPanel()
+      await selectFile(makeFile(csv, "genesis.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    }
+    const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
+    const checkboxIn = (row: HTMLElement) => row.querySelector("input[type=checkbox]") as HTMLInputElement
+
+    it("keeps every row on its own line past a stray title row, and lists the title as not in the file", async () => {
+      await mapAndReview("source,target\nGenesis draft,Génesis\nIn the beginning,Uno\nAnd the earth was formless,Dos\n")
+      expect(screen.getByText("Paired with lines by source text. Rows whose source doesn't match their line are left unticked.")).toBeInTheDocument()
+      expect(screen.queryByText(/Matched in order/)).not.toBeInTheDocument()
+      expect(rowOf("Uno")).toHaveAttribute("data-review-cell", "cell-gen-1-1")
+      expect(rowOf("Dos")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
+      expect(checkboxIn(rowOf("Uno")).checked).toBe(true)
+      openList(/Rows that didn't find a line/)
+      expect(within(entryOf("Génesis")).getByText("No line has this source text")).toBeInTheDocument()
+    })
+
+    it("flags, shows and unticks a row whose source doesn't match its line", async () => {
+      await mapAndReview("source,target\nIn the beginning,Uno\nSomething else entirely,Dos\n")
+      const row = rowOf("Dos")
+      expect(within(row).getByText("Source differs")).toBeInTheDocument()
+      expect(within(row).getByText("Source in the file: Something else entirely")).toBeInTheDocument()
+      expect(checkboxIn(row).checked).toBe(false)
+      expect(screen.getByRole("tab", { name: /To check 1/ })).toBeInTheDocument()
+    })
+
+    it("assumes no source column unless one is headed as source", async () => {
+      await mapAndReview("text,translation\nIn the beginning,Uno\nAnd the earth was formless,Dos\n")
+      expect(screen.getByText(/Matched in order/)).toBeInTheDocument()
+    })
+  })
+
   it("lists a spreadsheet's unmatched rows as rows", async () => {
     renderPanel()
     await selectFile(makeFile("ref,target\nGEN 1:1,Uno\n,Sin referencia\n", "genesis.csv"))

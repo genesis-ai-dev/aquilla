@@ -45,8 +45,9 @@ export interface ColumnMappingPanelProps {
   /**
    * "create" (default): full mapping for importing a new file — source required.
    * "target": populate an existing file's target column — target is required
-   * instead; ref is optional (no ref → rows match cells by order); source,
-   * cast, and timestamp columns are hidden since they don't apply.
+   * instead; ref is optional (no ref → rows match cells by order), and so is
+   * source (mapped → rows pair with cells by their source text, AQU-1375);
+   * type, cast, and timestamp columns are hidden since they don't apply.
    */
   mode?: "create" | "target"
 }
@@ -131,7 +132,10 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
     const detectedSource = autoDetect(["source", "src", "original", "source_text", "sourcetext", "en", "english"])
     const detectedTarget = autoDetect(["target", "tgt", "translation", "translated", "target_text", "targettext"])
     return {
-      sourceCol: detectedSource ?? (firstRow.length >= 1 ? 0 : null),
+      // In target mode a source column is optional and steers the pairing
+      // (AQU-1375), so only a column headed as source is assumed — column 1
+      // of a ref/target sheet holds refs, and pairing by them would flag every row.
+      sourceCol: detectedSource ?? (!targetMode && firstRow.length >= 1 ? 0 : null),
       // Only assume a generic two-column source/target sheet when no semantic
       // source header was found. A ref/source/type sheet must not silently copy
       // its source text into the target lane.
@@ -190,6 +194,14 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
           onChange={(v) => set("targetCol", v)}
           required={targetMode}
         />
+        {targetMode && (
+          <ColSelect
+            label={t("importExport.columnMapping.sourceColumnLabel")}
+            headers={headers}
+            value={mapping.sourceCol}
+            onChange={(v) => set("sourceCol", v)}
+          />
+        )}
         <ColSelect
           label={t("importExport.columnMapping.labelColumnLabel")}
           headers={headers}

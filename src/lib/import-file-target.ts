@@ -108,6 +108,10 @@ export interface TargetRow {
    *  — see `rowTimingMs`. */
   startMs?: number
   endMs?: number
+  /** The source text the row was translated from, when the uploaded file
+   *  carries it (a spreadsheet's Source column). An order match pairs rows to
+   *  lines by it instead of by position alone (AQU-1375). */
+  source?: string
 }
 
 /** Why a pairing is left unticked for a person to check (AQU-1360). */
@@ -122,6 +126,10 @@ export type TargetMatchFlag =
    *  decision: when every cue in the group got a line the row starts ticked
    *  (Sam, 09-23), and the review offers a Swap with its partner. */
   | "sharedTiming"
+  /** The row's own source text doesn't match the line it was paired with
+   *  (AQU-1375): the text couldn't settle the pairing, so it fell back to
+   *  position. Left unticked, with the row's source shown beside the line's. */
+  | "sourceDiffers"
 
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched cell's source text — review-screen context only. */
@@ -146,6 +154,8 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The line already holds exactly this text. Not a conflict — there is
    *  nothing to overwrite — and nothing to import either. */
   alreadyThere?: boolean
+  /** For a `sourceDiffers` row: the source text the uploaded row carries. */
+  incomingSource?: string
 }
 
 /** Why an incoming row found no line. One code per reason, each with its own
@@ -177,6 +187,10 @@ export type TargetOrphanReason =
   /** A single verse the open file holds inside one bridged line (AQU-1375).
    *  `verses` names that line's bridge. */
   | "partOfBridgedLine"
+  /** Pairing by source text found no line for the row: its source isn't in
+   *  the open file, and no line was left over for it in that stretch
+   *  (AQU-1375). Typically a title row, or a line deleted from the file. */
+  | "sourceNotInFile"
 
 /** An incoming row that was not paired with any line. */
 export interface TargetOrphan {
@@ -224,8 +238,8 @@ export interface FileTargetMatchResult {
   uncovered: UncoveredLine[]
   /** Which policy a ref-less (positional) match actually used, so the review
    *  screen doesn't warn about raw-order alignment when it aligned by
-   *  timecode. Absent for ref matching. */
-  alignedBy?: "order" | "overlap"
+   *  timecode or by source text. Absent for ref matching. */
+  alignedBy?: "order" | "overlap" | "source"
   /** Subtitle cues the file contained that never became rows: they had no
    *  text, or a timestamp line the parser couldn't read. Set by the caller
    *  from the parse report, since the matchers only ever see the rows. */
@@ -1168,6 +1182,233 @@ export function matchTargetRowsByOverlap(
   }
 }
 
+// ── Pairing by source text (AQU-1375) ─────────────────────────────────────────
+//
+// A translation spreadsheet usually carries the source text beside the target.
+// Matched by position alone, one stray row at the top (a title line) or one
+// row deleted put EVERY later row one line off, and the review said only "1
+// unmatched row". With the Source column mapped, rows are paired with lines by
+// that text instead, so a stray or missing row stays local to itself.
+//
+// Rows and lines are aligned the way a patience diff aligns two files: a
+// source text that occurs exactly once on each side anchors its row to its
+// line, the longest run of anchors in order is kept, and each stretch between
+// anchors is aligned the same way on its own. What no exact text settles is
+// paired by similarity where the stretch is small, and by position where its
+// two sides are the same length; whatever pairing results, a row whose source
+// doesn't match its line is flagged and left unticked.
+
+/** At or above this similarity, a row's source and its line's are the same
+ *  text — an edited word or two since the spreadsheet was made. Neighbouring
+ *  verses don't come close. */
+const SAME_SOURCE = 0.8
+/** In a stretch with no exact match, a row and a line this similar may pair. */
+const SIMILAR_SOURCE = 0.5
+/** Stretches up to this many row-by-line comparisons are aligned by
+ *  similarity; past it (a whole file whose source text was reworded) rows are
+ *  paired by position within the stretch, every one checked and flagged. */
+const STRETCH_COMPARISONS = 10_000
+
+/** Source text compared the way a person reads it: markup (a USFM source
+ *  line keeps its character markers and notes), punctuation, case and spacing
+ *  don't count. */
+function sourceKey(text: string): string {
+  return usfmContentOnly(text).text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function bigramsOf(key: string): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (let i = 0; i < key.length - 1; i++) {
+    const pair = key.slice(i, i + 2)
+    counts.set(pair, (counts.get(pair) ?? 0) + 1)
+  }
+  return counts
+}
+
+/** Dice similarity of two source keys over their letter pairs: 1 for the
+ *  same text, 0 when either is empty. */
+function makeSimilarity(rowKeys: string[], cellKeys: string[]) {
+  const rowGrams = new Map<number, Map<string, number>>()
+  const cellGrams = new Map<number, Map<string, number>>()
+  const grams = (cache: Map<number, Map<string, number>>, keys: string[], at: number) => {
+    let found = cache.get(at)
+    if (!found) cache.set(at, (found = bigramsOf(keys[at])))
+    return found
+  }
+  return (r: number, c: number): number => {
+    const a = rowKeys[r]
+    const b = cellKeys[c]
+    if (!a || !b) return 0
+    if (a === b) return 1
+    const ga = grams(rowGrams, rowKeys, r)
+    const gb = grams(cellGrams, cellKeys, c)
+    let shared = 0
+    let total = 0
+    for (const [pair, n] of ga) {
+      shared += Math.min(n, gb.get(pair) ?? 0)
+      total += n
+    }
+    for (const n of gb.values()) total += n
+    return total === 0 ? 0 : (2 * shared) / total
+  }
+}
+
+/** Row → line pairs whose source text occurs exactly once on each side of the
+ *  stretch, thinned to the longest run that keeps both sides in order. */
+function uniqueAnchors(
+  rowKeys: string[],
+  cellKeys: string[],
+  [r0, r1, c0, c1]: Stretch,
+): Array<[number, number]> {
+  const once = (keys: string[], from: number, to: number) => {
+    const at = new Map<string, number>()
+    const seen = new Set<string>()
+    for (let i = from; i < to; i++) {
+      const key = keys[i]
+      if (!key) continue
+      if (seen.has(key)) at.delete(key)
+      else {
+        seen.add(key)
+        at.set(key, i)
+      }
+    }
+    return at
+  }
+  const rowOnce = once(rowKeys, r0, r1)
+  const cellOnce = once(cellKeys, c0, c1)
+  const pairs: Array<[number, number]> = []
+  for (const [key, r] of rowOnce) {
+    const c = cellOnce.get(key)
+    if (c !== undefined) pairs.push([r, c])
+  }
+  pairs.sort((a, b) => a[0] - b[0])
+  // Longest increasing run of line positions (patience sorting).
+  const tails: number[] = []
+  const prev = new Array<number>(pairs.length).fill(-1)
+  for (let i = 0; i < pairs.length; i++) {
+    let lo = 0
+    let hi = tails.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (pairs[tails[mid]][1] < pairs[i][1]) lo = mid + 1
+      else hi = mid
+    }
+    if (lo > 0) prev[i] = tails[lo - 1]
+    tails[lo] = i
+  }
+  const run: Array<[number, number]> = []
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i >= 0; i = prev[i]) run.push(pairs[i])
+  return run.reverse()
+}
+
+/** Half-open row and line ranges: rows [r0, r1), lines [c0, c1). */
+type Stretch = [r0: number, r1: number, c0: number, c1: number]
+
+/** Pairs within a stretch no exact text settled. */
+function pairStretch(
+  [r0, r1, c0, c1]: Stretch,
+  similarity: (r: number, c: number) => number,
+): Array<[number, number]> {
+  const rows = r1 - r0
+  const lines = c1 - c0
+  if (rows === 0 || lines === 0) return []
+  // Same length on both sides: the text didn't settle it, so position does.
+  if (rows === lines) return Array.from({ length: rows }, (_, i) => [r0 + i, c0 + i])
+  if (rows * lines > STRETCH_COMPARISONS) {
+    return Array.from({ length: Math.min(rows, lines) }, (_, i) => [r0 + i, c0 + i])
+  }
+  // Best total similarity, pairing only rows and lines that are alike.
+  const width = lines + 1
+  const best = new Float64Array((rows + 1) * width)
+  for (let i = 1; i <= rows; i++) {
+    for (let j = 1; j <= lines; j++) {
+      const sim = similarity(r0 + i - 1, c0 + j - 1)
+      const take = sim >= SIMILAR_SOURCE ? best[(i - 1) * width + j - 1] + sim : -Infinity
+      best[i * width + j] = Math.max(best[(i - 1) * width + j], best[i * width + j - 1], take)
+    }
+  }
+  const pairs: Array<[number, number]> = []
+  for (let i = rows, j = lines; i > 0 && j > 0; ) {
+    const here = best[i * width + j]
+    if (here === best[(i - 1) * width + j]) i--
+    else if (here === best[i * width + j - 1]) j--
+    else {
+      pairs.push([r0 + i - 1, c0 + j - 1])
+      i--
+      j--
+    }
+  }
+  return pairs.reverse()
+}
+
+/** Order matching steered by the rows' own source text — see above. Rows with
+ *  neither text nor source take no part (a spacer row holds no slot here). */
+function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileTargetMatchResult {
+  const taking = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.text.trim() || row.source?.trim())
+  const rowKeys = taking.map(({ row }) => sourceKey(row.source ?? ""))
+  const cellKeys = cells.map((cell) => sourceKey(cell.original))
+  const similarity = makeSimilarity(rowKeys, cellKeys)
+
+  const lineForRow = new Map<number, number>()
+  const stretches: Stretch[] = [[0, taking.length, 0, cells.length]]
+  while (stretches.length > 0) {
+    let [r0, r1, c0, c1] = stretches.pop()!
+    // Equal text at either end anchors directly, duplicates or not.
+    while (r0 < r1 && c0 < c1 && rowKeys[r0] && rowKeys[r0] === cellKeys[c0]) lineForRow.set(r0++, c0++)
+    while (r0 < r1 && c0 < c1 && rowKeys[r1 - 1] && rowKeys[r1 - 1] === cellKeys[c1 - 1]) lineForRow.set(--r1, --c1)
+    const anchors = r0 < r1 && c0 < c1 ? uniqueAnchors(rowKeys, cellKeys, [r0, r1, c0, c1]) : []
+    if (anchors.length === 0) {
+      for (const [r, c] of pairStretch([r0, r1, c0, c1], similarity)) lineForRow.set(r, c)
+      continue
+    }
+    let r = r0
+    let c = c0
+    for (const [ar, ac] of anchors) {
+      lineForRow.set(ar, ac)
+      stretches.push([r, ar, c, ac])
+      r = ar + 1
+      c = ac + 1
+    }
+    stretches.push([r, r1, c, c1])
+  }
+
+  const matched: FileTargetMatchedCell[] = []
+  const orphans: TargetOrphan[] = []
+  taking.forEach(({ row, index }, at) => {
+    if (!row.text.trim()) return
+    const label = row.ref ?? `Row ${index + 1}`
+    const lineAt = lineForRow.get(at)
+    if (lineAt === undefined) {
+      orphans.push({ ref: label, text: row.text, reason: "sourceNotInFile" })
+      return
+    }
+    const cell = cells[lineAt]
+    const differs = similarity(at, lineAt) < SAME_SOURCE
+    matched.push({
+      ...toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? label, differs ? "sourceDiffers" : undefined),
+      ...(differs ? { incomingSource: row.source ?? "" } : {}),
+    })
+  })
+
+  const uncovered = uncoveredLines(cells, matched)
+  return {
+    matched,
+    orphans,
+    unmatchedSourceCount: uncovered.length,
+    uncovered,
+    alignedBy: "source",
+  }
+}
+
 /** Positional matching for formats that carry no canonical refs.
  *
  *  When the file's cells AND every non-empty incoming row carry cue timings,
@@ -1178,6 +1419,10 @@ export function matchTargetRowsByOverlap(
  *  A row whose timecode runs backwards still counts as timed here: it is
  *  reported by name as a broken cue, and must not drag every other row back
  *  to matching by position.
+ *
+ *  Rows carrying their own source text (a spreadsheet's Source column) are
+ *  paired with lines by it, falling back to position only where the text
+ *  doesn't settle it (`matchRowsBySource`, AQU-1375).
  *
  *  The result's `alignedBy` says which ran, so the review screen only warns
  *  about order alignment when order alignment is what happened; on an order
@@ -1204,6 +1449,7 @@ export function matchTargetRowsByOrder(
       overrides: options.overrides,
     })
   }
+  if (nonEmptyRows.some((row) => row.source?.trim())) return matchRowsBySource(rows, cells)
   const result = matchRowsPositionally(rows, cells)
   const untimed = timedRows === 0 ? undefined : cellsTimed ? "rows" : "lines"
   return {

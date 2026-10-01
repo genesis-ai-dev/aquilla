@@ -289,6 +289,11 @@ const ReviewRow = memo(function ReviewRow({
               {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
               {m.sourceText}
             </p>
+            {m.flag === "sourceDiffers" && (
+              <p className="truncate text-[10px] text-amber-600">
+                {t("importExport.review.rowIncomingSource", { text: m.incomingSource ?? "" })}
+              </p>
+            )}
             <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
             {m.hasConflict && (
               <p className="truncate text-[10px] text-amber-600">
@@ -300,7 +305,7 @@ const ReviewRow = memo(function ReviewRow({
         {/* Everything to check about a row sits in its corner. "Contested"
             opens the comparison below; a timing pill means only the line's
             own timing is kept. */}
-        {(rivals || m.flag === "sharedTiming" || m.cellRef) && (
+        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.cellRef) && (
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             {rivals && (
               <Badge
@@ -330,6 +335,11 @@ const ReviewRow = memo(function ReviewRow({
             )}
             {m.cellRef && (
               <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
+            )}
+            {m.flag === "sourceDiffers" && (
+              <Badge className={AMBER_PILL} title={t("importExport.review.rowSourceDiffers")}>
+                {t("importExport.review.rowSourceDiffersPill")}
+              </Badge>
             )}
           </div>
         )}
@@ -565,15 +575,15 @@ export function FileTargetImportPanel({
     setMatchedByOrder(byOrder)
     // Pre-select only rows that are safe to take as they stand. Overwriting an
     // existing translation needs an explicit tick; so does a contested row
-    // (AQU-1360); and a row whose text the line already holds has nothing to
-    // import at all.
+    // (AQU-1360) and a row whose source differs from its line's (AQU-1375);
+    // and a row whose text the line already holds has nothing to import at all.
     setSelectedCellIds(new Set(
       keepTicks
         ? result.matched.filter((m) => keepTicks.has(m.cellId) && !m.alreadyThere).map((m) => m.cellId)
         : result.matched
           // A same-timing pair whose cues all found a line is a heads-up, not
           // a decision: ticked, with its pill and a Swap (Sam, 09-23).
-          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && !m.sharedTimingUnpaired)
+          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && !m.sharedTimingUnpaired)
           .map((m) => m.cellId),
     ))
     setStep("review")
@@ -719,9 +729,11 @@ export function FileTargetImportPanel({
     if (!selectedSheet || mapping.targetCol === null) return
     const dataRows = hasHeader ? selectedSheet.rows.slice(1) : selectedSheet.rows
     // Keep empty rows in place — order matching needs every row to hold its slot.
+    // A mapped source column steers order matching (AQU-1375).
     const rows: TargetRow[] = dataRows.map((r) => ({
       ref: mapping.labelCol !== null ? (r[mapping.labelCol] ?? "").trim() || undefined : undefined,
       text: (r[mapping.targetCol!] ?? "").trim(),
+      ...(mapping.sourceCol !== null ? { source: (r[mapping.sourceCol] ?? "").trim() } : {}),
     }))
     const byOrder = mapping.labelCol === null
     showReview(
@@ -909,11 +921,14 @@ export function FileTargetImportPanel({
     const conflicts = matched.filter((m) => m.hasConflict)
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // "To check": the rows left unticked for a reason a person has to settle —
-    // a contest, a shared timing, or text that would be replaced. Membership
+    // a contest, a shared timing, a source that differs, or text that would be
+    // replaced. Membership
     // follows the flag, not the tick, so a row never vanishes while being
     // worked on. "Timing differs" alone is not a reason: the pairing still
     // holds, and on a shifted file every row has it.
-    const toCheck = matched.filter((m) => m.flag === "contested" || m.flag === "sharedTiming" || m.hasConflict)
+    const toCheck = matched.filter(
+      (m) => m.flag === "contested" || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.hasConflict,
+    )
     const filtering = onlyToCheck && toCheck.length > 0
     const shown = filtering ? toCheck : matched
     // Select all acts on the rows shown; rows already there have nothing to import.
@@ -922,10 +937,11 @@ export function FileTargetImportPanel({
       shownSelectable.length > 0 && shownSelectable.every((m) => selectedCellIds.has(m.cellId))
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
     const unplaced = orphans.length - brokenTimecodes
-    // AQU-1143: a ref-less match that aligned by cue timecode is not the
-    // fragile top-to-bottom pairing this warns about — don't send the user off
-    // to eyeball 500 rows for a drift that cannot have happened.
-    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
+    // AQU-1143: a ref-less match that aligned by cue timecode (or, AQU-1375,
+    // by source text) is not the fragile top-to-bottom pairing this warns
+    // about — don't send the user off to eyeball 500 rows for a drift that
+    // cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy === "order"
     const reasonLabel = (orphan: TargetOrphan): string | null => {
       switch (orphan.reason) {
         case "backwardsTimecode": return t("importExport.review.reasonBackwardsTimecode")
@@ -934,6 +950,7 @@ export function FileTargetImportPanel({
         case "noReference": return t("importExport.review.reasonNoReference")
         case "refNotInFile": return t("importExport.review.reasonRefNotInFile")
         case "refRepeated": return t("importExport.review.reasonRefRepeated")
+        case "sourceNotInFile": return t("importExport.review.reasonSourceNotInFile")
         case "bridgeOverSeparateLines":
           return orphan.verses ? t("importExport.review.reasonBridgeOverSeparateLines", orphan.verses) : null
         case "partOfBridgedLine":
@@ -1073,6 +1090,9 @@ export function FileTargetImportPanel({
                     : "importExport.review.orderMatchWarning",
               )}
             </p>
+          )}
+          {matchResult.alignedBy === "source" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">{t("importExport.review.sourceAligned")}</p>
           )}
           {/* AQU-1375: on an order match, unequal counts are the likeliest
               sign that every row after some point is one line off. */}

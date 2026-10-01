@@ -1085,7 +1085,8 @@ export const importExport = defineNamespace({
     "importExport.columnMapping.startColumnLabel": "Start timestamp",
     "importExport.columnMapping.targetColumnLabel": "Target translation",
     "importExport.columnMapping.targetModeHint": "Pick the column with the translations. Map a ref column to match by " +
-      "reference; leave it unmapped to match rows to cells in order.",
+      "reference, or the source text column to pair rows with lines by their source. With neither, rows match " +
+      "lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
     "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
@@ -1179,6 +1180,12 @@ export const importExport = defineNamespace({
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
     "importExport.review.rowSharedTimingPill": "Same timing",
     "importExport.review.rowTimingDiffers": "Timing differs",
+    "importExport.review.rowSourceDiffersPill": "Source differs",
+    "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
+    "importExport.review.rowIncomingSource": "Source in the file: {text}",
+    "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
+      "line are left unticked.",
+    "importExport.review.reasonSourceNotInFile": "No line has this source text",
     "importExport.review.showAll": "All {count}",
     "importExport.review.showFilterAriaLabel": "Which rows to show",
     "importExport.review.showToCheck": "To check {count}",
@@ -2872,10 +2879,10 @@ export const importExport = defineNamespace({
         description:
           "Instruction under the column-mapping heading when the spreadsheet is " +
           "being used to fill in translations for lines that already exist. First " +
-          "sentence names the one required choice. The rest explains the " +
-          "consequence of the optional reference column: name one and rows are " +
-          "paired by that reference, leave it out and rows are paired top to bottom " +
-          "by position.",
+          "sentence names the one required choice. The rest explains the two " +
+          "optional columns: a reference column pairs rows with lines by reference; " +
+          "a source text column pairs them by the original text each row was " +
+          "translated from; with neither, rows are paired top to bottom by position.",
       },
       "importExport.columnMapping.typeColumnLabel": {
         description:
@@ -3372,6 +3379,44 @@ export const importExport = defineNamespace({
           "another cue for the same line. It is a toggle with a small arrow: clicking " +
           "it opens the row to compare the two cues. One word, the same word the " +
           "warning above the list uses.",
+      },
+      "importExport.review.rowSourceDiffersPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list, shown when the original (source) text the uploaded spreadsheet row " +
+          "carries doesn't match the source text of the line it was paired with, so " +
+          "the pairing may be wrong. The row is left unticked. Two or three words, no " +
+          "closing full stop.",
+      },
+      "importExport.review.rowSourceDiffers": {
+        description:
+          "Tooltip on the 'Source differs' pill of one row of the match-review list: " +
+          "the uploaded row's original (source) text doesn't match the source text of " +
+          "the line it was paired with. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowIncomingSource": {
+        description:
+          "Small amber line inside one row of the match-review list, under the " +
+          "paired line's own source text, showing the source text the uploaded " +
+          "spreadsheet row carries — so the two can be compared when they don't " +
+          "match. Label, colon, then the text (truncated if long).",
+        placeholders: {
+          text: "The original (source) text from the uploaded row.",
+        },
+      },
+      "importExport.review.sourceAligned": {
+        description:
+          "Grey note above the match-review list when spreadsheet rows were paired " +
+          "with the open file's lines by comparing their original (source) text " +
+          "rather than by position. Rows whose source text doesn't match their line " +
+          "start unticked for the user to check. Two short sentences.",
+      },
+      "importExport.review.reasonSourceNotInFile": {
+        description:
+          "Reason shown next to one entry in the list of uploaded spreadsheet rows " +
+          "that were not paired with any line: the row's original (source) text isn't " +
+          "in the open file, as with a title row or a line deleted from the file. " +
+          "Short sentence.",
       },
       "importExport.review.rowTimingDiffers": {
         description:

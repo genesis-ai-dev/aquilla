@@ -85,6 +85,36 @@ type OutgoingMessage = ProgressMessage | ResultMessage | ErrorMessage | WarmedMe
 let pipePromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null
 let activeModel: string | null = null
 
+type WhisperDevice = "webgpu" | "wasm"
+
+/**
+ * AQU-1533: choose the execution device BEFORE the first pipeline() call.
+ *
+ * A WebGPU attempt that fails at session creation cannot be recovered from
+ * inside this worker. transformers.js serialises web session creation with
+ * `webInitChain = webInitChain.then(load)`, so the first rejection leaves that
+ * chain rejected for good and every later session — a WASM one included —
+ * re-throws the first error without running (huggingface/transformers.js#1767).
+ * Chrome with graphics acceleration off, a blocklisted GPU, and most VMs all
+ * expose `navigator.gpu` yet hand out no adapter, which is exactly that
+ * failure. So ask for the adapter the way ONNX Runtime will, and never start a
+ * WebGPU attempt that is certain to fail (it would also download the fp32
+ * weights for nothing).
+ */
+async function pickDevice(): Promise<WhisperDevice> {
+  const gpu: GPU | undefined = navigator.gpu
+  if (!gpu) return "wasm"
+  try {
+    const { powerPreference, forceFallbackAdapter } = env.backends.onnx.webgpu ?? {}
+    const adapter = await gpu.requestAdapter({ powerPreference, forceFallbackAdapter })
+    if (adapter) return "webgpu"
+  } catch (e) {
+    console.warn("[whisper-worker] WebGPU adapter probe failed:", e)
+  }
+  console.info("[whisper-worker] No WebGPU adapter available, running on WASM.")
+  return "wasm"
+}
+
 /**
  * AQU-929: tear the cached session down. transformers.js pipelines own ONNX
  * Runtime sessions whose tensors live outside the JS heap, so dropping the
@@ -121,20 +151,22 @@ async function getPipe(model: string, requestId: string): Promise<AutomaticSpeec
     }
     ;(self as unknown as Worker).postMessage(msg)
   })
-  // Prefer WebGPU; fall back to WASM if the GPU adapter fails (Safari, some
-  // Firefox builds, machines without compatible discrete/integrated GPUs).
+  const load = (device: WhisperDevice) =>
+    pipeline("automatic-speech-recognition", model, { device, progress_callback: progressCb })
+  // Prefer WebGPU when an adapter exists, otherwise WASM (Safari, some Firefox
+  // builds, machines without compatible discrete/integrated GPUs).
   pipePromise = (async () => {
+    if ((await pickDevice()) === "wasm") return await load("wasm")
     try {
-      return await pipeline("automatic-speech-recognition", model, {
-        device: "webgpu",
-        progress_callback: progressCb,
-      })
+      return await load("webgpu")
     } catch (e) {
+      // Recoverable only when the WebGPU load failed BEFORE session creation
+      // (fetching the fp32 weights, say — WASM loads the quantized ones). A
+      // failure inside session creation re-throws the same error from the
+      // WASM attempt too — see pickDevice — until transformers.js#1767 is
+      // fixed upstream.
       console.warn("[whisper-worker] WebGPU init failed, falling back to WASM:", e)
-      return await pipeline("automatic-speech-recognition", model, {
-        device: "wasm",
-        progress_callback: progressCb,
-      })
+      return await load("wasm")
     }
   })().catch((err) => {
     pipePromise = null

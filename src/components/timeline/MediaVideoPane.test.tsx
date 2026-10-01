@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import type { FrontierSession } from "@/lib/frontier/types"
+
+vi.mock("@/lib/audio/sync-token-fetcher", () => ({
+  audioSyncTokenFetcherForSession: () => async () => "picture-token",
+}))
 
 import type { CellData } from "@/hooks/useCells"
 import type { QueueForFile } from "@/lib/audio/queue-scope"
@@ -34,6 +39,20 @@ vi.mock("@/lib/audio/play-queue", () => ({
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
 }))
+
+vi.mock("youtube-video-element", () => {
+  class FakeYouTubeVideo extends HTMLElement {
+    paused = true
+    currentTime = 0
+    readyState = 0
+    muted = false
+    play() { return Promise.resolve() }
+    pause() {}
+    load() {}
+  }
+  if (!customElements.get("youtube-video")) customElements.define("youtube-video", FakeYouTubeVideo)
+  return {}
+})
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
 import {
@@ -91,6 +110,24 @@ describe("MediaVideoPane", () => {
   })
 
   // AQU-646 2026-08-11: when the picture is the transport, the queue is idle,
+  it("loads imported video through an authenticated streaming URL", async () => {
+    const onVideoDuration = vi.fn()
+    render(<MediaVideoPane
+      src="frontier-audio://imported.mp4"
+      projectId="p1" fileId="f1" cells={[]}
+      session={{ username: "dev", jwt: "identity" } as FrontierSession}
+      onVideoDuration={onVideoDuration}
+    />)
+    await waitFor(() => {
+      const src = screen.getByTestId("video-pane-media").getAttribute("src")
+      expect(src).toContain("/audio/p1/f1/imported.mp4?t=picture-token")
+    })
+    const video = screen.getByTestId("video-pane-media")
+    Object.defineProperty(video, "duration", { value: 12, configurable: true })
+    fireEvent.loadedMetadata(video)
+    expect(onVideoDuration).toHaveBeenCalledWith("frontier-audio://imported.mp4", 12)
+  })
+
   // so everything that used to ask it "what is sounding" and "is it playing"
   // got nothing. Both are now answered by the element itself.
   describe("the picture as the transport", () => {
@@ -155,6 +192,55 @@ describe("MediaVideoPane", () => {
         play.mockRestore()
         pause.mockRestore()
       }
+    })
+
+    // 2026-09-30: when the picture is the transport it takes the floor — a
+    // take sounding on a waveform stops — and the next thing to start stops
+    // the picture. It used to go on under a take (the throttled browser pass).
+    it("takes the floor when it starts, and a take that starts stops it", async () => {
+      const { claimActiveAudio, clearActiveAudioIf, getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+      const pause = vi.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {})
+      try {
+        let takePlaying = true
+        const take = { isPlaying: () => takePlaying, play: async () => { takePlaying = true }, pause: vi.fn(() => { takePlaying = false }) }
+        claimActiveAudio(take)
+        renderStandalone()
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "paused", { value: false, configurable: true })
+        fireEvent.play(video)
+        expect(take.pause).toHaveBeenCalledTimes(1)
+        expect(getActiveAudio()).not.toBe(take)
+        // Now a take starts: the picture is paused through its own controller.
+        const next = { isPlaying: () => true, play: async () => {}, pause: vi.fn() }
+        claimActiveAudio(next)
+        expect(pause).toHaveBeenCalled()
+        clearActiveAudioIf(next)
+      } finally {
+        pause.mockRestore()
+      }
+    })
+
+    it("lets go of the floor when it pauses", async () => {
+      const { getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+      renderStandalone()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "paused", { value: false, configurable: true })
+      fireEvent.play(video)
+      expect(getActiveAudio()).not.toBeNull()
+      Object.defineProperty(video, "paused", { value: true, configurable: true })
+      fireEvent.pause(video)
+      expect(getActiveAudio()).toBeNull()
+    })
+
+    it("never takes the floor from the queue it follows (slaved)", async () => {
+      const { claimActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+      const queue = { isPlaying: () => true, play: async () => {}, pause: vi.fn() }
+      claimActiveAudio(queue)
+      // renderPane()'s CELLS are media cells with the shared clip → slaved.
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
+      fireEvent.play(screen.getByTestId("video-pane-media"))
+      expect(queue.pause).not.toHaveBeenCalled()
+      clearActiveAudioIf(queue)
     })
 
     it("ignores Space when the QUEUE is the transport — two writers would fight", () => {
@@ -930,5 +1016,31 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     } finally {
       mockQueue = { ...mockQueue, active: false, playing: false, kind: "idle" }
     }
+  })
+})
+
+describe("a YouTube link", () => {
+  const YT = "https://youtu.be/dQw4w9WgXcQ?si=share"
+
+  it("plays through the YouTube element, not a <video>", () => {
+    const { container } = renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media")
+    expect(media.tagName.toLowerCase()).toBe("youtube-video")
+    expect(media.getAttribute("src")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    expect(container.querySelector("video")).toBeNull()
+  })
+
+  it("still hears the element's media events", () => {
+    const onVideoDuration = vi.fn()
+    renderPane({ src: YT, onVideoDuration })
+    const media = screen.getByTestId("video-pane-media")
+    Object.defineProperty(media, "duration", { value: 212, configurable: true })
+    act(() => { media.dispatchEvent(new Event("durationchange")) })
+    expect(onVideoDuration).toHaveBeenCalledWith(YT, 212)
+  })
+
+  it("a direct media file still uses <video>", () => {
+    renderPane({ src: "https://cdn/episode.mp4" })
+    expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
   })
 })

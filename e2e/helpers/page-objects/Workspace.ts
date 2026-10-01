@@ -53,6 +53,20 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importYouTubeCaptions(url: string, payload: FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video and captions/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Your caption export").setInputFiles(payload)
+    await dialog.getByRole("button", { name: "Preview captions" }).click()
+    await expect(dialog.getByRole("button", { name: "Import captions" }))
+      .toBeEnabled({ timeout: 10_000 })
+    await dialog.getByRole("button", { name: "Import captions" }).click()
+    await this.waitForImportSettled()
+  }
+
   async importPayload(payload: FilePayload): Promise<void> {
     await this.previewImportPayload(payload)
     await this.confirmImportPreview()
@@ -69,12 +83,102 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
-   * (they have no text cells to show) and upload immediately on selection, so
-   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
     await this.chooseImportFiles(filePath)
     await this.waitForImportSettled()
+  }
+
+  /** Review companion captions before publishing the media file. */
+  async previewMediaWithCaptions(
+    media: FilePayload,
+    captions: FilePayload,
+  ): Promise<void> {
+    await this.chooseImportFiles([media, captions])
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async previewEmbeddedMedia(media: FilePayload): Promise<void> {
+    await this.chooseImportFiles(media)
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmMediaPreview(mediaName: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Continue import", exact: true }).click()
+    // Existing sidebar rows cannot prove this import completed.
+    await expect(this.page.getByTestId("shell-dock")
+      .getByRole("button", { name: mediaName, exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await expect(this.modalDialogs()).toHaveCount(0)
+  }
+
+  /** Every open dialog except toasts. AQU-1352's "Created … in …" success toast
+   * is also role="dialog" and outlives the import, so a bare role lookup cannot
+   * prove the import dialog closed. */
+  modalDialogs(): Locator {
+    return this.page.getByRole("dialog").and(this.page.locator(':not([data-slot="toast"])'))
+  }
+
+  sourceAudioClips(): Locator {
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+  }
+
+  async previewCaptionTrack(captions: FilePayload): Promise<void> {
+    await this.page.getByTestId("tl-sources-menu").click()
+    await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmCaptionTrack(overwrite = false): Promise<void> {
+    await this.page.getByRole("button", {
+      name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
+    }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async zoomTimelineIn(): Promise<void> {
+    await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  }
+
+  async declineWhisperDownload(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Whisper/i })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+
+  linkedVideo(): Locator {
+    return this.page.getByTestId("video-pane-media")
+  }
+
+  async playMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: /Play all/i }).click()
+  }
+
+  async pauseMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Pause", exact: true }).click()
+  }
+
+  async waitForLinkedVideo(): Promise<void> {
+    await expect(this.linkedVideo()).toBeVisible()
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement) =>
+      element.readyState), { timeout: EDITOR_READY_TIMEOUT_MS }).toBeGreaterThanOrEqual(2)
+  }
+
+  async seekLinkedVideo(seconds: number): Promise<void> {
+    const duration = await this.linkedVideo().evaluate((element: HTMLVideoElement) => element.duration)
+    const slider = this.page.getByRole("slider", { name: "Seek", exact: true })
+    const bounds = await slider.boundingBox()
+    expect(bounds).not.toBeNull()
+    await slider.click({ position: { x: bounds!.width * seconds / duration,
+      y: bounds!.height / 2 } })
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement, time) =>
+      element.seeking ? 1 : Math.abs(element.currentTime - time), seconds))
+      .toBeLessThan(0.05)
   }
 
   /** Select and commit one translation through the eBible corpus picker. */
@@ -189,7 +293,9 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+  private async chooseImportFiles(
+    filePath: string | FilePayload | string[] | FilePayload[],
+  ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
@@ -218,11 +324,11 @@ export class Workspace {
     const importError = this.page.getByText(/^Import failed:/i).first()
     let outcome = "pending"
     await expect.poll(async () => {
-      if (await importError.isVisible().catch(() => false)) {
+      if (await importError.isVisible()) {
         outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
         return "settled"
       }
-      if (await fileActions.isVisible().catch(() => false)) {
+      if (await fileActions.isVisible()) {
         outcome = "success"
         return "settled"
       }
@@ -399,6 +505,21 @@ export class Workspace {
     await expect(firstCell).toBeVisible({
       timeout: EDITOR_READY_TIMEOUT_MS,
     })
+  }
+
+  async showFilesSidebar(): Promise<void> {
+    const files = this.page.getByRole("button", { name: "Files", exact: true })
+    await expect(files).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Media view selects Voices; ensure Files without toggling an open panel.
+    if (await files.getAttribute("aria-pressed") !== "true") await files.click()
+    await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  async openMediaView(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "Media", exact: true })
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   cellRow(index = 0): Locator {

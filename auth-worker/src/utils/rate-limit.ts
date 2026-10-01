@@ -103,6 +103,8 @@ export type RateLimitKind =
   | "agent_authorize"
   | "agent_code"
   | "agent_decision"
+  | "mcp_oauth_request"
+  | "mcp_oauth_decision"
   | "access_link_redeem"
   | "feedback"
 

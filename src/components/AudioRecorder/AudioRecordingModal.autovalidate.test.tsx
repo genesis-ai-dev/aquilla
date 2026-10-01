@@ -56,7 +56,23 @@ vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () =>
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it is inert.
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 

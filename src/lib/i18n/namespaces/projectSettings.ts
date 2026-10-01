@@ -643,6 +643,63 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.detachingButton": "Detaching…",
     "projectSettings.sourceLink.detachConfirmButton": "Detach",
 
+    // ── LinkSourceSection.tsx (AQU-1525) ──
+    "projectSettings.linkSource.title": "Link to a source project",
+    "projectSettings.linkSource.description":
+      "This project owns its own source. Link it to another project to read that " +
+      "project's source files here, without recreating this project.",
+    "projectSettings.linkSource.pickerLabel": "Source project",
+    "projectSettings.linkSource.pickerPlaceholder": "Choose a project to link from…",
+    "projectSettings.linkSource.pickerSearchPlaceholder": "Search projects…",
+    "projectSettings.linkSource.pickerSearchAriaLabel": "Search projects",
+    "projectSettings.linkSource.pickerNoMatches": "No projects match.",
+    "projectSettings.linkSource.noProjectsNote": "No other project is available to link to.",
+    "projectSettings.linkSource.additiveNote":
+      "The link is live: the upstream's source files are mirrored in alongside " +
+      "everything this project already holds, and later upstream edits keep " +
+      "flowing through. Existing files, translations and validations are left as " +
+      "they are. Detach later to stop following the upstream.",
+    "projectSettings.linkSource.linkButton": "Link source project",
+    "projectSettings.linkSource.linkingButton": "Linking…",
+    "projectSettings.linkSource.roleGateNote":
+      "Project lead or above required to link a source project.",
+    "projectSettings.linkSource.cycleError":
+      "That project already reads its source from this one, so linking would " +
+      "create a loop. This project is still unlinked — choose a different project.",
+
+    // ── AQU-1526: the confirm step shown after an upstream is picked and
+    // before anything is linked. It warns about same-named files; it never
+    // blocks the link.
+    "projectSettings.linkSource.reviewButton": "Review what will be added",
+    "projectSettings.linkSource.cancelButton": "Cancel",
+    "projectSettings.linkSource.previewTitle": "Link to {upstream}?",
+    "projectSettings.linkSource.previewLoading": "Checking what this link will add…",
+    "projectSettings.linkSource.previewCount": plural({
+      one: "{count} source file will be added to this project.",
+      other: "{count} source files will be added to this project.",
+    }),
+    "projectSettings.linkSource.previewEmptyUpstream":
+      "That project has no source files yet, so nothing will be added now. Files " +
+      "will arrive here as the upstream gains them.",
+    "projectSettings.linkSource.previewLoadError":
+      "Couldn't load that project's file list, so we can't say what the link will " +
+      "add. Nothing has been linked.",
+    "projectSettings.linkSource.previewRetryButton": "Try again",
+    "projectSettings.linkSource.clashWarningHeading": plural({
+      one: "This project already has a file with the same name:",
+      other: "This project already has files with these names:",
+    }),
+    "projectSettings.linkSource.clashWarningBody": plural({
+      one:
+        "Your existing file is kept exactly as it is, with its translations. The " +
+        "mirrored copy arrives alongside it with empty translations, so this name " +
+        "will appear twice in the file list.",
+      other:
+        "Your existing files are kept exactly as they are, with their translations. " +
+        "The mirrored copies arrive alongside them with empty translations, so each " +
+        "of these names will appear twice in the file list.",
+    }),
+
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
     "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
@@ -1544,6 +1601,83 @@ export const projectSettings = defineNamespace({
           "as visible text; the visible hint is upstreamProjectSearchPlaceholder. " +
           "\"Projects\" here means Aquilla translation projects, the same sense as " +
           "projectSettings.create.upstreamProjectLabel.",
+      },
+      "projectSettings.linkSource.pickerSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the \"Link to a source project\" " +
+          "picker in Project Settings → Source & sync (AQU-1525). Screen-reader-only — " +
+          "never rendered as visible text; the visible hint is " +
+          "projectSettings.linkSource.pickerSearchPlaceholder. \"Projects\" here means " +
+          "Aquilla translation projects, the same sense as " +
+          "projectSettings.linkSource.pickerLabel.",
+      },
+      // AQU-1526 — the confirm step between picking an upstream and linking it.
+      "projectSettings.linkSource.previewTitle": {
+        description:
+          "Heading of the confirm step in Project Settings \u2192 Source & sync, shown after " +
+          "an upstream project has been picked and before anything is linked. A " +
+          "question, because the step can still be cancelled.",
+        placeholders: {
+          upstream: "The display name of the upstream project about to be linked, as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.previewCount": {
+        description:
+          "The confirm step's headline fact: how many source files the link will " +
+          "mirror into this project. Shown only when the upstream has at least one " +
+          "file (an upstream with none gets previewEmptyUpstream instead, never " +
+          "\"0 source files\"). \"Source files\" are the upstream's own source-side " +
+          "files, not file uploads.",
+        placeholders: {
+          count: "How many upstream source files will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.previewEmptyUpstream": {
+        description:
+          "Replaces the file count in the confirm step when the chosen upstream has " +
+          "no source files yet. Reassuring, not a refusal: the link is still " +
+          "allowed, and files appear here as the upstream gains them.",
+      },
+      "projectSettings.linkSource.previewLoading": {
+        description:
+          "Transient line in the confirm step while the upstream's file list is being " +
+          "read, before the count and any same-name warning can be shown.",
+      },
+      "projectSettings.linkSource.previewLoadError": {
+        description:
+          "Shown in the confirm step when the upstream's file list could not be read, " +
+          "so the step cannot say what the link would add. Deliberately distinct from " +
+          "previewEmptyUpstream \u2014 \"we don't know\" is not \"nothing is coming\" \u2014 and it " +
+          "states that nothing has been linked, because the user is mid-action.",
+      },
+      "projectSettings.linkSource.previewRetryButton": {
+        description:
+          "Button beside previewLoadError that re-reads the upstream's file list. Not " +
+          "a page reload and not the link itself.",
+      },
+      "projectSettings.linkSource.clashWarningHeading": {
+        description:
+          "Opens the confirm step's warning that some upstream files share a name with " +
+          "files this project already has; the names follow as a list. Ends in a colon " +
+          "for that reason. A caution, not an error \u2014 the link is still allowed.",
+      },
+      "projectSettings.linkSource.clashWarningBody": {
+        description:
+          "Follows the clashing file names and says what will happen: the project's " +
+          "own files are kept untouched with their translations, and the mirrored " +
+          "copies arrive beside them with empty translations, so each name appears " +
+          "twice in the file list. Nothing is overwritten or merged.",
+      },
+      "projectSettings.linkSource.reviewButton": {
+        description:
+          "Button that leaves the picker and opens the confirm step. It links nothing " +
+          "by itself \u2014 the wording has to make that clear, because the press that " +
+          "actually links is linkButton on the next step.",
+      },
+      "projectSettings.linkSource.cancelButton": {
+        description:
+          "Backs out of the confirm step to the picker without linking. The picked " +
+          "project is kept, so this is \"not yet\", not \"discard\".",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",

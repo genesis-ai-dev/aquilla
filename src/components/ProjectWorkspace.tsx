@@ -84,7 +84,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -116,6 +116,9 @@ import {
 } from "./pending-cell-scroll"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
+import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
+import { importTimelineTextTrack } from "@/lib/import/timeline-text"
+import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import {
   importSubtitleSourceCells,
@@ -168,7 +171,6 @@ import {
   virtualClockSeek,
 } from "@/lib/timeline/virtual-clock"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
-import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
@@ -244,7 +246,8 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
@@ -289,6 +292,11 @@ import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
 import { useWorkspaceDockTabs } from "@/hooks/useWorkspaceDockTabs"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import {
+  computeRightRailSurfaces,
+  hasRightRailEdge,
+  hasRightRailPanel,
+} from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -319,6 +327,8 @@ import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
+import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
+import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
 // AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
@@ -744,8 +754,8 @@ export function ProjectWorkspace() {
     // hydratedProject.files`, which is what lets the `project` memo hand the
     // hydrated record straight back instead of respreading it.
     const rawFiles = hydratedProject?.files ?? []
-    const serverFiles = rawFiles.some((f) => isAudioCueFile(f))
-      ? rawFiles.filter((f) => !isAudioCueFile(f))
+    const serverFiles = rawFiles.some((f) => isHiddenTimelineFile(f))
+      ? rawFiles.filter((f) => !isHiddenTimelineFile(f))
       : rawFiles
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
@@ -3150,7 +3160,7 @@ export function ProjectWorkspace() {
       if (!held || f.id > held.id) siblingFor.set(f.anchorFileId, f)
     }
     return all
-      .filter((f) => !isAudioCueFile(f))
+      .filter((f) => !isHiddenTimelineFile(f))
       .map((f) => {
         const sibling = siblingFor.get(f.id)
         return {
@@ -3162,13 +3172,19 @@ export function ProjectWorkspace() {
       })
   }, [hydratedProject?.files])
 
-  const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
+  const {
+    audioCues,
+    isLoading: audioCuesLoading,
+    refresh: refreshAudioCues,
+    patchTiming: patchAudioCueTiming,
+  } = useAudioCueCells({
     projectId: project?.id ?? null,
     // AQU-1326: the cue sibling is a second whole-file read. Deferred behind
     // the first cell page so it doesn't race the editor's own stream.
     siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
+  const timelineTextRefreshRef = useRef<(fileId: string) => void>(() => {})
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
   // chips too, not only the subtitle rows — Sam's original ruling on the lock.
   // Same event the re-import reconcile emits (`cell.retime` against the hidden
@@ -3209,6 +3225,7 @@ export function ProjectWorkspace() {
     rows: cueLinkRows,
     rejected: cueLinkRejections,
     error: cueLinksError,
+    hasLoaded: cueLinksLoaded,
     setLinkLocally: setCueLinkLocally,
     refresh: refreshCueLinks,
   } = useFileCellLinks({
@@ -3237,11 +3254,19 @@ export function ProjectWorkspace() {
   // is a one-shot read — they are a transcript of a finished film and no event
   // ever edits them). Only their ATTACHMENTS are live, which is exactly what
   // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+  const { byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
   )
+  // A dubbing file's lines are performed by heard lines, whose takes arrive by
+  // three reads of their own, later than the line's own audio: the cue cells
+  // (deferred behind the first page — null until they start), their links to
+  // the subtitle lines, and their recordings. Until all three are back, a
+  // line's audio check cannot say "no audio" — it does not know yet.
+  const heardLinesLoading =
+    audioCueSibling != null &&
+    (audioCues === null || audioCuesLoading || !cueLinksLoaded || !cueAudioLoaded)
   // Dragging a take on a cue: the anchor the drag writes lands in the CUE
   // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
   // transcript, no live sync, nothing to invalidate). Without a local overlay
@@ -3341,6 +3366,8 @@ export function ProjectWorkspace() {
    *  looks like the matcher did nothing. */
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
+  const [captionDialogFileId, setCaptionDialogFileId] = useState<string | null>(null)
+  const [alignmentDialogFileId, setAlignmentDialogFileId] = useState<string | null>(null)
   /** AQU-1139: the file the Extract-subtitles dialog was opened FOR, not a bare
    *  boolean — a confirmation has to be about the file the report was read
    *  against, and the active file can change while the dialog is open. */
@@ -3367,6 +3394,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     closeCueLinkDrawer()
     setCharacterCheckOpen(false)
+    setCaptionDialogFileId(null)
   }, [activeFileId, closeCueLinkDrawer])
   /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
    *  a mode — three at once would be a mess nobody asked for. */
@@ -3625,6 +3653,12 @@ export function ProjectWorkspace() {
   const handleClearCastVoice = useCallback(
     (cell: CellData, opts?: { applyToSpeaker?: boolean }) => void timelineClearVoiceRef.current(cell, opts),
     [],
+  )
+  // The same set handleTimelineAssignVoice applies "all «name» lines" to.
+  const handleCountCastLines = useCallback(
+    (castName: string) =>
+      getActiveCells().filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName).length,
+    [getActiveCells],
   )
 
   /**
@@ -6994,6 +7028,9 @@ export function ProjectWorkspace() {
           },
           onMessage(msg) {
             if (msg.t === "event.applied") {
+              if (msg.project === pid && msg.file && msg.cell) {
+                timelineTextRefreshRef.current(msg.file)
+              }
               if (msg.file && msg.project === pid && (
                 msg.kind?.startsWith('source.cell.') ||
                 msg.kind?.startsWith('target.cell.') ||
@@ -7761,11 +7798,9 @@ export function ProjectWorkspace() {
   // they've been moved off the row prop bag into EditorActionsContext. All
   // five deps are `[]`-memoized above, so this value's identity is stable —
   // the provider never forces a re-render of the table subtree.
-  // (onAssignVoice/onOpenAudioSetup stay drilled: onAssignVoice's identity is
-  // NOT stable — it closes over project/session state — and both are
-  // entangled with the still-drilled audio-lens prop cluster in EditorRow's
-  // audio section, so pulling just the callback into context wouldn't shrink
-  // that section's prop surface.)
+  // (onOpenAudioSetup stays drilled: it is entangled with the still-drilled
+  // audio-lens prop cluster in EditorRow's audio section, so pulling just the
+  // callback into context wouldn't shrink that section's prop surface.)
   // AQU-646: `ensureTargetRowForTake` is declared further down (it needs
   // `isReadOnly`), and this memo must not churn, so it goes through a ref the
   // same way the cast-assign handler above does. The context sees one identity
@@ -7773,6 +7808,12 @@ export function ProjectWorkspace() {
   const ensureTargetRowForTakeRef = useRef<(cellId: string) => void>(() => {})
   const handleTakeSaved = useCallback((cellId: string) => {
     ensureTargetRowForTakeRef.current(cellId)
+  }, [])
+  // …and its twin for a delete in the Recording tab: the reset and the
+  // cue-to-lines lookup are declared further down too.
+  const lastTakeRemovedRef = useRef<(cellId: string) => void>(() => {})
+  const handleLastTakeRemoved = useCallback((cellId: string) => {
+    lastTakeRemovedRef.current(cellId)
   }, [])
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
@@ -7856,7 +7897,9 @@ export function ProjectWorkspace() {
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
+    countCastLines: handleCountCastLines, // 2026-09-28: "Apply to all «name» lines (N)"
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
+    onLastTakeRemoved: handleLastTakeRemoved, // …and deleting its last one takes that back
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
     cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
@@ -7874,25 +7917,8 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
-  const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
-    if (!audioProject || !frontierSession) return
-    // First assign the voice to this cell in the cast
-    tts.assignCells([cellId], voiceId)
-    // Then synthesise with the newly assigned voice
-    const targetCell = getActiveCell(cellId)
-    if (!targetCell) return
-    const ok = await generateCellVoice({
-      project: audioProject,
-      cell: targetCell,
-      session: frontierSession,
-      username: currentUsername,
-      voiceId,
-      ...(activeLane ? { targetLang: activeLane } : {}),
-    })
-    if (ok) refresh()
-  }, [audioProject, frontierSession, tts.assignCells, getActiveCell, currentUsername, refresh, activeLane])
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
@@ -8446,7 +8472,7 @@ export function ProjectWorkspace() {
     // function's server ids are what reconcile the optimistic rows away, and
     // thinning them there would strand any row it dropped. (`role` arrives
     // nullable off the server read, hence the coalesce.)
-    const isDocument = (f: FileSummary) => !isAudioCueFile({ role: f.role ?? undefined })
+    const isDocument = (f: FileSummary) => !isHiddenTimelineFile({ role: f.role ?? undefined })
     for (const f of deletedFiles) if (isDocument(f)) byId.set(f.fileId, f)
     for (const f of optimisticTrash) {
       if (isDocument(f) && !byId.has(f.fileId)) byId.set(f.fileId, f)
@@ -9605,6 +9631,11 @@ export function ProjectWorkspace() {
       audioCueCells ? [...(cueLinks.textForCue.get(cellId) ?? [])] : [cellId],
     [audioCueCells, cueLinks],
   )
+  // A take on a cue counts as work on the LINES it performs, so the reset goes
+  // to each of them — exactly as the recorder's onLastTakeRemoved does below.
+  lastTakeRemovedRef.current = (cellId: string) => {
+    for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
+  }
 
   const resolveCueReadAloud = useCallback(
     (cueCellId: string) => {
@@ -9779,7 +9810,7 @@ export function ProjectWorkspace() {
    */
   const takeCellsFor = useCallback(
     (cellId: string): readonly CellData[] => {
-      const linked = linkedTakesByCell.get(cellId)
+      const linked = linkedTakesByCell.get(cellId)?.filter((t) => t.hasTake)
       if (linked && linked.length > 0) return linked.map((t) => t.cell)
       const own = audioMergedCells.find((c) => c.id === cellId)
       return own ? [own] : []
@@ -9874,7 +9905,7 @@ export function ProjectWorkspace() {
         cell: merged,
         targetLangs: plan?.targetLangs ?? [],
         commentCount,
-        sharedTakeCount: (linkedTakesByCell.get(cellId) ?? []).filter((t) => t.sharedWith > 1).length,
+        sharedTakeCount: (linkedTakesByCell.get(cellId) ?? []).filter((t) => t.hasTake && t.sharedWith > 1).length,
       })
       if (inventory.isEmpty) {
         void handleRemoveLine(cellId)
@@ -10075,6 +10106,41 @@ export function ProjectWorkspace() {
     () => deriveTracksForFile(activeFile, trackContext),
     [activeFile, trackContext],
   )
+  const timelineText = useTimelineTextCells({
+    projectId: project?.id ?? null,
+    fileIds: serverTimelineTracks.flatMap(track => track.contentFileId ? [track.contentFileId] : []),
+    getToken: getTokenForFile,
+    enabled: editorFirstPaint && lens === "audio",
+  })
+  timelineTextRefreshRef.current = timelineText.refresh
+  const handleRetimeTextTrack = useCallback(async (
+    contentFileId: string, cellId: string, startSec: number, endSec: number,
+  ) => {
+    if (!project?.id || isReadOnly || timingLocked
+      || !timelineText.cellsByFile[contentFileId]?.some(cell => cell.id === cellId)) return
+    timelineText.patchTiming(contentFileId, cellId, startSec, endSec)
+    try {
+      const eventId = await emitCellRetime({
+        projectId: project.id, fileId: contentFileId, cellId,
+        startMs: Math.round(startSec * 1000), endMs: Math.round(endSec * 1000),
+        author: currentUsername,
+      })
+      let refusal: string | undefined
+      const result = await flushOutboxUntilSettled([eventId], {
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: entries => { refusal = entries.find(entry => entry.id === eventId)?.reason },
+        onForbidden: entries => { refusal = entries.find(entry => entry.id === eventId)?.reason },
+      })
+      if (refusal || !result.settled || result.networkError || result.authError) {
+        throw new Error(refusal ?? "Couldn't save caption timing.")
+      }
+    } catch (cause) {
+      toast.add({ type: "error", title: cause instanceof Error ? cause.message : "Couldn't move that caption." })
+    } finally {
+      timelineText.refresh(contentFileId)
+    }
+  }, [project?.id, isReadOnly, timingLocked, currentUsername, getTokenForProjectFile,
+    timelineText.cellsByFile, timelineText.patchTiming, timelineText.refresh])
   /**
    * A drag the server has not confirmed yet, as `trackId → new order`.
    *
@@ -10150,6 +10216,23 @@ export function ProjectWorkspace() {
   // clearance alone. That split is why the editor takes `onRenameTrack` as its
   // own prop instead of folding it into `trackEditing`.
   const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const alignmentClipUrl = useMemo(() => {
+    const urls = new Set(audioMergedCells.flatMap(cell => {
+      const clip = sourceClipAudioForCell(cell)
+      return clip ? [clip.url] : []
+    }))
+    // A script belongs to one whole source clip. Do not choose between clips.
+    return urls.size === 1 ? [...urls][0] : undefined
+  }, [audioMergedCells])
+  const captionMediaDurationMs = useMemo(() => {
+    if (videoDurationForTable !== null && videoDurationForTable > 0) return videoDurationForTable * 1000
+    const durations = audioMergedCells.flatMap(cell => {
+      const clip = sourceClipAudioForCell(cell)
+      const duration = clip ? cell.attachments?.[clip.audioId]?.durationMs : undefined
+      return typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? [duration] : []
+    })
+    return durations.length ? Math.max(...durations) : undefined
+  }, [videoDurationForTable, audioMergedCells])
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
@@ -12184,6 +12267,26 @@ export function ProjectWorkspace() {
     />
   ) : null
 
+  // AQU-1316: one decision for both right-rail slots. `aside` renders the
+  // panels, `asideEdge` the collapsed tabs, and each feature's two surfaces are
+  // derived from the same open flag — so a panel and its edge tab can never be
+  // on screen together (the duplicate Parallel Bibles panels in the report) and
+  // closing a panel always gives its edge tab back.
+  const rightRail = computeRightRailSurfaces({
+    inScriptureEditor: parallelBiblesPanelActive,
+    // AQU-461: verse resources ride the same scripture-editor condition, plus
+    // the project's Bible-resources gate (the aquifer routes 404 when it's off,
+    // so an ungated tab would only ever show an error).
+    verseResourcesAvailable:
+      !!project &&
+      resolveBibleResourcesEnabled(
+        project.bibleResourcesEnabled,
+        projectHasScriptureFiles(project.files),
+      ),
+    parallelBiblesOpen,
+    verseResourcesOpen,
+  })
+
   return (
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
@@ -12457,6 +12560,7 @@ export function ProjectWorkspace() {
                   activeLane={activeLane}
                   myScopes={myScopes}
                   audioByCellId={audioValidationByCellId}
+                  linkedTakesByCell={linkedTakesByCell}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
@@ -12918,6 +13022,12 @@ export function ProjectWorkspace() {
                     // button above and for the same reason.
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
                     canImportAudioVtt={canManageSources}
+                    onRequestImportCaptions={canManageSources && activeFile
+                      ? () => setCaptionDialogFileId(activeFile.id) : undefined}
+                    canImportCaptions={canEditTracks}
+                    onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
+                      ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
+                    canAlignScript={canEditTracks}
                     // AQU-1139: the clip's own subtitles into THIS file's
                     // source lane. Withheld entirely until a clip is attached
                     // — the cues are timed against its clock — and gated on the
@@ -12960,6 +13070,10 @@ export function ProjectWorkspace() {
                     onScrubStart={handleTimelineScrubStart}
                     onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
+                    textTrackCells={timelineText.cellsByFile}
+                    textTrackErrors={timelineText.errors}
+                    onRetryTextTrack={timelineText.refresh}
+                    onRetimeTextTrack={handleRetimeTextTrack}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
                     // Hidden rather than gated: gating only the callback would
@@ -13018,11 +13132,13 @@ export function ProjectWorkspace() {
                     // own comments in TimelineEditor for why absent, not
                     // disabled.
                     onRenameTrack={canReorderTracks ? handleRenameTrack : undefined}
+                    // Colour rides the same clearance alone (Sam, 2026-09-26):
+                    // how a track looks, not what the timeline holds.
+                    onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
                     trackEditing={
                       canEditTracks
                         ? {
                             onAdd: handleAddTrack,
-                            onSetColor: handleSetTrackColor,
                             onLeaveFolder: handleLeaveFolder,
                             onMoveToScope: handleMoveTrackToScope,
                             onCreateFolderFrom: handleCreateFolderFrom,
@@ -13124,6 +13240,8 @@ export function ProjectWorkspace() {
                     <MediaVideoPane
                       key={activeFile.id}
                       src={activeFile.coreMediaUrl}
+                      projectId={project.id}
+                      session={frontierSession}
                       // AQU-646 stage 2: the pane's header now carries the
                       // film's mute button, and audibility is stored per file.
                       fileId={activeFile.id}
@@ -13241,6 +13359,7 @@ export function ProjectWorkspace() {
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
             linkedTakesByCell={linkedTakesByCell}
+            heardLinesLoading={heardLinesLoading}
             cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
@@ -13257,11 +13376,20 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             audioLens={audioLens}
+            // Sam, 2026-09-26: the Audio view's colour IS the file's dub-track
+            // colour, the timeline's own value — one colour per file, the same
+            // for everyone. A maintainer may change it whatever the track-
+            // editing setting says (track-editing-authority.ts).
+            audioTrackColor={audioLens ? fileTrackColor(project?.files, activeFileId, DEFAULT_TARGET_TRACK_ID) : undefined}
+            onSetAudioTrackColor={
+              audioLens && canReorderTracks
+                ? (hueId) => handleSetTrackColor([{ trackId: DEFAULT_TARGET_TRACK_ID, color: hueId }])
+                : undefined
+            }
             castGutter={timelineStacked}
             ttsSettings={tts.settings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
-            onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
@@ -13343,21 +13471,8 @@ export function ProjectWorkspace() {
           />
         )}
         aside={(() => {
-          const showParallelBibles =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          // AQU-461: verse resources ride the same scripture-editor condition,
-          // plus the project's Bible-resources gate (the aquifer routes 404
-          // when it's off, so an ungated tab would only ever show an error).
-          const showVerseResources =
-            showParallelBibles &&
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
           const hasRightAside =
-            (showParallelBibles && parallelBiblesOpen) ||
-            (showVerseResources && verseResourcesOpen) ||
+            hasRightRailPanel(rightRail) ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -13372,7 +13487,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {showParallelBibles && parallelBiblesOpen && (
+              {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
                   key={activeFile!.id}
                   trackedRef={trackedCellRef}
@@ -13386,7 +13501,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {showVerseResources && verseResourcesOpen && (
+              {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
                   key={activeFile!.id}
                   projectId={project!.id}
@@ -13552,21 +13667,14 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          const inScriptureEditor =
-            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
-          if (!inScriptureEditor) return null
           // AQU-461: two collapsed tabs can stack here — bibles and verse
           // resources — each shown only while its own panel is closed.
-          const verseResourcesAvailable =
-            !!project &&
-            resolveBibleResourcesEnabled(
-              project.bibleResourcesEnabled,
-              projectHasScriptureFiles(project.files),
-            )
-          if (parallelBiblesOpen && !(verseResourcesAvailable && !verseResourcesOpen)) return null
+          // AQU-1316: both flags come from `rightRail`, the same value `aside`
+          // reads, so a tab can never sit beside its own open panel.
+          if (!hasRightRailEdge(rightRail)) return null
           return (
             <>
-              {!parallelBiblesOpen && (
+              {rightRail.biblesEdge && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-edge`}
                   trackedRef={trackedCellRef}
@@ -13578,7 +13686,7 @@ export function ProjectWorkspace() {
                   }}
                 />
               )}
-              {verseResourcesAvailable && !verseResourcesOpen && (
+              {rightRail.resourcesEdge && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources-edge`}
                   projectId={project!.id}
@@ -14137,6 +14245,48 @@ export function ProjectWorkspace() {
           void handleImportAudioVtt(parsed, sourceFileName, timebase)
         }}
       />
+      {captionDialogFileId && activeFile?.id === captionDialogFileId && project && (
+        <ImportTimelineTextDialog key={captionDialogFileId}
+          projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+          tracks={serverTimelineTracks.filter(track =>
+            track.kind === "source-subtitles" || track.kind === "target-subtitles",
+          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
+            segmentCount: track.contentFileId
+              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+              : cellsLoading ? null : cellSummaries.length,
+          }))}
+          onCancel={() => setCaptionDialogFileId(null)}
+          onConfirm={async input => {
+            if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
+            await importTimelineTextTrack({
+              ...input, projectId: project.id, anchorFileId: captionDialogFileId,
+              durationMs: captionMediaDurationMs, getToken: getTokenForFile,
+            })
+            await refresh()
+          }}
+        />
+      )}
+      {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
+        && project && alignmentClipUrl && (
+        <AlignTimelineScriptDialog key={alignmentDialogFileId}
+          projectId={project.id} fileId={alignmentDialogFileId}
+          mediaName={activeFile.name} clipUrl={alignmentClipUrl}
+          language={activeSourceLanguage ?? project.sourceLanguage}
+          durationMs={captionMediaDurationMs} canEditTracks={canEditTracks}
+          cells={audioMergedCells} getToken={getTokenForFile}
+          tracks={serverTimelineTracks.filter(track =>
+            track.kind === "source-subtitles" || track.kind === "target-subtitles",
+          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
+            segmentCount: track.contentFileId
+              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+              : cellsLoading ? null : cellSummaries.length,
+          }))}
+          onSaved={async () => { refresh() }}
+          onCancel={() => setAlignmentDialogFileId(null)}
+        />
+      )}
       {/* AQU-1139: the clip's sidecar subtitles, into this file's own source
           lane. Up here with its two siblings for the same reason — the
           workspace owns the emit, the outbox flush and the revalidate. */}

@@ -93,6 +93,7 @@ import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import agentConnectRoutes from "./routes/agent-connect"
+import { mcpOAuthPublicRoutes, mcpOAuthConsentRoutes } from "./routes/mcp-oauth"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
@@ -342,6 +343,11 @@ app.route("/api/v2/monday", mondayRoutes)
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
 app.route("/api/v2/agent-connect", agentConnectRoutes)
+// OAuth 2.1 + PKCE for MCP hosts (ChatGPT plugin, Claude, Codex): RFC 8414
+// metadata, /oauth/authorize → SPA consent, /oauth/token → aqk_ credential.
+// The consent page's session calls live under /api/v2/mcp-oauth.
+app.route("/", mcpOAuthPublicRoutes)
+app.route("/api/v2/mcp-oauth", mcpOAuthConsentRoutes)
 // One-time human approval assertion for ask-mode changesets (AQU-533 §3).
 // Browser-session-authenticated — distinct from the API-credential-gated
 // agent surface in sync-worker's /api/v1/external/projects/*/changesets.

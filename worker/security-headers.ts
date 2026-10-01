@@ -50,7 +50,7 @@ export const ENFORCED_CSP = [
  *  clean on the SPA. */
 export const REPORT_ONLY_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'wasm-unsafe-eval'",
+  "script-src 'self' 'wasm-unsafe-eval' https://www.youtube.com",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",

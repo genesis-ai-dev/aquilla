@@ -28,11 +28,46 @@ import { getOutputContext, resetOutputContextForTests } from "@/lib/audio/output
  *  count reaches zero, so the two cues say "now" at the same instant. */
 export const COUNTDOWN_FROM = 3
 
+/** One count, when nobody says otherwise: the count as it always was. */
+export const DEFAULT_COUNTDOWN_STEP_MS = 1000
+
+/** Past the tone's own length, the oscillator runs this much longer while its
+ *  gain finishes falling away. */
+const BEEP_RELEASE_MS = 20
+
+/**
+ * How long each beep lasts at a given count speed. (AQU-1210, Sam: "SHORTEN
+ * BEEP!")
+ *
+ * 120ms at one second a count and slower — the beep as it always was — and
+ * proportionally shorter below that, down to 60ms at the Fast half-second.
+ * The last beep sounds one step before zero and the take's pre-roll starts
+ * listening 200ms before zero, so at half a second a full-length beep (and the
+ * room's ring after it) would end barely clear of the window that is kept as
+ * the take's head. useCountdown.test pins the clearance at every speed.
+ */
+export function countdownBeepMs(stepMs: number): number {
+  return Math.round(Math.max(60, Math.min(120, stepMs * 0.12)))
+}
+
+/** When, relative to zero, the last beep has fully stopped (negative = before). */
+export function lastBeepEndsMs(stepMs: number): number {
+  return -stepMs + countdownBeepMs(stepMs) + BEEP_RELEASE_MS
+}
+
+export interface CountdownStartOptions {
+  beep?: boolean
+  from?: number
+  /** Milliseconds per count (see recording-countdown-pref). */
+  stepMs?: number
+  onDone?: () => void
+}
+
 export interface UseCountdown {
   /** null when idle; otherwise current tick (3 → 2 → 1 → 0). */
   count: number | null
   running: boolean
-  start: (opts?: { beep?: boolean; from?: number; onDone?: () => void }) => void
+  start: (opts?: CountdownStartOptions) => void
   cancel: () => void
 }
 
@@ -66,7 +101,7 @@ function beepOnce(freq: number, durationMs: number) {
     gain.gain.exponentialRampToValueAtTime(0.2, now + 0.01)
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000)
     osc.start(now)
-    osc.stop(now + durationMs / 1000 + 0.02)
+    osc.stop(now + (durationMs + BEEP_RELEASE_MS) / 1000)
     // The NODES are released; the context is not. See the block comment above.
     osc.onended = () => {
       try { osc.disconnect() } catch {}
@@ -88,15 +123,17 @@ export function useCountdown(): UseCountdown {
 
   useEffect(() => () => cancel(), [cancel])
 
-  const start = useCallback((opts?: { beep?: boolean; from?: number; onDone?: () => void }) => {
+  const start = useCallback((opts?: CountdownStartOptions) => {
     cancel()
     const beep = opts?.beep ?? true
     const from = Math.max(1, opts?.from ?? 3)
+    const stepMs = Math.max(1, opts?.stepMs ?? DEFAULT_COUNTDOWN_STEP_MS)
+    const beepMs = countdownBeepMs(stepMs)
     onDoneRef.current = opts?.onDone ?? null
 
     let current = from
     setCount(current)
-    if (beep) beepOnce(880, 120)
+    if (beep) beepOnce(880, beepMs)
 
     const tick = () => {
       current -= 1
@@ -112,10 +149,10 @@ export function useCountdown(): UseCountdown {
         fn?.()
         return
       }
-      if (beep) beepOnce(880, 120)
-      timeoutRef.current = setTimeout(tick, 1000)
+      if (beep) beepOnce(880, beepMs)
+      timeoutRef.current = setTimeout(tick, stepMs)
     }
-    timeoutRef.current = setTimeout(tick, 1000)
+    timeoutRef.current = setTimeout(tick, stepMs)
   }, [cancel])
 
   return { count, running: count !== null, start, cancel }

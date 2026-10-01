@@ -5,6 +5,7 @@ import {
   detectFileType,
   fileHasSections,
   isAudioCueFile,
+  isHiddenTimelineFile,
   isSubtitleImportFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
@@ -137,6 +138,17 @@ describe("isAudioCueFile", () => {
     expect(isAudioCueFile({})).toBe(false)
     expect(isAudioCueFile(null)).toBe(false)
     expect(isAudioCueFile(undefined)).toBe(false)
+  })
+})
+
+describe("hidden timeline content", () => {
+  it("hides independent text tracks without mistaking them for the audio cue track", () => {
+    const textTrack = { role: "timeline-content" }
+    expect(isHiddenTimelineFile(textTrack)).toBe(true)
+    expect(isAudioCueFile(textTrack)).toBe(false)
+    expect(isHiddenTimelineFile({ role: AUDIO_CUES_ROLE })).toBe(true)
+    expect(isHiddenTimelineFile({ role: "source" })).toBe(false)
+    expect(isHiddenTimelineFile(null)).toBe(false)
   })
 })
 

@@ -16,6 +16,13 @@
 // Every one of those is a way for the film to make sound, or to move, at a
 // moment nobody asked it to.
 //
+// FILM PLAY-ALONG (AQU-1210, Sam 2026-09-25) keeps that invariant. When a take
+// is played back inside the recorder, the picture follows the TAKE'S OWN
+// player: the modal hands down where in the film the take's current sample
+// belongs, every frame, and this seeks only when the picture has drifted
+// visibly. Nothing is published and nothing is read from the singletons —
+// it is still a picture, now one that watches the take.
+//
 // WHY THE FILM IS STOPPED DURING RECORDING TODAY, which is the constraint the
 // whole surface is shaped by: the mic is opened with `echoCancellation`,
 // `noiseSuppression` and `autoGainControl` all FALSE, so an audible film
@@ -51,6 +58,11 @@ const LEAD_IN_TOLERANCE_SEC = 0.12
  *  entrance is worse than the drift it removes, and the take's timing does not
  *  depend on the picture anyway — the countdown is the clock. */
 const LEAD_IN_SETTLE_SEC = 0.4
+
+/** How far the picture may drift from a take being played back before it is
+ *  put right. Looser than the lead-in's: this is review, and a seek every few
+ *  frames would stutter more than the drift it removed. */
+const FOLLOW_TOLERANCE_SEC = 0.25
 
 /**
  * Where the picture should sit for the line being recorded — pure, so the seek
@@ -96,6 +108,15 @@ export interface RecordingVideoSurfaceProps {
    *  to a line you already recorded — must re-fire, which a boolean cannot
    *  express. */
   armNonce: number
+  /**
+   * FILM PLAY-ALONG (AQU-1210): a take being played back — the preview after
+   * Stop, or the selected take on the ready screen — with the picture
+   * following it. `filmSec` is where in the film the take's current sample
+   * belongs (where the take sits, plus how far into it the player is);
+   * `playing` whether it is sounding. Null when nothing is being followed: the
+   * setting is off, the line has no timing, or a take is being captured.
+   */
+  follow?: { filmSec: number; playing: boolean } | null
   // An `overrun` prop used to draw a red ring round the whole picture when the
   // take ran past the end of the line. Removed 2026-08-16 (Sam: "get rid of
   // it") — the overrun already says so twice, in the duration bar and in the
@@ -109,6 +130,7 @@ export function RecordingVideoSurface({
   running,
   armNonce,
   leadIn,
+  follow = null,
 }: RecordingVideoSurfaceProps) {
   const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -267,6 +289,48 @@ export function RecordingVideoSurface({
       attempt.catch(() => {})
     }
   }, [running, leadIn])
+
+  // ── Play-along: the picture follows a take being played back.
+  //
+  // Seeks on the first frame of each playback (so the picture starts where the
+  // take does), then only on visible drift — which is also what follows a
+  // scrub, since a seek moves the take's position by more than the tolerance.
+  // A pause stops the picture with it, on the frame it reached; a take that
+  // plays to its end rewinds to the start of its kept part, and the picture
+  // follows it back there, ready to play again.
+  // A take being captured, or a countdown's lead-in, always owns the picture.
+  const followSec = follow ? follow.filmSec : null
+  const followPlaying = follow?.playing ?? false
+  const followingRef = useRef(false)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (running || leadIn) {
+      followingRef.current = false
+      return
+    }
+    if (followPlaying && followSec != null && Number.isFinite(followSec)) {
+      if (video.readyState < HAVE_METADATA) return
+      const target = Math.max(0, followSec)
+      // While the film is still seeking to the last target, leave it: a scrub
+      // moves the take every frame, and seeking a streamed film again before
+      // its last seek lands only piles up range requests it cannot serve —
+      // the next frame after it lands corrects any drift that is left.
+      if (!video.seeking && (!followingRef.current || Math.abs(video.currentTime - target) > FOLLOW_TOLERANCE_SEC)) {
+        try { video.currentTime = target } catch { /* not seekable yet */ }
+      }
+      if (video.paused) {
+        const attempt = video.play()
+        if (attempt && typeof attempt.catch === "function") attempt.catch(() => {})
+      }
+      followingRef.current = true
+      return
+    }
+    if (followingRef.current) {
+      followingRef.current = false
+      video.pause()
+    }
+  }, [followSec, followPlaying, running, leadIn])
 
   // The element is captured at effect time rather than read from the ref in the
   // cleanup, because React detaches refs before passive cleanups run on an

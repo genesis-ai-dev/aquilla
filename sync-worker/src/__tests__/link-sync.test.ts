@@ -55,7 +55,12 @@ function nextId(): string {
  *  the events table (so laneRelevantHeadSeq / delta queries see it). */
 async function emitUpstream(
   t: TestDb,
-  kind: "file.create" | "source.cell.create" | "source.cell.commit" | "source.cell.delete",
+  kind:
+    | "file.create"
+    | "file.rename"
+    | "source.cell.create"
+    | "source.cell.commit"
+    | "source.cell.delete",
   args: { fileId?: string; cellId?: string; payload: Record<string, unknown> },
 ): Promise<{ id: string; seq: number }> {
   const id = nextId()
@@ -282,6 +287,128 @@ describe("mirrorSync — delete / tombstone", () => {
       )
       expect(row.rows).toHaveLength(1) // row still exists
       expect(row.rows[0]?.tombstoned_at).not.toBeNull()
+    } finally {
+      await t.close()
+    }
+  })
+})
+
+describe("mirrorSync — stable file identity (AQU-1358)", () => {
+  const FILE_B = "file-exo"
+  const FILE_C = "file-lev"
+  const DOWNSTREAM_FILE_B = deterministicDownstreamFileId(DOWNSTREAM, FILE_B)
+  const DOWNSTREAM_FILE_C = deterministicDownstreamFileId(DOWNSTREAM, FILE_C)
+
+  async function downstreamFiles(t: TestDb): Promise<{ id: string; name: string }[]> {
+    const rows = await t.pg.query<{ id: string; name: string }>(
+      `SELECT id, name FROM files WHERE project_id = $1 ORDER BY name`,
+      [DOWNSTREAM],
+    )
+    return rows.rows
+  }
+
+  it("adding a new upstream file mirrors only that file — already-mirrored files are not re-copied", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamProject(t)
+      await seedDownstreamProject(t, { mode: "live" })
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "Genesis", fileType: "codex" } })
+      await emitUpstream(t, "file.create", { fileId: FILE_B, payload: { name: "Exodus", fileType: "codex" } })
+      await emitUpstream(t, "source.cell.create", {
+        fileId: FILE,
+        cellId: "cell-1",
+        payload: { cellId: "cell-1", value: "In the beginning", anchorCellId: null },
+      })
+
+      const seed = await mirrorSync(t.db, DOWNSTREAM)
+      expect(seed.filesMirrored).toBe(2)
+      expect(await downstreamFiles(t)).toHaveLength(2)
+
+      // Add new material (file C) upstream — the partner-reported repro.
+      await emitUpstream(t, "file.create", { fileId: FILE_C, payload: { name: "Leviticus", fileType: "codex" } })
+      const second = await mirrorSync(t.db, DOWNSTREAM)
+
+      // Only C is mirrored; A and B are untouched, not duplicated.
+      expect(second.filesMirrored).toBe(1)
+      const after = await downstreamFiles(t)
+      expect(after).toHaveLength(3)
+      expect(after.map((f) => f.name)).toEqual(["Exodus", "Genesis", "Leviticus"])
+      expect(after.map((f) => f.id).sort()).toEqual(
+        [DOWNSTREAM_FILE, DOWNSTREAM_FILE_B, DOWNSTREAM_FILE_C].sort(),
+      )
+
+      // A third consecutive addition stays idempotent too (AC: "at least two
+      // consecutive additions").
+      await emitUpstream(t, "file.create", { fileId: "file-num", payload: { name: "Numbers", fileType: "codex" } })
+      await mirrorSync(t.db, DOWNSTREAM)
+      expect(await downstreamFiles(t)).toHaveLength(4)
+
+      // And a sync with nothing new writes nothing at all.
+      const noop = await mirrorSync(t.db, DOWNSTREAM)
+      expect(noop.ranSync).toBe(false)
+      expect(await downstreamFiles(t)).toHaveLength(4)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("renaming an upstream file renames the downstream copy in place — no new file, cells keep their row", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamProject(t)
+      await seedDownstreamProject(t, { mode: "live" })
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "Genesis", fileType: "codex" } })
+      await emitUpstream(t, "source.cell.create", {
+        fileId: FILE,
+        cellId: "cell-1",
+        payload: { cellId: "cell-1", value: "In the beginning", anchorCellId: null },
+      })
+      await mirrorSync(t.db, DOWNSTREAM)
+      expect(await downstreamFiles(t)).toEqual([{ id: DOWNSTREAM_FILE, name: "Genesis" }])
+
+      await emitUpstream(t, "file.rename", { fileId: FILE, payload: { name: "Genesis (Revised)" } })
+
+      // A rename alone must make the downstream behind and mirror.
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+      expect(result.ranSync).toBe(true)
+      expect(result.filesMirrored).toBe(1)
+
+      // Renamed in place: same row id, new name, still exactly one file.
+      expect(await downstreamFiles(t)).toEqual([{ id: DOWNSTREAM_FILE, name: "Genesis (Revised)" }])
+
+      // The mirrored cell still hangs off that same file row.
+      const cell = await t.pg.query<{ value: string }>(
+        `SELECT value FROM cells WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
+        [DOWNSTREAM, DOWNSTREAM_FILE, "cell-1"],
+      )
+      expect(cell.rows[0]?.value).toBe("In the beginning")
+
+      // Re-running is a clean no-op — the rename does not re-emit forever.
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("a content-only upstream edit never re-emits file.mirror (staleness/repin path untouched)", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamProject(t)
+      await seedDownstreamProject(t, { mode: "live" })
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "Genesis", fileType: "codex" } })
+      await emitUpstream(t, "source.cell.create", {
+        fileId: FILE,
+        cellId: "cell-1",
+        payload: { cellId: "cell-1", value: "v1", anchorCellId: null },
+      })
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      await emitUpstream(t, "source.cell.commit", { fileId: FILE, cellId: "cell-1", payload: { value: "v2" } })
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+
+      expect(result.cellsMirrored).toBe(1)
+      expect(result.filesMirrored).toBe(0)
+      expect(await downstreamFiles(t)).toHaveLength(1)
     } finally {
       await t.close()
     }

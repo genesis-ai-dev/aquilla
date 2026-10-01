@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 import { AgentConnectionPage } from "../../helpers/page-objects/AgentConnectionPage"
@@ -36,4 +37,57 @@ test("browser consent delivers a project credential to the agent; revocation blo
   })
   expect(revoked.status).toBe(200)
   expect((await fetch(`${sync}/api/v1/external/me`, { headers })).status).toBe(401)
+})
+
+
+test("OAuth browser consent grants Act to selected current organizations only (AQU-1529)", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const jwt = await jwtFor("alice")
+  const authHeaders = { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }
+  async function createOrganization(name: string) {
+    const response = await fetch(`${auth}/api/v2/orgs`, {
+      method: "POST", headers: authHeaders, body: JSON.stringify({ name }),
+    })
+    expect(response.status).toBe(200)
+    return await response.json() as { id: number; name: string }
+  }
+  const included = await createOrganization("OAuth included")
+  const excluded = await createOrganization("OAuth excluded")
+  const verifier = "aquilla-browser-consent-verifier-" + "v".repeat(32)
+  const callback = "https://chatgpt.com/connector_platform_oauth_redirect"
+  const params = new URLSearchParams({
+    response_type: "code", client_id: "https://chatgpt.com/oauth/client.json",
+    redirect_uri: callback, code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256", state: "browser-org-snapshot", scope: "ask",
+  })
+  // Capture the host callback without navigating to a real ChatGPT session.
+  await alice.route(`${callback}**`, route => route.fulfill({ body: "OAuth callback received" }))
+  const consent = new AgentConnectionPage(alice)
+  await consent.reviewOAuth(`/oauth/consent?${params}`)
+  await consent.chooseAllCurrentOrganizations()
+  await consent.excludeOrganization(excluded.name)
+  await consent.allowOAuth()
+  await expect(alice).toHaveURL(/connector_platform_oauth_redirect.*code=/, { timeout: 30_000 })
+  const redirect = new URL(alice.url())
+  expect(redirect.searchParams.get("state")).toBe("browser-org-snapshot")
+  const tokenResponse = await fetch(`${auth}/oauth/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code", code: redirect.searchParams.get("code")!,
+      code_verifier: verifier, client_id: params.get("client_id")!, redirect_uri: callback,
+    }),
+  })
+  expect(tokenResponse.status).toBe(200)
+  const credential = await tokenResponse.json() as { access_token: string; scope: string }
+  expect(credential.scope).toBe("act")
+  const headers = { Authorization: `Bearer ${credential.access_token}` }
+  const future = await createOrganization("OAuth future membership")
+  const response = await fetch(`${sync}/api/v1/external/orgs`, { headers })
+  expect(response.status).toBe(200)
+  const body = await response.json() as { data: { id: string }[] }
+  expect(body.data.map(org => String(org.id))).toContain(String(included.id))
+  expect(body.data.map(org => String(org.id))).not.toContain(String(excluded.id))
+  expect(body.data.map(org => String(org.id))).not.toContain(String(future.id))
+  const me = await fetch(`${sync}/api/v1/external/me`, { headers })
+  expect(await me.json()).toMatchObject({ mode: "act", orgIds: expect.arrayContaining([String(included.id)]) })
 })

@@ -64,6 +64,8 @@ vi.mock("@/lib/sync/events-emit", () => ({
 }))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "sync-tok",
+  // The ready screen reads the line's takes (AQU-1217), through this.
+  makeAudioSyncTokenFetcher: () => async () => "sync-tok",
 }))
 vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -75,7 +77,12 @@ vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () =>
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+// The real coordinator, but for the keyboard override: the ready screen's take
+// player and its takes list take and give up the floor through it (AQU-1217).
+vi.mock("@/lib/audio/audio-coordinator", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  pushAudioShortcutOverride: () => () => {},
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 

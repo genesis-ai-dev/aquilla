@@ -237,3 +237,49 @@ describe("the snapshot React reads", () => {
     expect(getVirtualClockSec()).toBe(a)
   })
 })
+
+// 2026-09-30: the clock is the transport of a subtitle file with neither film
+// nor source audio, and pressing play there left a take sounding under the
+// timeline. It takes the floor like the play queue does.
+describe("one sound at a time", () => {
+  const other = () => {
+    let playing = true
+    const c = { isPlaying: () => playing, play: async () => { playing = true }, pause: vi.fn(() => { playing = false }) }
+    return c
+  }
+
+  it("stops whatever else is sounding when it starts", async () => {
+    const { claimActiveAudio, getActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+    const take = other()
+    claimActiveAudio(take)
+    startVirtualClock(10)
+    virtualClockPlay()
+    expect(take.pause).toHaveBeenCalledTimes(1)
+    expect(getActiveAudio()?.isPlaying()).toBe(true)
+    virtualClockPause()
+    expect(getActiveAudio()).toBeNull()
+    clearActiveAudioIf(take)
+  })
+
+  it("is stopped by the next thing that starts", async () => {
+    const { claimActiveAudio, clearActiveAudioIf } = await import("@/lib/audio/audio-coordinator")
+    startVirtualClock(10)
+    virtualClockPlay()
+    const take = other()
+    claimActiveAudio(take)
+    expect(getVirtualClockPlaying()).toBe(false)
+    clearActiveAudioIf(take)
+  })
+
+  it("lets go of the floor at the end and when it stops driving", async () => {
+    const { getActiveAudio } = await import("@/lib/audio/audio-coordinator")
+    startVirtualClock(1)
+    virtualClockPlay()
+    advance(1500)
+    expect(getVirtualClockPlaying()).toBe(false)
+    expect(getActiveAudio()).toBeNull()
+    virtualClockPlay()
+    stopVirtualClock()
+    expect(getActiveAudio()).toBeNull()
+  })
+})

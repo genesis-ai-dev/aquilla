@@ -12,7 +12,9 @@ profile or fall back from an unknown branch.
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
-`/sync/*` through the sync Worker. Staging is retired from the deployable
+`/sync/*` through the sync Worker. The identity Worker also owns
+`/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
@@ -33,8 +35,17 @@ branch; development deploy scripts refuse anything but `dev`. Every surface sele
 `development` explicitly. The shared deployer uploads
 a version, validates its exact ID and bindings, promotes it, reapplies
 routes/triggers, and confirms the same ID owns 100% traffic before public
-verification. Identity and sync deploys also run the target Neon schema guard
-before publishing.
+verification. Every surface — web, identity and sync alike — runs the target
+Neon schema guard before publishing, so a deployment is one unit: a pending
+migration or schema drift stops the SPA upload too, rather than leaving the
+site on new front-end code against old Workers and an un-migrated database
+(AQU-682/AQU-1157).
+
+**Migrate first, then deploy.** `npm run neon:apply:dev` / `neon:apply:prod`
+applies pending `db/postgres/migrations/` files to the target Neon branch; only
+then does any deploy command get past its guard. Migrations are never applied
+automatically by a deploy path or by an agent — that is a deliberate human step
+(`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -172,7 +183,9 @@ branches cut from `dev`; `main` is retired.
    It gets the next NN in that date's tag series.
 
 Prod lags `dev` by design, so migrations must be backward-compatible across one
-release (add first, remove in a later release).
+release (add first, remove in a later release). Apply the release's migrations
+to the target Neon branch *before* step 3 — every surface's deploy guard fails
+closed on a pending migration, and nothing publishes until it passes.
 
 ## Deployment ownership
 

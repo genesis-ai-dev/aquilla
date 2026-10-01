@@ -27,6 +27,7 @@ import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/u
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
+import { createMediaCueSpecs } from "./import/media-cues"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -492,6 +493,11 @@ export interface ImportContext {
    *  entry is stamped as `importManifest.origin` and projected verbatim to
    *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
   origins?: ReadonlyMap<string, Record<string, unknown>>
+  /** User-reviewed timed wording for this media file. */
+  mediaTextSource?: {
+    cues: readonly TranslatableString[]
+    artifact?: TargetImportArtifact
+  }
 }
 
 type PrepareImportContext = Pick<
@@ -1694,6 +1700,8 @@ export interface MediaSegmentSpec {
   /** Playback window into the shared clip — the bytes are uploaded once, not N times. */
   trimStartMs?: number
   trimEndMs?: number
+  transcription?: string
+  metadata?: Record<string, unknown>
 }
 
 /**
@@ -1749,7 +1757,11 @@ export async function emitMediaFile(
     throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
   }
   const fileId = uuidv7()
-  const { durationMs, specs } = await computeMediaSegmentSpecs(file)
+  const suppliedDuration = ctx.mediaTextSource
+    ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
+  const { durationMs, specs } = ctx.mediaTextSource
+    ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
+    : await computeMediaSegmentSpecs(file)
 
   const cells: BulkImportCell[] = specs.map((s, i) => ({
     id: uuidv7(),
@@ -1758,6 +1770,7 @@ export async function emitMediaFile(
     value: file.name,
     medium: "media",
     sequenceIndex: i,
+    ...(s.metadata ? { metadata: s.metadata } : {}),
     ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
   }))
 
@@ -1789,6 +1802,17 @@ export async function emitMediaFile(
   // cell with its trim window. Slot 'recording' is reused for the source clip;
   // a dedicated source-media slot is a later refinement.
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
+  const textArtifact = ctx.mediaTextSource?.artifact
+  if (textArtifact) {
+    await uploadSourceOriginal({
+      projectId: ctx.projectId, fileId, artifactId: uuidv7(),
+      bytes: textArtifact.bytes, format: textArtifact.format,
+      artifactName: textArtifact.name, memberPath: textArtifact.name,
+      bindingRole: "source", profileId: `builtin:media-cues-${textArtifact.format}`,
+      profileVersion: "1", fidelity: "preserved-only", updateSourceSidecar: false,
+      getToken: ctx.getToken, signal: ctx.signal,
+    })
+  }
   const audioId = buildAudioId(fileId)
   const artifactId = uuidv7()
   const upload = await uploadCellAudio({
@@ -1809,11 +1833,13 @@ export async function emitMediaFile(
   await publishStagedImport({
     projectId: ctx.projectId,
     fileId,
+    ...(fileType === "video" ? { coreMediaUrl: upload.url } : {}),
     attachments: specs.map((s) => ({
       cellId: s.cellId,
       audioId: `${upload.audioId}.${upload.ext}`,
       url: upload.url,
       slot: "recording",
+      ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
       ...(file.type ? { mimeType: file.type } : {}),
       ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
       ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
@@ -1827,7 +1853,7 @@ export async function emitMediaFile(
   // AQU-646: seed the post-import auto-transcribe — the workspace's
   // import-completion handler consumes this (the cell store won't have these
   // cells, let alone their attachments, until an unawaitable revalidate).
-  recordMediaImportSeed({
+  if (!ctx.mediaTextSource) recordMediaImportSeed({
     fileId,
     cells: buildMediaSeedCells({
       fileId,
@@ -1846,6 +1872,7 @@ export async function emitMediaFile(
     createdAt: new Date().toISOString(),
     cellCount: cells.length,
     orderedBy: "time",
+    hasOriginalSource: true,
   }
 }
 

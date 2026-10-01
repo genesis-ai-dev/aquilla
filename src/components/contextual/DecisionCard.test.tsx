@@ -5,7 +5,9 @@
 // answerable rather than merely annoying. Dismiss must be as easy as answer —
 // dismissal rate is a designed signal, so the UI must not discourage it.
 
-import { render, screen } from "@testing-library/react"
+import { render as rtlRender, screen } from "@testing-library/react"
+import type { ReactElement } from "react"
+import { MemoryRouter } from "react-router-dom"
 import userEvent from "@testing-library/user-event"
 import { describe, it, expect, vi } from "vitest"
 import { DecisionCard } from "./DecisionCard"
@@ -15,6 +17,15 @@ vi.mock("@/lib/contextual/transport", async (orig) => ({
   ...(await orig<typeof import("@/lib/contextual/transport")>()),
   actOnContextualDecision: vi.fn().mockResolvedValue(undefined),
 }))
+
+// The card now carries a "where does this apply" line that reads cells; these
+// tests are about the question itself, so that read is stubbed out.
+vi.mock("@/lib/contextual/decision-context", () => ({
+  loadDecisionPlace: vi.fn(() => new Promise(() => {})),
+  loadDecisionSurroundings: vi.fn(),
+}))
+
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>)
 
 const decision: ContextualDecisionView = {
   id: "d1",

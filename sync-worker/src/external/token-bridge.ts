@@ -7,6 +7,7 @@
 // invoking handleEventsWriteRequest with a synthetic Request. This module mints
 // that token and enforces the credential's scope ceiling first.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from 'hono/jwt'
 import { ExternalError } from './errors'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -48,7 +49,7 @@ export async function assertCredentialScope(
   }
 
   const projectOrgId = project.org_id == null ? null : String(project.org_id)
-  if (cred.orgId != null && cred.orgId !== projectOrgId) {
+  if (!credentialAllowsOrganization(cred, projectOrgId)) {
     throw new ExternalError(
       'scope_denied',
       'credential org scope does not match this project',

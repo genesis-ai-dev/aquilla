@@ -9,7 +9,8 @@
 // Idempotent: a committed changeset returns its stored receipt without
 // re-applying. Ask-mode confirmations are consumed exactly once.
 
-import { errorResponse, toErrorResponse } from './errors'
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
+import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
   isStructureCommandKind,
@@ -194,6 +195,27 @@ export async function commitChangesetCore(
   } else {
     const denied = await changesetAuthorityDenied(db, cs, cred)
     if (denied) return denied
+  }
+
+  // AQU-1529: enforce the live OAuth ceiling before returning receipts or
+  // claiming a staged plan. Pre-creation plans use their command's org scope.
+  if (cred.orgIds !== undefined) {
+    try {
+      for (const command of cs.commands) {
+        if (command.kind === 'CreateOrg') {
+          throw new ExternalError('scope_denied', 'organization grant cannot create another organization')
+        }
+        if (command.kind === 'CreateProject' || isOrgMemberCommand(command)) {
+          if (!credentialAllowsOrganization(cred, String(command.orgId))) {
+            throw new ExternalError('scope_denied', 'organization is outside the credential scope')
+          }
+        } else {
+          await assertCredentialScope(db, cred, projectId)
+        }
+      }
+    } catch (err) {
+      return toErrorResponse(err)
+    }
   }
 
   // ── Status gate ──────────────────────────────────────────────────────────
@@ -1099,7 +1121,7 @@ async function commitCreateProject(
     return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
   }
   const targetOrgStr = orgId == null ? null : String(orgId)
-  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+  if (!credentialAllowsOrganization(cred, targetOrgStr)) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
   if (orgId != null) {
@@ -1204,7 +1226,7 @@ async function commitCreateOrg(
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
   }
-  if (cred.orgId != null) {
+  if (cred.orgId != null || cred.orgIds !== undefined) {
     return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
   }
 

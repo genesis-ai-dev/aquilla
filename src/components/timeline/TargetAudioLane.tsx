@@ -59,7 +59,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { takeState } from "@/components/cell/audio-validation-state"
+import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -272,6 +273,14 @@ function TargetAudioChip({
    */
   const [previewing, setPreviewing] = useState(false)
   const previewRef = useRef<ClipPreviewHandle | null>(null)
+  /**
+   * Fetching the clip before it can sound (2026-09-30). On a slow connection
+   * that took 14.6s with the button still saying "Play this clip" — nothing on
+   * screen said anything had happened. It shows a spinner now, and a second
+   * press gives up the wait.
+   */
+  const [priming, setPriming] = useState(false)
+  const primingRef = useRef<{ cancelled: boolean } | null>(null)
   useEffect(() => () => { previewRef.current?.stop() }, [])
   /** The mini-playhead's DOM node — positioned imperatively per frame, so the
    *  60Hz ride never re-renders the chip. */
@@ -307,15 +316,8 @@ function TargetAudioChip({
   // single check, a met threshold is a double one, and somebody ELSE's lone
   // vote is nothing at all. (The gutter draws that last case as a filled mic;
   // the chip has no idle affordance to fill, so it stays bare.)
-  const chipValidationState = chipTake && (chipTake.role ?? "dub") === "dub"
-    ? takeState(
-        {
-          validatorCount: chipTake.validatorCount ?? 0,
-          validators: chipTake.validators ?? [],
-        },
-        currentUsername,
-        validationRequirementAudio,
-      )
+  const chipValidationState = chipTake
+    ? takeBadgeState(chipTake, currentUsername, validationRequirementAudio)
     : null
 
   // The one span transform shared by preview and commit.
@@ -639,6 +641,13 @@ function TargetAudioChip({
       setPreviewing(false)
       return
     }
+    // A press while the clip is still arriving gives up waiting for it.
+    if (primingRef.current) {
+      primingRef.current.cancelled = true
+      primingRef.current = null
+      setPriming(false)
+      return
+    }
     if (!preview) return
     // ASK FIRST, AND SAY SO WHEN THE ANSWER IS NO (2026-08-28). This used to
     // play straight into whatever happened: a clip nobody has measured that is
@@ -646,7 +655,19 @@ function TargetAudioChip({
     // button made no sound and offered no reason. The device is already
     // resumed by the pointerdown handler, which runs inside the gesture, so
     // awaiting here costs nothing a browser cares about.
-    const ready = await preview.prime()
+    const attempt = { cancelled: false }
+    primingRef.current = attempt
+    setPriming(true)
+    let ready: Awaited<ReturnType<typeof preview.prime>>
+    try {
+      ready = await preview.prime()
+    } finally {
+      if (primingRef.current === attempt) {
+        primingRef.current = null
+        setPriming(false)
+      }
+    }
+    if (attempt.cancelled) return
     if (ready !== "ready") {
       toast.add({
         type: "info",
@@ -1002,8 +1023,9 @@ function TargetAudioChip({
         <span
           role="button"
           tabIndex={0}
-          title={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
-          aria-label={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-busy={priming || undefined}
           data-testid={`tl-target-${cell.id}-play`}
           onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
           onClick={(e) => { e.stopPropagation(); togglePreview() }}
@@ -1014,9 +1036,11 @@ function TargetAudioChip({
               togglePreview()
             }
           }}
-          className="absolute left-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("left")}
         >
-          {previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
+          {priming
+            ? <Spinner className="h-2.5 w-2.5" />
+            : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
         </span>
       )}
       {showRecordButton && onOpenRecording && (
@@ -1039,7 +1063,7 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className="absolute right-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("right")}
         >
           <Mic className="h-2.5 w-2.5" />
         </span>
@@ -1053,7 +1077,7 @@ function TargetAudioChip({
           aria-label={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
-          className="pointer-events-none absolute bottom-1 right-2 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/80 text-green-500 shadow-sm ring-1 ring-border"
+          className={CHIP_VALIDATED_BADGE_CLASS}
         >
           {chipValidationState === "full"
             ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
@@ -1070,7 +1094,7 @@ function TargetAudioChip({
           aria-hidden
           ref={playlineRef}
           data-testid={`tl-target-${cell.id}-playline`}
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-white opacity-0 shadow-[0_0_2px_rgba(0,0,0,0.5)]"
+          className={CHIP_PLAYLINE_CLASS}
         />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does

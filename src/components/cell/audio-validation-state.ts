@@ -26,6 +26,25 @@ export function takeState(
 }
 
 /**
+ * The state one take's validated TICK shows, or null for a clip that is not a
+ * dub take (an imported source clip never wears a tick). Lifted from the
+ * timeline chip so the shared waveform rectangle reads a take's tick through
+ * the same rule: `self`/`full` draw a check, `none`/`others` draw nothing.
+ */
+export function takeBadgeState(
+  att: { role?: string | null; validatorCount?: number | null; validators?: readonly string[] | null },
+  currentUsername: string,
+  requirement: number,
+): TakeState | null {
+  if ((att.role ?? "dub") !== "dub") return null
+  return takeState(
+    { validatorCount: att.validatorCount ?? 0, validators: [...(att.validators ?? [])] },
+    currentUsername,
+    requirement,
+  )
+}
+
+/**
  * The line's state: the WEAKEST of its takes.
  *
  * Deliberately the minimum and not the maximum. Two tracks sound together, so

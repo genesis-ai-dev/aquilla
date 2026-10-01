@@ -16,6 +16,7 @@ import {
   actOnContextualDecision,
   type ContextualDecisionView,
 } from "@/lib/contextual/transport"
+import { DecisionContext } from "./DecisionContext"
 
 export interface DecisionCardProps {
   decision: ContextualDecisionView
@@ -52,6 +53,7 @@ export function DecisionCard({ decision, projectId, onResolved }: DecisionCardPr
       className="flex flex-col gap-3 rounded-lg border p-4"
     >
       <p className="text-sm">{decision.reason}</p>
+      <DecisionContext projectId={projectId} fileId={decision.fileId} cellIds={decision.cellIds} />
       {decision.blastRadius > 0 && (
         <p className="text-xs text-muted-foreground">
           {t("autopilot.decisions.blastRadius", { count: decision.blastRadius })}

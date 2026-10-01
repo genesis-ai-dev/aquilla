@@ -17,20 +17,28 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 
-import { COUNTDOWN_FROM, resetCountdownBeepContextForTests, useCountdown } from "./useCountdown"
+import {
+  COUNTDOWN_FROM,
+  countdownBeepMs,
+  lastBeepEndsMs,
+  resetCountdownBeepContextForTests,
+  useCountdown,
+} from "./useCountdown"
+import { COUNTDOWN_STEP_MS } from "@/lib/store/recording-countdown-pref"
+import { PRE_ROLL_MS } from "@/hooks/useAudioRecorder"
 
 /** Counts beeps by standing in for the AudioContext beepOnce builds per tick.
  *  happy-dom has none, so without this the real code's try/catch would swallow
  *  every beep and a "no beep at zero" assertion would pass vacuously. */
-function installAudioContextSpy(): { beeps: number[] } {
-  const record = { beeps: [] as number[] }
+function installAudioContextSpy(): { beeps: number[]; stops: number[] } {
+  const record = { beeps: [] as number[], stops: [] as number[] }
   class FakeOsc {
     frequency = { value: 0 }
     type = ""
     onended: (() => void) | null = null
     connect() {}
     start() { record.beeps.push(this.frequency.value) }
-    stop() {}
+    stop(at: number) { record.stops.push(at) }
   }
   class FakeCtx {
     currentTime = 0
@@ -104,5 +112,46 @@ describe("useCountdown — zero is one instant", () => {
     act(() => { vi.advanceTimersByTime(5000) })
     expect(onDone).not.toHaveBeenCalled()
     expect(result.current.count).toBeNull()
+  })
+})
+
+// AQU-1210 (Sam, 2026-09-25): the count has a speed — Fast half a second,
+// Normal one, Slow one and a half — and the beep is SHORTENED at the fast end.
+describe("useCountdown — speed, and a beep that never reaches the take", () => {
+  beforeEach(() => { vi.useFakeTimers(); resetCountdownBeepContextForTests() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it.each(Object.entries(COUNTDOWN_STEP_MS))("%s: zero lands at three counts of its step", (_speed, stepMs) => {
+    installAudioContextSpy()
+    const onDone = vi.fn()
+    const { result } = renderHook(() => useCountdown())
+    act(() => { result.current.start({ beep: false, from: COUNTDOWN_FROM, stepMs, onDone }) })
+    act(() => { vi.advanceTimersByTime(COUNTDOWN_FROM * stepMs - 1) })
+    expect(onDone).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps today's beep at one second a count and slower, and halves it at Fast", () => {
+    expect(countdownBeepMs(COUNTDOWN_STEP_MS.normal)).toBe(120)
+    expect(countdownBeepMs(COUNTDOWN_STEP_MS.slow)).toBe(120)
+    expect(countdownBeepMs(COUNTDOWN_STEP_MS.fast)).toBe(60)
+  })
+
+  // The take's pre-roll keeps the last 200ms before zero as the take's head.
+  // The last beep sounds one step before zero; at every speed it has to be
+  // over — with room for the room's own ring — before that window opens.
+  it.each(Object.entries(COUNTDOWN_STEP_MS))("%s: the last beep ends at least 150ms before the pre-roll opens", (_speed, stepMs) => {
+    expect(lastBeepEndsMs(stepMs)).toBeLessThanOrEqual(-(PRE_ROLL_MS + 150))
+  })
+
+  it("the beeps it plays are the shortened ones", () => {
+    const audio = installAudioContextSpy()
+    const { result } = renderHook(() => useCountdown())
+    act(() => { result.current.start({ beep: true, from: COUNTDOWN_FROM, stepMs: COUNTDOWN_STEP_MS.fast }) })
+    act(() => { vi.advanceTimersByTime(COUNTDOWN_FROM * COUNTDOWN_STEP_MS.fast + 100) })
+    expect(audio.beeps).toEqual([880, 880, 880])
+    // The fake context's clock sits at 0: each stop is the beep plus its release.
+    for (const at of audio.stops) expect(at).toBeCloseTo(0.08)
   })
 })

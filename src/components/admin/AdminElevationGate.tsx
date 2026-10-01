@@ -11,6 +11,9 @@ import { requestAdminElevation, verifyAdminElevation } from "@/lib/frontier/admi
 
 const CODE_LENGTH = 6
 
+const CONSOLE_DESCRIPTION =
+  "The admin console is protected. Confirm it's you with a one-time code sent to your company email."
+
 /**
  * Step-up "sudo" gate shown before the admin console when hardening is on.
  * Two phases: request a code (emailed to the operator's @company address), then
@@ -22,10 +25,13 @@ export function AdminElevationGate({
   jwt,
   email,
   onElevated,
+  description = CONSOLE_DESCRIPTION,
 }: {
   jwt: string
   email: string | null
   onElevated: () => void
+  /** Override the intro line (the global step-up dialog words it for a single change). */
+  description?: string
 }) {
   const [phase, setPhase] = useState<"request" | "verify">("request")
   const [busy, setBusy] = useState(false)
@@ -80,10 +86,7 @@ export function AdminElevationGate({
         <ShieldCheck className="size-6" />
       </div>
       <h2 className="font-heading text-lg font-medium">Admin verification required</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        The admin console is protected. Confirm it's you with a one-time code sent to your
-        company email.
-      </p>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
 
       {phase === "request" ? (
         <div className="mt-6 space-y-3">

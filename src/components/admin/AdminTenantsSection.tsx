@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, type MouseEvent } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Building2 } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
@@ -13,17 +13,23 @@ import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 /**
  * Tenants — flat cross-tenant list of organizations. Team nesting lives on the
  * Teams tab; this table only shows a per-org team count. Row click switches
- * into the org workspace (platform admins resolve owner-level everywhere).
+ * into the org workspace (platform admins resolve owner-level everywhere). The
+ * trailing actions column jumps straight to an org's Members page or its
+ * People & access page (AQU-1322); those buttons stop the click so the row
+ * handler does not also fire.
  */
 
 export function AdminTenantsSection({
   orgs,
   teams,
   onOpenOrg,
+  onOpenOrgPath,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
   onOpenOrg: (orgId: number) => void
+  /** Open an org subpage such as "/members" or "/access". */
+  onOpenOrgPath: (orgId: number, subpath: string) => void
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -118,8 +124,31 @@ export function AdminTenantsSection({
           />
         ),
       },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => null,
+        cell: ({ row }) => {
+          const orgId = row.original.id
+          const open = (subpath: string) => (e: MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation()
+            onOpenOrgPath(orgId, subpath)
+          }
+          const linkClass = "text-xs text-primary hover:underline"
+          return (
+            <div className="flex justify-end gap-3 whitespace-nowrap">
+              <button type="button" className={linkClass} onClick={open("/members")}>
+                Members
+              </button>
+              <button type="button" className={linkClass} onClick={open("/access")}>
+                People &amp; access
+              </button>
+            </div>
+          )
+        },
+      },
     ],
-    [teamCountByOrg],
+    [teamCountByOrg, onOpenOrgPath],
   )
 
   return (

@@ -96,6 +96,14 @@ export function AdminConsole() {
     [setActiveOrg, navigate],
   )
 
+  const openOrgPath = useCallback(
+    (orgId: number, subpath: string) => {
+      setActiveOrg(orgId)
+      navigate(orgPath(orgId, subpath))
+    },
+    [setActiveOrg, navigate],
+  )
+
   const openTeam = useCallback(
     (team: AdminTeam) => {
       setActiveOrg(team.orgId)
@@ -202,7 +210,12 @@ export function AdminConsole() {
           <TabsContent value="migration">{jwt && <AdminMigrationSection jwt={jwt} />}</TabsContent>
 
           <TabsContent value="tenants">
-            <AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={openOrg} />
+            <AdminTenantsSection
+              orgs={orgs}
+              teams={teams}
+              onOpenOrg={openOrg}
+              onOpenOrgPath={openOrgPath}
+            />
           </TabsContent>
 
           <TabsContent value="teams">

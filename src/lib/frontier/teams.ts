@@ -1,6 +1,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { throwIfElevationRequired } from "./elevation"
 import type { MemberGrantResult } from "./members"
 
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
@@ -66,23 +67,27 @@ export async function getTeam(jwt: string, orgId: number, groupId: number): Prom
 
 export async function createTeam(jwt: string, orgId: number, name: string, description?: string): Promise<{ id: number; name: string; description: string | null }> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(description != null ? { name, description } : { name }) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
   return (await res.json()) as { id: number; name: string; description: string | null }
 }
 
 export async function updateTeam(jwt: string, orgId: number, groupId: number, patch: { name?: string; description?: string }): Promise<{ id: number; name: string; description: string | null }> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}`, { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify(patch) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
   return (await res.json()) as { id: number; name: string; description: string | null }
 }
 
 export async function deleteTeam(jwt: string, orgId: number, groupId: number): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}`, { method: "DELETE", headers: authHeaders(jwt) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
 }
 
 export async function addTeamMember(jwt: string, orgId: number, groupId: number, username: string): Promise<{ userId: number; username: string }> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ username }) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
   return (await res.json()) as { userId: number; username: string }
 }
@@ -94,29 +99,34 @@ export async function addTeamMember(jwt: string, orgId: number, groupId: number,
  */
 export async function addTeamMembers(jwt: string, orgId: number, groupId: number, usernames: string[]): Promise<MemberGrantResult[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ usernames }) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
   return ((await res.json()) as { results: MemberGrantResult[] }).results
 }
 
 export async function removeTeamMember(jwt: string, orgId: number, groupId: number, userId: number): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members/${userId}`, { method: "DELETE", headers: authHeaders(jwt) })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
 }
 
 export async function attachProject(jwt: string, orgId: number, groupId: number, projectId: string, roleLevel: number): Promise<{ projectId: string; roleLevel: number }> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ projectId, roleLevel }) })
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) throw new UserError(res.status, "", "project")
   return (await res.json()) as { projectId: string; roleLevel: number }
 }
 
 export async function changeProjectRole(jwt: string, orgId: number, groupId: number, projectId: string, roleLevel: number): Promise<{ projectId: string; roleLevel: number }> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ roleLevel }) })
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) throw new UserError(res.status, "", "project")
   return (await res.json()) as { projectId: string; roleLevel: number }
 }
 
 export async function detachProject(jwt: string, orgId: number, groupId: number, projectId: string): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", headers: authHeaders(jwt) })
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) throw new UserError(res.status, "", "project")
 }
 
@@ -133,5 +143,6 @@ export async function setTeamMemberRole(
     headers: authHeaders(jwt),
     body: JSON.stringify({ roleLevel }),
   })
+  await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, await res.text().catch(() => ""), "team")
 }

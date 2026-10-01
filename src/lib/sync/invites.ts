@@ -28,6 +28,7 @@
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 import { UserError } from "@/lib/errors/user-error"
+import { throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 /**
  * Invite tokens are bearer credentials — anyone holding one can join the
@@ -185,6 +186,7 @@ export async function createServerInvite(
         body: JSON.stringify(body),
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(
         `[invites] createServerInvite ${projectId} → HTTP ${res.status}`
@@ -305,6 +307,7 @@ export async function listProjectInvites(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] listProjectInvites ${projectId} → HTTP ${res.status}`)
       return null
@@ -335,6 +338,7 @@ export async function revokeProjectInvite(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] revokeProjectInvite ${tokenFingerprint(token)} → HTTP ${res.status}`)
       return false

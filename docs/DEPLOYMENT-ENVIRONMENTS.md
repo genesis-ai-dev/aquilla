@@ -52,13 +52,60 @@ copy between environments: provisioning a key on `aquilla-identity` leaves
 from that surface's directory:
 
 ```bash
+# from the repo root — identity and sync only (see "Rotating a secret" for why)
+printf %s "$KEY" | pnpm run secrets:rotate <identity|sync> <production|development> <NAME>
+
 # from the surface directory (auth-worker/, sync-worker/, or the repo root for web)
-printf %s "$KEY" | npx wrangler secret put <NAME> --env <production|development>
 npx wrangler secret list --env <production|development>   # names only, never values
 ```
 
 Use `printf %s`, not `echo` — `echo` appends a newline and stores it as part of the
 secret, which fails as an opaque upstream `401` rather than a missing-key error.
+
+### Rotating a secret (AQU-1361)
+
+**Never rotate an identity or sync secret with bare `wrangler secret put`.** That command
+is a one-shot: it patches the live Worker and immediately shifts traffic to a new version
+Cloudflare derives from the running one. The derived version keeps the script etag and
+every binding — and drops the custom version tag. Both API Workers' environment guards
+(`auth-worker/src/environment-guard.ts`, `sync-worker/src/environment-guard.ts`) require
+`CF_VERSION_METADATA.tag` to name the Worker and environment serving a first-party API
+host, so the rotation lands a hard `503 Worker deployment configuration does not match
+this API environment` with correct secrets and correct bindings. That is what took dev
+sync offline on 2026-09-22.
+
+`scripts/cloudflare-secret-rotate.mjs` is the supported path, and it keeps the guard
+fail-closed rather than loosening it:
+
+```bash
+printf %s "$KEY" | pnpm run secrets:rotate sync development SYNC_SECRET_KEY
+```
+
+1. **Stage** — `wrangler versions secret put --tag <worker>-<environment>-<sha>` creates a
+   new version carrying the rotated secret *and* the deployment tag, without shifting any
+   traffic.
+2. **Verify** — the staged version's actual bindings are checked against
+   `config/cloudflare-deployments.json` (Hyperdrive id, R2 buckets, plain-text vars,
+   required secrets) before it can serve. A mismatch aborts with nothing promoted.
+3. **Promote** — that exact version id goes to 100%, then `verify-worker-deployment.mjs`
+   confirms it is the single active version and `verify-live-environment.mjs` re-checks the
+   live endpoints.
+
+The secret value is piped through wrangler's inherited stdin, so it never enters the Node
+process, its logs, or its error messages. The script refuses a surface other than
+`identity`/`sync`, a name absent from that Worker's required secrets in the manifest, and
+any output it cannot parse a version id from. A secret that is live on a Worker but not
+listed for that environment — `INWORLD_API_KEY` on `aquilla-sync-worker-dev`, say — is
+refused by name: add it to the manifest (and the table above) first, so the manifest stays
+the source of truth the deployers enforce. **Web secrets** rotate by re-running
+`deploy:aquilla:spa` / `deploy:aquilla:dev:spa` after the `wrangler secret put` — the web
+version is verified against an immutable preview origin, which a patched version has none
+of.
+
+A rotation that has already gone out the old way is recovered the same way any untagged
+version is: re-run that surface's verified deployment
+(`pnpm run deploy:aquilla:dev:sync`, …), which stages and promotes a properly tagged
+version with the new secret value intact.
 
 `config/cloudflare-deployments.json` is the source of truth for which secrets each
 Worker requires, and the deployers enforce it: `cloudflare-version-deploy.mjs` verifies

@@ -1,55 +1,68 @@
 // AQU-1493: lines nobody gave a reference — a line added in the editor carries
-// no canonical_ref — on the plan's book rows.
+// no canonical_ref — on the plan's chapter and book rows.
 //
 // The file's own row always counted them; no book or chapter row did. Six blank
 // added lines left a book at 100% and "Nothing left" on the board while the
-// file's untranslated count said six (ETEN, 2026-09-29). In a file that holds
-// one book they now count toward it; in a file of several they stay in the
-// file's row only, and nothing guesses which book they belong to.
+// file's untranslated count said six (ETEN, 2026-09-29). Sam's rule
+// (2026-10-01): such a line belongs to the chapter of the line ABOVE it in the
+// file — however many are stacked in a row — and a line at the top of a file to
+// the front matter of its first book. Projection-time only; no cell is written.
+//
+// "Above" is the anchor chain, which is the editor's own order. Each fixture
+// below chains its cells explicitly, head first.
 import { describe, it, expect } from "vitest"
-import { fullProgressRecomputeStmts, sectionsProgressRecomputeStmt } from "../events/progress-projection"
-import { readFirstOpenCell } from "../events/progress-read-route"
+import {
+  fullProgressRecomputeStmts,
+  sectionsProgressRecomputeStmt,
+  UNREFERENCED_LINES_STALE_FILES_SQL,
+} from "../events/progress-projection"
+import {
+  handleProgressReadRequest,
+  readFirstOpenCell,
+  type SectionProgressDetailResponse,
+} from "../events/progress-read-route"
 import { makeTestDb } from "./helpers/pg-test-db"
+import { makeTestToken } from "./helpers/auth"
 
 const P = "proj-a"
 const F = "file-1"
 const TS = 1_700_000_000_000
+const SECRET = "progress-secret"
 
-interface CellSeed {
-  cell_id: string
-  side?: string
-  canonical_ref?: string | null
-  value?: string
-  endorsement_count?: number
-  start_ms?: number | null
-  hidden_at?: number | null
+interface Line {
+  id: string
+  /** The verse reference; omitted for a line added by hand. */
+  ref?: string
+  /** Translated (and validated once) when true. */
+  done?: boolean
+  hidden?: boolean
+  startMs?: number
 }
 
-function cell(c: CellSeed) {
-  return {
-    project_id: P,
-    file_id: F,
-    cell_id: c.cell_id,
-    side: c.side ?? "source",
-    target_lang: "",
-    value: c.value ?? "",
-    canonical_ref: c.canonical_ref ?? null,
-    endorsement_count: c.endorsement_count ?? 0,
-    last_edit_at: TS,
-    start_ms: c.start_ms ?? null,
-    hidden_at: c.hidden_at ?? null,
-    event_id: `ev-${c.cell_id}-${c.side ?? "source"}`,
-  }
+/**
+ * A file as the editor shows it, top to bottom: each line anchored on the one
+ * before it, the first on nothing. Returns source rows plus a target row for
+ * every line marked done.
+ */
+function chain(lines: Line[]) {
+  const rows: object[] = []
+  lines.forEach((l, i) => {
+    rows.push({
+      project_id: P, file_id: F, cell_id: l.id, side: "source", target_lang: "",
+      value: `source ${l.id}`, canonical_ref: l.ref ?? null,
+      anchor_cell_id: i === 0 ? null : lines[i - 1].id,
+      start_ms: l.startMs ?? null, hidden_at: l.hidden ? TS : null,
+      last_edit_at: TS, event_id: `ev-${l.id}`,
+    })
+    if (l.done) {
+      rows.push({
+        project_id: P, file_id: F, cell_id: l.id, side: "target", target_lang: "",
+        value: "done", endorsement_count: 1, last_edit_at: TS, event_id: `tev-${l.id}`,
+      })
+    }
+  })
+  return rows
 }
-
-/** A translated, validated verse: source plus its target. */
-const done = (id: string, ref: string) => [
-  cell({ cell_id: id, canonical_ref: ref }),
-  cell({ cell_id: id, side: "target", value: "done", endorsement_count: 1 }),
-]
-
-/** A line added in the editor: no reference, nothing translated yet. */
-const added = (id: string) => cell({ cell_id: id })
 
 type Db = Parameters<typeof fullProgressRecomputeStmts>[0]
 
@@ -79,122 +92,155 @@ async function keys(db: Db, scope: string) {
   return (r.results ?? []).map((x) => x.section_key)
 }
 
-describe("lines with no reference on a one-book file (AQU-1493)", () => {
-  it("count toward the book, so the book is short exactly where the file is", async () => {
-    const { db } = await makeTestDb({
-      cells: [...done("g1", "GEN 1:1"), ...done("g2", "GEN 1:2"), added("x1"), added("x2")],
-    })
+/** Jonah 1–2 with two lines added by hand below 2:1. */
+const JONAH = [
+  { id: "j11", ref: "JON 1:1", done: true },
+  { id: "j12", ref: "JON 1:2", done: true },
+  { id: "j21", ref: "JON 2:1", done: true },
+  { id: "x1" },
+  { id: "x2" },
+  { id: "j22", ref: "JON 2:2", done: true },
+]
+
+describe("a line with no reference counts in the chapter of the line above it (AQU-1493)", () => {
+  it("takes the chapter above it, two added lines in a row included", async () => {
+    const { db } = await makeTestDb({ cells: chain(JONAH) })
     await recompute(db)
 
-    // The book and the file now agree: four lines, two of them blank.
-    expect(await row(db, "file", "")).toEqual({ total_count: 4, filled_count: 2 })
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 4, filled_count: 2 })
-    // They have no chapter, and no chapter pretends to hold them.
-    expect(await row(db, "section", "GEN 1")).toEqual({ total_count: 2, filled_count: 2 })
-    expect(await keys(db, "section")).toEqual(["GEN 1"])
+    // Chapter 2 now holds 2:1, both added lines and 2:2 — two of them blank.
+    expect(await row(db, "section", "JON 2")).toEqual({ total_count: 4, filled_count: 2 })
+    expect(await row(db, "section", "JON 1")).toEqual({ total_count: 2, filled_count: 2 })
+    expect(await row(db, "book", "JON")).toEqual({ total_count: 6, filled_count: 4 })
+    // Every line is in some chapter: the file and its chapters agree.
+    expect(await row(db, "file", "")).toEqual({ total_count: 6, filled_count: 4 })
   })
 
-  it("keep the book current when only the added line changes", async () => {
-    // The incremental path recomputes the touched cells' keys. An added line's
-    // key used to be '', which matched no book row, so translating it left the
-    // book short until the next full rebuild.
-    const { db, pg } = await makeTestDb({
-      cells: [...done("g1", "GEN 1:1"), added("x1")],
+  it("puts a line at the top of the file in its first book's front matter", async () => {
+    const { db } = await makeTestDb({
+      cells: chain([{ id: "t1" }, { id: "t2" }, ...JONAH.filter((l) => l.ref)]),
     })
     await recompute(db)
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 2, filled_count: 1 })
+    // A bare book code is the section key USFM front matter already uses; the
+    // board draws it on the "front matter" tile beside the numbered chapters.
+    expect(await row(db, "section", "JON")).toEqual({ total_count: 2, filled_count: 0 })
+    expect(await keys(db, "section")).toEqual(["JON", "JON 1", "JON 2"])
+    expect(await row(db, "book", "JON")).toEqual({ total_count: 6, filled_count: 4 })
+  })
 
+  it("follows the line above across books in a file of several", async () => {
+    const { db } = await makeTestDb({
+      cells: chain([
+        { id: "g1", ref: "GEN 1:1", done: true }, { id: "xg" },
+        { id: "e1", ref: "EXO 1:1", done: true }, { id: "xe" },
+      ]),
+    })
+    await recompute(db)
+    expect(await row(db, "section", "GEN 1")).toEqual({ total_count: 2, filled_count: 1 })
+    expect(await row(db, "section", "EXO 1")).toEqual({ total_count: 2, filled_count: 1 })
+    expect(await row(db, "book", "GEN")).toEqual({ total_count: 2, filled_count: 1 })
+    expect(await row(db, "book", "EXO")).toEqual({ total_count: 2, filled_count: 1 })
+  })
+
+  it("moves with the chain when the referenced line above is removed", async () => {
+    // Removing 2:1 re-anchors the line below it onto 1:2 (the editor sends
+    // that reorder with the delete), so the run now hangs below chapter 1.
+    const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
+    await recompute(db)
+    await pg.query(`DELETE FROM cells WHERE project_id = $1 AND file_id = $2 AND cell_id = 'j21'`, [P, F])
+    await pg.query(
+      `UPDATE cells SET anchor_cell_id = 'j12' WHERE project_id = $1 AND file_id = $2 AND cell_id = 'x1'`,
+      [P, F],
+    )
+    await recompute(db)
+    expect(await row(db, "section", "JON 1")).toEqual({ total_count: 4, filled_count: 2 })
+    expect(await row(db, "section", "JON 2")).toEqual({ total_count: 1, filled_count: 1 })
+  })
+
+  it("keeps a chapter current on the incremental path when only an added line changes", async () => {
+    const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
+    await recompute(db)
     await pg.query(
       `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, last_edit_at, event_id)
-       VALUES ($1, $2, 'x1', 'target', '', 'translated', $3, 'ev-x1-target')`,
+       VALUES ($1, $2, 'x2', 'target', '', 'translated', $3, 'tev-x2')`,
       [P, F, TS],
     )
-    await sectionsProgressRecomputeStmt(db, P, F, TS, ["x1"]).run()
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 2, filled_count: 2 })
+    await sectionsProgressRecomputeStmt(db, P, F, TS, ["x2"]).run()
+    expect(await row(db, "section", "JON 2")).toEqual({ total_count: 4, filled_count: 3 })
+    expect(await row(db, "book", "JON")).toEqual({ total_count: 6, filled_count: 5 })
   })
 
-  it("survive the full rebuild's prune rather than being written and deleted in one batch", async () => {
-    const { db } = await makeTestDb({ cells: [...done("g1", "GEN 1:1"), added("x1")] })
-    await recompute(db)
-    await recompute(db)
-    expect(await keys(db, "book")).toEqual(["GEN"])
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 2, filled_count: 1 })
-  })
-
-  it("follow the file's one VISIBLE book: a parked other book does not split it", async () => {
-    // Parked cells leave progress entirely (AQU-1424), so the book rows are
-    // drawn from visible cells; the sole-book answer has to be too, or this
-    // file would be told it holds two books and the line would count nowhere.
+  it("passes a chapter through a parked line, and keeps a chapter only an added line is left in", async () => {
+    // 2:1 is parked: it leaves progress, but it is still the line above x1. Its
+    // chapter's only visible cells are the added lines and 2:2 is gone too, so
+    // the prune must keep a row the insert wrote for inherited lines alone.
     const { db } = await makeTestDb({
-      cells: [
-        ...done("g1", "GEN 1:1"),
-        cell({ cell_id: "e1", canonical_ref: "EXO 1:1", hidden_at: TS }),
-        added("x1"),
-      ],
+      cells: chain([
+        { id: "j11", ref: "JON 1:1", done: true },
+        { id: "j21", ref: "JON 2:1", hidden: true },
+        { id: "x1" },
+      ]),
     })
     await recompute(db)
-    expect(await keys(db, "book")).toEqual(["GEN"])
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 2, filled_count: 1 })
+    expect(await row(db, "section", "JON 2")).toEqual({ total_count: 1, filled_count: 0 })
+    expect(await keys(db, "section")).toEqual(["JON 1", "JON 2"])
   })
 
-  it("leave a parked added line out, as every other parked cell is", async () => {
+  it("leaves a media file alone: time buckets, no book rows", async () => {
     const { db } = await makeTestDb({
-      cells: [...done("g1", "GEN 1:1"), cell({ cell_id: "x1", hidden_at: TS })],
-    })
-    await recompute(db)
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 1, filled_count: 1 })
-  })
-})
-
-describe("lines with no reference on a file of several books (AQU-1493)", () => {
-  it("stay in the file's row only — no book is guessed", async () => {
-    const { db } = await makeTestDb({
-      cells: [...done("g1", "GEN 1:1"), ...done("e1", "EXO 1:1"), added("x1")],
-    })
-    await recompute(db)
-    expect(await row(db, "file", "")).toEqual({ total_count: 3, filled_count: 2 })
-    expect(await row(db, "book", "GEN")).toEqual({ total_count: 1, filled_count: 1 })
-    expect(await row(db, "book", "EXO")).toEqual({ total_count: 1, filled_count: 1 })
-  })
-})
-
-describe("files with no books are untouched (AQU-1493)", () => {
-  it("still gives a media file time sections and no book rows", async () => {
-    const { db } = await makeTestDb({
-      cells: [cell({ cell_id: "m1", start_ms: 0 }), cell({ cell_id: "m2", start_ms: 400_000 })],
+      cells: chain([{ id: "m1", startMs: 0 }, { id: "m2", startMs: 400_000 }]),
     })
     await recompute(db)
     expect(await keys(db, "book")).toEqual([])
-    expect((await keys(db, "section")).length).toBe(2)
+    expect((await keys(db, "section")).every((k) => k.startsWith("t:"))).toBe(true)
   })
 })
 
-describe("the plan's 'go to first' link reaches lines with no reference (AQU-1493)", () => {
+describe("the backfill's --unreferenced-lines selector (AQU-1493)", () => {
+  async function selected(db: Db) {
+    const r = await db.prepare(UNREFERENCED_LINES_STALE_FILES_SQL).all<{ project_id: string; id: string }>()
+    return (r.results ?? []).map((x) => x.id)
+  }
+
+  it("selects a file whose chapters miss lines, and nothing once it is re-projected", async () => {
+    const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
+    await recompute(db)
+    // What the projection before this change left behind: the added lines in
+    // the file's row and in no chapter.
+    await pg.query(
+      `UPDATE file_section_progress SET total_count = 2
+        WHERE project_id = $1 AND file_id = $2 AND scope = 'section' AND section_key = 'JON 2'`,
+      [P, F],
+    )
+    expect(await selected(db)).toEqual([F])
+    await recompute(db)
+    expect(await selected(db)).toEqual([])
+  })
+})
+
+describe("the plan's readers walk an added line where it sits (AQU-1493)", () => {
   const settings = [{ project_id: P, settings: JSON.stringify({ validationCount: 1 }), version: 1 }]
   const files = [{ id: F, project_id: P, name: F, event_id: `fev-${F}` }]
 
-  it("lands on an added line once every referenced verse is done", async () => {
-    const { db } = await makeTestDb({
-      files, project_settings: settings,
-      cells: [...done("g1", "GEN 1:1"), added("x1")],
-    })
-    expect(await readFirstOpenCell(db, P, F, "GEN", "untranslated", "")).toBe("x1")
+  it("sends 'go to first untranslated' to the added line before the verse below it", async () => {
+    const lines = JONAH.map((l) => (l.id === "j22" ? { ...l, done: false } : l))
+    const { db } = await makeTestDb({ files, project_settings: settings, cells: chain(lines) })
+    expect(await readFirstOpenCell(db, P, F, "JON", "untranslated", "")).toBe("x1")
   })
 
-  it("still puts the referenced verses first", async () => {
-    const { db } = await makeTestDb({
-      files, project_settings: settings,
-      cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }), added("x1")],
-    })
-    expect(await readFirstOpenCell(db, P, F, "GEN", "untranslated", "")).toBe("g1")
-  })
-
-  it("does not send a book to a line that belongs to no book", async () => {
-    const { db } = await makeTestDb({
-      files, project_settings: settings,
-      cells: [...done("g1", "GEN 1:1"), ...done("e1", "EXO 1:1"), added("x1")],
-    })
-    expect(await readFirstOpenCell(db, P, F, "GEN", "untranslated", "")).toBeNull()
-    expect(await readFirstOpenCell(db, P, F, "EXO", "untranslated", "")).toBeNull()
+  it("lists the chapter's added lines in file order, marked unnumbered", async () => {
+    const { db } = await makeTestDb({ files, project_settings: settings, cells: chain(JONAH) })
+    await recompute(db)
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const url = `https://worker/api/v1/projects/${P}/files/${F}/progress/sections/${encodeURIComponent("JON 2")}`
+    const res = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    const body = await res.json() as SectionProgressDetailResponse
+    expect(body.verses.map((v) => [v.cellId, v.ref, v.unnumbered ?? false])).toEqual([
+      ["j21", "JON 2:1", false],
+      ["x1", "", true],
+      ["x2", "", true],
+      ["j22", "JON 2:2", false],
+    ])
   })
 })

@@ -99,10 +99,10 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
     expect(rows).toHaveLength(4)
   })
 
-  it("puts a person on a one-book file's book for a line added with no reference (AQU-1493)", async () => {
-    // The projection counts such a line toward the file's one book, so whoever
-    // holds it is working on that book. In a file of several books nothing
-    // says which, and they are on no row — as the line is in no book's bar.
+  it("puts a person on the book of the line above their added line (AQU-1493)", async () => {
+    // The projection counts a line with no reference in the chapter of the line
+    // above it, so whoever holds it is working on that book — in a one-book
+    // file and in a file of several alike.
     await seed()
     const db = testEnv.AQUILLA_PG
     await seedUser(5, "dana")
@@ -115,10 +115,10 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
         ('pa','f3','book','GEN','',1), ('pa','f3','file','','',1)`,
     ).run()
     await db.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
-        ('pa','f3','h1','source','s','e-pa',1,'GEN 1:1'),
-        ('pa','f3','h2','source','s','e-pa',1,NULL),
-        ('pa','f1','n1','source','s','e-pa',1,NULL)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id) VALUES
+        ('pa','f3','h1','source','s','e-pa',1,'GEN 1:1',NULL),
+        ('pa','f3','h2','source','s','e-pa',1,NULL,'h1'),
+        ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
     ).run()
     await db.prepare(
       `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
@@ -130,9 +130,11 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
         ('as-dana','f3','h2'), ('as-erin','f1','n1')`,
     ).run()
     const rows = await getProjectUnitAssignees(testEnv, "pa")
-    expect(rows.filter((r) => r.username === "dana").map((r) => `${r.fileId}:${r.sectionKey}`))
-      .toEqual(["f3:GEN"])
-    expect(rows.some((r) => r.username === "erin")).toBe(false)
+    const unitsOf = (name: string) =>
+      rows.filter((r) => r.username === name).map((r) => `${r.fileId}:${r.sectionKey}`)
+    expect(unitsOf("dana")).toEqual(["f3:GEN"])
+    // n1 sits below EXO 1:1 in a file of two books.
+    expect(unitsOf("erin")).toEqual(["f1:EXO"])
   })
 
   it("drops a person whose whole assignment is structural, under the exclude policy", async () => {

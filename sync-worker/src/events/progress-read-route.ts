@@ -1,7 +1,7 @@
 import { verifyTokenForProject } from '../auth'
 import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
-import { soleBookSql } from '../../../db/shared/plan-keys'
+import { inheritedKeysSql, oneScriptureFileSql } from '../../../db/shared/plan-keys'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
@@ -121,6 +121,12 @@ export interface SectionProgressDetailResponse {
      */
     recorded: boolean
     audioValidated: boolean
+    /**
+     * AQU-1493: a line with no verse reference of its own, listed in the
+     * chapter it is counted with — the chapter of the line above it (see
+     * inheritedKeysSql). Its `ref` is ''. Absent on every other verse.
+     */
+    unnumbered?: boolean
   }>
 }
 
@@ -419,6 +425,41 @@ interface FirstOpenRow {
   take_signed?: boolean
   cues_unrecorded?: number | string
   cues_unsigned?: number | string
+  // AQU-1493: where a line with no reference is counted, and where it sits.
+  inherited_key?: string | null
+  after_ref?: string | null
+  inherited_depth?: number | string | null
+}
+
+/**
+ * AQU-1493: the inherited keys of one file, as a CTE to put first in a
+ * statement. Binds (projectId, fileId) ahead of everything else.
+ */
+const INHERITED_KEYS_WITH = `WITH inherited_keys AS (${inheritedKeysSql(oneScriptureFileSql())})`
+const INHERITED_COLUMNS = `ik.section_key AS inherited_key, ik.after_ref AS after_ref, ik.depth AS inherited_depth`
+
+/**
+ * AQU-1493: a row's place in a Scripture file. A referenced line sorts by its
+ * own reference; a line with none sits right after the line it hangs below
+ * (that line's reference, then its depth in the run) — "the line above it" —
+ * and one at the top of the file, counted as front matter, before everything.
+ */
+function compareInFileOrder(
+  a: { canonical_ref: string | null; after_ref?: string | null; inherited_depth?: number | string | null },
+  b: { canonical_ref: string | null; after_ref?: string | null; inherited_depth?: number | string | null },
+): number {
+  const key = (r: typeof a) => r.canonical_ref
+    ? { ref: r.canonical_ref, depth: 0 }
+    : { ref: r.after_ref ?? '', depth: Number(r.inherited_depth ?? 0) }
+  const ka = key(a)
+  const kb = key(b)
+  if (ka.ref !== kb.ref) {
+    if (ka.ref === '') return -1
+    if (kb.ref === '') return 1
+    const byRef = compareCanonicalRefs(ka.ref, kb.ref)
+    if (byRef !== 0) return byRef
+  }
+  return ka.depth - kb.depth
 }
 
 /**
@@ -430,10 +471,11 @@ interface FirstOpenRow {
  */
 function inDocumentOrder<T extends FirstOpenRow>(rows: T[]): T[] {
   if (rows.some((r) => r.canonical_ref)) {
-    const withRef = rows
-      .filter((r) => r.canonical_ref)
-      .sort((a, b) => compareCanonicalRefs(a.canonical_ref!, b.canonical_ref!))
-    return [...withRef, ...rows.filter((r) => !r.canonical_ref)]
+    // AQU-1493: a line with no reference that the projection counts in a
+    // chapter is walked where it sits, not after everything else.
+    const placed = (r: T) => Boolean(r.canonical_ref) || r.inherited_key != null
+    const withRef = rows.filter(placed).sort(compareInFileOrder)
+    return [...withRef, ...rows.filter((r) => !placed(r))]
   }
   if (rows.some((r) => r.start_ms != null)) {
     const at = (r: T) => (r.start_ms == null ? Number.POSITIVE_INFINITY : Number(r.start_ms))
@@ -514,8 +556,9 @@ export async function readFirstOpenCell(
   const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
   const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio)
 
-  const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`]
-  const binds: unknown[] = []
+  const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`, INHERITED_COLUMNS]
+  // The inherited-keys CTE comes first in the statement, so its binds do too.
+  const binds: unknown[] = [projectId, fileId]
   if (wantsText) {
     columns.push(`COALESCE(t.value, '') AS target_value`,
       `COALESCE(t.endorsement_count, 0) AS endorsement_count`)
@@ -541,19 +584,21 @@ export async function readFirstOpenCell(
     : ''
   if (wantsText) binds.push(...targetLaneDualReadBinds(projectId, lane))
   binds.push(projectId, fileId)
-  if (unit) binds.push(unit, `${unit} %`, unit, projectId, fileId)
+  if (unit) binds.push(unit, `${unit} %`, unit)
 
   const { results } = await db.prepare(
-    `SELECT ${columns.join(`,
+    `${INHERITED_KEYS_WITH}
+     SELECT ${columns.join(`,
             `)}
        FROM cells s
        ${targetJoin}
+       LEFT JOIN inherited_keys ik ON ik.cell_id = s.cell_id
       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
         ${unit
-          // AQU-1493: a line with no reference belongs to the file's one book,
-          // as the projection counts it (`unitBookKeyExpr`). Without this the
-          // board said "3 cells to translate" and its link found none of them.
-          ? `AND (${key} = ? OR ${key} LIKE ? OR (${key} = '' AND ? = ${soleBookSql()}))`
+          // AQU-1493: a line with no reference belongs to the book of the line
+          // above it, as the projection counts it (`unitBookKeyExpr`). Without
+          // this the board said "3 cells to translate" and its link found none.
+          ? `AND (${key} = ? OR ${key} LIKE ? OR SPLIT_PART(ik.section_key, ' ', 1) = ?)`
           : ''}
         ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
         -- AQU-1424: a parked cell is never the NEXT THING TO WORK ON, whatever
@@ -680,8 +725,10 @@ export async function handleProgressReadRequest(
     ])
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
-        `SELECT s.cell_id,
+        `${INHERITED_KEYS_WITH}
+         SELECT s.cell_id,
                 s.canonical_ref,
+                ${INHERITED_COLUMNS},
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count,
                 ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
@@ -693,8 +740,11 @@ export async function handleProgressReadRequest(
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
             AND ${targetLaneDualReadSql('t')}
+           LEFT JOIN inherited_keys ik ON ik.cell_id = s.cell_id
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-            AND ${chapterKeySql('s')} = ?
+            -- AQU-1493: and the lines with no reference the projection counts
+            -- in this chapter, so the list and the chapter's own count agree.
+            AND (${chapterKeySql('s')} = ? OR ik.section_key = ?)
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
             -- AQU-1424: and it is not one of the chapter's cells here either, so
             -- this detail read agrees with the projection's own count for the
@@ -702,9 +752,15 @@ export async function handleProgressReadRequest(
             -- same goes for a line the upstream deleted from a live link.
             AND ${visibleSourceSql('s')}
             AND ${liveSourceSql('s')}`,
-      ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
+      ).bind(
+        projectId, fileId,
+        ...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey, sectionKey,
+      ).all<{
         cell_id: string
         canonical_ref: string | null
+        inherited_key: string | null
+        after_ref: string | null
+        inherited_depth: number | string | null
         target_value: string
         endorsement_count: number | string
         has_take: boolean
@@ -750,8 +806,8 @@ export async function handleProgressReadRequest(
     // body with no data write to move `revision`. And `s4` because the meaning
     // of take_signed changed under clients holding an `s3` body: same field,
     // same type, different question — the one kind of change a revision can
-    // never express.
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s4${structuralTag}${laneTag}"`
+    // never express. `s5` (AQU-1493): the list gained its unnumbered lines.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s5${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -761,16 +817,17 @@ export async function handleProgressReadRequest(
       revision,
       validationCount,
       verses: rowsResult.results
-        .filter((row): row is typeof row & { canonical_ref: string } => Boolean(row.canonical_ref))
+        .filter((row) => Boolean(row.canonical_ref) || row.inherited_key != null)
+        .sort(compareInFileOrder)
         .map((row) => ({
           cellId: row.cell_id,
-          ref: row.canonical_ref,
+          ref: row.canonical_ref ?? '',
           filled: row.target_value.trim().length > 0,
           validated: Number(row.endorsement_count) >= validationCount,
           recorded: row.has_take,
           audioValidated: row.take_signed,
-        }))
-        .sort((a, b) => compareCanonicalRefs(a.ref, b.ref)),
+          ...(row.canonical_ref ? {} : { unnumbered: true }),
+        })),
     }
     return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

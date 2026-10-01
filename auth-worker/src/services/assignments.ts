@@ -22,7 +22,9 @@
 // reads.
 
 import type { Env } from "../types"
-import { sectionKeyExpr, soleBookSql, unitBookKeyExpr } from "../../../db/shared/plan-keys"
+import {
+  inheritedKeysSql, oneScriptureFileSql, unitBookKeyExpr, unitSectionKeyExpr,
+} from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
 import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 
@@ -377,13 +379,11 @@ export async function getUnitAssignments(
   ])
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
-  // all. Built as a fragment so the binds only exist when the predicate does.
+  // all. Built as a fragment so the bind only exists when the predicate does.
   // AQU-1493: by the key the projection COUNTS a cell toward, so a line added
-  // with no reference is a person's share of the file's one book here exactly
-  // as it is a cell of that book's bar above.
-  const sectionPredicate = sectionKey === ""
-    ? ""
-    : `AND (${unitBookKeyExpr("c", soleBookSql())}) = ?`
+  // with no reference is a person's share of the book (and chapter) of the
+  // line above it here exactly as it is a cell of that book's bar above.
+  const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("c", "ik")}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
     // The audio CTE is lifted from sync-worker's AUDIO_CTE_SQL, verbatim
@@ -421,6 +421,10 @@ export async function getUnitAssignments(
        -- panel sits directly under the unit's own audio bar, so the two must
        -- count the same cells by construction rather than by agreement.
        ${AUDIO_CTE_SQL}
+     ), inherited_keys AS (
+       -- AQU-1493: where a line with no reference is counted — the chapter of
+       -- the line above it — so the chapter breakdown below matches the grid.
+       ${inheritedKeysSql(oneScriptureFileSql())}
      )
      SELECT a.assignment_id    AS assignment_id,
             a.assignee_user_id AS assignee_user_id,
@@ -434,7 +438,7 @@ export async function getUnitAssignments(
             -- still owes work in, and which chapters of the unit nobody holds.
             -- The aggregate the panel already showed is the sum over these,
             -- folded below, so no existing number moves.
-            ${sectionKeyExpr("c")} AS chapter_key,
+            ${unitSectionKeyExpr("c", "ik")} AS chapter_key,
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
@@ -460,6 +464,7 @@ export async function getUnitAssignments(
                         AND t.cell_id = c.cell_id AND t.side = 'target'
                         AND t.lane_id = ?
        LEFT JOIN audio au ON au.cell_id = c.cell_id
+       LEFT JOIN inherited_keys ik ON ik.cell_id = c.cell_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
          ON ln.project_id = a.project_id AND ln.id = a.lane_id
@@ -479,18 +484,20 @@ export async function getUnitAssignments(
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
                a.target_lang, a.lane_id, a.deadline, a.created_at,
-               ${sectionKeyExpr("c")}
+               ${unitSectionKeyExpr("c", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
-    // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane id on the target join, then
-    // the WHERE — and the sole-book lookup's (project, file) plus the section
-    // key last, only when the fragment above put placeholders there. Adding a
-    // CTE ahead of another means inserting its binds ahead of theirs; there is
-    // no naming here to catch a mistake.
+    // policy CTE's project, the audio CTE's (project, file), the inherited
+    // keys' (project, file), the text then audio thresholds in the SELECT list,
+    // the lane id on the target join, then the WHERE — and the section key
+    // last, only when the fragment above put a placeholder there. Adding a CTE
+    // ahead of another means inserting its binds ahead of theirs; there is no
+    // naming here to catch a mistake.
     .bind(
       projectId,
+      projectId,
+      fileId,
       projectId,
       fileId,
       validationCount,
@@ -498,7 +505,7 @@ export async function getUnitAssignments(
       laneId,
       projectId,
       fileId,
-      ...(sectionKey === "" ? [] : [projectId, fileId, sectionKey]),
+      ...(sectionKey === "" ? [] : [sectionKey]),
     )
     .all<{
       assignment_id: string
@@ -983,16 +990,20 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id = ?
      ), units AS (${planUnitsSql("f.project_id = ?")}
-     ), sole_books AS (
-       -- AQU-1493: files whose plan is exactly one book. A line with no
-       -- reference counts toward that book (unitBookKeyExpr), so its assignee
-       -- belongs on the book's row. Read from the units rather than recomputed
-       -- per file from cells: the units ARE the projection's book rows, and
-       -- one book row is exactly the projection's "sole book" answer.
-       SELECT file_id, MIN(section_key) AS book_key
-         FROM units
-        GROUP BY file_id
-       HAVING COUNT(*) = 1 AND MIN(section_key) <> ''
+     ), inherited_keys AS (
+       -- AQU-1493: a line with no reference counts toward the book of the line
+       -- above it (unitBookKeyExpr), so its assignee belongs on that book's
+       -- row. Walked only in files that have book units AND a live assigned
+       -- line with no reference — normally none, so a board load pays nothing.
+       ${inheritedKeysSql(`SELECT DISTINCT xc.project_id, xc.file_id
+                             FROM assignments xa
+                             JOIN assignment_cells xac ON xac.assignment_id = xa.assignment_id
+                             JOIN cells xc ON xc.project_id = xa.project_id AND xc.file_id = xac.file_id
+                                          AND xc.cell_id = xac.cell_id AND xc.side = 'source'
+                            WHERE xa.project_id = ? AND xa.unassigned_at IS NULL AND xa.completed_at IS NULL
+                              AND TRIM(SPLIT_PART(COALESCE(xc.canonical_ref, ''), ':', 1)) = ''
+                              AND EXISTS (SELECT 1 FROM units xu
+                                           WHERE xu.file_id = xc.file_id AND xu.section_key <> '')`)}
      )
      SELECT u.file_id           AS file_id,
             u.section_key       AS section_key,
@@ -1003,11 +1014,11 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
        JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                    AND c.cell_id = ac.cell_id AND c.side = 'source'
-       LEFT JOIN sole_books sb ON sb.file_id = c.file_id
+       LEFT JOIN inherited_keys ik ON ik.file_id = c.file_id AND ik.cell_id = c.cell_id
        -- A file with book units has no '' unit and a file without has only
        -- the '' unit, so this OR is exact rather than lenient.
        JOIN units u ON u.project_id = c.project_id AND u.file_id = c.file_id
-                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("c", "sb.book_key")})
+                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("c", "ik")})
        LEFT JOIN users usr ON usr.id = a.assignee_user_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -1015,8 +1026,9 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
       GROUP BY u.file_id, u.section_key, a.assignee_user_id, usr.username
       ORDER BY u.file_id, u.section_key, latest DESC, a.assignee_user_id`,
   )
-    // Positional: the policy CTE's project, the units CTE's project, the WHERE.
-    .bind(projectId, projectId, projectId)
+    // Positional: the policy CTE's project, the units CTE's project, the
+    // inherited keys' project, the WHERE.
+    .bind(projectId, projectId, projectId, projectId)
     .all<{ file_id: string; section_key: string; user_id: number; username: string | null }>()
   return (rows.results ?? []).map((r) => ({
     fileId: r.file_id,

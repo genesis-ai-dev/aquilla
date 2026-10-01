@@ -1,6 +1,9 @@
 #!/usr/bin/env tsx
 import { makePostgres } from '../db/shim/postgres'
-import { fullProgressRecomputeStmts } from '../sync-worker/src/events/progress-projection'
+import {
+  fullProgressRecomputeStmts,
+  UNREFERENCED_LINES_STALE_FILES_SQL,
+} from '../sync-worker/src/events/progress-projection'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -31,23 +34,17 @@ async function main(): Promise<void> {
     // every media project done while its audio counts sit at zero forever.
     // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
-    // AQU-1493: `--unreferenced-lines` re-runs one-book files whose book row is
-    // SMALLER than the file's own row. Before the fix a line with no reference
-    // (one added in the editor) counted in the file and in no book; after it,
-    // every visible line of a one-book file is in that book, so the two totals
-    // are equal and the file drops out of this selector — safe to re-run, and
-    // it reads only progress rows, never the cells. Combines with
-    // --missing-books (the dev stack passes both at boot).
+    // AQU-1493: `--unreferenced-lines` re-runs Scripture files whose chapter
+    // rows add up to LESS than the file's own row. A line with no reference
+    // (one added in the editor) used to count in the file and in no chapter
+    // or book; it now counts in the chapter of the line above it, or in the
+    // front matter at the top of the file, so once a file is re-projected its
+    // chapters (time buckets aside) hold every line again and it drops out of
+    // this selector — safe to re-run. Reads progress rows only, never cells.
+    // Combines with --missing-books (the dev stack passes both at boot).
     const unreferencedLines = process.argv.includes('--unreferenced-lines')
     const scoped = missingOnly || missingBooks || unreferencedLines
-    const unreferencedSql = `SELECT f.project_id, f.file_id AS id
-             FROM file_section_progress f
-             JOIN file_section_progress b
-               ON b.project_id = f.project_id AND b.file_id = f.file_id
-              AND b.scope = 'book' AND b.target_lang = f.target_lang
-            WHERE f.scope = 'file' AND f.section_key = '' AND f.target_lang = ''
-            GROUP BY f.project_id, f.file_id, f.total_count
-           HAVING COUNT(*) = 1 AND MAX(b.total_count) < f.total_count`
+    const unreferencedSql = UNREFERENCED_LINES_STALE_FILES_SQL
     const { results: files } = await db
       .prepare(unreferencedLines && !missingBooks
         ? `${unreferencedSql}

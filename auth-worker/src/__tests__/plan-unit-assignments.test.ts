@@ -364,47 +364,50 @@ describe("per-chapter coverage on a unit's assignments", () => {
 })
 
 describe("lines added with no reference (AQU-1493)", () => {
-  // The projection counts a line with no canonical_ref toward the file's ONE
-  // book (unitBookKeyExpr), so the book's bar includes it. A person assigned
-  // that line has to have it counted here too, under the same bar.
+  // The projection counts a line with no canonical_ref in the chapter (and so
+  // the book) of the line above it — the anchor chain, the editor's order. A
+  // person assigned that line has to have it counted here too, under the same
+  // bar.
   async function seedAddedLines(): Promise<void> {
     await seedUnit()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', 'genesis.usfm', 'e-pa')",
     ).run()
+    // f2: GEN 1:1, then a line added below it. f1 (GEN + EXO): a line added
+    // below EXO 1:1.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
-        ('pa','f2','h1','source','s','e-pa',1,'GEN 1:1'),
-        ('pa','f2','h2','source','s','e-pa',1,NULL),
-        ('pa','f1','n1','source','s','e-pa',1,NULL)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id) VALUES
+        ('pa','f2','h1','source','s','e-pa',1,'GEN 1:1',NULL),
+        ('pa','f2','h2','source','s','e-pa',1,NULL,'h1'),
+        ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
         ('as-gen-only', 'pa', 2, 'cells', 'Genesis', '', 2, NULL, 1, 2000, NULL, NULL),
-        ('as-two-books', 'pa', 3, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+        ('as-added-exo', 'pa', 3, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
         ('as-gen-only','f2','h1'), ('as-gen-only','f2','h2'),
-        ('as-two-books','f1','n1')`,
+        ('as-added-exo','f1','n1')`,
     ).run()
   }
 
-  it("counts the added line toward a one-book file's book", async () => {
+  it("counts the added line toward the book of the line above it", async () => {
     await seedAddedLines()
     const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", "")
     expect(anna.assignmentId).toBe("as-gen-only")
     expect(anna.cellsTotal).toBe(2)
+    // …and in that line's chapter, so the panel can name it.
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2]])
   })
 
-  it("puts it in no book of a file that holds several", async () => {
+  it("follows the line above in a file of several books", async () => {
     await seedAddedLines()
-    // f1 holds GEN and EXO: nothing says which book n1 belongs to, so neither
-    // book's panel lists the person whose only line it is.
-    for (const book of ["GEN", "EXO"]) {
-      const rows = await getUnitAssignments(testEnv, "pa", "f1", book, "")
-      expect(rows.map((r) => r.assignmentId)).not.toContain("as-two-books")
-    }
+    const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", "")
+    expect(exo.map((r) => r.assignmentId)).toContain("as-added-exo")
+    const gen = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(gen.map((r) => r.assignmentId)).not.toContain("as-added-exo")
   })
 })
 

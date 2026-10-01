@@ -37,27 +37,31 @@ function renderRoute(path: string, desktop: boolean) {
   )
 }
 
-describe("ProjectWorkspaceRoute — compact-viewport guard (AQU-806)", () => {
+// AQU-806 redirected the agent surface to the editor on a compact viewport.
+// The Team workspace is single-column below `lg`, so that guard is gone: a
+// phone keeps its Agent URL, hand-off and all.
+describe("ProjectWorkspaceRoute — Agent stays reachable on a compact viewport", () => {
   it("keeps the workbench available on desktop", () => {
     renderRoute("/project/p1/agent", true)
     expect(screen.getByText("Agent workbench")).toBeInTheDocument()
   })
 
-  it("returns a phone deep link to its editor file", async () => {
+  it("keeps a phone deep link on the agent surface instead of returning it to its editor file", () => {
     renderRoute(
       "/project/p1/agent?return=%2Fproject%2Fp1%2Feditor%2Ffile%2Ff1",
       false,
     )
-    expect(await screen.findByText("File editor")).toBeInTheDocument()
-    expect(screen.queryByText("Agent workbench")).toBeNull()
+    expect(screen.getByText("Agent workbench")).toBeInTheDocument()
+    expect(screen.queryByText("File editor")).toBeNull()
   })
 
-  it("falls back to the project editor without a return path", async () => {
+  it("keeps a bare phone agent URL on the agent surface", () => {
     renderRoute("/project/p1/agent", false)
-    expect(await screen.findByText("Project editor")).toBeInTheDocument()
+    expect(screen.getByText("Agent workbench")).toBeInTheDocument()
+    expect(screen.queryByText("Project editor")).toBeNull()
   })
 
-  it("guards the agent surface only — other surfaces render on a phone", () => {
+  it("renders the other surfaces on a phone", () => {
     renderRoute("/project/p1/comments", false)
     expect(screen.getByText("Comments surface")).toBeInTheDocument()
   })

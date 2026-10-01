@@ -277,8 +277,15 @@ CREATE TABLE project_settings (
     -- entirely (absent, not blanked). NULL/anything else = the pseudonymous
     -- default. Projected out of the blob for the same reason as the columns
     -- above: the agent read path must not load multiple MB to answer it.
-    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED
+    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED,
+    -- 0123: the v3 agent-mode react switch, projected for the 5-minute react
+    -- watcher — it asks "which projects have react on?" across the whole table
+    -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
+    -- absent/false/garbage all collapse to the documented default (off).
+    agent_react BOOLEAN
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
 );
+CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
@@ -1953,6 +1960,53 @@ CREATE TABLE IF NOT EXISTS rule_applicability (
   UNIQUE (rule_id, target_type, target_id)
 );
 CREATE INDEX IF NOT EXISTS rule_applicability_rule ON rule_applicability (rule_id);
+
+-- Durable team channel (0122_team_channel.sql; AQU-1049 port to the v2
+-- one-channel model). One shared, project-scoped history: the Coordinator
+-- narrates in the main channel (thread_id IS NULL) and every delegated piece
+-- of work owns a thread. Humans and agent personas post into the same table.
+CREATE TABLE IF NOT EXISTS team_threads (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  -- 'run' = a contextual autopilot run (source_ref is its run id);
+  -- 'human' = opened from the channel by a person (source_ref NULL).
+  source_kind text NOT NULL CHECK (source_kind IN ('run', 'human')),
+  source_ref text,
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 160),
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (source_ref IS NULL OR octet_length(source_ref) <= 512),
+  -- One thread per work item; NULL source_refs never collide, so ingestion
+  -- can ON CONFLICT its way to find-or-create for a run.
+  UNIQUE (project_id, source_kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS team_threads_project_time
+  ON team_threads(project_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS team_messages (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  thread_id text,                       -- NULL = the main project channel
+  author_kind text NOT NULL CHECK (author_kind IN ('human', 'persona')),
+  -- Username for a human; persona id for an agent teammate. Open registry.
+  author_id text NOT NULL CHECK (char_length(author_id) BETWEEN 1 AND 128),
+  body_kind text NOT NULL CHECK (body_kind IN ('text', 'activity', 'question')),
+  body jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(body) = 'object')
+    CHECK (octet_length(body::text) <= 16384),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (thread_id IS NULL OR char_length(thread_id) = 36)
+);
+CREATE INDEX IF NOT EXISTS team_messages_main_time
+  ON team_messages(project_id, created_at DESC, id DESC)
+  WHERE thread_id IS NULL;
+CREATE INDEX IF NOT EXISTS team_messages_thread_time
+  ON team_messages(project_id, thread_id, created_at DESC, id DESC);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

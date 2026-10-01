@@ -1,14 +1,14 @@
 {
   "name": "aquilla",
   "version": "0.1.0",
-  "description": "Agentic translation management for Bible and mission content: project status, quality, terminology and staged changes that a person approves.",
+  "description": "Agentic translation management for Bible and mission content: project status, quality, terminology and traceable changes within your authorized organizations.",
   "keywords": ["translation", "bible translation", "localization", "project management", "quality assurance"],
   "skills": "./skills",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Aquilla",
     "shortDescription": "Translation project status, quality and approvals",
-    "longDescription": "Aquilla runs Bible and mission translation projects. Connect it to ask where a project stands, which books or files need attention, and whether key terms are used consistently. Aquilla can also draft changes, but every change is staged first: you review it in Aquilla and approve it before anything is saved.",
+    "longDescription": "Aquilla runs Bible and mission translation projects. Connect it to ask where a project stands, which books or files need attention, and whether key terms are used consistently. Choose the organizations Aquilla can access. It can draft and save changes within your current permissions, with ChatGPT confirmation when required. Human translation validation remains a separate review step.",
     "developerName": "Frontier R&D",
     "category": "Productivity",
     "websiteURL": "https://aquilla.app",

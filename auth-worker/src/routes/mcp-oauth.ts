@@ -10,7 +10,7 @@
 //   5. POST /oauth/token               code + PKCE verifier → aqk_ credential
 //
 // The access token is an ordinary API credential (same table, same revoke
-// button, same live-role checks on every call), so nothing downstream changes.
+// button, with a saved organization allowlist and live-role checks on every call).
 // It does not expire and there is no refresh token — the same contract as the
 // device flow (agent-connect.ts), so a connected host keeps working until the
 // human revokes it under Preferences → API tokens.
@@ -52,7 +52,7 @@ export function authorizationServerMetadata(issuer: string) {
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["ask", "act"],
+    scopes_supported: ["act"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
     service_documentation: "https://github.com/genesis-ai-dev/aquilla/blob/dev/docs/CHATGPT-PLUGIN.md",
@@ -87,11 +87,16 @@ export function isAcceptableResource(resource: string, issuer: string): boolean 
   return url.hostname === new URL(issuer).hostname
 }
 
-/** The mode a client asked for. Unknown scopes are ignored, not refused:
- *  hosts send generic scopes, and the human picks the real mode anyway. */
-function requestedMode(scope: string | undefined): Mode {
-  const words = new Set((scope ?? "").split(/\s+/).filter(Boolean))
-  return words.has("act") && !words.has("ask") ? "act" : "ask"
+/** Eligible organizations, without platform-admin elevation or lazy creation. */
+async function eligibleOrganizations(env: Bindings, userId: string) {
+  const result = await env.AQUILLA_PG.prepare(`
+    SELECT o.id::text AS id, o.name FROM organizations o
+    WHERE o.owner_user_id::text = ? OR EXISTS (
+      SELECT 1 FROM org_members om WHERE om.org_id = o.id
+        AND om.user_id::text = ? AND om.role_level >= ${ROLE.MAINTAINER}
+    ) ORDER BY LOWER(COALESCE(o.name, '')), o.id
+  `).bind(userId, userId).all<{ id: string; name: string | null }>()
+  return result.results
 }
 
 export function buildRedirect(redirectUri: string, params: Record<string, string | undefined>): string {
@@ -124,7 +129,7 @@ async function validateAuthorize(params: AuthorizeParams, issuer: string): Promi
   if (params.resource !== undefined && !isAcceptableResource(params.resource, issuer)) {
     return back("invalid_target", "resource is not an Aquilla MCP endpoint")
   }
-  return { kind: "ok", client: resolved.client, params, mode: requestedMode(params.scope), resource: params.resource ?? null }
+  return { kind: "ok", client: resolved.client, params, mode: "act", resource: params.resource ?? null }
 }
 
 async function readBody(req: Request): Promise<unknown> {
@@ -167,7 +172,7 @@ mcpOAuthPublicRoutes.get("/.well-known/oauth-authorization-server/*", (c) => {
   return c.json(authorizationServerMetadata(issuer), 200, { "Cache-Control": "public, max-age=300" })
 })
 
-// The consent UI lives in the SPA (sign-in, project picker). Pass the request
+// The consent UI lives in the SPA (sign-in, organization selection). Pass the request
 // through untouched; the SPA posts it back to /api/v2/mcp-oauth/* for
 // validation, so nothing here trusts the client yet.
 mcpOAuthPublicRoutes.get("/oauth/authorize", (c) => {
@@ -194,6 +199,7 @@ interface CodeRow {
   mode: Mode
   project_id: string | null
   org_id: string | null
+  org_ids: string[] | null
   status: "issued" | "consumed"
   credential_id: string | null
   expired: boolean
@@ -213,7 +219,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   const db = c.env.AQUILLA_PG
   const row = await db.prepare(
     `SELECT client_id, redirect_uri, code_challenge, resource, user_id, mode, project_id, org_id,
-            status, credential_id, expires_at <= now() AS expired
+            status, credential_id, org_ids, expires_at <= now() AS expired
      FROM mcp_oauth_codes WHERE code_hash = ?`,
   ).bind(codeHash).first<CodeRow>()
   const invalidGrant = () => c.json({ error: "invalid_grant" }, 400)
@@ -236,8 +242,15 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   }
   // Live role at mint time, not just at consent: it may have been lowered.
   const user = await db.prepare("SELECT * FROM users WHERE id::text = ?").bind(row.user_id).first<AuthUser>()
-  const level = user ? await scopeLevel(c.env, user, row.project_id, row.org_id) : null
-  if (level == null || level < (row.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) return invalidGrant()
+  if (!user) return invalidGrant()
+  if (row.org_ids !== null) {
+    const eligible = new Set((await eligibleOrganizations(c.env, row.user_id)).map((org) => org.id))
+    if (!row.org_ids.length || row.org_ids.some((id) => !eligible.has(id))) return invalidGrant()
+  } else {
+    // Codes issued before 0119 keep their original scope until they expire.
+    const level = await scopeLevel(c.env, user, row.project_id, row.org_id)
+    if (level == null || level < (row.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) return invalidGrant()
+  }
 
   const minted = await mintApiToken()
   const credentialId = crypto.randomUUID()
@@ -247,10 +260,10 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
     `WITH claimed AS (
        UPDATE mcp_oauth_codes SET status = 'consumed', credential_id = ?
        WHERE code_hash = ? AND status = 'issued' AND expires_at > now()
-       RETURNING user_id, client_name, mode, org_id, project_id
+       RETURNING user_id, client_name, mode, org_id, project_id, org_ids
      ) INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at)
-       SELECT ?, user_id, client_name, ?, ?, mode, org_id, project_id, NULL
+       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, org_ids)
+       SELECT ?, user_id, client_name, ?, ?, mode, org_id, project_id, NULL, org_ids
        FROM claimed RETURNING id`,
   ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash).first()
   if (!credential) return invalidGrant()
@@ -283,15 +296,14 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
     clientName: v.client.clientName,
     clientHost: v.client.host,
     redirectHost: new URL(v.params.redirect_uri).host,
-    mode: v.mode,
+    mode: "act",
+    organizations: await eligibleOrganizations(c.env, String(c.get("user").id)),
   })
 })
 
 const decisionSchema = authorizeSchema.extend({
   approve: z.boolean(),
-  mode: z.enum(["ask", "act"]).optional(),
-  project_id: z.string().min(1).max(200).optional(),
-  org_id: z.string().min(1).max(200).optional(),
+  org_ids: z.array(z.string().regex(/^[1-9][0-9]*$/)).min(1).max(1000).optional(),
 })
 
 /** Approve or deny. Returns the URL the browser must navigate to; the code is
@@ -316,24 +328,20 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   if (!input.approve) {
     return c.json({ redirect: buildRedirect(input.redirect_uri, { error: "access_denied", state: input.state, iss: issuer }) })
   }
-  // Exactly one scope, at the floor for the mode the human chose.
-  if (Boolean(input.project_id) === Boolean(input.org_id)) {
-    return c.json({ error: "invalid_request", error_description: "choose one project or one organization" }, 400)
+  const orgIds = [...new Set(input.org_ids ?? [])]
+  if (!orgIds.length) {
+    return c.json({ error: "invalid_request", error_description: "choose at least one organization" }, 400)
   }
-  const mode: Mode = input.mode ?? v.mode
-  const level = await scopeLevel(c.env, user, input.project_id, input.org_id)
-  if (level == null || level < (mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) {
-    return c.json({ error: "scope_denied" }, 403)
-  }
+  const eligible = new Set((await eligibleOrganizations(c.env, String(user.id))).map((org) => org.id))
+  if (orgIds.some((id) => !eligible.has(id))) return c.json({ error: "scope_denied" }, 403)
   const code = base64url(crypto.getRandomValues(new Uint8Array(32)))
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO mcp_oauth_codes
        (code_hash, client_id, client_name, redirect_uri, code_challenge, resource,
-        user_id, mode, project_id, org_id, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now() + interval '${CODE_TTL}')`,
+        user_id, mode, org_ids, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'act', ?::text::jsonb, now() + interval '${CODE_TTL}')`,
   ).bind(await sha256Hex(code), v.client.clientId, v.client.clientName, input.redirect_uri,
-    input.code_challenge ?? "", v.resource, String(user.id), mode,
-    input.project_id ?? null, input.org_id ?? null).run()
+    input.code_challenge ?? "", v.resource, String(user.id), JSON.stringify(orgIds)).run()
   // Bounded retention; codes are useless minutes after issue.
   await c.env.AQUILLA_PG.prepare("DELETE FROM mcp_oauth_codes WHERE expires_at < now() - interval '1 day'").run()
   return c.json({ redirect: buildRedirect(input.redirect_uri, { code, state: input.state, iss: issuer }) })

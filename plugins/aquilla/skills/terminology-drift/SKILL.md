@@ -1,13 +1,13 @@
 ---
 name: terminology-drift
-description: Find key terms that an Aquilla project renders inconsistently and, if the user asks, stage corrections for a person to approve. Use for terminology checks, consistency reviews, or "fix the term X" requests.
+description: Find key terms that an Aquilla project renders inconsistently and, if the user asks, prepare and save authorized corrections. Use for terminology checks, consistency reviews, or "fix the term X" requests.
 ---
 
 # Terminology drift
 
 Use this when the user asks whether key terms are consistent, or asks you to
-fix a term. Finding drift is read-only. Fixing it stages a changeset that a
-person approves in Aquilla before anything is saved.
+fix a term. Finding drift is read-only. Fixing it stages a traceable changeset. OAuth connections use Act mode within
+the organizations the user selected.
 
 ## Find
 
@@ -33,11 +33,12 @@ person approves in Aquilla before anything is saved.
 4. Draft the corrected target text. Change only the term and the words that
    must agree with it. Keep everything else exactly as it is.
 5. Call `prepare_translations` with all corrections in one changeset.
-6. Show the user the returned summary and the `approvalUrl`.
-   - In ask mode: a person must open the link and approve. Stop here. Say the
+6. Show the user the returned summary, and an `approvalUrl` when provided.
+   - If the prepared changeset uses ask mode: a person must open the link and approve. Stop here. Say the
      change is not saved yet.
-   - In act mode: ask the user to confirm in chat before you call
-     `confirm_changeset`.
+   - If the prepared changeset uses act mode: call `confirm_changeset` for the corrections the user
+     authorized. Respect host confirmation requirements. Saving does not
+     establish human translation validation.
 7. Only after `confirm_changeset` succeeds may you say the fix is saved.
 
 ## Do not

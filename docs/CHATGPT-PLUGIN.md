@@ -10,11 +10,13 @@ package with project-management skills.
 
 1. They add Aquilla in ChatGPT (directory listing, or Developer Mode with the
    MCP URL below).
-2. ChatGPT sends them to Aquilla. They sign in, pick **one project or one
-   organization**, and pick **ask** or **act** mode.
+2. ChatGPT sends them to Aquilla. They sign in, select **one or more organizations**. **All current organizations**
+   selects the organizations available today. OAuth connections always use **Act**.
 3. Back in ChatGPT they ask things like "write a status report on my Aquilla
-   projects". Reads run freely. Any change is a changeset: in ask mode a person
-   approves it in Aquilla before it is saved.
+   projects". Reads run freely. Changes use changesets and can save within the selected
+   organizations, subject to current permissions and ChatGPT confirmations.
+   Saving a translation does not mark it as human validated. Existing
+   command-specific approval rules, including project creation, still apply.
 4. The connection appears under **Preferences → API tokens** with the app's
    name. Revoking it there disconnects ChatGPT.
 
@@ -31,14 +33,15 @@ ChatGPT ──POST /sync/api/v1/external/mcp (no token)──▶ sync-worker
         ──browser: /identity/oauth/authorize?… ──302──▶ https://aquilla.app/oauth/consent?…
                      SPA: sign in, POST /api/v2/mcp-oauth/request, then /decision
         ◀─browser: redirect_uri?code=…&state=…&iss=https://api.aquilla.app/identity
-        ──POST /identity/oauth/token (code + code_verifier)──▶ { access_token: "aqk_…", token_type: "Bearer", scope: "ask" }
+        ──POST /identity/oauth/token (code + code_verifier)──▶ { access_token: "aqk_…", token_type: "Bearer", scope: "act" }
         ──POST /sync/api/v1/external/mcp  Authorization: Bearer aqk_…──▶ tools
 ```
 
 Design decisions:
 
 - **The access token is an ordinary `aqk_` API credential.** Same table, same
-  live-role check on every call, same revoke button. Nothing downstream changed.
+  live-role check on every call, same revoke button. The saved organization
+  allowlist also intersects live organization membership on every request.
 - **No expiry, no refresh token** — the same contract as the device flow
   (`docs/AGENT-CONNECTION.md`): a connected host keeps working until the human
   revokes it.
@@ -52,8 +55,11 @@ Design decisions:
 - **RFC 9207 `iss`** is on every authorization response, success or error.
 - **Codes** are stored as SHA-256 hashes, live five minutes, redeem once, and
   a replayed code revokes the credential the first redemption minted.
-- **Scopes are the autonomy modes.** `ask` stages, `act` may commit. The client
-  asks; the human decides on the consent page. Unknown scopes are ignored.
+- **OAuth always grants `act`.** The user selects organizations rather than an
+  autonomy mode. Device-flow and API-token connections retain Ask/Act controls.
+- **Organization selection is a snapshot.** New projects inside selected
+  organizations can be accessed with current permissions. Later organization
+  memberships require a new grant. Removed memberships cannot retain access.
 - **`resource`** (RFC 8707) must be an Aquilla MCP URL on the issuer's host.
   Tokens are not audience-bound — every Agent API surface accepts them.
 
@@ -63,8 +69,8 @@ Design decisions:
 | RFC 8414 metadata, authorize, token, consent API | `auth-worker/src/routes/mcp-oauth.ts` |
 | Client metadata fetch + validation | `auth-worker/src/lib/mcp-oauth/client-metadata.ts` |
 | Consent page | `src/pages/OAuthConsent.tsx` (route `/oauth/consent`) |
-| Shared mode/scope picker | `src/components/agent-access/AgentAccessFields.tsx` |
-| Code storage | `db/postgres/migrations/0118_mcp_oauth_codes.sql` |
+| Organization consent | `src/pages/OAuthConsent.tsx` |
+| Code storage | `0118_mcp_oauth_codes.sql`, `0119_mcp_oauth_org_scope.sql` |
 
 Configuration: `MCP_OAUTH_ISSUER` on the identity worker (production
 `https://api.aquilla.app/identity`, development
@@ -96,7 +102,7 @@ preview identity worker (see `docs/DEPLOYMENT-ENVIRONMENTS.md`).
 | --- | --- |
 | `translation-status-report` | Plain-language report for a manager or funder |
 | `attention-queue` | Ranked list of what needs attention in one project |
-| `terminology-drift` | Find inconsistent key terms; stage fixes for approval |
+| `terminology-drift` | Find inconsistent key terms; prepare and save authorized fixes |
 
 `scripts/chatgpt-plugin.test.ts` keeps the package honest: every tool a skill
 names must exist, every path must resolve, and the MCP URL must match the
@@ -104,7 +110,7 @@ production deployment manifest.
 
 ## Testing it in ChatGPT
 
-1. Deploy this branch to development (migration `0118` first).
+1. Deploy this branch to development (migrations `0118` and `0119` first).
 2. In ChatGPT, turn on Developer Mode (under Settings → Apps & Connectors →
    Advanced; the location varies by plan), then create an app with MCP URL
    `https://api.dev.aquilla.app/sync/api/v1/external/mcp` and OAuth

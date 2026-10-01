@@ -61,6 +61,11 @@ export const onboarding = defineNamespace({
     "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it may reach.",
     "onboarding.oauth.verified": "Request from {host}. The app supplies its own name; Aquilla checked only the domain.",
     "onboarding.oauth.return": "After you choose, you return to {host}.",
+    "onboarding.oauth.act": "This app can create and update content in the organizations you select, within your current permissions.",
+    "onboarding.oauth.organizations": "Organizations",
+    "onboarding.oauth.allOrganizations": "All current organizations",
+    "onboarding.oauth.scopeHint": "Only organizations where you have maintainer access or higher appear here. Access includes their current and future projects. Organizations you join later require a new connection.",
+    "onboarding.oauth.validation": "Saving a change does not mark it as human-validated. Reviewers validate specific translation versions separately.",
     "onboarding.oauth.approve": "Allow access",
     "onboarding.oauth.redirecting": "Returning you to {host}…",
     "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
@@ -795,6 +800,21 @@ export const onboarding = defineNamespace({
         description:
           "Security note under the heading of the app-consent page. It tells the person that the app name is self-declared and that only the web domain was checked, so they can spot an impostor.",
         placeholders: { host: "The web domain that identified the app, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.act": {
+        description: "OAuth consent explains that the app can change content in selected organizations, subject to current permissions.",
+      },
+      "onboarding.oauth.organizations": {
+        description: "Legend above the organization access checkboxes on OAuth consent.",
+      },
+      "onboarding.oauth.allOrganizations": {
+        description: "Checkbox selecting every currently eligible organization. This selection excludes organizations joined later.",
+      },
+      "onboarding.oauth.scopeHint": {
+        description: "Consent note explaining the maintainer permission floor, access to future projects in selected organizations, and a new grant for later organizations.",
+      },
+      "onboarding.oauth.validation": {
+        description: "Consent note distinguishing saving a change from human linguistic validation of a specific translation version.",
       },
       "onboarding.oauth.return": {
         description: "Line on the app-consent page saying which website the browser goes back to after the person allows or denies access.",

@@ -51,7 +51,7 @@ describe('MCP 401 challenge', () => {
     const res = await postMcp(null)
     expect(res.status).toBe(401)
     expect(res.headers.get('WWW-Authenticate')).toBe(
-      'Bearer resource_metadata="https://api.aquilla.app/sync/.well-known/oauth-protected-resource/api/v1/external/mcp", scope="ask"',
+      'Bearer resource_metadata="https://api.aquilla.app/sync/.well-known/oauth-protected-resource/api/v1/external/mcp", scope="act"',
     )
     // Browser-based MCP clients must be able to read the header cross-origin.
     expect(res.headers.get('Access-Control-Expose-Headers')).toContain('WWW-Authenticate')
@@ -83,7 +83,7 @@ describe('protected-resource metadata (RFC 9728)', () => {
     expect(await res!.json()).toEqual({
       resource: 'https://api.aquilla.app/sync/api/v1/external/mcp',
       authorization_servers: [ISSUER],
-      scopes_supported: ['ask', 'act'],
+      scopes_supported: ['act'],
       bearer_methods_supported: ['header'],
       resource_name: 'Aquilla',
     })

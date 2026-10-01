@@ -12,6 +12,11 @@ import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { validateApiCredential } from "../../../db/shared/api-credentials"
 
+import { listOrgsForCredential } from "../../../sync-worker/src/external/orgs-list"
+import { listProjectsForCredential } from "../../../sync-worker/src/external/projects-list"
+import { scopeCredentialToProject } from "../../../sync-worker/src/external/read-auth"
+import { assertCredentialScope } from "../../../sync-worker/src/external/token-bridge"
+
 const ISSUER = "https://api.aquilla.app/identity"
 const CLIENT_ID = "https://chatgpt.com/oauth/client.json"
 const REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
@@ -73,13 +78,14 @@ async function redeem(fields: Record<string, string>) {
 
 async function seed() {
   await seedUser(1, "alice"); await seedUser(2, "bob")
-  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('p', 'Project', 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Alpha', 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by, org_id) VALUES ('p', 'Project', 1, 10)").run()
   return jwtFor("alice")
 }
 
 /** Approve as `jwt` and return the code from the redirect. */
 async function approveFor(jwt: string, extra: Record<string, unknown> = {}) {
-  const response = await consent("decision", { ...(await authorizeParams()), approve: true, project_id: "p", ...extra }, jwt)
+  const response = await consent("decision", { ...(await authorizeParams()), approve: true, org_ids: ["10"], ...extra }, jwt)
   expect(response.status).toBe(200)
   const redirect = new URL(((await response.json()) as { redirect: string }).redirect)
   return { redirect, code: redirect.searchParams.get("code") ?? "" }
@@ -124,7 +130,7 @@ describe("consent → token → Agent API credential", () => {
     const jwt = await seed()
     const described = await consent("request", await authorizeParams(), jwt)
     expect(await described.json()).toEqual({
-      clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "ask",
+      clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "act", organizations: [{ id: "10", name: "Alpha" }],
     })
     const { redirect, code } = await approveFor(jwt)
     expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT)
@@ -136,10 +142,10 @@ describe("consent → token → Agent API credential", () => {
     expect(response.status).toBe(200)
     expect(response.headers.get("cache-control")).toBe("no-store")
     const token = (await response.json()) as { access_token: string; token_type: string; scope: string; expires_in?: number }
-    expect(token).toMatchObject({ token_type: "Bearer", scope: "ask" })
+    expect(token).toMatchObject({ token_type: "Bearer", scope: "act" })
     expect(token.expires_in).toBeUndefined()
     expect(await validateApiCredential(env.AQUILLA_PG, token.access_token))
-      .toMatchObject({ userId: "1", mode: "ask", projectId: "p", orgId: null })
+      .toMatchObject({ userId: "1", mode: "act", projectId: null, orgId: null, orgIds: ["10"] })
     const credential = await env.AQUILLA_PG.prepare("SELECT id, name, expires_at FROM api_credentials").first<{ id: string; name: string; expires_at: null }>()
     expect(credential).toMatchObject({ name: "ChatGPT", expires_at: null })
 
@@ -170,11 +176,12 @@ describe("consent → token → Agent API credential", () => {
 
   it("will not mint without the matching verifier, client and redirect", async () => {
     const jwt = await seed(); const { code } = await approveFor(jwt)
-    for (const override of [
+    const overrides: Record<string, string>[] = [
       { code_verifier: "w".repeat(43) },
       { client_id: "https://evil.example/client.json" },
       { redirect_uri: "https://chatgpt.com/other" },
-    ]) {
+    ]
+    for (const override of overrides) {
       expect(await (await redeem(tokenFields(code, override))).json()).toEqual({ error: "invalid_grant" })
     }
     expect(await (await redeem(tokenFields(code, { resource: "https://api.aquilla.app/sync/api/v1/elsewhere" }))).json())
@@ -193,26 +200,26 @@ describe("consent → token → Agent API credential", () => {
 
   it("re-checks the approver's role when the code is redeemed", async () => {
     await seed()
-    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p', 2, 400, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 2, 600)").run()
     const { code } = await approveFor(await jwtFor("bob"))
-    await env.AQUILLA_PG.prepare("DELETE FROM project_members WHERE user_id = 2").run()
+    await env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE user_id = 2").run()
     expect(await (await redeem(tokenFields(code))).json()).toEqual({ error: "invalid_grant" })
   })
 })
 
 describe("what the human approves", () => {
-  it("grants the mode and scope chosen on the page, at the role floor for that mode", async () => {
+  it("always grants act and refuses organizations below the maintainer floor", async () => {
     await seed()
-    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p', 2, 400, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 2, 400)").run()
     const bob = await jwtFor("bob")
-    const act = await consent("decision", { ...(await authorizeParams()), approve: true, project_id: "p", mode: "act" }, bob)
+    const act = await consent("decision", { ...(await authorizeParams()), approve: true, org_ids: ["10"], mode: "ask" }, bob)
     expect(act.status).toBe(403)
     const alice = await jwtFor("alice")
-    const { code } = await approveFor(alice, { mode: "act" })
+    const { code } = await approveFor(alice, { mode: "ask" })
     expect(((await (await redeem(tokenFields(code))).json()) as { scope: string }).scope).toBe("act")
   })
 
-  it("requires exactly one project or organization", async () => {
+  it("requires a nonempty organization allowlist", async () => {
     const jwt = await seed()
     const none = await consent("decision", { ...(await authorizeParams()), approve: true }, jwt)
     expect(none.status).toBe(400)
@@ -269,5 +276,66 @@ describe("untrusted clients", () => {
       expect(redirect.searchParams.get("state")).toBe("xyz-state")
       expect(redirect.searchParams.get("iss")).toBe(ISSUER)
     }
+  })
+})
+
+
+describe("OAuth organization grants across real consumers (AQU-1529)", () => {
+  async function multiOrgGrant() {
+    const jwt = await seed()
+    await env.AQUILLA_PG.prepare(`INSERT INTO organizations (id, name, owner_user_id)
+      VALUES (11, 'Beta', 2), (12, 'Excluded', 2)`).run()
+    await env.AQUILLA_PG.prepare(`INSERT INTO org_members (org_id, user_id, role_level)
+      VALUES (11, 1, 600), (12, 1, 600)`).run()
+    await env.AQUILLA_PG.prepare(`INSERT INTO projects (id, name, created_by, org_id)
+      VALUES ('beta', 'Beta project', 2, 11), ('excluded', 'Excluded project', 2, 12)`).run()
+    const { code } = await approveFor(jwt, { org_ids: ["10", "11"] })
+    const response = await redeem(tokenFields(code))
+    expect(response.status).toBe(200)
+    const { access_token: token } = await response.json() as { access_token: string }
+    return { jwt, token }
+  }
+
+  it("passes the minted allowlist through discovery, read and write gates", async () => {
+    const { jwt, token } = await multiOrgGrant()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    expect(cred.orgIds).toEqual(["10", "11"])
+    expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10", "11"])
+    expect((await listProjectsForCredential(env.AQUILLA_PG, cred)).map((project) => project.id).sort()).toEqual(["beta", "p"])
+    for (const project of ["p", "beta"]) {
+      expect((await scopeCredentialToProject(env, cred, project)).ok).toBe(true)
+      await expect(assertCredentialScope(env.AQUILLA_PG, cred, project)).resolves.toBeDefined()
+    }
+    expect((await scopeCredentialToProject(env, cred, "excluded")).ok).toBe(false)
+    await expect(assertCredentialScope(env.AQUILLA_PG, cred, "excluded")).rejects.toMatchObject({ code: "scope_denied" })
+    const listing = await app.request("/api/v2/credentials", { headers: authHeader(jwt) }, oauthEnv)
+    expect(await listing.json()).toMatchObject({ credentials: [{ orgIds: ["10", "11"] }] })
+  })
+
+  it("does not authorize organizations joined after consent", async () => {
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (13, 'Future', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by, org_id) VALUES ('future', 'Future project', 1, 13)").run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10", "11"])
+    await expect(assertCredentialScope(env.AQUILLA_PG, cred, "future")).rejects.toMatchObject({ code: "scope_denied" })
+  })
+
+  it("removes lost org access even when a direct project membership remains", async () => {
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('beta', 1, 600)").run()
+    await env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = 11 AND user_id = 1").run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    expect(cred.orgIds).toEqual(["10"])
+    expect((await scopeCredentialToProject(env, cred, "beta")).ok).toBe(false)
+    await expect(assertCredentialScope(env.AQUILLA_PG, cred, "beta")).rejects.toMatchObject({ code: "scope_denied" })
+    expect((await listProjectsForCredential(env.AQUILLA_PG, cred)).map((project) => project.id)).toEqual(["p"])
+  })
+
+  it("does not mint a partially widened grant when one selected org is unauthorized", async () => {
+    const jwt = await seed()
+    const response = await consent("decision", { ...(await authorizeParams()), approve: true, org_ids: ["10", "999"] }, jwt)
+    expect(response.status).toBe(403)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM mcp_oauth_codes").first()).toEqual({ n: 0 })
   })
 })

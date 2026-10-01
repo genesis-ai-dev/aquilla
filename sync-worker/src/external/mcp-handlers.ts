@@ -10,6 +10,7 @@
 // { error: { code, message } } using the SAME stable codes as the REST surface,
 // so agents branch identically across adapters.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError } from './errors'
 import type { ExternalErrorCode } from './errors'
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
@@ -420,6 +421,7 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
     // any more than about what it may learn.
     access: cred.access,
     orgId: cred.orgId,
+    ...(cred.orgIds !== undefined ? { orgIds: cred.orgIds } : {}),
     projectId: cred.projectId,
     credentialId: cred.credentialId,
   })
@@ -442,7 +444,7 @@ async function listProjects(
   // credential's own scope — an org-scoped credential naming a different org
   // gets scope_denied, matching the REST route rather than returning [].
   const orgId = str(args, 'orgId')
-  if (orgId !== undefined && cred.orgId !== null && cred.orgId !== orgId) {
+  if (orgId !== undefined && !credentialAllowsOrganization(cred, orgId)) {
     return fail('scope_denied', 'credential is not scoped to this org')
   }
   // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the

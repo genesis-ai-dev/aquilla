@@ -10,6 +10,7 @@
 // doctrine): an owner whose ownership lapses after staging is denied at the
 // commit, not at the row write.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { receiptOnlyGates } from './commit-gates'
@@ -49,9 +50,7 @@ async function resolveOrgMemberGate(
   cred: ApiCredentialContext,
   cmd: OrgMemberCommand,
 ): Promise<OrgMemberGate | Response> {
-  // Scope: a project-scoped credential can never reach org governance. (Act
-  // tokens are project-scoped at mint, which is the second reason these
-  // commands are ask-mode-only by construction.)
+  // Scope: a project-scoped credential cannot reach org governance.
   if (cred.projectId != null) {
     return errorResponse('scope_denied', 'a project-scoped credential cannot manage org membership')
   }
@@ -60,7 +59,7 @@ async function resolveOrgMemberGate(
   if (!Number.isInteger(orgId)) {
     return errorResponse('validation_failed', `${cmd.kind}.orgId must be an integer org id`)
   }
-  if (cred.orgId != null && cred.orgId !== String(orgId)) {
+  if (!credentialAllowsOrganization(cred, String(orgId))) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
 

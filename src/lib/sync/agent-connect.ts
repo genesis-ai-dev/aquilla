@@ -25,7 +25,8 @@ export interface McpOAuthClient {
   clientHost: string
   /** Where the browser goes back to after the decision. */
   redirectHost: string
-  mode: "ask" | "act"
+  mode: "act"
+  organizations: { id: string; name: string | null }[]
 }
 
 export type McpOAuthResult<T> =

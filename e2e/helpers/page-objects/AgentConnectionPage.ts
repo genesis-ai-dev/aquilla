@@ -16,4 +16,21 @@ export class AgentConnectionPage {
     await this.page.getByRole("button", { name: "Authorize agent", exact: true }).click()
     await expect(this.page.getByRole("status")).toContainText("Access approved")
   }
+  async reviewOAuth(url: string) {
+    await this.page.goto(url)
+    await expect(this.page.getByRole("checkbox", { name: "All current organizations", exact: true })).toBeVisible({ timeout: 30_000 })
+  }
+  async chooseAllCurrentOrganizations() {
+    await this.page.getByRole("checkbox", { name: "All current organizations", exact: true }).check()
+  }
+  async excludeOrganization(name: string) {
+    await this.page.getByRole("checkbox", { name, exact: true }).uncheck()
+  }
+  async allowOAuth() {
+    const decision = this.page.waitForResponse(response =>
+      response.url().includes("/api/v2/mcp-oauth/decision") && response.request().method() === "POST")
+    await this.page.getByRole("button", { name: "Allow access", exact: true }).click()
+    expect((await decision).status()).toBe(200)
+  }
+
 }

@@ -120,6 +120,7 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
     // usefully retry.
     access: cred.access,
     orgId: cred.orgId,
+    ...(cred.orgIds !== undefined ? { orgIds: cred.orgIds } : {}),
     projectId: cred.projectId,
     credentialId: cred.credentialId,
     hints: {

@@ -6,10 +6,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button"
 import { FieldGroup } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { AgentAccessFields, useAgentAccess } from "@/components/agent-access/AgentAccessFields"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { leaveForClient, mcpOAuthCall, type McpOAuthClient } from "@/lib/sync/agent-connect"
 
 // Consent for MCP hosts (ChatGPT plugin, Claude, Codex) using OAuth 2.1 +
@@ -26,7 +23,8 @@ const AUTHORIZE_PARAMS = [
 
 export function OAuthConsent() {
   const { session } = useFrontierSession()
-  return <OAuthConsentContent key={session?.jwt ?? "signed-out"} />
+  const { search } = useLocation()
+  return <OAuthConsentContent key={`${session?.jwt ?? "signed-out"}:${search}`} />
 }
 
 function OAuthConsentContent() {
@@ -41,10 +39,7 @@ function OAuthConsentContent() {
   }, [search])
   const [client, setClient] = useState<McpOAuthClient | null>(null)
   const [invalid, setInvalid] = useState(false)
-  const [orgs, setOrgs] = useState<OrgSummary[]>([])
-  const [projects, setProjects] = useState<CloudProjectSummary[]>([])
-  const access = useAgentAccess(projects, orgs, null)
-  const { setMode } = access
+  const [selectedOrgs, setSelectedOrgs] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -64,24 +59,20 @@ function OAuthConsentContent() {
           else setInvalid(true)
           return
         }
-        const [directory, myOrgs] = await Promise.all([fetchAccessibleProjectsResult(jwt), listMyOrgs(jwt)])
-        if (cancelled) return
-        if (!directory.ok) throw new Error("projects")
-        setProjects(directory.projects); setOrgs(myOrgs)
-        setMode(described.data.mode); setClient(described.data)
+        setClient(described.data)
       } catch {
         if (!cancelled) setError(true)
       }
     })()
     return () => { cancelled = true }
-  }, [jwt, params, setMode])
+  }, [jwt, params])
 
   async function decide(approve: boolean) {
     if (!jwt || !client || inFlight.current) return
     inFlight.current = true; setBusy(true); setError(false)
     try {
       const result = await mcpOAuthCall<{ redirect: string }>(jwt, "decision", {
-        ...params, approve, ...(approve ? { mode: access.mode, ...access.scopeBody } : {}),
+        ...params, approve, ...(approve ? { org_ids: selectedOrgs } : {}),
       })
       const redirect = result.ok ? result.data.redirect : result.redirect
       if (redirect) { setLeaving(true); leaveForClient(redirect); return }
@@ -105,13 +96,36 @@ function OAuthConsentContent() {
           <p>{t("onboarding.connect.account", { username: session.username })}</p>
           <p className="text-sm text-muted-foreground">{t("onboarding.oauth.verified", { host: client.clientHost })}</p>
           <FieldGroup>
-            <AgentAccessFields access={access} requestedMode={client.mode} pinnedProjectId={null} busy={busy}
-              askHint={t("onboarding.connect.ask")} actHint={t("onboarding.connect.act")} />
+            <p>{t("onboarding.oauth.act")}</p>
+            <fieldset disabled={busy} className="flex flex-col gap-3">
+              <legend className="mb-2 font-medium">{t("onboarding.oauth.organizations")}</legend>
+              {client.organizations.length === 0 ? (
+                <p>{t("onboarding.connect.noOrgs")}</p>
+              ) : <>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox"
+                    checked={selectedOrgs.length === client.organizations.length}
+                    onChange={(event) => setSelectedOrgs(event.target.checked
+                      ? client.organizations.map((org) => org.id) : [])} />
+                  {t("onboarding.oauth.allOrganizations")}
+                </label>
+                {client.organizations.map((org) => (
+                  <label key={org.id} className="flex items-center gap-2">
+                    <input type="checkbox" checked={selectedOrgs.includes(org.id)}
+                      onChange={(event) => setSelectedOrgs((ids) => event.target.checked
+                        ? [...ids, org.id] : ids.filter((id) => id !== org.id))} />
+                    {org.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: org.id })}
+                  </label>
+                ))}
+              </>}
+            </fieldset>
+            <p className="text-sm text-muted-foreground">{t("onboarding.oauth.scopeHint")}</p>
+            <p className="text-sm text-muted-foreground">{t("onboarding.oauth.validation")}</p>
             <p className="text-sm text-muted-foreground">{t("onboarding.connect.expiry")}</p>
             <p className="text-sm text-muted-foreground">{t("onboarding.oauth.return", { host: client.redirectHost })}</p>
           </FieldGroup>
           <div className="flex gap-2">
-            <Button disabled={busy || !access.scopeChosen} onClick={() => void decide(true)}>{t("onboarding.oauth.approve")}</Button>
+            <Button disabled={busy || selectedOrgs.length === 0} onClick={() => void decide(true)}>{t("onboarding.oauth.approve")}</Button>
             <Button variant="outline" disabled={busy} onClick={() => void decide(false)}>{t("onboarding.connect.deny")}</Button>
           </div>
         </>}

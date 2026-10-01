@@ -26,6 +26,7 @@ export interface ApiCredential {
   access: CredentialAccess
   /** Org scope, if any. Stored as TEXT server-side (see migration 0054). */
   orgId: string | null
+  orgIds?: string[]
   /** Project scope, if any. */
   projectId: string | null
   tokenPrefix: string

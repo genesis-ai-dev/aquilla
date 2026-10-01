@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OAuthConsent } from "./OAuthConsent"
 import { leaveForClient, mcpOAuthCall } from "@/lib/sync/agent-connect"
-import { pickSelectOption } from "@/test-utils/select"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" }, loading: false }) }))
 vi.mock("@/lib/sync/agent-connect", async (importActual) => ({
@@ -11,18 +10,6 @@ vi.mock("@/lib/sync/agent-connect", async (importActual) => ({
   mcpOAuthCall: vi.fn(),
   leaveForClient: vi.fn(),
 }))
-// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
-vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
-  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
-  fetchAccessibleProjectsResult: async () => ({ ok: true, projects: [
-    { id: "p", name: "Project", role: { level: 700 } },
-    { id: "helper", name: "Contributor project", role: { level: 400 } },
-  ] }),
-}))
-vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: async () => [
-  { id: 1, name: "Come and See", role: { level: 700 } },
-] }))
-
 const api = vi.mocked(mcpOAuthCall)
 const leave = vi.mocked(leaveForClient)
 const QUERY = "response_type=code&client_id=https%3A%2F%2Fchatgpt.com%2Foauth%2Fclient.json" +
@@ -31,7 +18,7 @@ const PARAMS = {
   response_type: "code", client_id: "https://chatgpt.com/oauth/client.json", redirect_uri: "https://chatgpt.com/cb",
   code_challenge: "abc", code_challenge_method: "S256", state: "s1", scope: "ask",
 }
-const described = { clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "ask" as const }
+const described = { clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "act" as const, organizations: [{ id: "1", name: "Come and See" }, { id: "2", name: "Second org" }] }
 const mount = () => render(<MemoryRouter initialEntries={[`/oauth/consent?${QUERY}`]}><OAuthConsent /></MemoryRouter>)
 
 beforeEach(() => {
@@ -49,29 +36,43 @@ describe("OAuth consent for MCP hosts", () => {
     expect(api).toHaveBeenCalledWith("jwt", "request", PARAMS)
   })
 
-  it("approves the chosen scope and mode, then leaves for the client with the code", async () => {
+  it("approves selected organizations in fixed act mode and returns to the client", async () => {
     mount()
     const allow = await screen.findByRole("button", { name: "Allow access" })
     // Nothing chosen yet: nothing to approve.
     expect(allow).toBeDisabled()
-    await pickSelectOption("Project", "Project")
-    fireEvent.click(screen.getByRole("radio", { name: /Act/ }))
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Come and See" }))
     api.mockResolvedValueOnce({ ok: true, data: { redirect: "https://chatgpt.com/cb?code=c&state=s1" } })
     fireEvent.click(allow)
     await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", {
-      ...PARAMS, approve: true, mode: "act", project_id: "p",
+      ...PARAMS, approve: true, org_ids: ["1"],
     }))
     expect(leave).toHaveBeenCalledWith("https://chatgpt.com/cb?code=c&state=s1")
     expect(await screen.findByRole("status")).toHaveTextContent("Returning you to chatgpt.com")
   })
 
-  it("can grant a whole organization", async () => {
+  it("selects all current organizations and can exclude an individual organization", async () => {
     mount()
-    await screen.findByRole("button", { name: "Allow access" })
-    fireEvent.click(screen.getByRole("radio", { name: /whole organization/i }))
+    const allow = await screen.findByRole("button", { name: "Allow access" })
+    fireEvent.click(screen.getByRole("checkbox", { name: "All current organizations" }))
+    expect(screen.getByRole("checkbox", { name: "Come and See" })).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Second org" })).toBeChecked()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Come and See" }))
+    expect(screen.getByRole("checkbox", { name: "All current organizations" })).not.toBeChecked()
     api.mockResolvedValueOnce({ ok: true, data: { redirect: "https://chatgpt.com/cb?code=c" } })
-    fireEvent.click(screen.getByRole("button", { name: "Allow access" }))
-    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", expect.objectContaining({ org_id: "1" })))
+    fireEvent.click(allow)
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", {
+      ...PARAMS, approve: true, org_ids: ["2"],
+    }))
+  })
+
+  it("cannot grant access when no organizations are eligible", async () => {
+    api.mockReset()
+    api.mockResolvedValueOnce({ ok: true, data: { ...described, organizations: [] } })
+    mount()
+    expect(await screen.findByRole("button", { name: "Allow access" })).toBeDisabled()
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 
   it("denies without choosing a scope", async () => {

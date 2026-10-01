@@ -28,7 +28,7 @@ import { encodeCursor, parsePageParams } from './pagination'
 import { assertCredentialScope } from './token-bridge'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { credentialAllowsOrganization, validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -78,6 +78,9 @@ async function handleGet(
   if (cred.credentialId !== cs.credentialId) {
     return errorResponse('permission_denied', 'credential did not create this changeset')
   }
+  try {
+    await assertCredentialScope(db, cred, projectId)
+  } catch (err) { return toErrorResponse(err) }
   // Live-role resolution on every call (§2): a viewer floor to read the plan,
   // so a user removed from the project after prepare can no longer see it.
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
@@ -234,8 +237,16 @@ async function handleDiscard(
   // an unconditional denial into "the staging credential may discard its own
   // changeset". Once the project exists, the live-role check applies unchanged.
   if (!(await projectExists(db, projectId))) {
+    if (cred.orgIds !== undefined && cs.commands.some(command =>
+      command.kind !== 'CreateProject'
+      || !credentialAllowsOrganization(cred, command.orgId == null ? null : String(command.orgId)))) {
+      return errorResponse('scope_denied', 'changeset is outside the credential organization scope')
+    }
     return discardChangesetCore(db, projectId, cs)
   }
+  try {
+    await assertCredentialScope(db, cred, projectId)
+  } catch (err) { return toErrorResponse(err) }
   // Live-role resolution on every call (§2): the credential owner must still
   // resolve SOME role on the project — a user removed after prepare cannot
   // discard, matching every other lifecycle op.

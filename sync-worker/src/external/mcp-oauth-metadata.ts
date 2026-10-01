@@ -26,7 +26,7 @@ export const PROTECTED_RESOURCE_WELL_KNOWN = '/.well-known/oauth-protected-resou
 
 /** Autonomy modes double as OAuth scopes: `ask` stages work for a human to
  *  approve, `act` may commit. The consent page lets the human pick either. */
-export const MCP_OAUTH_SCOPES = ['ask', 'act'] as const
+export const MCP_OAUTH_SCOPES = ['act'] as const
 
 /** Strip a trailing slash so URL joins never double up. */
 function trimSlash(value: string): string {
@@ -56,7 +56,7 @@ export function mcpWwwAuthenticate(
 ): string {
   const parts = [
     `resource_metadata="${protectedResourceMetadataUrl(publicBase)}"`,
-    'scope="ask"',
+    'scope="act"',
   ]
   if (error) {
     parts.unshift(`error="${error.code}"`, `error_description="${error.description.replace(/"/g, "'")}"`)

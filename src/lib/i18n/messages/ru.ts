@@ -3011,7 +3011,7 @@ export const ru: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "Задавать целевые даты могут только кураторы.",
   "org.projectOverview.plan.completion": "Завершение",
   "org.projectOverview.plan.markDone": "Отметить как готовое",
-  "org.projectOverview.plan.markDoneHint": "Можно отменить.",
+  "org.projectOverview.plan.markDoneTooltip": "Эту отметку можно будет снять позже.",
   "org.projectOverview.plan.markDoneAnyway": "Всё равно отметить готовым",
   "org.projectOverview.plan.unmarkDone": "Снять отметку",
   "org.projectOverview.plan.notMarkedDone": "Готовность не отмечена.",

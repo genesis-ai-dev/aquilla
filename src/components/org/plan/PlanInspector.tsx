@@ -646,14 +646,16 @@ export function PlanInspector({
                     {t("org.projectOverview.plan.nothingLeft")}
                   </p>
                 )}
+                {/* AQU-1494: the reassurance that this can be reversed lives in
+                    a tooltip. Printed beside the button as "Undoable." it read
+                    as "cannot be undone" (Joel, 2026-09-29). */}
                 <div className="flex items-center gap-2">
-                  <Button size="sm" disabled={busy} data-testid="plan-mark-done"
-                    onClick={() => (validatedPct < 100 ? setConfirmingDone(true) : markDone())}>
-                    {t("org.projectOverview.plan.markDone")}
-                  </Button>
-                  <span className="text-[11.5px] text-muted-foreground">
-                    {t("org.projectOverview.plan.markDoneHint")}
-                  </span>
+                  <AppTooltip content={t("org.projectOverview.plan.markDoneTooltip")}>
+                    <Button size="sm" disabled={busy} data-testid="plan-mark-done"
+                      onClick={() => (validatedPct < 100 ? setConfirmingDone(true) : markDone())}>
+                      {t("org.projectOverview.plan.markDone")}
+                    </Button>
+                  </AppTooltip>
                 </div>
               </>
             )}

@@ -3,6 +3,8 @@ import type { ReactNode } from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { PlanInspector } from "./PlanInspector"
 import type { PlanOpenKind, PlanUnit } from "@/lib/plan/plan-status"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectTooltip } from "@/test-utils/tooltip"
 
 // Every test below used to pass getToken={null}, which short-circuits
 // usePlanUnitSections before it fetches — so the whole AQU-1098 breakdown (the
@@ -71,10 +73,13 @@ function renderInspector(
   const onPatch = vi.fn().mockResolvedValue(true)
   const onClose = vi.fn()
   const onStep = vi.fn()
+  // The provider App.tsx mounts, with no delay, so the Mark done tooltip opens.
   render(
-    <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
-      projectId="p1" getToken={getToken} lane="" languageLabel="Tok Pisin"
-      onPatch={onPatch} onClose={onClose} onStep={onStep} {...extras} />,
+    <TooltipProvider delay={0}>
+      <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
+        projectId="p1" getToken={getToken} lane="" languageLabel="Tok Pisin"
+        onPatch={onPatch} onClose={onClose} onStep={onStep} {...extras} />
+    </TooltipProvider>,
   )
   return { onPatch, onClose, onStep }
 }
@@ -164,8 +169,17 @@ describe("marking done", () => {
 
   it("reverses a mark", async () => {
     const { onPatch } = renderInspector(unit({ doneAt: NOW, doneBy: "randall" }))
+    expect(screen.getByTestId("plan-unmark-done")).toHaveTextContent("Unmark")
     fireEvent.click(screen.getByTestId("plan-unmark-done"))
     await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ fileId: "f1", sectionKey: "", done: false }))
+  })
+
+  it("says the mark can be reversed in a tooltip, never as a word beside the button", async () => {
+    // AQU-1494: "Undoable." printed beside Mark done read as "cannot be
+    // undone" (Joel, 2026-09-29).
+    renderInspector(unit())
+    expect(screen.queryByText(/undoable/i)).toBeNull()
+    await expectTooltip(screen.getByTestId("plan-mark-done"), "You can unmark this later.")
   })
 
   it("shows a Done unit's bars beside the mark, mismatch and all", () => {

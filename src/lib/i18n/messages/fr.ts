@@ -2953,7 +2953,7 @@ export const fr: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "Seuls les mainteneurs peuvent définir des dates cibles.",
   "org.projectOverview.plan.completion": "Achèvement",
   "org.projectOverview.plan.markDone": "Marquer terminé",
-  "org.projectOverview.plan.markDoneHint": "Annulable.",
+  "org.projectOverview.plan.markDoneTooltip": "Vous pourrez retirer cette marque plus tard.",
   "org.projectOverview.plan.markDoneAnyway": "Terminer quand même",
   "org.projectOverview.plan.unmarkDone": "Démarquer",
   "org.projectOverview.plan.notMarkedDone": "Non marqué terminé.",

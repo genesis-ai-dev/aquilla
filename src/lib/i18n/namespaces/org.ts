@@ -1358,9 +1358,9 @@ export const org = defineNamespace({
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
-    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneTooltip": "You can unmark this later.",
     "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
-    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.unmarkDone": "Unmark",
     "org.projectOverview.plan.notMarkedDone": "Not marked done.",
     "org.projectOverview.plan.aMaintainer": "a maintainer",
     "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
@@ -2951,9 +2951,9 @@ export const org = defineNamespace({
         description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
         maxLength: 14,
       },
-      "org.projectOverview.plan.markDoneHint": {
-        description: "Reassurance beside Mark done that the action can be reversed.",
-        maxLength: 14,
+      "org.projectOverview.plan.markDoneTooltip": {
+        description: "Hover tooltip on Mark done: reassurance that the mark can be removed again afterwards. Must read as reversible, never as \"cannot be undone\".",
+        maxLength: 60,
       },
       "org.projectOverview.plan.markDoneAnyway": {
         description: "Confirms marking a unit done although its validated percentage is below 100.",

@@ -2966,7 +2966,7 @@ export const id: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "Hanya pengelola yang dapat menetapkan tanggal target.",
   "org.projectOverview.plan.completion": "Kerampungan",
   "org.projectOverview.plan.markDone": "Tandai selesai",
-  "org.projectOverview.plan.markDoneHint": "Dapat diurungkan.",
+  "org.projectOverview.plan.markDoneTooltip": "Tanda ini dapat dibatalkan nanti.",
   "org.projectOverview.plan.markDoneAnyway": "Tetap tandai selesai",
   "org.projectOverview.plan.unmarkDone": "Batalkan tanda",
   "org.projectOverview.plan.notMarkedDone": "Belum ditandai selesai.",

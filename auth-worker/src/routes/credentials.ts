@@ -63,6 +63,7 @@ interface CredentialRow {
   mode: "ask" | "act"
   access: "read" | "write"
   org_id: string | null
+  org_ids?: string[] | null
   project_id: string | null
   token_prefix: string
   created_at: string
@@ -82,6 +83,7 @@ function toDto(r: CredentialRow) {
     // anything — the same reason `pii` is surfaced below.
     access: r.access,
     orgId: r.org_id,
+    ...(r.org_ids != null ? { orgIds: r.org_ids } : {}),
     projectId: r.project_id,
     tokenPrefix: r.token_prefix,
     createdAt: r.created_at,
@@ -232,7 +234,7 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 credentials.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
   const result = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, mode, access, org_id, project_id, token_prefix,
+    `SELECT id, name, mode, access, org_id, org_ids, project_id, token_prefix,
             created_at, expires_at, last_used_at, revoked_at, pii
        FROM api_credentials
       WHERE user_id = ?

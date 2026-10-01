@@ -7,8 +7,31 @@
 // tool to call. `inputSchema` is JSON Schema (draft 2020-12 subset) so hosts can
 // validate arguments before dispatch.
 
-/** A single MCP tool definition as returned by tools/list. */
-export interface McpToolDef {
+/** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
+ *  when to ask the user before a call: ChatGPT's "ask before changes" setting
+ *  keys off readOnlyHint / destructiveHint, and app review requires them. */
+export interface McpToolAnnotations {
+  title: string
+  /** True when the tool never changes Aquilla state (staging included). */
+  readOnlyHint: boolean
+  /** True when the tool can overwrite or remove committed project content. */
+  destructiveHint: boolean
+  /** True when repeating the same call has no further effect. */
+  idempotentHint: boolean
+  /** Aquilla is a closed system: no tool reaches the open web. */
+  openWorldHint: false
+}
+
+/** Per-tool auth requirement (OpenAI Apps SDK `securitySchemes`). Every
+ *  Aquilla tool needs a signed-in user; OAuth scopes are the ask/act modes,
+ *  which the human picks on the consent page, so none is demanded per tool. */
+export interface McpSecurityScheme {
+  type: 'oauth2'
+  scopes: string[]
+}
+
+/** A tool as authored below, before annotations are attached. */
+interface McpToolSpec {
   name: string
   description: string
   inputSchema: {
@@ -19,11 +42,18 @@ export interface McpToolDef {
   }
 }
 
+/** A single MCP tool definition as returned by tools/list. */
+export interface McpToolDef extends McpToolSpec {
+  annotations: McpToolAnnotations
+  securitySchemes: McpSecurityScheme[]
+  _meta: { securitySchemes: McpSecurityScheme[] }
+}
+
 const projectIdProp = {
   projectId: { type: 'string', description: 'Aquilla project id (TEXT primary key).' },
 }
 
-export const MCP_TOOLS: McpToolDef[] = [
+const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'get_capabilities',
     description:
@@ -1148,3 +1178,76 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
 ]
+type ToolKind = 'read' | 'stage' | 'commit' | 'discard'
+
+/**
+ * How each tool touches Aquilla state. Every tool MUST be listed (a test
+ * enforces it), so a new tool cannot ship without a deliberate choice.
+ *
+ *  read    — no state change at all.
+ *  stage   — writes a pending changeset only; nothing in the project changes
+ *            until a confirm (and, in ask mode, a human approval).
+ *  commit  — applies a staged changeset: may overwrite translations, delete or
+ *            split cells, or change settings. The one destructive tool.
+ *  discard — drops a staged changeset; project content is untouched.
+ */
+export const TOOL_KINDS: Record<string, ToolKind> = {
+  get_capabilities: 'read',
+  get_identity_and_scope: 'read',
+  list_orgs: 'read',
+  list_projects: 'read',
+  get_project: 'read',
+  get_project_settings: 'read',
+  patch_settings: 'stage',
+  describe_command: 'read',
+  get_skill: 'read',
+  search_project: 'read',
+  find_similar_cells: 'read',
+  search_projects: 'read',
+  read_content: 'read',
+  read_history: 'read',
+  read_comments: 'read',
+  get_prompt_preview: 'read',
+  list_memory: 'read',
+  read_cell_memory: 'read',
+  read_quality: 'read',
+  read_term_consistency: 'read',
+  list_terms: 'read',
+  prepare_translations: 'stage',
+  preview_import: 'read',
+  prepare_import: 'stage',
+  export_file: 'read',
+  get_changeset: 'read',
+  list_changesets: 'read',
+  wait_for_changeset: 'read',
+  confirm_changeset: 'commit',
+  discard_changeset: 'discard',
+}
+
+const OAUTH: McpSecurityScheme[] = [{ type: 'oauth2', scopes: [] }]
+
+function titleOf(name: string): string {
+  const words = name.split('_')
+  return [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(' ')
+}
+
+function annotationsFor(spec: McpToolSpec): McpToolAnnotations {
+  // Unknown kinds fail closed: treat the tool as a destructive write.
+  const kind = TOOL_KINDS[spec.name] ?? 'commit'
+  return {
+    title: titleOf(spec.name),
+    readOnlyHint: kind === 'read',
+    destructiveHint: kind === 'commit',
+    idempotentHint: kind === 'read' || kind === 'discard',
+    openWorldHint: false,
+  }
+}
+
+export const MCP_TOOLS: McpToolDef[] = TOOL_SPECS.map((spec) => ({
+  ...spec,
+  annotations: annotationsFor(spec),
+  // Top-level field is the Apps SDK form; _meta mirrors it for hosts that only
+  // read namespaced metadata. Both say the same thing.
+  securitySchemes: OAUTH,
+  _meta: { securitySchemes: OAUTH },
+}))

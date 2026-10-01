@@ -12,7 +12,9 @@ profile or fall back from an unknown branch.
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
-`/sync/*` through the sync Worker. Staging is retired from the deployable
+`/sync/*` through the sync Worker. The identity Worker also owns
+`/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker

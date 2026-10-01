@@ -1337,6 +1337,7 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     token_hash   TEXT NOT NULL UNIQUE,
     mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
     org_id       TEXT,
+    org_ids      JSONB,
     project_id   TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ,
@@ -1350,7 +1351,9 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     -- `mode`, which is the autonomy dial for writes that ARE permitted. 'read'
     -- makes every write surface answer scope_denied; 'write' (the default, so
     -- every pre-0113 token keeps working) is the original all-or-nothing grant.
-    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write'))
+    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write')),
+    CONSTRAINT api_credentials_org_ids_array CHECK (org_ids IS NULL OR
+      (jsonb_typeof(org_ids) = 'array' AND org_id IS NULL AND project_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
@@ -2145,6 +2148,31 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 );
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
+
+-- 0124: OAuth 2.1 authorization codes for MCP hosts (ChatGPT plugin, Claude,
+-- Codex). Hash-only; five-minute, single-use; a replay revokes credential_id.
+CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  resource TEXT,
+  user_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+  project_id TEXT,
+  org_id TEXT,
+  org_ids JSONB,
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'consumed')),
+  credential_id UUID,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT mcp_oauth_codes_scope_check CHECK (
+    (org_ids IS NOT NULL AND jsonb_typeof(org_ids) = 'array'
+      AND jsonb_array_length(org_ids) > 0 AND org_id IS NULL AND project_id IS NULL)
+    OR (org_ids IS NULL AND ((project_id IS NULL) <> (org_id IS NULL))))
+);
+CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
 
 -- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because

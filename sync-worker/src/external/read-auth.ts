@@ -16,6 +16,7 @@
 //
 // Nothing here is new behavior beyond that — it is read-routes.ts's gate, moved.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
 import type { SyncTokenClaims } from "../auth"
 import { ROLE } from "../events/role-policy"
@@ -126,7 +127,7 @@ export async function scopeCredentialToProject(
       response: externalError("scope_denied", "credential is not scoped to this project", 403),
     }
   }
-  if (credential.orgId !== null && credential.orgId !== projectOrgId) {
+  if (!credentialAllowsOrganization(credential, projectOrgId)) {
     return {
       ok: false,
       response: externalError("scope_denied", "credential is not scoped to this org", 403),

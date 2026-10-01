@@ -82,6 +82,7 @@ import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
+import { handleMcpProtectedResourceRequest } from "./external/mcp-oauth-metadata"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
@@ -240,6 +241,12 @@ function routeProjectSync(request: Request, env: Env): Response | Promise<Respon
  *  working unchanged. Pre-migration this was `/api/sync` under the apex. */
 const APEX_PREFIX = "/sync"
 
+/** The mount prefix a request arrived under ("" when reached directly). */
+function apexPrefixOf(request: Request): string {
+  const { pathname } = new URL(request.url)
+  return pathname === APEX_PREFIX || pathname.startsWith(`${APEX_PREFIX}/`) ? APEX_PREFIX : ""
+}
+
 function stripApexPrefix(request: Request): Request {
   const url = new URL(request.url)
   if (url.pathname !== APEX_PREFIX && !url.pathname.startsWith(`${APEX_PREFIX}/`)) {
@@ -253,7 +260,10 @@ function stripApexPrefix(request: Request): Request {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Must run before CORS / route matching — those test bare paths.
+    // Must run before CORS / route matching — those test bare paths. The
+    // stripped prefix is kept for handlers that must echo the PUBLIC URL
+    // (MCP OAuth discovery advertises where clients reach this worker).
+    const mountPrefix = apexPrefixOf(request)
     request = stripApexPrefix(request)
 
     // OPTIONS must still complete so browsers can receive the guarded error
@@ -504,7 +514,10 @@ const worker = {
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
+    const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
+    if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.

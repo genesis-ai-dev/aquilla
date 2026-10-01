@@ -20,7 +20,8 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {
-    source: /^(?:auth-worker\/.*agent-connect|src\/.*(?:ConnectAgent|agent-connect|ApiTokensSection)|db\/.*agent_authorizations)/i,
+    // MCP OAuth (ChatGPT plugin) shares credential validation and browser consent.
+    source: /^(?:auth-worker\/.*(?:agent-connect|mcp-oauth)|db\/shared\/api-credentials|sync-worker\/src\/external\/(?:mcp|read-auth|token-bridge|orgs-list|projects-list|changesets-route|commit)|src\/.*(?:ConnectAgent|OAuthConsent|agent-access|agent-connect|ApiTokensSection)|db\/.*(?:agent_authorizations|mcp_oauth))/i,
     sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
   },
   {

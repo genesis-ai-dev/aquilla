@@ -10,9 +10,10 @@
 // UW called that their single biggest gap ("we're basically editing blind",
 // 2026-07-09 demo). `@/lib/notes/note-metadata` reads the bucket, so a cell
 // from the DCS resource route and one from the direct TSV import render alike.
-// Reads from the server's cells-read route for every "tsv"-typed file in the
-// project (those are TN imports — other TSV files could be CSV-bilingual but
-// the canonicalRef filter ensures only bible-ref anchored notes surface).
+// Reads from the server's cells-read route for every notes file in the project
+// (`isTranslationNotesFile`: "translation-notes" from the direct TSV import,
+// "tsv" from the DCS resource route — other TSV files could be CSV-bilingual
+// but the canonicalRef filter ensures only bible-ref anchored notes surface).
 //
 // Persistence choice: no new DB table or migration. We reuse the existing
 // cells projection + canonical_ref column. The sidebar fetches cells from the
@@ -41,6 +42,7 @@ import {
   supportReferenceLabel,
   type NoteReferenceMetadata,
 } from "@/lib/notes/note-metadata"
+import { isTranslationNotesFile } from "@/lib/notes/note-files"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -121,9 +123,11 @@ export function TranslationNotesSidebar({
         return
       }
 
-      // Fetch all files in the project, filter for TSV (TN imports).
+      // Fetch all files in the project, filter for TN imports. Not a bare
+      // "tsv" test: a notes file from the Translation Notes import card comes
+      // back as fileType "translation-notes" — see `@/lib/notes/note-files`.
       const allFiles = await fetchProjectFiles(projectId, jwt)
-      const tnFiles = allFiles.filter((f) => f.fileType === "tsv")
+      const tnFiles = allFiles.filter(isTranslationNotesFile)
 
       if (tnFiles.length === 0) {
         setNotes([])

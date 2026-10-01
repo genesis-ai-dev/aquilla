@@ -122,6 +122,45 @@ describe("TranslationNotesSidebar original-language phrase (AQU-527)", () => {
     expect(screen.queryByText(/rc:\/\//)).toBeNull()
   })
 
+  // The bot walk on this PR failed here, not in the phrase chrome: it imported a
+  // TN TSV from the Translation Notes card, focused GEN 1:1 and got "No
+  // translation notes for GEN 1:1." The files route reports that import as
+  // fileType "translation-notes" (`kind ?? role`), and the panel only read files
+  // typed "tsv" — so it never asked for the notes file's cells. Every fixture
+  // above says "tsv", which is why they were all green while the feature was
+  // unreachable. The row below is the one the route actually returned.
+  it("reads a notes file imported from the Translation Notes card", async () => {
+    fetchProjectFiles.mockResolvedValue([
+      {
+        fileId: "tn-direct",
+        projectId: "proj-1",
+        name: "tn_GEN.tsv",
+        fileType: "translation-notes",
+        role: "source",
+        kind: "translation-notes",
+      },
+    ])
+    fetchFileCells.mockResolvedValue({
+      cells: [noteCell(NOTE_BODY, { quote: HEBREW_QUOTE, occurrence: "1" })],
+      nextCursor: undefined,
+    })
+    renderSidebar()
+
+    await waitFor(() => expect(screen.getByText(NOTE_BODY)).toBeTruthy())
+    expect(screen.getByText(HEBREW_QUOTE)).toBeTruthy()
+    expect(fetchFileCells.mock.calls[0]?.[1]).toBe("tn-direct")
+  })
+
+  it("does not read note rows from a file that is not a notes import", async () => {
+    fetchProjectFiles.mockResolvedValue([
+      { fileId: "bible", name: "01GEN.usfm", fileType: "usfm", role: "source", kind: "usfm" },
+    ])
+    renderSidebar()
+
+    await waitFor(() => expect(screen.getByText(/No translation notes for/)).toBeTruthy())
+    expect(fetchFileCells).not.toHaveBeenCalled()
+  })
+
   it("renders a note that carries no metadata as prose, with no empty phrase block", async () => {
     fetchFileCells.mockResolvedValue({
       cells: [noteCell(NOTE_BODY, null)],

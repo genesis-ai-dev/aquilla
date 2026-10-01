@@ -79,6 +79,7 @@ import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
+import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
 import { getBookName } from "./file-labeling/bible-book-names"
@@ -1307,7 +1308,7 @@ export async function importTranslationNotes(
       name: file.name,
       fileType: "tsv",
       role: "source",
-      kind: "translation-notes",
+      kind: TRANSLATION_NOTES_FILE_KIND,
       importFormat: "tn-tsv",
       parserVersion: "tn-tsv-v1",
     },

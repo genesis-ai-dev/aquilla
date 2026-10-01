@@ -87,6 +87,7 @@ export async function mintSyncToken(jwt: string, projectId: string, fileId: stri
 
 export interface SeededFileEvent {
   id: string
+  cellId?: string
   kind: string
   author: string
   payload: unknown

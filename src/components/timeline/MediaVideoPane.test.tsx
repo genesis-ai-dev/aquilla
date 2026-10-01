@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import type { FrontierSession } from "@/lib/frontier/types"
+
+vi.mock("@/lib/audio/sync-token-fetcher", () => ({
+  audioSyncTokenFetcherForSession: () => async () => "picture-token",
+}))
 
 import type { CellData } from "@/hooks/useCells"
 import type { QueueForFile } from "@/lib/audio/queue-scope"
@@ -34,6 +39,20 @@ vi.mock("@/lib/audio/play-queue", () => ({
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
 }))
+
+vi.mock("youtube-video-element", () => {
+  class FakeYouTubeVideo extends HTMLElement {
+    paused = true
+    currentTime = 0
+    readyState = 0
+    muted = false
+    play() { return Promise.resolve() }
+    pause() {}
+    load() {}
+  }
+  if (!customElements.get("youtube-video")) customElements.define("youtube-video", FakeYouTubeVideo)
+  return {}
+})
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
 import {
@@ -91,6 +110,24 @@ describe("MediaVideoPane", () => {
   })
 
   // AQU-646 2026-08-11: when the picture is the transport, the queue is idle,
+  it("loads imported video through an authenticated streaming URL", async () => {
+    const onVideoDuration = vi.fn()
+    render(<MediaVideoPane
+      src="frontier-audio://imported.mp4"
+      projectId="p1" fileId="f1" cells={[]}
+      session={{ username: "dev", jwt: "identity" } as FrontierSession}
+      onVideoDuration={onVideoDuration}
+    />)
+    await waitFor(() => {
+      const src = screen.getByTestId("video-pane-media").getAttribute("src")
+      expect(src).toContain("/audio/p1/f1/imported.mp4?t=picture-token")
+    })
+    const video = screen.getByTestId("video-pane-media")
+    Object.defineProperty(video, "duration", { value: 12, configurable: true })
+    fireEvent.loadedMetadata(video)
+    expect(onVideoDuration).toHaveBeenCalledWith("frontier-audio://imported.mp4", 12)
+  })
+
   // so everything that used to ask it "what is sounding" and "is it playing"
   // got nothing. Both are now answered by the element itself.
   describe("the picture as the transport", () => {
@@ -979,5 +1016,31 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     } finally {
       mockQueue = { ...mockQueue, active: false, playing: false, kind: "idle" }
     }
+  })
+})
+
+describe("a YouTube link", () => {
+  const YT = "https://youtu.be/dQw4w9WgXcQ?si=share"
+
+  it("plays through the YouTube element, not a <video>", () => {
+    const { container } = renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media")
+    expect(media.tagName.toLowerCase()).toBe("youtube-video")
+    expect(media.getAttribute("src")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    expect(container.querySelector("video")).toBeNull()
+  })
+
+  it("still hears the element's media events", () => {
+    const onVideoDuration = vi.fn()
+    renderPane({ src: YT, onVideoDuration })
+    const media = screen.getByTestId("video-pane-media")
+    Object.defineProperty(media, "duration", { value: 212, configurable: true })
+    act(() => { media.dispatchEvent(new Event("durationchange")) })
+    expect(onVideoDuration).toHaveBeenCalledWith(YT, 212)
+  })
+
+  it("a direct media file still uses <video>", () => {
+    renderPane({ src: "https://cdn/episode.mp4" })
+    expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
   })
 })

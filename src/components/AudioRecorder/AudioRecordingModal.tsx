@@ -42,6 +42,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import { useOnline } from "@/hooks/useOnline"
 import { getActiveAudio, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -461,10 +462,14 @@ export function AudioRecordingModal({
   // Stage 4: the picture belongs to the file being TRANSLATED, which is no
   // longer the file the take is written to — see `filmFileId`.
   const filmOwnerId = filmFileId ?? activeCell?.fileId
-  const filmUrl = useMemo(() => {
+  const storedFilmUrl = useMemo(() => {
     const raw = project.files?.find((f) => f.id === filmOwnerId)?.coreMediaUrl
-    return raw && isLinkableVideoUrl(raw) ? raw : null
+    return raw && (isLinkableVideoUrl(raw) || parseFrontierAudioUrl(raw)) ? raw : null
   }, [project.files, filmOwnerId])
+  const filmUrl = useMediaPictureUrl({
+    src: storedFilmUrl ?? "", projectId: project.id,
+    fileId: filmOwnerId ?? "", session, retryKey: 0,
+  }) || null
 
   // Two layouts, one control (Sam's design exploration, 2026-08-13). Expanded
   // is a 16:9 room with the picture down the left; collapsed is a tall portrait

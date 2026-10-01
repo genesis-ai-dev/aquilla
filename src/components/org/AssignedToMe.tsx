@@ -20,6 +20,12 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
+/**
+ * The lane is always emitted, as an empty `?lane=` for a default-lane
+ * assignment. The editor reads an ABSENT lane param as "keep the lane last
+ * used" (see `resolveDeepLinkLane`), so a bare URL would open a default-lane
+ * assignment in whatever language the assignee had open before.
+ */
 function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`

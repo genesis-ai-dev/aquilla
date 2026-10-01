@@ -98,6 +98,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
+import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -358,21 +359,38 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
     expect(screen.getByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
   })
 
-  it("opens the collapsed takes list so the new take is reachable without a hunt", async () => {
+  // The drawer's resting state is a setting since 2026-09-28 (Sam); resting
+  // CLOSED is the state the take used to disappear into.
+  it("with the drawer resting closed, raises the takes so the new take is reachable without a hunt", async () => {
+    setRecordingTakesDrawerOpen(false)
+    try {
+      attachmentsState.byCellId = ONE_TAKE
+      renderTwo(filmProject)
+      expect(screen.getByTestId("rec-video")).toBeInTheDocument()
+      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+      expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+
+      pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+      await waitFor(() =>
+        expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
+      )
+      // Not just the flag: the rows are actually rendered, each with the
+      // audition control that makes the take listenable on the spot.
+      expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
+    } finally {
+      setRecordingTakesDrawerOpen(true)
+    }
+  })
+
+  it("with the drawer resting open (the default), the new take shows in it and nothing is raised", async () => {
     attachmentsState.byCellId = ONE_TAKE
     renderTwo(filmProject)
-    // The film layout, and the list starts shut — the state the take used to
-    // disappear into.
-    expect(screen.getByTestId("rec-video")).toBeInTheDocument()
-    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("rec-takes-drawer")).toBeInTheDocument()
 
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
 
-    await waitFor(() =>
-      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
-    )
-    // Not just the flag: the rows are actually rendered, each with the audition
-    // control that makes the take listenable on the spot.
-    expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument())
+    expect(screen.getByTestId("rec-takes-group")).toHaveAttribute("data-sheet", "down")
   })
 })

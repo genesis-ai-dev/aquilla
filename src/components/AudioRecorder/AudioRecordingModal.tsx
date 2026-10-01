@@ -1,14 +1,15 @@
 // Full-screen recording dialog. States: idle → counting → recording →
 // preview → uploading → saved. Next/Prev cell navigation lives in the footer
-// and in arrow-key shortcuts. Space toggles start/stop; Esc smartly
-// cancels/closes based on current phase.
+// and in arrow-key shortcuts. Space toggles start/stop, and in the preview
+// plays the take back; Enter saves it; Esc smartly cancels/closes based on
+// current phase.
 //
 // This deliberately owns its own recorder + upload — the per-cell inline
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,7 @@ import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { setRecordingTakesDrawerOpen, useRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
   isDefaultTrackSlot,
@@ -25,8 +27,9 @@ import {
   trackIdForSlot,
 } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
-import { DEFAULT_TARGET_TRACK_ID, slotForTrack } from "@/lib/timeline/track-slots"
+import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { groupSelection, groupTakesByTrack } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -76,10 +79,10 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
-import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioDeselect } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -219,6 +222,11 @@ const READ_ALOUD_LINES = 5
  *  the line stops being something you can perform from, so more shrinking would
  *  be trading readability for a scrollbar we would rather just have. */
 const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
+/** Without the film, the takes drawer keeps at least this much: its list's
+ *  padding and one whole take row (Sam, 2026-09-28). A long line gives up
+ *  type size for it rather than the drawer vanishing — on a five-line verse
+ *  the ready screen's take strip had squeezed the drawer to nothing. */
+const TAKES_DRAWER_FLOOR_PX = 56
 /**
  * One recorder setting: its icon, its name, and a real switch — the whole row
  * toggles it, and what it does is said on hover (Sam, 2026-09-28).
@@ -235,7 +243,10 @@ function SettingSwitch({
   onCheckedChange: (next: boolean) => void
 }) {
   return (
-    <AppTooltip content={tip}>
+    // To the LEFT: the menu opens at the recorder's right edge, and below a
+    // row the tip would cover the next row's switch — the first row's tip
+    // opens on its own as the menu takes focus.
+    <AppTooltip content={tip} side="left">
       {/* Not a <label>: the switch keeps a hidden checkbox, and a label passes
           a click on the switch to it as well — two toggles, no change. The
           row toggles itself for a click anywhere but the switch. */}
@@ -264,6 +275,11 @@ function SettingSwitch({
   )
 }
 
+/** The drawer's floor never shrinks the line below this: in a window too short
+ *  for both, the drawer gives way instead. A line to be read aloud comes
+ *  first. (The fit's own floor, above, is for lines too long for any size.) */
+const READ_ALOUD_READABLE_PX = 18
+
 /**
  * The takes list, grouped by track. (AQU-646 stage 3, Sam's choice)
  *
@@ -285,6 +301,7 @@ function GroupedTakes({
   session,
   onLastTakeRemoved,
   laneTag,
+  trackFileId,
 }: {
   groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
   project: ProjectRecord
@@ -296,6 +313,8 @@ function GroupedTakes({
   onLastTakeRemoved?: (cellId: string) => void
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   laneTag?: string
+  /** The timeline's file, for the takes' track colours. */
+  trackFileId?: string
 }) {
   const showHeadings = groups.length > 1
   return (
@@ -305,11 +324,7 @@ function GroupedTakes({
         // recording pointer (falling through to the generated one, exactly as
         // it always has); for an added track it is that track's single slot.
         const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
-        const selected = isDefault
-          ? (entry?.selectedAudioId ?? null)
-          : (slotSelections(entry ?? { selectedAudioId: null, selectedGeneratedVoiceAudioId: null })[
-              slotForTrack(group.trackId)
-            ] ?? null)
+        const selected = groupSelection(entry, group.trackId)
         return (
           <div key={group.trackId}>
             {showHeadings && (
@@ -325,6 +340,7 @@ function GroupedTakes({
               projectId={project.id}
               project={project}
               fileId={cell.fileId}
+              trackFileId={trackFileId}
               cellId={cell.id}
               takes={group.takes}
               onLastTakeRemoved={onLastTakeRemoved}
@@ -462,11 +478,14 @@ export function AudioRecordingModal({
   // collapse, so a control for it would be a lie.
   const videoCollapsed = useRecordingVideoCollapsed()
   const showFilm = filmUrl != null && !videoCollapsed
-  // Expanded, the takes list is a disclosure over the column rather than a
-  // permanent shelf: the 16:9 column is short, and the instruments are what you
-  // are looking at while recording. Collapsed, the drawer is always open
-  // because the portrait column has the room and nothing else wants it.
+  // THE TAKES DRAWER works the same in both layouts (Sam, 2026-09-28), and
+  // where it rests is a setting: OPEN, the takes that fit show under the
+  // recorder; CLOSED, only the "Takes" bar shows. Either way its chevron raises
+  // the whole list over the line and the instruments — `takesOpen` — as far as
+  // the takes need and no further than the header.
+  const takesDrawerOpen = useRecordingTakesDrawerOpen()
   const [takesOpen, setTakesOpen] = useState(false)
+  const takesSheet = takesOpen
 
   // THE READ-ALOUD BLOCK NEVER SCROLLS AND NEVER CLIPS (Sam, 2026-08-13). It
   // owns the height of five line boxes; a line too long for that gets a smaller
@@ -493,7 +512,12 @@ export function AudioRecordingModal({
   // scales together — shrinking the type while leaving 33px leading would open
   // gaps that waste the very space we are trying to buy.
   const readAloudRatio = READ_ALOUD_LINE_RATIO
-  const readAloudBudget = READ_ALOUD_LINES * READ_ALOUD_LINE_PX
+  // Five line boxes — or, without the film, whatever the column has left once
+  // the takes drawer has its floor (measured below, on the ready screen).
+  const [fitBudget, setFitBudget] = useState<number | null>(null)
+  const readAloudBudget = !takesDrawerOpen || fitBudget == null
+    ? READ_ALOUD_LINES * READ_ALOUD_LINE_PX
+    : Math.min(READ_ALOUD_LINES * READ_ALOUD_LINE_PX, fitBudget)
   const [readAloudPx, setReadAloudPx] = useState(readAloudBase)
   // Stage 4: the line to perform may live on a DIFFERENT cell from the one
   // being recorded — see `readAloudFor`. Falls back to the cell's own
@@ -533,6 +557,9 @@ export function AudioRecordingModal({
     if (!box || typeof ResizeObserver === "undefined") return
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0
+      // Hidden under the takes sheet the column measures 0 — not a width to
+      // fit the line to.
+      if (w <= 0) return
       setReadAloudWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev))
     })
     ro.observe(box)
@@ -612,29 +639,10 @@ export function AudioRecordingModal({
    * A single group renders exactly as the ungrouped list always did — the
    * heading only appears once there is more than one thing to tell apart.
    */
-  const takeGroups = useMemo(() => {
-    const all = Object.values(audioEntry?.attachments ?? {})
-      // The imported SOURCE clip rides the recording slot but is not a take.
-      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
-    const byTrack = new Map<string, AudioAttachmentOut[]>()
-    for (const att of all) {
-      const trackId = trackIdForSlot(att.slot)
-      const list = byTrack.get(trackId)
-      if (list) list.push(att)
-      else byTrack.set(trackId, [att])
-    }
-    // In the file's own track order, so the headings read down the tab the way
-    // the lanes read down the timeline. Tracks this build cannot name (a
-    // collaborator's newer one) still list their takes rather than hiding them.
-    const ordered = (timelineTracks ?? []).filter((tr) => byTrack.has(tr.id))
-    const named = new Set(ordered.map((tr) => tr.id))
-    return [
-      ...ordered.map((tr) => ({ trackId: tr.id, name: tr.name, takes: byTrack.get(tr.id)! })),
-      ...[...byTrack.entries()]
-        .filter(([id]) => !named.has(id))
-        .map(([id, takes]) => ({ trackId: id, name: "", takes })),
-    ].map((g) => ({ ...g, takes: g.takes.sort((a, b) => a.audioId.localeCompare(b.audioId)) }))
-  }, [audioEntry, activeCell?.fileId, timelineTracks])
+  const takeGroups = useMemo(
+    () => groupTakesByTrack(audioEntry?.attachments, activeCell?.fileId ?? "", timelineTracks),
+    [audioEntry, activeCell?.fileId, timelineTracks],
+  )
 
   /**
    * How many takes the strip will actually LIST — every track's, not this one's.
@@ -704,6 +712,71 @@ export function AudioRecordingModal({
   const readyBadge = readyAtt
     ? takeBadgeState(readyAtt, username, readValidationCountAudio(project))
     : null
+
+  // ── The read-aloud block's room, without the film ──────────────────────
+  // Measured on the READY screen and held for the line through the count,
+  // the take and the preview: the type must never change size under the
+  // operator as they start to read. The room is the line-and-instruments
+  // column plus the drawer, less the drawer's floor, less everything in the
+  // column that is not the read-aloud block — so it is the same answer
+  // whatever size the block currently is.
+  // Held as state, not refs: the dialog's content mounts a commit after
+  // `open` turns true, so an effect keyed on `open` alone ran before either
+  // element existed and never measured at all.
+  const [upperEl, setUpperEl] = useState<HTMLDivElement | null>(null)
+  const [drawerEl, setDrawerEl] = useState<HTMLDivElement | null>(null)
+  // Re-measured whenever anything in the column or the drawer changes size,
+  // not on a list of causes: the take strip, its waveform and the takes
+  // themselves arrive a moment after the dialog opens, and a measurement taken
+  // before them left the line sized for a column that no longer existed.
+  useLayoutEffect(() => {
+    if (!open || !takesDrawerOpen || takesSheet) return
+    if (phase !== "idle" && phase !== "error") return
+    const upper = upperEl
+    const drawer = drawerEl
+    const box = readAloudBoxRef.current
+    const el = readAloudRef.current
+    if (!upper || !drawer || !box) return
+    const measure = () => {
+      const others = upper.scrollHeight - box.offsetHeight
+      const room = upper.clientHeight + drawer.clientHeight - TAKES_DRAWER_FLOOR_PX
+      // What the line needs at the readable size — measured, then the fit's
+      // own sizing put back exactly as it was.
+      let readable = 0
+      if (el) {
+        const { fontSize, lineHeight } = el.style
+        el.style.fontSize = `${READ_ALOUD_READABLE_PX}px`
+        el.style.lineHeight = `${Math.round(READ_ALOUD_READABLE_PX * READ_ALOUD_LINE_RATIO)}px`
+        readable = el.scrollHeight
+        el.style.fontSize = fontSize
+        el.style.lineHeight = lineHeight
+      }
+      const next = Math.max(readable, Math.floor(room - others))
+      setFitBudget((prev) => (prev != null && Math.abs(prev - next) < 1 ? prev : next))
+    }
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(() => measure())
+    for (const child of Array.from(upper.children)) ro.observe(child)
+    ro.observe(upper)
+    ro.observe(drawer)
+    return () => ro.disconnect()
+  }, [open, showFilm, takesDrawerOpen, takesSheet, phase, activeCell?.id, readAloudText, upperEl, drawerEl])
+
+  // Whether every take already shows in the drawer. If so there is nothing to
+  // pull up, and the handle's chevron goes (Sam, 2026-09-28).
+  const [takesFit, setTakesFit] = useState(true)
+  useLayoutEffect(() => {
+    if (!open || !takesDrawerOpen || takesSheet || !drawerEl) return
+    const drawer = drawerEl
+    const check = () => setTakesFit(drawer.scrollHeight <= drawer.clientHeight + 1)
+    check()
+    if (typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(check)
+    ro.observe(drawer)
+    if (drawer.firstElementChild) ro.observe(drawer.firstElementChild)
+    return () => ro.disconnect()
+  }, [open, takesDrawerOpen, takesSheet, drawerEl, listedTakeCount])
   // One sound at a time: playing the waveform silences a Takes-row audition
   // (which in turn silences the waveform — see TakesStrip).
   // Countdown, recording, preview and upload own the instrument area: the
@@ -927,6 +1000,9 @@ export function AudioRecordingModal({
 
   const startFlow = useCallback(() => {
     stayOnThisLine()
+    // The takes sheet covers the line and the instruments: a take never
+    // starts under it.
+    setTakesOpen(false)
     // Offline gates FIRST — when both fail it is the truer cause ("sign in"
     // is unactionable without a connection anyway).
     if (!online) {
@@ -1137,14 +1213,21 @@ export function AudioRecordingModal({
         // and generated takes are siblings in one slot, so picking either
         // deselects the other through the per-(cell, slot) rule the server
         // already enforces.
+        //
+        // With no source clip (every text file) there is nothing to park the
+        // slot on, and this used to do nothing — the new voice was saved and
+        // never played. The slot is emptied instead (2026-09-28).
         const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
-        if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
-          const displaceP = emitCellAudioSelect({
-            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
-            audioId: sourceClip.audioId, slot: "recording", author: username,
+        if (recSel && audioIdSeededWith(recSel, activeCell.id)) {
+          const where = {
+            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id, slot: "recording", author: username,
             ...(laneTag ? { targetLang: laneTag } : {}),
-          })
-          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          }
+          const displaceP = sourceClip
+            ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
+            : emitCellAudioDeselect(where)
+          if (sourceClip) injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          else injectOptimisticAudioDeselect(activeCell.fileId, activeCell.id, "recording", displaceP)
           await displaceP
           notifyAudioAttachmentsChanged(activeCell.fileId)
         }
@@ -1500,8 +1583,9 @@ export function AudioRecordingModal({
       // successfully, but it only showed up in the Takes dropdown"). So: stay,
       // and OPEN the takes list, which is where the new take is circled as the
       // keeper and can be auditioned. In the plain layout that drawer is always
-      // rendered, so this is a no-op there and the flag costs nothing.
-      setTakesOpen(true)
+      // rendered, so the sheet stays down: pulling it up would hide Record.
+      // Resting closed there is nothing showing it, so the list rises.
+      if (!takesDrawerOpen) setTakesOpen(true)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
@@ -1513,7 +1597,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, takesDrawerOpen])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -1609,6 +1693,8 @@ export function AudioRecordingModal({
 
       if (e.key === "Escape") {
         e.preventDefault()
+        // The takes sheet goes down before anything closes.
+        if (takesSheet) { setTakesOpen(false); return }
         if (phase === "recording") { stopRecording(); return }
         if (phase === "counting") { countdown.cancel(); setLeadIn(null); setPhase("idle"); return }
         // Escape used to RETAKE here, which threw the take away and left the
@@ -1665,7 +1751,7 @@ export function AudioRecordingModal({
     // hearing it first changes nothing else.
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview])
+  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex, previewPlaying, playPreview, pausePreview, takesSheet])
 
   if (!open || !activeCell) return null
 
@@ -1674,8 +1760,10 @@ export function AudioRecordingModal({
   // In the colour of the track being recorded onto (Sam, 2026-09-26): the
   // growing take and the preview say which track the take lands on, and the
   // take on the ready screen wears its own track's colour.
-  const recordingTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: targetSlot })
-  const readyTrackVars = takeTrackVars({ files: project.files, fileId: activeCell.fileId, slot: readyAtt?.slot ?? targetSlot })
+  // The TIMELINE's file names the tracks: on a heard line the take is
+  // written to the hidden cue sibling, whose file knows no added track.
+  const recordingTrackVars = takeTrackVars({ files: project.files, fileId: filmOwnerId, slot: targetSlot })
+  const readyTrackVars = takeTrackVars({ files: project.files, fileId: filmOwnerId, slot: readyAtt?.slot ?? targetSlot })
 
   // ── AQU-1210: FILM PLAY-ALONG ─────────────────────────────────────────────
   // Always on (Sam, 2026-09-28: the switch for it is gone — the film is muted
@@ -1725,8 +1813,9 @@ export function AudioRecordingModal({
         if (next) return
         // Escape belongs to the recorder's own key handler, which hears it
         // first (capture) and knows what it means right now: stop the take,
-        // cancel the count, or ask to close. The dialog closing on it as well
-        // would stop a take and ask to close in the same press.
+        // cancel the count, put the takes sheet down, or ask to close. The
+        // dialog closing on it as well would close the recorder over a sheet
+        // that had just gone down.
         if (details?.reason === "escape-key") return
         requestClose()
       }}
@@ -1917,6 +2006,9 @@ export function AudioRecordingModal({
             </div>
           </div>
 
+          {/* Everything under the header, positioned so the takes sheet can
+              rise within it — never over the header. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
           {/* THE LINE — source above, the line to speak below.
               The read-aloud block owns the space of FIVE line boxes (26/33
               expanded, 23/30 collapsed) and a longer line shrinks to fit it
@@ -1931,11 +2023,14 @@ export function AudioRecordingModal({
               the thing that vanished. Shrinkable, it scrolls instead, and the
               read-aloud block inside keeps its own five-line cap regardless. */}
           <div
+            ref={setUpperEl}
+            // Under the takes sheet nothing here can be reached — not even by Tab.
+            inert={takesSheet || undefined}
             className={cn(
               "flex min-h-0 flex-col overflow-y-auto",
-              // Expanded it also GROWS, so the spacer below can push the
-              // instruments to the bottom of the column.
-              showFilm && "flex-1",
+              // With the drawer resting closed it also GROWS, so the spacer
+              // below can push the instruments to the bottom of the column.
+              !takesDrawerOpen && "flex-1",
             )}
           >
           {/* THE ANCHORED SOURCE (AQU-1407) — the thing being translated, and
@@ -2091,11 +2186,11 @@ export function AudioRecordingModal({
             )}
           </div>
 
-          {/* Beside a picture the instruments sit at the BOTTOM of the column,
-              so the eye runs from the line down to the meter and the button.
-              Collapsed there is nothing to push them with — the takes drawer
-              below is what absorbs the leftover height. */}
-          {showFilm && <div className="min-h-[8px] flex-1" />}
+          {/* With the drawer resting closed the instruments sit at the BOTTOM
+              of the column, so the eye runs from the line down to the meter and
+              the button. Resting open the drawer below absorbs the leftover
+              height instead. */}
+          {!takesDrawerOpen && <div className="min-h-[8px] flex-1" />}
 
           {/* INSTRUMENTS + ANCHOR — the same skeleton in every phase: what the
               take looks like, then the one button that acts on it, then the
@@ -2282,21 +2377,37 @@ export function AudioRecordingModal({
                     over. Its trim is shown (grey lines), not edited here. */}
                 {readyTakeId && readyAtt && readyKept && (
                   <div data-testid="rec-ready-take" className="space-y-1">
-                    <p className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
                         label: readyAtt.label ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
                         // prints them — the two must never disagree.
                         seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
                       })}
+                      {/* No window to judge against: said on hover, beside the
+                          take, rather than as a line of its own (Sam,
+                          2026-09-28 — the room went to the takes drawer). */}
+                      {targetSec == null && (
+                        <AppTooltip content={t("audio.recordingModal.noTimedWindow")}>
+                          <span
+                            role="img"
+                            aria-label={t("audio.recordingModal.noTimedWindow")}
+                            data-testid="rec-no-window"
+                            className="inline-flex"
+                          >
+                            <TimerOff className="h-3.5 w-3.5 text-muted-foreground/70" />
+                          </span>
+                        </AppTooltip>
+                      )}
                     </p>
                     <TakeWaveform
                       controller={readyController}
                       audioId={readyTakeId}
                       kept={readyKept}
-                      // The film layout's instrument area is compact; the
-                      // strip shrinks rather than push Record out of place.
-                      height={showFilm ? 40 : 56}
+                      // Compact in both layouts: beside the film so Record
+                      // keeps its place, and without it so a long line still
+                      // leaves the takes drawer its room (Sam, 2026-09-28).
+                      height={40}
                       kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId ? "generated" : "take"}
                       trackVars={readyTrackVars}
                       strategy="eager"
@@ -2307,9 +2418,10 @@ export function AudioRecordingModal({
                 )}
                 {targetSec != null ? (
                   <DurationBar elapsedMs={readyKeptMs ?? 0} targetSec={targetSec} />
-                ) : (
+                ) : !(readyTakeId && readyAtt && readyKept) ? (
+                  // No take to hang the icon on: the note stays a line.
                   <p className="text-xs text-muted-foreground">{t("audio.recordingModal.noTimedWindow")}</p>
-                )}
+                ) : null}
                 {/* i18n-exempt "error" is a RecorderPhase union tag, not copy */}
                 {displayPhase === "error" && (
                   <p data-testid="rec-error-message" className="text-xs font-medium text-destructive">
@@ -2519,49 +2631,54 @@ export function AudioRecordingModal({
 
           </div>{/* end line + instruments */}
 
+          {/* THE TAKES — the strip, and without the film the drawer under it.
+              Pulled up (Sam, 2026-09-28) they rise from the bottom over the
+              line and the instruments, only as far as the takes need, capped
+              at the room under the header and scrolling past it. */}
+          <div
+            data-testid="rec-takes-group"
+            data-sheet={takesSheet ? "up" : "down"}
+            className={cn(
+              // Down it is no box at all: the strip and the drawer lay out as
+              // the body's own children — the strip rigid, the drawer taking
+              // what the column leaves. A real flex box here refused to shrink
+              // below every take it held, and squeezed Record out of the column.
+              !takesSheet && "contents",
+              takesSheet && "absolute inset-x-0 bottom-0 z-20 flex max-h-full flex-col bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]",
+            )}
+          >
           {/* THE UTILITY STRIP — takes, the format the takes are in, and the
               settings that describe recording. One row, always in the same
               place. Expanded it is a disclosure bar with the list raised over
               the column; collapsed it is the header of a drawer that fills the
               rest of the panel. `relative` so the raised list can anchor to it. */}
           <div className="relative shrink-0 border-t bg-muted/20">
-            {/* The raised list, expanded only. `bottom-full` puts it directly
-                above this strip; capped so it can never cover the line being
-                read, and scrolling inside that cap. */}
-            {showFilm && takesOpen && listedTakeCount > 0 && activeCell && (
-              <div className="absolute inset-x-0 bottom-full z-20 max-h-[260px] overflow-y-auto border-t bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]">
-                <GroupedTakes
-                  groups={takeGroups}
-                  project={project}
-                  cell={activeCell}
-                  entry={audioEntry}
-                  sourceClip={sourceClip}
-                  username={username}
-                  session={session ?? null}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  laneTag={laneTag}
-                />
-              </div>
-            )}
             <div className="flex items-center gap-2 px-4 py-2">
-              {showFilm ? (
+              {takesDrawerOpen && takesFit && !takesOpen ? (
+                // Resting open with every take already showing: nothing to
+                // pull up.
+                <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
+                </span>
+              ) : (
+                // The drawer's handle, in both layouts. Up raises the takes over
+                // the line and the instruments; down puts them back.
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   data-testid="rec-takes-toggle"
                   aria-expanded={takesOpen}
+                  aria-label={t(takesOpen ? "audio.recordingModal.takesCollapse" : "audio.recordingModal.takesExpand")}
                   disabled={listedTakeCount === 0}
                   onClick={() => setTakesOpen((v) => !v)}
-                  className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
+                  className="-ms-1.5 h-7 shrink-0 gap-1 px-1.5 text-xs font-medium"
                 >
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
-                  <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
+                  <ChevronUp className={cn("h-3.5 w-3.5 text-muted-foreground", takesOpen && "rotate-180")} />
+                  <span data-testid="rec-takes-count">
+                    {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
+                  </span>
                 </Button>
-              ) : (
-                <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
-                </span>
               )}
 
               {/* The format lives HERE, not in the header: it describes the
@@ -2626,6 +2743,7 @@ export function AudioRecordingModal({
                       on/off switch was. */}
                   <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1 rounded-md px-2 pb-1 pt-1.5">
                     <AppTooltip
+                      side="left"
                       content={countdownSpeed === "off"
                         ? t("audio.recordingModal.countdownOffDescription")
                         : countdownSpeed === "fast"
@@ -2687,18 +2805,28 @@ export function AudioRecordingModal({
                     checked={autoAdvance}
                     onCheckedChange={setRecordingAutoAdvance}
                   />
+                  <SettingSwitch
+                    testId="rec-takes-drawer-open"
+                    icon={<PanelBottom />}
+                    title={t("audio.recordingModal.takesDrawerTitle")}
+                    tip={takesDrawerOpen
+                      ? t("audio.recordingModal.takesDrawerOnDescription")
+                      : t("audio.recordingModal.takesDrawerOffDescription")}
+                    checked={takesDrawerOpen}
+                    onCheckedChange={(next) => { setTakesOpen(false); setRecordingTakesDrawerOpen(next) }}
+                  />
                 </PopoverContent>
               </Popover>
             </div>
           </div>
 
-          {/* THE DRAWER, collapsed only — takes every pixel the panel has left,
-              and is ALWAYS rendered even with nothing in it. A conditional
-              drawer left the strip above floating mid-dialog with dead space
-              beneath it, and made the whole bottom of the panel jump as takes
-              came and went between phases. */}
-          {!showFilm && (
-            <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+          {/* THE DRAWER — resting open it takes every pixel the panel has left,
+              and is ALWAYS rendered then, even with nothing in it: a conditional
+              drawer left the strip above floating with dead space beneath it,
+              and made the whole bottom jump as takes came and went between
+              phases. Resting closed it exists only while raised. */}
+          {(takesDrawerOpen || takesSheet) && (
+            <div ref={setDrawerEl} data-testid="rec-takes-drawer" className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
               {listedTakeCount > 0 && activeCell ? (
                 <GroupedTakes
                   groups={takeGroups}
@@ -2710,6 +2838,7 @@ export function AudioRecordingModal({
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
                   laneTag={laneTag}
+                  trackFileId={filmOwnerId}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">
@@ -2718,6 +2847,8 @@ export function AudioRecordingModal({
               )}
             </div>
           )}
+          </div>{/* end takes */}
+          </div>{/* end body */}
         </div>
 
         {/* i18n-exempt CSS keyframes for the countdown "pop", not user-visible copy */}

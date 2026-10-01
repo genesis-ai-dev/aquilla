@@ -723,7 +723,8 @@ export interface CellAudioSelectInput {
   projectId: string
   fileId: string
   cellId: string
-  audioId: string
+  /** null empties the slot — see emitCellAudioDeselect. */
+  audioId: string | null
   /** Open string (AQU-646): a track id addresses an extra target track. */
   slot: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
@@ -745,6 +746,21 @@ export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<
     clientTs: input.clientTs,
   })
   return eventId
+}
+
+/**
+ * Leave a slot with NOTHING selected. (2026-09-28)
+ *
+ * A line plays its recording-slot take whenever there is one, so switching it
+ * to its generated voice has to empty that slot. A line with an imported source
+ * clip parks the slot on the clip instead; everything else — every text file —
+ * has nothing to park it on, and picking the generated take used to change
+ * nothing at all (Sam, Mark 1:3).
+ */
+export function emitCellAudioDeselect(
+  input: Omit<CellAudioSelectInput, "audioId">,
+): Promise<string> {
+  return emitCellAudioSelect({ ...input, audioId: null })
 }
 
 export interface CellRetimeInput {

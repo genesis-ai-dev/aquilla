@@ -17,16 +17,18 @@
 //     section's own timing. It is drawn as that section alone and never
 //     offers edges — retime the section on the timeline instead.
 //
-// Loading, needs-a-click, missing and failed are CellWaveform's states,
-// carried over unchanged (the design pass parked restyling them).
+// Needs-a-click, missing and failed are CellWaveform's states, carried over
+// unchanged (the design pass parked restyling them). Loading is a placeholder
+// shape pulsing where the take will be drawn (2026-10-01).
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, CloudDownload, Download, RotateCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
+import { WAVEFORM_BINS, autoLoadsPeaks } from "@/lib/audio/peaks-loader"
 import {
+  formatTrimTime,
   moveTrimEnd,
   moveTrimStart,
   sameTrim,
@@ -39,7 +41,6 @@ import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 import { WaveformRect, type WaveformEdge } from "./WaveformRect"
 
-const AUTO_LOAD: ReadonlySet<AudioMediaStrategy> = new Set(["lazy", "eager"])
 
 export interface TakeWaveformProps {
   controller: UseCellAudioResult
@@ -88,7 +89,7 @@ export function TakeWaveform({
 
   // ── Peaks, on the project's terms ────────────────────────────────────
   const [userTriggered, setUserTriggered] = useState(false)
-  const shouldLoad = AUTO_LOAD.has(strategy) || userTriggered
+  const shouldLoad = autoLoadsPeaks(strategy) || userTriggered
   useEffect(() => {
     if (shouldLoad) void requestPeaks(WAVEFORM_BINS)
   }, [shouldLoad, requestPeaks, audioId])
@@ -126,6 +127,11 @@ export function TakeWaveform({
     return peaks.slice(a, b)
   }, [peaks, isSection, dur, viewStart, viewEnd])
   const toFrac = (sec: number) => (viewLen > 0 ? (sec - viewStart) / viewLen : 0)
+  // Still on its way — downloading, waiting its turn to decode, decoding. The
+  // frame before the request starts counts too, or every take would flash flat
+  // first. (A flat body read as a silent take: the 3G pass, Sam 2026-10-01.)
+  const shapeLoading = !(drawnPeaks && drawnPeaks.length > 0) &&
+    (peaksState === "loading" || (peaksState === "idle" && shouldLoad && Boolean(audioId)))
 
   const keep = !isSection && dur > 0 && (trim.start != null || trim.end != null)
     ? { start: toFrac(trim.start ?? 0), end: toFrac(trim.end ?? dur) }
@@ -134,11 +140,11 @@ export function TakeWaveform({
   // ── Edges ─────────────────────────────────────────────────────────────
   const canEdit = trimEditable && !isSection && dur > 0 && Boolean(onCommitTrim)
   const showReadOnly = !canEdit && !isSection && dur > 0 && kept.kind === "trim"
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`
   // The save paints the new window at once (an optimistic overlay, in the same
   // event), so the drag's own value can retire as it is handed over.
+  // A drag that ends where it began saves nothing.
   const commit = (v: TrimValue) => {
-    onCommitTrim?.(v.start, v.end)
+    if (!sameTrim(v, stored)) onCommitTrim?.(v.start, v.end)
     setDraft(null)
   }
   const edges: WaveformEdge[] = canEdit || showReadOnly
@@ -147,7 +153,7 @@ export function TakeWaveform({
           key: "start",
           at: toFrac(trim.start ?? 0),
           label: t("editor.waveform.trimStart"),
-          valueText: fmt(trim.start ?? 0),
+          valueText: formatTrimTime(trim.start ?? 0),
           editable: canEdit,
           onDrag: (f) => setDraft({ audioId, ...moveTrimStart(trim, f * dur, dur) }),
           onNudge: (dir, coarse) => {
@@ -160,7 +166,7 @@ export function TakeWaveform({
           key: "end",
           at: toFrac(trim.end ?? dur),
           label: t("editor.waveform.trimEnd"),
-          valueText: fmt(trim.end ?? dur),
+          valueText: formatTrimTime(trim.end ?? dur),
           editable: canEdit,
           onDrag: (f) => setDraft({ audioId, ...moveTrimEnd(trim, f * dur, dur) }),
           onNudge: (dir, coarse) => {
@@ -231,12 +237,10 @@ export function TakeWaveform({
       seekLabel={t("common.seek")}
       edges={edges}
       status={status}
+      loading={shapeLoading}
       className={className}
       testId={testId}
     >
-      {peaksState === "loading" && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-2 top-1/2 h-px animate-pulse bg-foreground/30" />
-      )}
       {state === "error" && error && (
         <span className="sr-only" role="status">{error.message}</span>
       )}

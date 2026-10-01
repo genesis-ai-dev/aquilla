@@ -32,18 +32,17 @@ import { FolderPlus, FolderMinus, Palette, Pencil, Trash2 } from "lucide-react"
 import {
   ContextMenuItem,
   ContextMenuRadioGroup,
-  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu"
 import {
-  TRACK_HUES,
   isColorableKind,
   parseTrackHue,
 } from "@/lib/timeline/track-colors"
 import { DEFAULT_TRACK_IDS, type TimelineTrack } from "@/lib/timeline/tracks"
+import { TrackColorSwatches } from "./TrackColorSwatches"
 import type { useT } from "@/lib/i18n/I18nProvider"
 
 /**
@@ -231,7 +230,7 @@ export function trackMenuItems({
               track nobody has coloured resolves to the default hue and so
               announces Green as current — which is honest, because Green is
               what it is drawn in. */}
-          <ContextMenuSubContent className="w-auto min-w-0 p-1">
+          <ContextMenuSubContent className="w-auto min-w-0 p-1.5">
             <ContextMenuRadioGroup
               // "Every one of them is already this", which is the only thing a
               // selected state could honestly mean across several tracks — so a
@@ -242,25 +241,11 @@ export function trackMenuItems({
                   : ""
               }
             >
-            {TRACK_HUES.map((hue) => {
-              return (
-                <ContextMenuRadioItem
-                  key={hue.id}
-                  value={hue.hex}
-                  className="gap-2"
-                  onClick={() =>
-                    onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
-                  }
-                >
-                  <span
-                    aria-hidden
-                    className="h-3.5 w-3.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: hue.hex }}
-                  />
-                  {t(hue.labelKey as Parameters<typeof t>[0])}
-                </ContextMenuRadioItem>
-              )
-            })}
+            {/* Swatches only, three across (Sam, 2026-09-28) — the names stay
+                as each swatch's accessible name. */}
+            <TrackColorSwatches
+              onPick={(hueId) => onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hueId })))}
+            />
             </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>

@@ -18,7 +18,15 @@
 //     line. Where it can be dragged the pointer turns into the left-right
 //     resize arrow over it — and nothing else appears (Sam: no grips, no
 //     arrows; an earlier semi-transparent handle failed on contrast against
-//     grey audio). Read-only edges are the same line in grey.
+//     grey audio). Read-only edges are the same line in grey. While a line
+//     moves — grabbed, or nudged with the arrow keys — its time shows beside
+//     it, and a grab keeps the point you took hold of under the pointer.
+//   - BUTTONS THAT STEP ASIDE (Sam, 2026-09-28). While a line is dragged or
+//     nudged, anything drawn over the waveform that the line comes within
+//     STEP_ASIDE_PX of — a corner button, the running time, a voice pill —
+//     fades almost to nothing (15%) and stops taking clicks, so the audio under
+//     it can be seen and cut. Overlays opt in with `data-wave-overlay` (WAVE_OVERLAY_CLASS
+//     does the fading); a nudge keeps them aside for a moment after the key.
 //
 // SVG, not canvas, for the reasons TargetChipWaveform gives: the ink inherits
 // the body's colour, the path is rebuilt only when the peaks or the height
@@ -27,7 +35,7 @@
 // Purely presentational. The caller owns the audio (peaks, position, play) and
 // the rules for moving an edge (see lib/audio/trim-edit).
 
-import { useMemo, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from "react"
 import { Play, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -88,6 +96,12 @@ export interface WaveformRectProps {
   edges?: readonly WaveformEdge[]
   /** Overlaid in the middle: a load button, an error, a "missing" note. */
   status?: ReactNode
+  /**
+   * The shape is on its way. Until `peaks` arrive a placeholder pulses where
+   * it will be drawn, in the take's own ink: a flat body reads as a silent
+   * take (Sam, 2026-10-01, from the 3G pass).
+   */
+  loading?: boolean
   className?: string
   style?: CSSProperties
   testId?: string
@@ -95,6 +109,15 @@ export interface WaveformRectProps {
 }
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
+
+/** How close (px) a moving line comes to an overlay before it steps aside.
+ *  Sam, 2026-09-28: 28 cleared them too early — only a line about to cross
+ *  one moves it. */
+export const STEP_ASIDE_PX = 10
+/** After an arrow-key nudge, overlays stay aside this long for the next one. */
+const NUDGE_LINGER_MS = 900
+
+type EdgeActivity = "start" | "move" | "end" | "nudge" | "blur"
 const pct = (n: number) => `${Math.round(clamp01(n) * 1e6) / 1e4}%`
 
 export function WaveformRect({
@@ -119,6 +142,7 @@ export function WaveformRect({
   seekLabel = "",
   edges = [],
   status,
+  loading = false,
   className,
   style,
   testId,
@@ -129,6 +153,57 @@ export function WaveformRect({
   const innerH = Math.max(0, height - 2)
   const bins = peaks?.length ?? 0
   const d = useMemo(() => (peaks && peaks.length > 0 ? envelopePathD(peaks, innerH) : ""), [peaks, innerH])
+
+  // ── Stepping aside for a moving line ─────────────────────────────────────
+  // Driven through the DOM rather than state: it changes on every pointer
+  // move, and re-rendering the whole rectangle for an opacity flip would be
+  // waste. The layout effect re-measures after each render, when the line has
+  // moved to the value the drag or nudge just produced.
+  const activeEdgeRef = useRef<string | null>(null)
+  const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stepAside = useCallback((at: number | null) => {
+    const box = boxRef.current
+    if (!box) return
+    const overlays = box.querySelectorAll<HTMLElement>("[data-wave-overlay]")
+    if (at == null) {
+      overlays.forEach((o) => o.removeAttribute("data-stepped-aside"))
+      return
+    }
+    const r = box.getBoundingClientRect()
+    const x = r.left + clamp01(at) * r.width
+    overlays.forEach((o) => {
+      const b = o.getBoundingClientRect()
+      const d = x < b.left ? b.left - x : x > b.right ? x - b.right : 0
+      if (d < STEP_ASIDE_PX) o.setAttribute("data-stepped-aside", "true")
+      else o.removeAttribute("data-stepped-aside")
+    })
+  }, [])
+  useLayoutEffect(() => {
+    const key = activeEdgeRef.current
+    if (key == null) return
+    const edge = edges.find((e) => e.key === key)
+    stepAside(edge ? edge.at : null)
+  })
+  useEffect(() => () => {
+    if (lingerRef.current) clearTimeout(lingerRef.current)
+  }, [])
+  const onEdgeActivity = (key: string, what: EdgeActivity, at: number) => {
+    if (lingerRef.current) { clearTimeout(lingerRef.current); lingerRef.current = null }
+    if (what === "end" || what === "blur") {
+      activeEdgeRef.current = null
+      stepAside(null)
+      return
+    }
+    activeEdgeRef.current = key
+    stepAside(at)
+    if (what === "nudge") {
+      lingerRef.current = setTimeout(() => {
+        lingerRef.current = null
+        activeEdgeRef.current = null
+        stepAside(null)
+      }, NUDGE_LINGER_MS)
+    }
+  }
 
   const showProgress = playing && progress != null && Number.isFinite(progress)
   const fracFromX = (clientX: number): number => {
@@ -181,6 +256,15 @@ export function WaveformRect({
           <path d={d} />
         </svg>
       )}
+      {loading && !d && (
+        <div
+          aria-hidden
+          data-testid={testId ? `${testId}-loading` : undefined}
+          // The app's skeleton pulse. The colour carries the transparency, so
+          // the pulse's own opacity steps stay its own.
+          className="pointer-events-none absolute inset-x-[10%] inset-y-[30%] animate-pulse rounded-full bg-current/15 motion-reduce:animate-none"
+        />
+      )}
 
       {/* The trimmed-off audio: still drawn, washed out. */}
       {keep && keep.start > 0 && (
@@ -224,7 +308,13 @@ export function WaveformRect({
       )}
 
       {edges.map((edge) => (
-        <EdgeLine key={edge.key} edge={edge} fracFromX={fracFromX} testId={testId ? `${testId}-edge-${edge.key}` : undefined} />
+        <EdgeLine
+          key={edge.key}
+          edge={edge}
+          fracFromX={fracFromX}
+          onActivity={(what, at) => onEdgeActivity(edge.key, what, at)}
+          testId={testId ? `${testId}-edge-${edge.key}` : undefined}
+        />
       ))}
 
       {onTogglePlay && (
@@ -265,14 +355,34 @@ export function WaveformRect({
 function EdgeLine({
   edge,
   fracFromX,
+  onActivity,
   testId,
 }: {
   edge: WaveformEdge
   fracFromX: (clientX: number) => number
+  /** The line is moving (or has stopped): the rectangle steps overlays aside. */
+  onActivity?: (what: EdgeActivity, at: number) => void
   testId?: string
 }) {
-  const dragging = useRef(false)
+  // The drag keeps the point of the line you grabbed under the pointer: the
+  // hit area is wider than the line, and grabbing it off-centre used to make
+  // it jump to the pointer — a grab-and-release in place moved the trim.
+  const drag = useRef<{ offset: number; moved: boolean } | null>(null)
   const { editable } = edge
+  // Its time, beside it, while it moves: from the grab to the release, and
+  // for a moment after an arrow-key nudge (Sam, 2026-09-28).
+  const [showTime, setShowTime] = useState(false)
+  const timeLinger = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const holdTime = (ms: number | null) => {
+    if (timeLinger.current) { clearTimeout(timeLinger.current); timeLinger.current = null }
+    setShowTime(true)
+    if (ms != null) timeLinger.current = setTimeout(() => { timeLinger.current = null; setShowTime(false) }, ms)
+  }
+  const dropTime = () => {
+    if (timeLinger.current) { clearTimeout(timeLinger.current); timeLinger.current = null }
+    setShowTime(false)
+  }
+  useEffect(() => () => { if (timeLinger.current) clearTimeout(timeLinger.current) }, [])
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (!editable) return
@@ -282,19 +392,29 @@ function EdgeLine({
     // Focus follows the grab, so the arrow keys nudge the line you just
     // touched (Sam: "click the line, then the arrow keys").
     e.currentTarget.focus({ preventScroll: true })
-    dragging.current = true
-    edge.onDrag?.(fracFromX(e.clientX))
+    drag.current = { offset: fracFromX(e.clientX) - edge.at, moved: false }
+    holdTime(null)
+    onActivity?.("start", edge.at)
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!editable || !dragging.current || e.buttons !== 1) return
+    const d = drag.current
+    if (!editable || !d || e.buttons !== 1) return
     e.stopPropagation()
-    edge.onDrag?.(fracFromX(e.clientX))
+    const f = clamp01(fracFromX(e.clientX) - d.offset)
+    if (!d.moved && Math.abs(f - edge.at) < 1e-9) return
+    d.moved = true
+    edge.onDrag?.(f)
+    onActivity?.("move", f)
   }
   const endDrag = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return
-    dragging.current = false
+    const d = drag.current
+    if (!d) return
+    drag.current = null
     e.stopPropagation()
-    edge.onCommit?.()
+    // A click that never moved the line saves nothing.
+    if (d.moved) edge.onCommit?.()
+    dropTime()
+    onActivity?.("end", edge.at)
   }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!editable) return
@@ -306,6 +426,8 @@ function EdgeLine({
     e.stopPropagation()
     edge.onNudge?.(e.key === "ArrowLeft" ? -1 : 1, e.shiftKey)
     edge.onCommit?.()
+    holdTime(NUDGE_LINGER_MS)
+    onActivity?.("nudge", edge.at)
   }
 
   return (
@@ -325,6 +447,7 @@ function EdgeLine({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
+      onBlur={() => { dropTime(); onActivity?.("blur", edge.at) }}
       className={cn(
         "absolute inset-y-0 z-10 w-2.5 -translate-x-1/2 touch-none outline-none",
         editable ? "cursor-ew-resize focus-visible:bg-foreground/10" : "pointer-events-none",
@@ -333,6 +456,19 @@ function EdgeLine({
     >
       {/* The line itself: 2px, fully opaque. */}
       <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      {/* Its time, at the top, on whichever side keeps it inside the box. */}
+      {showTime && edge.valueText && (
+        <span
+          aria-hidden
+          data-testid={testId ? `${testId}-time` : undefined}
+          className={cn(
+            "pointer-events-none absolute top-1 z-30 whitespace-nowrap rounded bg-foreground px-1 text-[10px] font-medium tabular-nums leading-4 text-background shadow-sm",
+            edge.at < 0.5 ? "left-full ms-0.5" : "right-full me-0.5",
+          )}
+        >
+          {edge.valueText}
+        </span>
+      )}
     </div>
   )
 }

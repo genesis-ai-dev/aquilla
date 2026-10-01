@@ -101,6 +101,9 @@ export type OptimisticShadow = ShadowCore &
         claimsSelection: boolean
       }
     | { kind: "remove"; audioId: string; slot: AudioSlot }
+    /** The slot is left with nothing selected (2026-09-28). The takes stay;
+     *  only the slot's selection empties. */
+    | { kind: "deselect"; slot: AudioSlot }
   )
 
 /** How long an overlay outlives its event's departure from the outbox. */
@@ -280,6 +283,10 @@ export function injectOptimisticAudioAttachment(
       if (s.kind === "attach" && s.att.slot === attachment.slot) s.claimsSelection = false
     }
   }
+  // A new selection in a slot outranks an earlier "nothing selected" there.
+  const unblocked = claimSelection
+    ? kept.filter((s) => !(s.kind === "deselect" && s.slot === attachment.slot))
+    : kept
   const shadow: OptimisticShadow = {
     key: nextShadowKey++,
     eventId: null,
@@ -289,7 +296,7 @@ export function injectOptimisticAudioAttachment(
     att: attachment,
     claimsSelection: claimSelection,
   }
-  byCell.set(cellId, [...kept, shadow])
+  byCell.set(cellId, [...unblocked, shadow])
   attachEventBinding(fileId, shadow, eventId)
   broadcast(fileId, cellId, shadow)
 }
@@ -421,6 +428,37 @@ export function injectOptimisticAudioRemove(
     graceStartedAt: Date.now(),
     kind: "remove",
     audioId,
+    slot,
+  }
+  byCell.set(cellId, [...kept, shadow])
+  attachEventBinding(fileId, shadow, eventId)
+  broadcast(fileId, cellId, shadow)
+}
+
+/**
+ * Optimistically empty a slot's selection (2026-09-28) — the takes stay listed,
+ * nothing in the slot is selected. Supersedes an earlier deselect of the same
+ * slot, and an older attach in the slot surrenders its selection claim, exactly
+ * as it would to a newer select.
+ */
+export function injectOptimisticAudioDeselect(
+  fileId: string,
+  cellId: string,
+  slot: AudioSlot,
+  eventId?: string | Promise<string>,
+): void {
+  const byCell = cellMap(fileId)
+  const list = byCell.get(cellId) ?? []
+  const kept = list.filter((s) => !(s.kind === "deselect" && s.slot === slot))
+  for (const s of kept) {
+    if (s.kind === "attach" && s.att.slot === slot) s.claimsSelection = false
+  }
+  const shadow: OptimisticShadow = {
+    key: nextShadowKey++,
+    eventId: null,
+    phase: "binding",
+    graceStartedAt: Date.now(),
+    kind: "deselect",
     slot,
   }
   byCell.set(cellId, [...kept, shadow])
@@ -583,6 +621,12 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       // only matters for which selection the remove shadow clears, and the
       // read-side prune keys removes by audioId — recording covers both.
       injectOptimisticAudioRemove(fileId, cellId, audioId, "recording", record.id)
+    } else if (event.kind === "cell.audio.select" && payload.audioId === null) {
+      // A queued "nothing selected" (2026-09-28) — pending only, like removes:
+      // a stuck one asserts nothing the server holds.
+      const slot = payload.slot
+      if (record.status !== "pending" || typeof slot !== "string" || slot === "") continue
+      injectOptimisticAudioDeselect(fileId, cellId, slot, record.id)
     }
   }
 }

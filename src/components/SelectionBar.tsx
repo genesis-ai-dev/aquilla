@@ -28,6 +28,7 @@ import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/
 import { selectedDubTakes } from "@/lib/sync/cell-audio-read-types"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
@@ -68,6 +69,12 @@ interface Props {
    * every file, silently.
    */
   audioByCellId?: Parameters<typeof mergeCellsWithAudio>[1]
+  /**
+   * The heard lines performing each subtitle line, in a dubbing file — where
+   * the takes of the selected lines actually live (Sam, 2026-09-30). Without
+   * it a selection of subtitle lines found no takes at all.
+   */
+  linkedTakesByCell?: ReadonlyMap<string, readonly LinkedTake[]>
   completeSingle?: (cell: CellData) => Promise<boolean> | void
   completeBatch?: (cells: CellData[]) => Promise<void> | void
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
@@ -104,7 +111,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -225,24 +232,39 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   const { audioTakeTargets, audioRemoveTargets, audioHasAnyTake } = useMemo(() => {
     const give: Array<{ fileId: string; cellId: string; audioId: string }> = []
     const back: Array<{ fileId: string; cellId: string; audioId: string }> = []
-    if (!audioByCellId) return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: false }
+    if (!audioByCellId && !linkedTakesByCell) return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: false }
     let anyTake = false
-    const merged = mergeCellsWithAudio(selectedCells, audioByCellId)
-    for (const cell of merged) {
+    // A heard line performing two selected lines is one take, voted once.
+    const seen = new Set<string>()
+    // `row` is the selected line, whose file the viewer's scope is asked
+    // about — an assignment is to the subtitle file, never to its hidden cue
+    // sibling. `owner` is the cell the take lives on: the row itself, or a
+    // heard line performing it.
+    const visit = (row: CellData, owner: CellData) => {
       for (const take of audioValidationTakes(
-        audioEntryFromCell(cell),
+        audioEntryFromCell(owner),
         project,
         { roleLevel: project.syncRole?.level ?? null, username },
         () => "",
       )) {
+        const key = `${owner.id}|${take.audioId}`
+        if (seen.has(key)) continue
+        seen.add(key)
         anyTake = true
-        const target = { fileId: cell.fileId, cellId: cell.id, audioId: take.audioId }
-        if (isBulkAudioValidatableByMe(cell, take, username, myScopes, activeLane)) give.push(target)
-        if (isBulkAudioUnvalidatableByMe(cell, take, username, myScopes, activeLane)) back.push(target)
+        const target = { fileId: owner.fileId, cellId: owner.id, audioId: take.audioId }
+        if (isBulkAudioValidatableByMe(row, take, username, myScopes, activeLane)) give.push(target)
+        if (isBulkAudioUnvalidatableByMe(row, take, username, myScopes, activeLane)) back.push(target)
+      }
+    }
+    const merged = audioByCellId ? mergeCellsWithAudio(selectedCells, audioByCellId) : selectedCells
+    for (const cell of merged) {
+      visit(cell, cell)
+      for (const heard of linkedTakesByCell?.get(cell.id) ?? []) {
+        if (heard.hasTake) visit(cell, heard.cell)
       }
     }
     return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: anyTake }
-  }, [selectedCells, audioByCellId, myScopes, activeLane, project, username])
+  }, [selectedCells, audioByCellId, linkedTakesByCell, myScopes, activeLane, project, username])
 
   /**
    * Does this FILE have audio at all? The pair's presence turns on this rather
@@ -255,12 +277,16 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
    * buttons it can never use.
    */
   const fileHasAudio = useMemo(() => {
+    // A dubbing file's recordings are on its heard lines, not its rows.
+    for (const heard of linkedTakesByCell?.values() ?? []) {
+      if (heard.some((h) => h.hasTake)) return true
+    }
     if (!audioByCellId) return false
     for (const entry of audioByCellId.values()) {
       if (selectedDubTakes(entry).length > 0) return true
     }
     return false
-  }, [audioByCellId])
+  }, [audioByCellId, linkedTakesByCell])
 
   /** Why the validate button is dark, in the selection's own terms. */
   const validateAudioDisabledReason = useMemo(() => {

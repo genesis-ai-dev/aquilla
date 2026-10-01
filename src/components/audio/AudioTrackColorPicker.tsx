@@ -11,17 +11,20 @@
 // one colour, and everyone on the project sees the one that was picked. The
 // caller withholds the whole control from anyone who cannot change it — the
 // cards below already say what the colour is.
+//
+// The swatches are just swatches, three across (Sam, 2026-09-28) — the same
+// grid as the timeline's track menu (TrackColorSwatches).
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { TRACK_HUES, parseTrackHue } from "@/lib/timeline/track-colors"
+import { TrackColorSwatches } from "@/components/timeline/TrackColorSwatches"
 
 export function AudioTrackColorPicker({
   color,
@@ -51,20 +54,15 @@ export function AudioTrackColorPicker({
           style={{ backgroundColor: current }}
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-auto min-w-0 p-1">
+      <DropdownMenuContent align="start" className="w-auto min-w-0 p-1.5">
         {/* Keyed by the RESOLVED hex, as the timeline's submenu is, so a file
             nobody has coloured announces Green — which is what it is drawn in.
             The heading sits inside the group it names. */}
         <DropdownMenuRadioGroup value={current}>
-          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          <DropdownMenuLabel className="px-1 pb-1.5 pt-0.5 text-xs font-normal text-muted-foreground">
             {t("editor.audioLens.trackColorLabel")}
           </DropdownMenuLabel>
-          {TRACK_HUES.map((hue) => (
-            <DropdownMenuRadioItem key={hue.id} value={hue.hex} className="gap-2" onClick={() => onPick(hue.id)}>
-              <span aria-hidden className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: hue.hex }} />
-              {t(hue.labelKey as Parameters<typeof t>[0])}
-            </DropdownMenuRadioItem>
-          ))}
+          <TrackColorSwatches onPick={onPick} />
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

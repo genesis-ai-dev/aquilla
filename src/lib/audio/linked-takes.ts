@@ -25,6 +25,22 @@ export interface LinkedTake {
    * one of those lines, which the reader should be told before they do it.
    */
   sharedWith: number
+  /**
+   * Whether it holds a recording yet. A line performed by SEVERAL heard lines
+   * lists every one of them once any holds a take (Sam, 2026-09-29), so the
+   * parts not yet recorded can be recorded from the Recording tab. Readers
+   * that mean "the recordings" filter on this.
+   */
+  hasTake: boolean
+  /** The subtitle lines this heard line performs — this one and any it is
+   *  shared with. What its take is checked against (Sam, 2026-09-30). */
+  performs: readonly string[]
+  /**
+   * One of several heard lines performing a line it performs (a line split
+   * across heard lines). Its take says only part of that line's text, and
+   * which part cannot be told from the text — so nothing can check it.
+   */
+  partOfSplit: boolean
 }
 
 export interface BuildLinkedTakesArgs {
@@ -38,8 +54,8 @@ export interface BuildLinkedTakesArgs {
 }
 
 /**
- * subtitle cell id → its heard lines that actually hold a recording, in FILM
- * ORDER.
+ * subtitle cell id → its heard lines, in FILM ORDER — for every line at least
+ * one of whose heard lines holds a recording.
  *
  * Two rules earn their place:
  *
@@ -47,9 +63,12 @@ export interface BuildLinkedTakesArgs {
  *     `buildCueLinkIndex`), so a line performed by two heard lines would
  *     otherwise list them in whatever order the edges came back in. The
  *     recorder's target picker sorts the same way for the same reason.
- *   - **Only cues with a take.** A paired cue nobody has recorded yet has
- *     nothing to draw, and the tab's empty state already offers the way to
- *     record it.
+ *   - **Only lines with a take.** A line none of whose heard lines has been
+ *     recorded gets no entry: the tab's empty state already offers the way to
+ *     record it. But once ANY of them holds a take, every heard line of that
+ *     line is listed, recorded or not (`hasTake`) — a line split across two
+ *     heard lines used to show only the recorded one, leaving the other with
+ *     no way to record it from the tab (Sam, 2026-09-29).
  *
  * Returns an empty map when there is no cue sibling, so every other
  * arrangement — an mp3 import, a plain subtitle file, scripture — is untouched.
@@ -69,10 +88,17 @@ export function buildLinkedTakes({
     const takes: LinkedTake[] = []
     for (const cueId of [...cueIds].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))) {
       const cell = byId.get(cueId)
-      if (!cell || resolveTargetAudio(cell) == null) continue
-      takes.push({ cell, sharedWith: textForCue.get(cueId)?.length ?? 1 })
+      if (!cell) continue
+      const performs = textForCue.get(cueId) ?? [textCellId]
+      takes.push({
+        cell,
+        sharedWith: performs.length,
+        hasTake: resolveTargetAudio(cell) != null,
+        performs,
+        partOfSplit: performs.some((id) => (cuesForText.get(id)?.length ?? 0) > 1),
+      })
     }
-    if (takes.length > 0) out.set(textCellId, takes)
+    if (takes.some((t) => t.hasTake)) out.set(textCellId, takes)
   }
   return out
 }

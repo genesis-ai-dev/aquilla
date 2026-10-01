@@ -98,7 +98,7 @@ import { activeWordRange } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
-import { useCellAudio } from "@/hooks/useCellAudio"
+import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
@@ -115,7 +115,8 @@ import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { parseTimecode, spanProblem } from "@/lib/timeline/timecode"
-import { fmtDragTime } from "@/components/timeline/format"
+import { fmtClock, fmtDragTime } from "@/components/timeline/format"
+import { takeTrackName } from "@/lib/timeline/take-colors"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   DropdownMenu,
@@ -146,7 +147,7 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
-import { audioBlockedReason, audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
+import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { PericopeSuggestions } from "./PericopeSuggestions"
@@ -160,6 +161,7 @@ import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-hi
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
+import { CheckMarks, GutterMarks } from "./table-header-marks"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -168,8 +170,9 @@ import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { CellAttachmentButton } from "./CellAttachmentButton"
 import { CellAttachmentLinks } from "./cell/CellAttachmentLinks"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { CellTakeBlock } from "./CellTakeBlock"
-import { fmtClock } from "./timeline/format"
+import { RecordingTakes } from "./cell/RecordingTakes"
+import { initialExpansionTab } from "./cell/expansion-tab"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
@@ -195,7 +198,6 @@ import {
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
-import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
@@ -855,6 +857,9 @@ interface EditorTableProps {
    * behaves exactly as before.
    */
   linkedTakesByCell?: ReadonlyMap<string, LinkedTake[]>
+  /** A dubbing file whose heard lines' takes are still being read (they arrive
+   *  after the line's own audio). Until then no line can say "no audio". */
+  heardLinesLoading?: boolean
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -928,9 +933,6 @@ interface EditorTableProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  /** Called when the user drops a voice chip onto a cell's audio area.
-   *  Parent should assign the voice then trigger TTS generation. */
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
    *  translator's last commit. When provided, each row renders the small
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
@@ -991,6 +993,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
   linkedTakesByCell,
+  heardLinesLoading = false,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
@@ -1001,7 +1004,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
   onValidated,
   repetitionCounts,
@@ -1327,7 +1330,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // Until the file's recordings have been read — and in a dubbing file, its
+  // heard lines' too — an empty answer means "not read yet", and each row's
+  // audio check shows a placeholder instead of claiming there is no audio.
+  const audioChecking = !audioLoaded || heardLinesLoading
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2008,6 +2015,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       })
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
+  // A file of chapters numbers its lines by verse; anything else counts them.
+  const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
+    item.kind === "chapter"
+    || item.kind === "chapter-range"
+    || item.kind === "preface"
+  )), [milestoneNavigationItems])
 
   // Numbering and paragraph groups depend on structure/validation, not save
   // timestamps or ordinary text edits. One version scan serves both caches;
@@ -2455,6 +2468,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
+          audioChecking={audioChecking}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2522,11 +2536,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
-          scriptureNumbering={milestoneNavigationItems.every((item) => (
-            item.kind === "chapter"
-            || item.kind === "chapter-range"
-            || item.kind === "preface"
-          ))}
+          scriptureNumbering={scriptureNumbering}
           cellLabelsEnabled={cellLabelsEnabled}
           sourceDirectionMode={sourceDirectionMode}
           targetDirectionMode={targetDirectionMode}
@@ -2546,7 +2556,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           canApproveConcept={canApproveConcept}
           onSetUpAffixes={onSetUpAffixes}
           onAskAiFromSelection={onAskAiFromSelection}
-          onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
           onDragEnter={handleDragEnter}
           onSelectionPointerDown={handleSelectionPointerDown}
@@ -2584,6 +2593,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClearCellErrors,
     activeLane,
     audioByCellId,
+    audioChecking,
     audioLens,
     castGutter,
     ttsSettings,
@@ -2627,6 +2637,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionConfigured,
     isTimeOrdered,
     milestoneNavigationItems,
+    scriptureNumbering,
     sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
@@ -2651,7 +2662,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSeekToCue,
-    onAssignVoice,
     previews,
     project,
     ruleMap,
@@ -2761,8 +2771,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
-              gutter-width away from the side; otherwise the track is
-              unlabeled (select + badges + number). */}
+              gutter-width away from the side; otherwise small marks name its
+              three narrow columns — select, notices, number (Sam, 2026-09-28). */}
           {castGutter ? (
             <div data-testid="table-source-header" className="hidden items-center gap-2 md:flex">
               {t("editor.column.source")}
@@ -2773,7 +2783,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               )}
             </div>
           ) : (
-            <div aria-hidden="true" className="hidden md:block" />
+            <GutterMarks numbers={lineNumbersEnabled ? (scriptureNumbering ? "verse" : "cell") : null} />
           )}
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
@@ -2793,6 +2803,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
+            {/* The two validation columns under this heading, told apart —
+                text, then audio — since a validated line shows the same green
+                check in both (Sam, 2026-09-28; the Text and Audio views). */}
+            {(audioLens || !castGutter) && <CheckMarks />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -3470,6 +3484,8 @@ interface MemoizedRowProps {
   /** The heard lines performing this row that hold a recording — see
    *  `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
+  /** The file's recordings have not been read yet — see `audioChecking`. */
+  audioChecking: boolean
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3620,7 +3636,6 @@ interface MemoizedRowProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
   onSelectionPointerDown: (
@@ -3663,7 +3678,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioChecking, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3696,7 +3711,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3785,6 +3800,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         linkedTakes={linkedTakes}
+        audioChecking={audioChecking}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3863,7 +3879,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         canApproveConcept={canApproveConcept}
         onSetUpAffixes={onSetUpAffixes}
         onAskAiFromSelection={onAskAiFromSelection}
-        onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
@@ -3907,6 +3922,9 @@ interface EditorRowProps {
   /** The heard lines performing this row that hold a recording, in film order
    *  — see `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
+  /** The file's recordings have not been read yet: the audio check shows a
+   *  placeholder rather than "no audio". */
+  audioChecking: boolean
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4056,7 +4074,6 @@ interface EditorRowProps {
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
   onAskAiFromSelection?: (chip: ContextChip) => void
-  onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
   sourceFontSize?: number
@@ -4905,7 +4922,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioChecking, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -4925,7 +4942,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4960,7 +4977,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onOpenAttachment, attachmentsByCell, onAttachmentAdded,
-    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
@@ -5099,8 +5116,6 @@ function EditorRow({
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
-  /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
-  const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
   // FRO-237: mic-denied help popover state — the rail button stays ENABLED
   // when mic is blocked and routes click here. Portaled so the cell's
   // overflow clip cannot hide it.
@@ -6159,27 +6174,6 @@ function EditorRow({
    * every-track-must-be-validated rule cannot mean anything while the text
    * view cannot see those tracks.
    */
-  /**
-   * AQU-490: the selected dub takes on slots OTHER than the two named ones,
-   * for the Recording tab to list. Excludes the default track (shown by the
-   * block keyed on `selectedAudioId`), the generated voice (its own block),
-   * and the imported programme clip (role 'source', never a performance).
-   */
-  const extraTrackTakes = useMemo(() => {
-    const out: Array<{ audioId: string; label: string | null }> = []
-    const selections = slotSelections({
-      selectedBySlot: cell.selectedBySlot,
-      selectedAudioId: cell.selectedAudioId ?? null,
-      selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
-    })
-    for (const [slot, audioId] of Object.entries(selections)) {
-      if (slot === "recording" || slot === "generatedVoice") continue
-      const att = cell.attachments?.[audioId]
-      if (!att || att.isDeleted || (att.role ?? "dub") !== "dub") continue
-      out.push({ audioId, label: att.label ?? null })
-    }
-    return out
-  }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const hasAnyTrackAudio = useMemo(() => {
     const selections = slotSelections({
       selectedBySlot: cell.selectedBySlot,
@@ -6193,6 +6187,13 @@ function EditorRow({
     return false
   }, [cell.selectedBySlot, cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, cell.attachments])
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
+  // Nothing to show in the Recording tab: no take of this line's own (the
+  // imported programme clip is not one), no programme section selected, and
+  // no heard line performing it.
+  const recordingTabEmpty =
+    !hasAudio &&
+    !linkedTakes?.some((t) => t.hasTake) &&
+    !Object.entries(cell.attachments ?? {}).some(([id, a]) => !a.isDeleted && !audioIdSeededWith(id, cell.fileId))
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
     : undefined
@@ -6242,6 +6243,14 @@ function EditorRow({
     cell.attachments, cell.selectedGeneratedVoiceAudioId,
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
+  // AQU-1211: the Recording tab plays the takes this row plays through the
+  // row's own players, so the word highlight in the cell follows them.
+  const rowPlayers = useMemo(() => {
+    const players = new Map<string, UseCellAudioResult>()
+    if (cell.selectedAudioId) players.set(cell.selectedAudioId, audioController)
+    if (cell.selectedGeneratedVoiceAudioId) players.set(cell.selectedGeneratedVoiceAudioId, generatedVoiceController)
+    return players
+  }, [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId, audioController, generatedVoiceController])
 
   // AQU-521: karaoke-while-listening for the read-only target view. When a cell
   // is not being actively edited its target renders as plain text (not a
@@ -6391,7 +6400,10 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  const gutterSpeaking = castGutter && !isStructuralCell(cell.type)
+  //
+  // The Audio view uses the same picker, opened from a field under each line's
+  // waveform rather than from a gutter (Sam, 2026-09-28).
+  const gutterSpeaking = (castGutter || Boolean(audioLens)) && !isStructuralCell(cell.type)
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -6505,22 +6517,22 @@ function EditorRow({
   const railOverflowAttentionDot: "emerald" | "primary" | null =
     openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
-  // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
-  // when the panel was closed and is being opened — once open, the user's
-  // choice (or programmatic switches via inline rule clicks) wins.
+  // First-open auto-tab: prefer the most-attention-worthy tab — and in the
+  // Audio view, Recording (Sam, 2026-09-29). Only applied when the panel was
+  // closed and is being opened — once open, the user's choice (or
+  // programmatic switches via inline rule clicks) wins.
   const previousExpandedRef = useRef(false)
+  const inAudioView = audioLens != null
   useEffect(() => {
     if (expanded && !previousExpandedRef.current) {
-      const initial =
-        cellInfractions.length > 0
-          ? "issues"
-          : transcriptNeedsAttention
-            ? "audio"
-            : "backtranslation"
-      setExpansionTab(initial)
+      setExpansionTab(initialExpansionTab({
+        hasIssues: cellInfractions.length > 0,
+        transcriptNeedsAttention,
+        audioView: inAudioView,
+      }))
     }
     previousExpandedRef.current = expanded
-  }, [expanded, cellInfractions.length, transcriptNeedsAttention])
+  }, [expanded, cellInfractions.length, transcriptNeedsAttention, inAudioView])
 
   useEffect(() => {
     if (expansionTab === "footnotes" && !showFootnotesInExpansion) {
@@ -6733,6 +6745,26 @@ function EditorRow({
       onValidationChange={emitValidationChange}
     />
   )
+  // The line's takes — its own, and in a dubbing file those of the heard
+  // lines performing it, each named by what it says (Sam, 2026-09-30: the
+  // check read only the row, so every subtitle line said "No audio to
+  // validate" and a vote on its heard line never showed here).
+  const audioValidationLine = lineValidationTakes(
+    cell,
+    linkedTakes,
+    project,
+    { roleLevel: project.syncRole?.level ?? null, username },
+    audioBlockedReason(t),
+    (cue) => cue.original?.trim()
+      ? `“${cue.original.trim()}”`
+      : t("editor.audio.heardLineAt", {
+          range: `${fmtClock(cue.startTime ?? 0, true)}–${fmtClock(cue.endTime ?? cue.startTime ?? 0, true)}`,
+        }),
+    // Named by THIS row's file's tracks, a heard line's takes too: they live
+    // in the cue sibling, but the tracks are the timeline's.
+    (_owner, slot) =>
+      takeTrackName({ files: project.files, fileId: cell.fileId, slot }) ?? t("editor.recordingTab.addedTrack"),
+  )
   // AQU-490: the audio twin of emitValidationChange above. The vote itself is
   // shared across languages. AQU-1462 stamps the lane the member is in so an
   // archived lane can refuse it; the default lane omits the tag.
@@ -6746,12 +6778,16 @@ function EditorRow({
       console.warn("[audio-validate] aborting: cell out of the caller's assigned scope")
       return false
     }
+    // The cell the take lives on: this row's own, or the heard line that
+    // performs it (dubbing). The scope asked above stays THIS row's — an
+    // assignment is to the subtitle file, never to its hidden cue sibling.
+    const owner = audioValidationLine.ownerOf.get(audioId) ?? { fileId: cell.fileId, cellId: cell.id }
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
         projectId: project.id,
-        fileId: cell.fileId,
-        cellId: cell.id,
+        fileId: owner.fileId,
+        cellId: owner.cellId,
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
@@ -6761,7 +6797,7 @@ function EditorRow({
       // to contradict it. The picture was right for the wrong reason and only
       // until the row recycled. Now the vote is flushed and every reader of
       // this file refetches, including a timeline open beside the text view.
-      await commitAudioValidation([cell.fileId])
+      await commitAudioValidation([owner.fileId])
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
@@ -6769,12 +6805,6 @@ function EditorRow({
     }
   }
 
-  const audioValidationTakeList = audioValidationTakes(
-    audioEntryFromCell(cell),
-    project,
-    { roleLevel: project.syncRole?.level ?? null, username },
-    audioBlockedReason(t),
-  )
   // AQU-490: no switch, no project setting, no file-level gate. Audio
   // validation sits in this gutter beside text validation wherever a line has
   // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
@@ -6784,7 +6814,8 @@ function EditorRow({
   const audioValidationControl = (
     <AudioValidationControl
       cellRef={cellRef}
-      takes={audioValidationTakeList}
+      takes={audioValidationLine.takes}
+      checking={audioChecking}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide
@@ -7002,6 +7033,7 @@ function EditorRow({
                     showLanguageBadge={gutterLanguageBadge}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
                     onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
+                    countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
                   />
                 )}
               </span>
@@ -7128,7 +7160,20 @@ function EditorRow({
           // this huge row let the React Compiler serve a stale voice, so a
           // freshly-picked voice didn't stick in the trigger).
           <div
-            className={cn("col-start-2 flex flex-col transition-opacity md:col-auto", isSynthBusy && "opacity-70")}
+            // md:pe-3: the card keeps 20px from the health line beside it,
+            // not 8 (Sam, 2026-09-28) — a little more than the 12px the
+            // checks keep on the line's other side.
+            // md:pt: the waveform's middle rides the line number's (Sam, same
+            // day). The number's box is the source line — fontSize × 1.6 — set
+            // 26px down the gutter (its 6px padding and the 20px strip
+            // spacer), so its middle is 26 + 0.8·fontSize down; the waveform's
+            // is 28 down (half its 56px). Hence 0.8·fontSize − 2px, and it
+            // follows the reader's font size.
+            className={cn(
+              "col-start-2 flex flex-col transition-opacity md:col-auto md:pe-3 md:pt-[calc(var(--aq-src-fs)*0.8_-_2px)]",
+              isSynthBusy && "opacity-70",
+            )}
+            style={{ "--aq-src-fs": `${sourceFontSize}px` } as React.CSSProperties}
             dir="ltr"
           >
             <CellVoicePanel
@@ -7136,15 +7181,30 @@ function EditorRow({
               project={audioLens.project}
               projectId={audioLens.projectId}
               settings={audioLens.settings}
-              voices={audioLens.voices}
               session={audioLens.session}
               username={audioLens.username}
               controller={hasAudio ? audioController : hasGeneratedVoice ? generatedVoiceController : undefined}
               targetLang={activeLane || undefined}
-              onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+              canEdit={editable}
+              onRecord={editable && onOpenRecording ? () => onOpenRecording(cell.id) : undefined}
+              recordUnavailable={getUnsupportedReason()}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+              voicePicker={gutterVoice && (
+                <CastGutterVoice
+                  variant="field"
+                  voice={gutterVoice}
+                  explicit={gutterExplicit}
+                  castName={gutterCastName}
+                  editable={editable && Boolean(onAssignCastVoice)}
+                  voices={gutterVoices}
+                  showLanguageBadge={gutterLanguageBadge}
+                  onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                  onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
+                  countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
+                />
+              )}
             />
           </div>
         ) : (
@@ -8238,52 +8298,22 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAnyTrackAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
+                : (hasAnyTrackAudio || hasGeneratedVoice || Boolean(linkedTakes?.some((t) => t.hasTake)))
                   ? "emerald"
                   : undefined,
               renderContent: () => (
-                <div
-                  className={cn(
-                    "flex flex-col gap-3 rounded-xl transition-colors",
-                    dragOverVoiceId && "bg-primary/10 ring-2 ring-primary/40",
-                  )}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes(VOICE_ASSIGN_MIME)) {
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = "copy"
-                      const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
-                      if (voiceId && voiceId !== dragOverVoiceId) setDragOverVoiceId(voiceId)
-                    }
-                  }}
-                  onDragLeave={() => setDragOverVoiceId(null)}
-                  onDrop={(e) => {
-                    const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
-                    setDragOverVoiceId(null)
-                    if (voiceId && onAssignVoice) {
-                      e.preventDefault()
-                      onAssignVoice(cell.id, voiceId)
-                    }
-                  }}
-                >
-                  {dragOverVoiceId && (
-                    <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 py-2 text-xs font-medium text-primary">
-                      {(() => {
-                        const v = audioLens?.voices.find(vv => vv.id === dragOverVoiceId)
-                        return v ? t("editor.voice.synthesizeWith", { name: v.name }) : t("editor.voice.dropToSynthesize")
-                      })()}
-                    </div>
-                  )}
-                  {/* BOTH/AND, not either/or (Sam, 2026-08-22): this row's own
-                      audio first, then every take that lives on a heard line
-                      performing it. A line can have both, and a reader who
-                      opened this panel wants to see everything that sounds for
-                      this line, not whichever one we ranked highest. */}
-                  {hasAudio && (
-                    <CellTakeBlock
+                <div className="flex flex-col gap-3">
+                  {/* Sam, 2026-09-29: the tab's one job is choosing which take
+                      this line uses, and checking that it says the text. Per
+                      track, the take that plays sits on top and the others
+                      are listed under it; a heard line performing this line
+                      (dubbing) follows with its own. */}
+                  {!recordingTabEmpty && (
+                    <RecordingTakes
                       project={project}
-                      owner={cell}
-                      controller={audioController}
-                      timings={cellAudioTimings}
+                      cell={cell}
+                      linkedTakes={linkedTakes}
+                      players={rowPlayers}
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}
@@ -8292,99 +8322,10 @@ function EditorRow({
                       onOpenRecording={onOpenRecording}
                       onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
                       onCommitted={onCellCommitted}
+                      onLastTakeRemoved={onLastTakeRemoved}
                     />
                   )}
-                  {/* AQU-490 / AQU-646: takes on ADDED target-audio tracks.
-                      The block above shows the default track's take and the
-                      one below the generated voice; a take on any other slot
-                      had no block at all, so a line whose only recording sat
-                      on track 2 opened to an EMPTY panel — the attention dot
-                      said audio, the panel said nothing. Sam hit exactly that
-                      on 2026-09-21. Every selected dub take that is not on the
-                      two named slots gets its own block here, named by the
-                      take's label or its track. */}
-                  {extraTrackTakes.map((take) => (
-                    <CellTakeBlock
-                      key={take.audioId}
-                      project={project}
-                      owner={cell}
-                      audioId={take.audioId}
-                      timings={cell.audioTimings?.[take.audioId]}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      onCommitted={onCellCommitted}
-                      header={
-                        <span className="text-[11px] text-muted-foreground">
-                          {take.label ?? t("editor.audio.addedTrackTakeHint")}
-                        </span>
-                      }
-                    />
-                  ))}
-                  {hasGeneratedVoice && (
-                    // A synthesized voice is nobody's performance: it can be
-                    // recorded over, but not transcribed or cleaned up.
-                    <CellTakeBlock
-                      project={project}
-                      owner={cell}
-                      audioId={cell.selectedGeneratedVoiceAudioId}
-                      controller={generatedVoiceController}
-                      timings={generatedVoiceTimings}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      recordLabel={t("editor.audio.recordOver")}
-                      readOnlyTranscript
-                      header={
-                        <span className="text-[11px] text-muted-foreground">
-                          {t("editor.voice.aiGeneratedHint")}
-                        </span>
-                      }
-                    />
-                  )}
-                  {linkedTakes?.map(({ cell: take, sharedWith }) => (
-                    <CellTakeBlock
-                      key={take.id}
-                      project={project}
-                      owner={take}
-                      timings={take.selectedAudioId ? take.audioTimings?.[take.selectedAudioId] : undefined}
-                      cellText={visibleTranslated}
-                      editable={editable}
-                      username={username}
-                      targetLang={activeLane || undefined}
-                      session={rowSession}
-                      onOpenRecording={onOpenRecording}
-                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                      onCommitted={onCellCommitted}
-                      header={
-                        <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
-                          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                            {t("editor.audio.heardLineAt", {
-                              range: `${fmtClock(take.startTime ?? 0, true)}–${fmtClock(take.endTime ?? take.startTime ?? 0, true)}`,
-                            })}
-                          </span>
-                          {sharedWith > 1 && (
-                            // One heard line can perform several subtitle lines
-                            // — real in this data, up to seven. Re-recording it
-                            // changes all of them, and that should not be a
-                            // surprise discovered afterwards.
-                            <span className="text-[10px] text-muted-foreground">
-                              {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
-                            </span>
-                          )}
-                        </div>
-                      }
-                    />
-                  ))}
-                  {!hasAnyTrackAudio && !hasGeneratedVoice && !linkedTakes?.length && (
+                  {recordingTabEmpty && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

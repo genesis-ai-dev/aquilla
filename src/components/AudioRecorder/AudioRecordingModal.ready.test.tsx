@@ -2,7 +2,7 @@
 // waveform, its length, a play button — and the target bar judges it, so the
 // operator can see and hear what they are about to record over.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -102,6 +102,8 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -178,6 +180,39 @@ describe("the selected take, before recording", () => {
     render(modalEl())
     expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 3 · 3.0s")
     expect(screen.getByText("0:03.0")).toBeInTheDocument()
+  })
+
+  // Sam, 2026-09-28: the room went to the takes drawer, so on a line with no
+  // timed window the note is a tooltip on an icon beside the take, not a line.
+  it("says a line has no timed window on hover, beside the take, compact", async () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-3.wav",
+      attachments: { "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }) },
+    })
+    const untimed = { ...cell, startTime: undefined, endTime: undefined } as unknown as CellData
+    renderWithTooltips(
+      <AudioRecordingModal
+        open project={project} cells={[untimed]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    const icon = screen.getByTestId("rec-no-window")
+    expect(screen.getByTestId("rec-ready-take").contains(icon)).toBe(true)
+    await expectTooltip(icon, "This line has no timed window.")
+    expect(screen.queryByText("This line has no timed window.", { selector: "p" })).toBeNull()
+    expect(screen.getByTestId("rec-ready-waveform").style.height).toBe("40px")
+  })
+
+  it("keeps the note as a line where there is no take to hang it on", () => {
+    const untimed = { ...cell, startTime: undefined, endTime: undefined } as unknown as CellData
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[untimed]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("rec-no-window")).toBeNull()
+    expect(screen.getByText("This line has no timed window.")).toBeInTheDocument()
   })
 
   it("shows today's empty window on a line with no take", () => {
@@ -266,5 +301,148 @@ describe("the selected take, before recording", () => {
     fireEvent.click(screen.getByTestId("rec-start"))
     await waitFor(() => expect(screen.queryByTestId("rec-ready-take")).toBeNull())
     expect(player.pause).toHaveBeenCalled()
+  })
+})
+
+// Sam, 2026-09-28: without the film, the drawer can be pulled up over the line
+// and the instruments to see every take at once — as the film layout raises
+// its list.
+describe("the takes drawer, pulled up", () => {
+  // happy-dom lays nothing out, so every drawer "fits". These tests stand in a
+  // drawer whose takes run past its bottom — the case the handle is for.
+  let sizes: Array<{ mockRestore: () => void }> = []
+  const overfull = () => {
+    const drawerOnly = (big: number) => function (this: HTMLElement) {
+      return this.getAttribute?.("data-testid") === "rec-takes-drawer" ? big : 0
+    }
+    sizes = [
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(drawerOnly(400)),
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(drawerOnly(100)),
+    ]
+  }
+  beforeEach(() => overfull())
+  afterEach(() => { for (const s of sizes) s.mockRestore(); sizes = [] })
+
+  const twoTakes = () => entry({
+    selectedAudioId: "audio-c1-3.wav",
+    attachments: {
+      "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 2" }),
+      "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }),
+    },
+  })
+  const draw = (onClose = vi.fn()) => {
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cell]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={onClose}
+      />,
+    )
+    return { toggle: screen.getByTestId("rec-takes-toggle"), onClose }
+  }
+  const sheet = () => screen.getByTestId("rec-takes-group").getAttribute("data-sheet")
+  const lineCovered = () => screen.getByTestId("rec-read-aloud").closest("[inert]") != null
+
+  it("has a handle left of Takes that raises the takes over the line, and puts them back", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle } = draw()
+    expect(toggle.firstElementChild?.tagName.toLowerCase()).toBe("svg")
+    expect(toggle).toHaveTextContent("Takes 2")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(sheet()).toBe("down")
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    // Risen from the bottom, as tall as its takes (the height is the
+    // browser's; the live walk measures it) — the line is covered, not gone.
+    expect(sheet()).toBe("up")
+    expect(screen.getByTestId("rec-takes-group").className).toContain("bottom-0")
+    expect(lineCovered()).toBe(true)
+    fireEvent.click(toggle)
+    expect(sheet()).toBe("down")
+    expect(lineCovered()).toBe(false)
+  })
+
+  it("goes down on Escape, before anything closes", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle, onClose } = draw()
+    fireEvent.click(toggle)
+    // Pressed where focus is, so the dialog's own Escape handling sees it too.
+    toggle.focus()
+    fireEvent.keyDown(toggle, { key: "Escape" })
+    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("goes down when a take starts, so the line is never under it", () => {
+    attachmentsState.byCellId = twoTakes()
+    const { toggle } = draw()
+    fireEvent.click(toggle)
+    fireEvent.keyDown(window, { key: " " })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(sheet()).toBe("down")
+  })
+
+  it("has nothing to pull up on a line with no takes", () => {
+    const { toggle } = draw()
+    expect(toggle).toBeDisabled()
+  })
+
+  // Sam, 2026-09-28: when every take already shows, there is no chevron.
+  it("has no chevron when every take already shows", () => {
+    for (const s of sizes) s.mockRestore()
+    sizes = []
+    attachmentsState.byCellId = twoTakes()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cell]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("rec-takes-toggle")).toBeNull()
+    expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 2")
+  })
+})
+
+// Sam, 2026-09-28: the drawer works the same with or without the film, and
+// where it rests is a setting — open (the takes that fit show) or closed
+// (only the "Takes" bar).
+describe("the takes drawer, resting closed", () => {
+  afterEach(() => setRecordingTakesDrawerOpen(true))
+  const twoTakes = () => entry({
+    selectedAudioId: "audio-c1-3.wav",
+    attachments: {
+      "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 2" }),
+      "audio-c1-3.wav": take("audio-c1-3.wav", { label: "Take 3" }),
+    },
+  })
+  const draw = () => render(
+    <AudioRecordingModal
+      open project={project} cells={[cell]} activeCellId="c1" username="sam"
+      onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+    />,
+  )
+
+  it("shows only the Takes bar, always with its chevron, and raises the list from it", () => {
+    setRecordingTakesDrawerOpen(false)
+    attachmentsState.byCellId = twoTakes()
+    draw()
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+    const toggle = screen.getByTestId("rec-takes-toggle")
+    fireEvent.click(toggle)
+    expect(screen.getByTestId("rec-takes-group")).toHaveAttribute("data-sheet", "up")
+    expect(screen.getByTestId("take-row-audio-c1-2.wav")).toBeInTheDocument()
+    fireEvent.keyDown(toggle, { key: "Escape" })
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+  })
+
+  it("is chosen with a switch in the recorder's settings", () => {
+    attachmentsState.byCellId = twoTakes()
+    draw()
+    expect(screen.getByTestId("rec-takes-drawer")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    const sw = screen.getByTestId("rec-takes-drawer-open")
+    expect(sw).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(sw)
+    expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
+    expect(screen.getByTestId("rec-takes-drawer-open")).toHaveAttribute("aria-checked", "false")
   })
 })

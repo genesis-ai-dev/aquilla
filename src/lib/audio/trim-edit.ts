@@ -61,6 +61,15 @@ export function keptLengthSec(v: TrimValue, durationSec: number): number {
 }
 
 /** Same window? Both sides compared to the millisecond, nulls equal. */
+/** A trim line's position, to the hundredth — one arrow-key nudge (10ms) is
+ *  always visible: "0:00.52", "1:02.30". */
+export function formatTrimTime(sec: number): string {
+  const cs = Math.max(0, Math.round((Number.isFinite(sec) ? sec : 0) * 100))
+  const m = Math.floor(cs / 6000)
+  const s = Math.floor((cs % 6000) / 100)
+  return `${m}:${String(s).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`
+}
+
 export function sameTrim(a: TrimValue, b: TrimValue): boolean {
   const ms = (x: number | null) => (x == null ? null : Math.round(x * 1000))
   return ms(a.start) === ms(b.start) && ms(a.end) === ms(b.end)

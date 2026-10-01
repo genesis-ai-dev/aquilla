@@ -8,12 +8,12 @@ describe("AudioTrackColorPicker", () => {
   it("shows the file's colour, and names it", () => {
     render(<AudioTrackColorPicker color="amber" onPick={() => {}} />)
     expect(screen.getByTestId("audio-track-color-dot").style.backgroundColor).toBe("#eba720")
-    expect(screen.getByTestId("audio-track-color")).toHaveAttribute("aria-label", "Audio colour for this file: Amber")
+    expect(screen.getByTestId("audio-track-color")).toHaveAttribute("aria-label", "Audio color: Amber")
   })
 
   it("reads an uncoloured file as the default green", () => {
     render(<AudioTrackColorPicker color={null} onPick={() => {}} />)
-    expect(screen.getByTestId("audio-track-color")).toHaveAttribute("aria-label", "Audio colour for this file: Green")
+    expect(screen.getByTestId("audio-track-color")).toHaveAttribute("aria-label", "Audio color: Green")
   })
 
   it("offers the timeline's six, marks the current one, and writes the hue's id", async () => {
@@ -21,9 +21,13 @@ describe("AudioTrackColorPicker", () => {
     render(<AudioTrackColorPicker color="azure" onPick={onPick} />)
     fireEvent.click(screen.getByTestId("audio-track-color"))
     const items = await screen.findAllByRole("menuitemradio")
-    expect(items.map((el) => el.textContent)).toEqual(["Cyan", "Azure", "Violet", "Magenta", "Amber", "Green"])
+    // Sam, 2026-09-28: swatches only, three across — the names are for
+    // screen readers, not the screen.
+    expect(items.map((el) => el.getAttribute("aria-label"))).toEqual(["Cyan", "Azure", "Violet", "Magenta", "Amber", "Green"])
+    expect(items.map((el) => el.textContent)).toEqual(["", "", "", "", "", ""])
+    expect(screen.getByTestId("track-color-swatches").className).toContain("grid-cols-3")
     expect(screen.getByRole("menuitemradio", { name: "Azure" })).toHaveAttribute("aria-checked", "true")
-    expect(screen.getByText("Audio colour for this file")).toBeInTheDocument()
+    expect(screen.getByText("Audio color")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Magenta" }))
     expect(onPick).toHaveBeenCalledWith("magenta")
   })

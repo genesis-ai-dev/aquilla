@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, Search, Cloud, CloudDownload,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  probeMediaDurationMs,
   importEBible,
   importObs,
   importHelloao,
@@ -61,6 +62,10 @@ import {
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
+import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
+import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
+import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
@@ -106,6 +111,7 @@ import {
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
+import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
@@ -115,7 +121,7 @@ import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube"
 
 interface ImportDialogProps {
   open: boolean
@@ -480,6 +486,7 @@ export function ImportDialog({
                   label={t("importExport.dialog.backToImportTypes")}
                 />
                 {screen === "upload" ? t("importExport.landing.upload.title")
+                  : screen === "youtube" ? t("importExport.landing.youtube.title")
                   : screen === "gdrive" ? t("importExport.landing.gdrive.title")
                   : screen === "helloao" ? t("importExport.dialog.titleHelloao")
                   : screen === "obs" ? t("importExport.landing.obs.title")
@@ -513,6 +520,14 @@ export function ImportDialog({
               }
               setScreen(s)
             }}
+          />
+        )}
+
+        {screen === "youtube" && (
+          <YouTubeImportPanel
+            ctx={{ projectId, author: username, sourceLanguage,
+              targetLanguage, targetLang, getToken }}
+            onImported={handleChildImported}
           />
         )}
 
@@ -869,6 +884,8 @@ type ImportOption = {
 }
 
 const POPULAR_OPTIONS: ImportOption[] = [
+  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
+    descriptionKey: "importExport.landing.youtube.description" },
   { id: "upload", titleKey: "importExport.landing.upload.title", icon: Upload,
     descriptionKey: "importExport.landing.upload.description" },
   { id: "gdrive", titleKey: "importExport.landing.gdrive.title", hintKey: "importExport.landing.gdrive.hint", icon: CloudDownload, badge: "beta",
@@ -1165,6 +1182,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  const [mediaReview, setMediaReview] = useState<{
+    id: string
+    mediaName: string
+    durationMs?: number
+    sources: MediaTextSourceOption[]
+  } | null>(null)
+  const mediaReviewResolver = useRef<((source: MediaTextSource | undefined | null) => void) | null>(null)
   // AQU-823: per-file Drive provenance (normalized name → origin), set by the
   // gdrive variant just before handleFiles and stamped into importManifest.
   const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
@@ -1173,7 +1197,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     refs: FileReference[]
     skipped?: { book: string; reason: string }[]
   } | null>(null)
-  useEffect(() => () => parseAbortRef.current?.abort(), [])
+  useEffect(() => () => {
+    parseAbortRef.current?.abort()
+    mediaReviewResolver.current?.(null)
+    mediaReviewResolver.current = null
+  }, [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1219,7 +1247,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * AQU-310: when `onPreview` is provided, this splits into two phases:
    *   1. Parse phase — reads all files locally, shows a preview
    *   2. Commit phase — uploads after user confirms
-   * Media files bypass preview (they have no text cells to show).
+   * Media with companion or embedded captions shows an editable cue preview.
    */
   const doImportFiles = useCallback(
     async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
@@ -1251,9 +1279,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       }
 
       // Parse text files client-side for the preview.
-      const allParsedResults: ImportResult[] = []
       const preparedByFile = new Map<File, PreparedImportFile>()
-      if (textFiles.length > 0 && onPreview) {
+      if (onPreview && (textFiles.length > 0 || mediaFiles.some(file => /\.(mp4|m4a)$/i.test(file.name)))) {
         parseAbortRef.current?.abort()
         const parseController = new AbortController()
         parseAbortRef.current = parseController
@@ -1277,7 +1304,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               excludeFrontMatter,
             })
             preparedByFile.set(file, prepared)
-            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
           if (parseController.signal.aborted) return
@@ -1292,15 +1318,62 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setImporting(false)
           setPhase("")
           return
-        } finally {
-          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
 
+        let reviewed: Awaited<ReturnType<typeof reviewMediaCompanions>>
+        try {
+        reviewed = await reviewMediaCompanions(list, async file => {
+          const prepared = preparedByFile.get(file)
+          const format = detectFileType(file.name)
+          if (!prepared || (format !== "vtt" && format !== "srt" && format !== "sbv")) {
+            throw new Error(t("importExport.upload.parseFailed"))
+          }
+          return {
+            cues: prepared.results.flatMap(result => result.strings),
+            artifact: { name: file.name, format,
+              bytes: prepared.results[0]?.rawBytes ?? await file.arrayBuffer() },
+          }
+        }, async (media, sources) => {
+          const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+          if (parseController.signal.aborted) return null
+          return new Promise(resolve => {
+            mediaReviewResolver.current = resolve
+            setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
+          })
+        }, async media => {
+          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          parseController.signal.throwIfAborted()
+          assertSourceUploadByteLength(media.size)
+          const bytes = await media.arrayBuffer()
+          parseController.signal.throwIfAborted()
+          return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({
+            ...source, label: t(source.language
+              ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
+              number: index + 1, language: source.language ?? "",
+            }),
+          }))
+        })
+        } catch (failure) {
+          if (!parseController.signal.aborted) {
+            setError(failure instanceof Error ? failure.message : t("importExport.upload.parseFailed"))
+            setImporting(false)
+          }
+          return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
+        }
+        if (reviewed === null) return
+        const remainingResults = reviewed.files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+        if (remainingResults.length === 0 && mediaFiles.length > 0) {
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
+          return
+        }
+
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
-        onPreview(allParsedResults, async (options) => {
+        onPreview(remainingResults, async (options) => {
           if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
             for (const [file, prepared] of preparedByFile) {
               preparedByFile.set(file, {
@@ -1314,7 +1387,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               })
             }
           }
-          await doCommit(list, preparedByFile, reimportFileIds)
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
         })
         return
       }
@@ -1332,6 +1405,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       list: File[],
       preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
       reimportFileIds?: ReadonlyMap<string, string>,
+      mediaSources?: ReadonlyMap<File, MediaTextSource>,
     ) => {
       setImporting(true)
       setProgress(null)
@@ -1404,6 +1478,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
@@ -1535,6 +1610,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
   // AQU-823: Google Drive variant — same panel state machine (importing,
   // progress, error, Paratext choice above), different file source.
+  if (mediaReview) {
+    const finishReview = (source: MediaTextSource | undefined | null) => {
+      const resolve = mediaReviewResolver.current
+      mediaReviewResolver.current = null
+      setMediaReview(null)
+      resolve?.(source)
+    }
+    return <MediaImportPreviewDialog key={mediaReview.id}
+      mediaName={mediaReview.mediaName} sources={mediaReview.sources}
+      durationMs={mediaReview.durationMs}
+      onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
+  }
   if (variant === "gdrive" && !importing) {
     return (
       <div>

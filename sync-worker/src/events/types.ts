@@ -920,6 +920,7 @@ export interface EventPayloads {
       groupId?: string | null
       color?: string | null
       sourceTrackId?: string | null
+      contentFileId?: string | null
     } | null
   }
 

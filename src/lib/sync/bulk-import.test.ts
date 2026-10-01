@@ -521,6 +521,9 @@ describe("bulkUploadSource", () => {
     const publishing = publishStagedImport({
       projectId: "p1",
       fileId: "f1",
+      coreMediaUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      publishEventId: "reveal-1",
+      videoEventId: "picture-1",
       attachments: [{
         cellId: "cell-0",
         audioId: "audio-1.wav",
@@ -536,9 +539,17 @@ describe("bulkUploadSource", () => {
 
     expect(bodies).toHaveLength(2)
     expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0].video).toEqual({
+      id: expect.any(String),
+      coreMediaUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    })
     expect(bodies[0]).toMatchObject({
       complete: true,
-      publishEventId: expect.any(String),
+      publishEventId: "reveal-1",
+      video: {
+        id: "picture-1",
+        coreMediaUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      },
       attachments: [{
         id: expect.any(String),
         cellId: "cell-0",

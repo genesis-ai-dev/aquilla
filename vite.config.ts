@@ -9,6 +9,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
 import { resolveBuildBranch, resolveBuildDate, resolveBuildSha } from "./scripts/build-info.ts"
+import { TRANSFORMERS_ORT_SPECIFIER, resolveTransformersOrtExternWasm } from "./scripts/transformers-ort-extern-wasm.ts"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
 import type { BrandId } from "./src/branding/types.ts"
 
@@ -132,6 +133,16 @@ export default defineConfig(({ mode }) => ({
         replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/index.ts"),
       },
       { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+      // transformers.js fetches its ONNX Runtime WASM from jsDelivr at runtime,
+      // so the copy its default onnxruntime-web build makes Vite emit is dead
+      // weight — and at 25.6 MiB under transformers 4.3.0 it is over the
+      // Cloudflare Workers per-asset limit. Exact match on purpose: mms-worker's
+      // own `onnxruntime-web/wasm` import still needs its bundled WASM. See
+      // scripts/transformers-ort-extern-wasm.ts.
+      {
+        find: new RegExp(`^${TRANSFORMERS_ORT_SPECIFIER}$`),
+        replacement: resolveTransformersOrtExternWasm(import.meta.dirname),
+      },
     ],
   },
   optimizeDeps: {

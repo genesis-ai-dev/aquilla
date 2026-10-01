@@ -2494,7 +2494,6 @@ export const ru: Catalog = {
   "org.teamDetail.deletingButton": "Удаление…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "Описания уровней доступа",
   "org.teamDetail.addMemberButton": "Добавить участника",
-  "org.teamDetail.addMembersDialogTitle": "Добавить участников в «{name}»",
   "org.teamDetail.removeAriaLabel": "Удалить {name}",
   "org.teamDetail.allMembersAddedNotice": "Все участники организации уже в этой команде.",
   "org.teamDetail.addErrorPrefix": "Не удалось добавить: {error}",

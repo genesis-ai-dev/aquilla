@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -40,10 +41,15 @@ import {
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
   humanRoleName,
-  roleDisplayText,
 } from "@/lib/frontier/roles"
-import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
-import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
+import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
+import { roleLabel } from "@/components/access/labels"
+import {
+  RemoveDirectGrantDialog, countBreakdown, isInheritedOnly, memberDirectLevel, memberOrigin, scopeHref,
+} from "@/components/project-members/roster-origin"
+import { RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -185,51 +191,62 @@ export function MembersTab({
 
   const renderMemberRow = (m: ProjectMember) => {
     const isSelf = callerUserId !== null && m.userId === callerUserId
-    const isLocked = m.role.source === "org" || m.role.source === "creator"
-    const lockedHint =
-      m.role.source === "org"
-        ? t("org.membersPage.lockedHintOrgAccess")
-        : m.role.source === "creator"
-          ? t("projectSettings.share.lockedHintCreator")
-          : undefined
+    // AQU-1352 §3.7: origin comes from the server; inherited-only rows keep
+    // their role control but render it read-only in place (rule 2).
+    const origin = memberOrigin(m)
+    const directLevel = memberDirectLevel(m)
+    const inheritedOnly = isInheritedOnly(m)
+    const isLocked = m.role.source === "creator" && directLevel == null
+    const lockedHint = isLocked ? t("projectSettings.share.lockedHintCreator") : undefined
+    const roleSelectLevel = directLevel ?? m.role.level
 
     return (
       <li
         key={m.userId}
         className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm"
       >
-        <UsernameWithAvatar username={m.username} />
-        <SourceBadge source={m.role.source} />
-        <RoleLabel name={m.role.name} />
-
-        {/* Secondary sources */}
-        {m.secondarySources && m.secondarySources.length > 0 && (
-          <span className="text-[10px] text-muted-foreground">
-            + {m.secondarySources.map((s) => `${s.source}:${s.name}`).join(", ")}
-          </span>
-        )}
+        <MemberInspectorTrigger
+          userId={m.userId}
+          username={m.username}
+          from={{ type: "project", id: projectId }}
+          herePath={[{ type: "project", id: projectId, name: t("org.access.inspector.thisProject") }]}
+        >
+          <UsernameWithAvatar username={m.username} />
+        </MemberInspectorTrigger>
+        <GrantOriginBadge origin={origin} />
+        <EffectiveRoleCell
+          className="text-xs text-muted-foreground"
+          directRoleLevel={directLevel}
+          effectiveRoleLevel={m.effective?.roleLevel ?? m.role.level}
+          effectiveOrigin={origin}
+        />
 
         <div className="ms-auto flex items-center gap-2">
           {/* Role change dropdown — only for direct grants, not self */}
           {!isLocked && !isSelf && (
-            <RoleSelect
-              options={grantableRoles}
-              currentOption={
-                grantableRoles.some((r) => r.level === m.role.level)
-                  ? null
-                  : { level: m.role.level, name: m.role.name }
-              }
-              value={m.role.level}
-              onValueChange={(level) => {
-                void add(m.username, level)
-              }}
-              size="sm"
-              aria-label={t("org.membersPage.changeRoleAria")}
-            />
+            <InheritedRoleControl
+              origin={inheritedOnly ? origin : { kind: "direct" }}
+              hrefFor={(scope) => scopeHref(scope, m.inheritedFrom?.[0]?.id ?? null)}
+            >
+              <RoleSelect
+                options={grantableRoles}
+                currentOption={
+                  grantableRoles.some((r) => r.level === roleSelectLevel)
+                    ? null
+                    : { level: roleSelectLevel, name: m.role.name }
+                }
+                value={roleSelectLevel}
+                onValueChange={(level) => {
+                  void add(m.username, level)
+                }}
+                size="sm"
+                aria-label={t("org.membersPage.changeRoleAria")}
+              />
+            </InheritedRoleControl>
           )}
 
           {/* Remove button for direct grants */}
-          {!isLocked && !isSelf && m.role.source === "override" ? (
+          {!isLocked && !isSelf && directLevel != null ? (
             <AppTooltip content={t("org.membersPage.removeDirectAccessTooltip", { username: m.username })}>
               <Button
                 variant="ghost"
@@ -305,6 +322,12 @@ export function MembersTab({
             {orgAccessMembers.length > 0
               ? t("editor.navTitle.projectMembers")
               : t("org.membersPage.currentMembersHeading")}
+            {members.length > 0 && (
+              <span className="ms-2 font-normal text-muted-foreground" data-testid="members-count">
+                {members.length}{" "}
+                {t("org.roster.countBreakdown", countBreakdown(members))}
+              </span>
+            )}
           </h2>
           <Button
             variant="ghost"
@@ -394,23 +417,17 @@ export function MembersTab({
         )}
       </div>
 
-      {/* Remove-direct-grant confirmation (FRO-368) */}
-      <ConfirmActionDialog
-        open={removeTarget !== null}
-        onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title={t("org.membersPage.removeMemberTitle")}
-        description={
+      {/* Remove-direct-grant confirmation (FRO-368; AQU-1352 §3.7 rule 4) */}
+      <RemoveDirectGrantDialog
+        member={removeTarget}
+        roleText={
           removeTarget
-            ? t("org.membersPage.removeMemberDescription", {
-                username: removeTarget.username,
-                role: roleDisplayText(removeTarget.role.name),
-              })
+            ? roleLabel(t, memberDirectLevel(removeTarget) ?? removeTarget.role.level)
             : ""
         }
-        confirmLabel={t("org.membersPage.remove")}
-        variant="destructive"
-        onConfirm={() => {
-          if (removeTarget) void remove(removeTarget.userId)
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={(target) => {
+          void remove(target.userId)
           setRemoveTarget(null)
         }}
       />
@@ -817,28 +834,6 @@ export function InviteLinkTab({
 // ──────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────
-
-// AQU-488: human-readable access-path labels. auth-worker's resolveProjectRole
-// (AD-12) returns one of these four `source` values per member — see
-// ProjectMemberRole in src/lib/frontier/members.ts. Labeling every row (not
-// just org-sourced ones) is what makes project-specific vs. org-wide
-// membership visually distinct, per the AQU-488 acceptance criteria.
-const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
-  override: "org.membersPage.sourceDirectInvite",
-  group: "org.membersPage.sourceViaTeam",
-  org: "org.membersPage.sourceViaOrg",
-  creator: "org.membersPage.sourceProjectCreator",
-}
-
-function SourceBadge({ source }: { source: string }) {
-  const t = useT()
-  const key = SOURCE_LABEL_KEYS[source]
-  return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-      {key ? t(key) : source}
-    </span>
-  )
-}
 
 function GrantPathRow({
   source, level, removable,

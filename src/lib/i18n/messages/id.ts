@@ -2452,7 +2452,6 @@ export const id: Catalog = {
   "org.teamDetail.deletingButton": "Menghapus…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "Definisi tingkat akses",
   "org.teamDetail.addMemberButton": "Tambah anggota",
-  "org.teamDetail.addMembersDialogTitle": "Tambahkan anggota ke '{name}'",
   "org.teamDetail.removeAriaLabel": "Keluarkan {name}",
   "org.teamDetail.allMembersAddedNotice": "Semua anggota organisasi sudah ada di tim ini.",
   "org.teamDetail.addErrorPrefix": "Tidak dapat menambahkan: {error}",

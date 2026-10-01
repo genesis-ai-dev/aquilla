@@ -2170,7 +2170,6 @@ export const zh_Hant: Catalog = {
   "org.teamDetail.deletingButton": "刪除中…",
   "org.teamDetail.accessLevelDefinitionsAriaLabel": "存取層級定義",
   "org.teamDetail.addMemberButton": "新增成員",
-  "org.teamDetail.addMembersDialogTitle": "將成員加入「{name}」",
   "org.teamDetail.removeAriaLabel": "移除 {name}",
   "org.teamDetail.allMembersAddedNotice": "所有組織成員都已在這個團隊中。",
   "org.teamDetail.addErrorPrefix": "無法新增：{error}",

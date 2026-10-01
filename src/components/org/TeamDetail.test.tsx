@@ -256,7 +256,7 @@ describe("TeamDetail admin management", () => {
 
   it("links admins to team settings", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     const settings = screen.getByRole("link", { name: /team settings/i })
     expect(settings).toHaveAttribute("href", "/orgs/1/teams/10/settings")
   })
@@ -270,8 +270,8 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     expect(title.nextElementSibling).toBeNull()
   })
 
@@ -284,14 +284,14 @@ describe("TeamDetail admin management", () => {
       projects: [],
     })
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
 
   it("keeps the avatar in flow and pads body content to the title on wide screens", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const title = screen.getByRole("heading", { name: "WA" })
+    await waitFor(() => expect(screen.getByRole("heading", { name: /WA$/ })).toBeInTheDocument())
+    const title = screen.getByRole("heading", { name: /WA$/ })
     const well = screen.getByTestId("team-detail-well")
     expect(well).toHaveClass("max-w-6xl")
     expect(well.className).toContain("@6xl/team-detail:max-w-[calc(72rem+2.75rem)]")
@@ -335,6 +335,45 @@ describe("TeamDetail non-admin gating", () => {
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     const remove = await screen.findByRole("menuitem", { name: /remove anna — maintainers only/i })
     expect(remove).toHaveAttribute("aria-disabled", "true")
+  })
+})
+
+// AQU-1352 §3.7 rules 1–2: a team row says where its role comes from. A NULL
+// team role inherits the org role, so a viewer who cannot edit is told where
+// to change it instead of seeing a bare "Inherit".
+describe("TeamDetail team-role origin (AQU-1352)", () => {
+  it("badges inheriting rows as inherited and team-role rows as direct", async () => {
+    getTeam.mockResolvedValue({
+      id: 10, name: "WA", projects: [],
+      members: [
+        { userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null },
+        { userId: 3, username: "Ben", roleLevel: 100, teamRoleLevel: 600 },
+      ],
+    })
+    const { container } = renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("Ben")).toBeInTheDocument())
+    const origins = Array.from(container.querySelectorAll("[data-origin]")).map((el) => el.getAttribute("data-origin"))
+    expect(origins).toEqual(expect.arrayContaining(["inherited", "direct"]))
+  })
+
+  it("tells a non-editor an inherited team role is set at the org", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.getByTestId("inherited-role-control")).toBeInTheDocument()
+    expect(screen.getAllByText(/CAS/).some((el) => /set at/i.test(el.textContent ?? ""))).toBe(true)
+  })
+
+  it("keeps the team-role select usable for an editor on an inheriting row", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.queryByTestId("inherited-role-control")).toBeNull()
+    expect(screen.getByTestId("team-role-anna")).toBeInTheDocument()
   })
 })
 

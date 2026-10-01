@@ -79,8 +79,9 @@ import {
 } from "../services/org-permissions"
 import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { projectElevationDenial } from "../services/elevation-gate"
 import { lookupUserByUsername } from "../services/user-lookup"
-import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
+import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
   applyInviteLaneScopes,
@@ -1504,6 +1505,8 @@ projects.post(
     if (callerRole.level < 500) {
       return c.json(roleRequiredBody("role >= project_lead required", ROLE.PROJECT_LEAD, callerRole), 403)
     }
+    const unelevated = await projectElevationDenial(c, callerRole)
+    if (unelevated) return unelevated
 
     const body = c.req.valid("json")
 
@@ -1575,6 +1578,8 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   if (callerRole.level < 600) {
     return c.json(roleRequiredBody("role >= maintainer required", ROLE.MAINTAINER, callerRole), 403)
   }
+  const unelevated = await projectElevationDenial(c, callerRole)
+  if (unelevated) return unelevated
 
   const existing = await c.env.AQUILLA_PG.prepare(
     "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
@@ -1770,6 +1775,8 @@ projects.post(
         403,
       )
     }
+    const unelevated = await projectElevationDenial(c, resolved)
+    if (unelevated) return unelevated
 
     // Cap the granted role at contributor — managerial roles aren't grantable
     // via tokenized URLs. Default to contributor when role is omitted.
@@ -1806,6 +1813,13 @@ projects.post(
       console.error("[invites] create failed:", err)
       return c.json({ error: "Failed to create invite" }, 500)
     }
+    await auditMembershipChange(c.env, user, {
+      action: "project.invite.create",
+      where: { scope: "project", projectId },
+      roleBefore: null,
+      roleAfter: grantedRole,
+      email: email ?? null,
+    })
 
     // Deliver the invite link by email (best-effort; no-op without the EMAIL binding).
     if (email) {
@@ -1860,6 +1874,8 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
   if (!role || role.level < INVITE_MIN_ROLE) {
     return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, role), 403)
   }
+  const unelevated = await projectElevationDenial(c, role)
+  if (unelevated) return unelevated
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, role_level, created_at, expires_at, email, scope_lanes
@@ -2119,7 +2135,16 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   if (!callerRole || callerRole.level < INVITE_MIN_ROLE) {
     return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, callerRole), 403)
   }
+  const unelevated = await projectElevationDenial(c, callerRole)
+  if (unelevated) return unelevated
 
+  const invite = isAdminActor(c.env, user)
+    ? await c.env.AQUILLA_PG.prepare(
+        "SELECT role_level, email FROM project_invites WHERE token = ? AND project_id = ? AND used_by IS NULL",
+      )
+        .bind(token, projectId)
+        .first<{ role_level: number; email: string | null }>()
+    : null
   const result = await c.env.AQUILLA_PG.prepare(
     `DELETE FROM project_invites
       WHERE token = ? AND project_id = ? AND used_by IS NULL`,
@@ -2129,6 +2154,15 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
 
   const changes = result.meta?.changes
   const removed = typeof changes === "number" ? changes > 0 : true
+  if (removed && invite) {
+    await auditMembershipChange(c.env, user, {
+      action: "project.invite.revoke",
+      where: { scope: "project", projectId },
+      roleBefore: Number(invite.role_level),
+      roleAfter: null,
+      email: invite.email,
+    })
+  }
   return c.json({ removed })
 })
 

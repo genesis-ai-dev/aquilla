@@ -23,6 +23,9 @@ import {
   planOpenKind,
   planAudioTotal,
   planUnitExpectsAudio,
+  planUnitExpectsText,
+  planHasText,
+  textFileIds,
   AUDIO_JUDGED_ON_RECORDED,
 } from "./plan-status"
 
@@ -218,8 +221,12 @@ describe("nearly complete (AQU-1278)", () => {
     expect(planUnitIsNearlyComplete(inDubbedFile, NOW, new Set<string>())).toBe(true)
   })
 
-  it("pins AUDIO_JUDGED_ON_RECORDED true — flip it for AQU-490 and THIS test fails first", () => {
-    expect(AUDIO_JUDGED_ON_RECORDED).toBe(true)
+  // AQU-490 shipped the client half, so the constant is false and the board
+  // measures audio on what has been VALIDATED. The tripwire stays, pointing
+  // the other way: flipping BACK would silently make every recorded take
+  // count as finished work again.
+  it("pins AUDIO_JUDGED_ON_RECORDED false — audio is judged on validation now", () => {
+    expect(AUDIO_JUDGED_ON_RECORDED).toBe(false)
   })
 
   it("judges audio on recorded, so a fully recorded book with no reviewed takes qualifies", () => {
@@ -264,7 +271,11 @@ describe("the audio gate is per FILE, not per project", () => {
   it("judges the text books on text alone, so all sixty-five can be nearly complete", () => {
     const audioFiles = audioFileIds(rows)
     for (const b of books) expect(planUnitStatus(b, NOW, audioFiles)).toBe("nearly_complete")
-    expect(planSummary(rows, NOW).nearlyComplete).toBe(66)
+    // 65, not 66: since AQU-490 the episode is judged on VALIDATED takes, and
+    // this fixture's episode has none, so it drops out of the bucket the text
+    // books remain in. That is the flip working — the sixty-five text books
+    // are still judged on text alone, which is what this test is about.
+    expect(planSummary(rows, NOW).nearlyComplete).toBe(65)
   })
 
   it("would sink every one of them if audio were read project-wide", () => {
@@ -295,7 +306,11 @@ describe("a dubbing project's audio is counted against its CUE SHEET", () => {
     const { audioTotalCount: _drop, ...noSheet } = episode(CUES)
     expect(planUnitShortfall(noSheet, true).toRecord).toBe(SUBTITLES - CUES)
     expect(planUnitStatus(noSheet, NOW, new Set(["f1"]))).toBe("in_progress")
-    expect(planUnitStatus(episode(CUES), NOW, new Set(["f1"]))).toBe("nearly_complete")
+    // AQU-490: the sheet fixes the DENOMINATOR, which is what this test is
+    // about, but the episode's takes are unvalidated — so it is in progress on
+    // that count rather than nearly complete. The bug being guarded here is
+    // still guarded: toRecord above is the number that used to be wrong.
+    expect(planUnitStatus(episode(CUES), NOW, new Set(["f1"]))).toBe("in_progress")
   })
 
   it("treats an empty cue sheet as audio EXPECTED, not as a text-only file", () => {
@@ -360,8 +375,11 @@ describe("planUnitShortfall", () => {
     for (const term of [s.toTranslate, s.toValidate, s.toRecord, s.toAudioValidate, s.worst]) {
       expect(term).toBeGreaterThanOrEqual(0)
     }
-    // And it is still judged on the ninety unvalidated cells it really has.
-    expect(s.worst).toBe(90)
+    // And it is still judged on what it really has outstanding. Since AQU-490
+    // that is the hundred unvalidated TAKES rather than the ninety unvalidated
+    // cells — the worse of the two mediums, which is the whole point of
+    // `worst`.
+    expect(s.worst).toBe(100)
     expect(planUnitStatus(overRecorded, NOW, new Set(["f1"]))).toBe("in_progress")
   })
 })
@@ -397,12 +415,19 @@ describe("planShortfallParts", () => {
     expect(s.toTranslate).toBe(6)
     expect(s.toValidate).toBe(4)
     expect(s.toRecord).toBe(200)
-    expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "record"])
+    // AQU-490: "validate" here is the AUDIO term — 100 takes recorded, none
+    // signed off — which outranks the 200 still to record only because the
+    // parts list names the worse medium's blocking step first.
+    expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "validate"])
   })
 
   it("names recording on its own when the text is finished and the takes are not", () => {
+    // AQU-490 adds the second audio term: 40 takes exist and none are signed
+    // off, so the row names both the 60 still to record and the 40 waiting on
+    // a listener. Before the flip the second was unreachable.
     expect(planShortfallParts(planUnitShortfall(counts(100, 100, 100, 40, 0), true))).toEqual([
       { kind: "record", count: 60 },
+      { kind: "audio_validate", count: 40 },
     ])
   })
 
@@ -625,7 +650,9 @@ describe("planSummary", () => {
       counts(1000, 1000, 1000, 1000, 0, { fileId: "6" }),
     ]
     const s = planSummary(rows, NOW)
-    expect(s).toEqual({ total: 6, done: 1, overdue: 1, inFlight: 2, nearlyComplete: 2 })
+    // AQU-490: the fully-recorded-but-unvalidated unit moved from
+    // nearlyComplete to inFlight, which is the flip doing its job.
+    expect(s).toEqual({ total: 6, done: 1, overdue: 1, inFlight: 3, nearlyComplete: 1 })
     expect(s.done + s.overdue + s.inFlight + s.nearlyComplete).toBe(s.total)
   })
 
@@ -821,15 +848,181 @@ describe("planOpenKind — where the link lands", () => {
   })
 
   it("has nothing to point at when nothing is left", () => {
-    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100), true))).toBeNull()
+    // AQU-490: "nothing left" now includes the takes being signed off, so the
+    // fixture has to validate them too. Without the last argument this unit
+    // has a hundred recorded takes nobody has listened to, and the link
+    // correctly points at them.
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 100), true))).toBeNull()
     // …and ignores audio entirely on a file that has none.
     expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 0), false))).toBeNull()
   })
 
-  it("never asks for sign-off while audio is judged on recording", () => {
-    // AQU-490 flips `AUDIO_JUDGED_ON_RECORDED`; until then the fourth queue is
-    // unreachable, and this is the test that will start failing when it is.
-    expect(AUDIO_JUDGED_ON_RECORDED).toBe(true)
-    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 40), true))).toBeNull()
+  it("asks for sign-off once the takes are recorded — the fourth queue, AQU-490", () => {
+    // This was the dormant one. Until the client could emit a vote, pointing a
+    // reader at "takes to validate" sent them somewhere with no button.
+    expect(AUDIO_JUDGED_ON_RECORDED).toBe(false)
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 40), true))).toBe("unsigned")
+  })
+})
+
+
+// ── AQU-955: audio-only projects get a real book/chapter rollup ──────────────
+//
+// An ETEN audio-only project has recordings and no target text at all. Before
+// this, every book was charged its whole cell count in text nobody would ever
+// write: `worst` never fell, no book ever reached Nearly complete, and the
+// row's words led with "N to translate" and never mentioned the takes. A PM
+// asking "which books have finished audio" got a board of 0%.
+describe("text expectation (AQU-955)", () => {
+  /** One book of an audio-only file: takes, no target text. */
+  const audioOnly = (over: Partial<PlanUnit> = {}) =>
+    counts(100, 0, 0, 100, 100, { fileId: "audio", ...over })
+
+  describe("planUnitExpectsText", () => {
+    it("expects text on a project that has no audio at all — including day one", () => {
+      // The trap this rule exists to avoid: an untouched TEXT project also has
+      // no filled cells, and reading that as "no text expected" would call it
+      // finished before anyone opened it.
+      expect(planUnitExpectsText(counts(100, 0, 0))).toBe(true)
+      expect(planUnitStatus(counts(100, 0, 0), NOW)).toBe("not_started")
+    })
+
+    it("stops expecting text once a unit is being recorded and has none", () => {
+      expect(planUnitExpectsText(audioOnly())).toBe(false)
+    })
+
+    it("expects text again the moment one target cell is written", () => {
+      expect(planUnitExpectsText(counts(100, 1, 0, 100, 100))).toBe(true)
+    })
+
+    it("treats a cue sheet as an audio expectation, like planUnitExpectsAudio does", () => {
+      expect(planUnitExpectsText(counts(100, 0, 0, 0, 0, { audioTotalCount: 90 }))).toBe(false)
+    })
+  })
+
+  describe("textFileIds", () => {
+    it("judges per FILE, so an unrecorded book of an audio-only file is audio-only too", () => {
+      // Per unit, MRK answers "expects text" — it has neither text nor takes —
+      // and would go on reading 0% beside its finished siblings.
+      const mat = audioOnly({ sectionKey: "MAT" })
+      const mrk = counts(100, 0, 0, 0, 0, { fileId: "audio", sectionKey: "MRK" })
+      expect(planUnitExpectsText(mrk)).toBe(true)
+      expect(textFileIds([mat, mrk]).has("audio")).toBe(false)
+    })
+
+    it("keeps a file in the set as soon as any of its units carries text", () => {
+      const mat = audioOnly({ sectionKey: "MAT" })
+      const mrk = counts(100, 40, 0, 100, 100, { fileId: "audio", sectionKey: "MRK" })
+      expect(textFileIds([mat, mrk]).has("audio")).toBe(true)
+    })
+
+    it("keeps every file of a text-only project, recorded or not", () => {
+      const text = counts(100, 0, 0, 0, 0, { fileId: "text" })
+      expect(textFileIds([text]).has("text")).toBe(true)
+    })
+
+    it("holds a mixed project apart: the dubbed file is audio-only, the text one is not", () => {
+      const dubbed = audioOnly({ fileId: "dub" })
+      const book = counts(100, 50, 20, 0, 0, { fileId: "text" })
+      const ids = textFileIds([dubbed, book])
+      expect(ids.has("dub")).toBe(false)
+      expect(ids.has("text")).toBe(true)
+    })
+  })
+
+  describe("planUnitShortfall", () => {
+    it("charges no text shortfall to an audio-only unit", () => {
+      const s = planUnitShortfall(audioOnly(), true, false)
+      expect(s.toTranslate).toBe(0)
+      expect(s.toValidate).toBe(0)
+      expect(s.worst).toBe(0)
+    })
+
+    it("still measures the takes, so a half-recorded book is half short", () => {
+      const s = planUnitShortfall(counts(100, 0, 0, 40, 40, { fileId: "audio" }), true, false)
+      expect(s.toRecord).toBe(60)
+      expect(s.worst).toBe(60)
+    })
+
+    it("leads the words with the takes instead of a translation queue that does not exist", () => {
+      const s = planUnitShortfall(counts(100, 0, 0, 40, 40, { fileId: "audio" }), true, false)
+      expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["record"])
+      expect(planOpenKind(s)).toBe("unrecorded")
+    })
+
+    it("defaults to measuring text, so every pre-AQU-955 caller is unchanged", () => {
+      expect(planUnitShortfall(counts(100, 0, 0), false))
+        .toEqual(planUnitShortfall(counts(100, 0, 0), false, true))
+      expect(planUnitShortfall(counts(100, 0, 0), false).worst).toBe(100)
+    })
+  })
+
+  describe("planUnitStatus", () => {
+    it("calls a fully recorded, fully signed-off audio-only book nearly complete", () => {
+      const units = [audioOnly({ sectionKey: "MAT" })]
+      const status = planUnitStatus(units[0], NOW, audioFileIds(units), textFileIds(units))
+      expect(status).toBe("nearly_complete")
+    })
+
+    it("left to the old rule the same book reads as barely started", () => {
+      // The regression this guards. Same unit, text still measured.
+      expect(planUnitStatus(audioOnly(), NOW, audioFileIds([audioOnly()]), new Set(["audio"])))
+        .toBe("in_progress")
+    })
+
+    it("keeps a half-recorded book in progress rather than flattering it", () => {
+      const units = [counts(100, 0, 0, 40, 40, { fileId: "audio" })]
+      expect(planUnitStatus(units[0], NOW, audioFileIds(units), textFileIds(units)))
+        .toBe("in_progress")
+    })
+
+    it("does not touch a text project's rows", () => {
+      const units = [shortBy(100, 3), shortBy(100, 60)]
+      expect(planUnitStatus(units[0], NOW, audioFileIds(units), textFileIds(units)))
+        .toBe("nearly_complete")
+      expect(planUnitStatus(units[1], NOW, audioFileIds(units), textFileIds(units)))
+        .toBe("in_progress")
+    })
+  })
+
+  describe("groupPlanUnits and planSummary", () => {
+    it("answers 'which books have finished audio' on an audio-only project", () => {
+      const done = audioOnly({ sectionKey: "MAT" })
+      const half = counts(100, 0, 0, 40, 40, { fileId: "audio", sectionKey: "MRK" })
+      const groups = groupPlanUnits([done, half], NOW)
+      const byStatus = new Map(groups.map((g) => [g.status, g.units.map((u) => u.sectionKey)]))
+      expect(byStatus.get("nearly_complete")).toEqual(["MAT"])
+      expect(byStatus.get("in_progress")).toEqual(["MRK"])
+    })
+
+    it("counts the finished book in the strip above the board", () => {
+      const done = audioOnly({ sectionKey: "MAT" })
+      const half = counts(100, 0, 0, 40, 40, { fileId: "audio", sectionKey: "MRK" })
+      expect(planSummary([done, half], NOW).nearlyComplete).toBe(1)
+    })
+  })
+
+  describe("planHasText", () => {
+    it("is false only when every file is audio-only", () => {
+      expect(planHasText([audioOnly()])).toBe(false)
+      expect(planHasText([audioOnly(), counts(100, 1, 0, 0, 0, { fileId: "text" })])).toBe(true)
+      expect(planHasText([counts(100, 0, 0)])).toBe(true)
+    })
+
+    it("stays true on a project that merely has no audio — the common case", () => {
+      expect(planHasText([shortBy(100, 3)])).toBe(true)
+      expect(planHasAudio([shortBy(100, 3)])).toBe(false)
+    })
+  })
+
+  describe("sortNearlyComplete", () => {
+    it("orders audio-only books by how many takes are left, closest first", () => {
+      const units = [
+        counts(100, 0, 0, 80, 80, { fileId: "audio", sectionKey: "MRK" }),
+        counts(100, 0, 0, 98, 98, { fileId: "audio", sectionKey: "MAT" }),
+      ]
+      const sorted = sortNearlyComplete(units, audioFileIds(units), textFileIds(units))
+      expect(sorted.map((u) => u.sectionKey)).toEqual(["MAT", "MRK"])
+    })
   })
 })

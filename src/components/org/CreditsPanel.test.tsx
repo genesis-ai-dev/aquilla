@@ -70,7 +70,9 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
 
     await waitFor(() => expect(screen.getByTestId("credits-panel")).toBeInTheDocument())
 
-    expect(screen.getByText("Compute credits")).toBeInTheDocument()
+    // AQU-688: the pooled currency is "AI credits" (chat + TTS + agent), not
+    // "compute credits" — the old name described the bill, not the budget.
+    expect(screen.getByText("AI credits")).toBeInTheDocument()
     expect(screen.getByTestId("credits-panel")).toHaveTextContent("Visibility control")
     // "Today"/"This week" label both the overall window and the agent sub-cap row.
     expect(screen.getAllByText("Today").length).toBeGreaterThanOrEqual(1)

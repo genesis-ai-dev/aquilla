@@ -303,8 +303,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'registered in the project\'s settings.targetLanes, e.g. "es", "pt" — see ' +
       'get_capabilities.multiLanguage). Pass lane to filter target cells to one lane ' +
       '(source cells are always included); omit it to get every lane — each target row ' +
-      'carries its targetLang. Returns { data, nextCursor, ... }. Use this together with ' +
-      'search_project to gather context before staging translations.',
+      'carries its targetLang. Every cell row carries `hidden` (AQU-1426): `true` means a ' +
+      'Project Lead PARKED that cell — it is out of the editor and out of every export, it ' +
+      'is not work, and you should not draft or report it. Bring one back with the ShowCell ' +
+      'command, or park one with HideCell. Returns { data, nextCursor, ... }. Use this ' +
+      'together with search_project to gather context before staging translations.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -528,6 +531,54 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'list_terms',
+    description:
+      'Read the project TERMBASE — the glossary concepts the copilot is told to honour and ' +
+      'the QA pass checks against. One entry per concept: conceptId, sourceTerm, renderings ' +
+      '(each preferred|admitted|forbidden), status (active = enforced now, draft = suggested ' +
+      'and awaiting review, deprecated = retired), notes, caseSensitive, matchOptions, and ' +
+      'created/updated timestamps. Same rows, same order (oldest first) as the in-app ' +
+      'Terminology page. Args: projectId; optional status to filter, includeDeleted to see ' +
+      'tombstoned entries (audit only), limit/cursor to page.\n\n' +
+      'READ THIS BEFORE STAGING A TERM. Two things it tells you that you cannot guess:\n' +
+      '1. Whether the concept already exists — staging a second concept for the same ' +
+      'sourceTerm does not merge, it gives the project two competing entries. To change an ' +
+      'existing one, send term.update with its conceptId.\n' +
+      '2. `matchOptions` — how the term MATCHES, which decides whether it fires at all. ' +
+      '`forms` are extra literal source forms treated as alternates of sourceTerm; ' +
+      '`excludedForms` are surfaces a human rejected; `affixes` allows the project\'s ' +
+      'configured prefixes/suffixes; `foldMarks` ignores combining marks. Matching is ' +
+      'otherwise EXACT, so in an inflected language a concept with no forms matches only the ' +
+      'lemma: "Боже Слово" with empty matchOptions flags none of its inflected forms. An ' +
+      'entry reporting `matchOptions: {}` is configured for exactly one surface form — if ' +
+      'read_term_consistency shows drift on it, missing `forms` is the first thing to check, ' +
+      'and the fix is a term.update carrying match.forms, not a new concept.\n\n' +
+      'Write terms with an EmitEvents changeset (REST POST .../projects/:projectId/changesets) ' +
+      'carrying term.create / term.update / term.approve / term.reject / term.delete — ' +
+      'describe_command({ kind: "EmitEvents" }) has the payloads. Every write goes through ' +
+      'the normal approval gate. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['active', 'draft', 'deprecated'],
+          description: 'Only entries with this status; omit for all live entries.',
+        },
+        includeDeleted: {
+          type: 'boolean',
+          description: 'Include tombstoned entries (they carry deletedAt). Audit views only.',
+        },
+        limit: { type: 'number', description: 'Page size (default 50).' },
+        cursor: { type: 'string', description: "Opaque cursor from a previous page's nextCursor." },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
@@ -609,7 +660,17 @@ export const MCP_TOOLS: McpToolDef[] = [
       'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
       'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
       'export slots (IDML/OOXML locators) because a structural change would break its ' +
-      'round-trip export. Call describe_command for the full rules.',
+      'round-trip export. Call describe_command for the full rules.\n' +
+      '  { kind: "HideCell", fileId, cellId } / { kind: "ShowCell", fileId, cellId } — PARK a ' +
+      'cell, reversibly, or bring it back. Hiding takes the row out of the editor for ' +
+      'everyone, in every language lane, and out of every export, but DELETES NOTHING: the ' +
+      'source text, every lane\'s translation, recordings, comments and validations survive ' +
+      'and return untouched on ShowCell. Prefer this over DeleteCell for a stray heading, an ' +
+      'import artefact, or a paragraph the client does not want translated — DeleteCell is ' +
+      'the destructive one. Both require PROJECT_LEAD. Several may share one changeset, but ' +
+      'they cannot mix with other kinds and hides cannot mix with shows (stage two plans). ' +
+      'Refused at prepare when the cell does not exist or is already in the state you asked ' +
+      'for. Cell reads carry `hidden` so you can see what is already parked and skip it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -644,7 +705,8 @@ export const MCP_TOOLS: McpToolDef[] = [
           type: 'array',
           description:
             'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
-            'InsertCell / DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this ' +
+            'InsertCell / DeleteCell / SplitCell / HideCell / ShowCell commands to stage ' +
+            '(Agent API v1.1) — see this ' +
             'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
             'PlanImport is not accepted here (REST-only).',
           items: {
@@ -807,6 +869,23 @@ export const MCP_TOOLS: McpToolDef[] = [
                   newCellId: { type: 'string', description: 'Optional client-chosen id for the second half.' },
                 },
                 required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['HideCell', 'ShowCell'],
+                    description:
+                      'HideCell parks the cell (out of the editor in every lane, out of every ' +
+                      'export) without deleting anything; ShowCell brings it back with its ' +
+                      'text, translations, recordings, comments and validations intact.',
+                  },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
                 additionalProperties: false,
               },
             ],

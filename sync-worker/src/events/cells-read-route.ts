@@ -12,11 +12,14 @@
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
-//                         filtered to `target_lang = <tag>`; source rows are
-//                         ALWAYS included regardless. Applies to the full
-//                         read, the delta (`?since=`) read, and the cellIds
-//                         fast path alike. Absent = all lanes (unchanged).
-//                         Max 64 chars; longer values are rejected with 400.
+//                         dual-read to the lane whose legacy_tag is <tag>
+//                         (prefer lane_id once backfill has populated it;
+//                         fall back to target_lang while lane_id is NULL);
+//                         source rows are ALWAYS included regardless. Applies
+//                         to the full read, the delta (`?since=`) read, and
+//                         the cellIds fast path alike. Absent = all lanes
+//                         (unchanged). Max 64 chars; longer values are
+//                         rejected with 400.
 //   since=<serverSeq>   — delta read (audit M2-1). Returns only the cells
 //                         touched by events with `server_seq > since`,
 //                         unpaginated, as `{ delta: true, changedCellIds,
@@ -70,10 +73,14 @@
 import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
+import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
+import { grantedLaneIds, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" enforces lane grants on this read. Unset = every lane (today). */
+  LANE_READ_WALL?: string
 }
 
 interface CellRowRaw {
@@ -104,6 +111,12 @@ interface CellRowRaw {
   /** JSONB — the driver hands back a parsed object, but a text executor may
    *  surface it as a string (parsed defensively in mapRow). */
   metadata: Record<string, unknown> | string | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
+  lane_id: string | null
+  /** AQU-1422: epoch-ms the cell was parked, NULL when visible. Only ever set
+   *  on the shared source row — see the column comment in db/postgres/schema.sql.
+   *  Absent on a pre-0112 database or a hand-built fixture. */
+  hidden_at?: number | null
 }
 
 interface CellRowOut {
@@ -132,6 +145,15 @@ interface CellRowOut {
   transcription: string | null
   cameraState: string | null
   metadata: Record<string, unknown> | null
+  /** AQU-1240: opaque lanes.id. Null while backfill is in flight. */
+  laneId?: string | null
+  /**
+   * AQU-1422: true while this cell is parked. OMITTED (not `false`) on a visible
+   * row — a 30k-cell Bible file would otherwise pay ~15 bytes per row for a field
+   * that is false on effectively all of them. Only ever emitted on the SOURCE
+   * row; consumers resolve a cell's visibility from there.
+   */
+  hidden?: boolean
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -191,6 +213,10 @@ function mapRow(row: CellRowRaw): CellRowOut {
     transcription: row.transcription,
     cameraState: row.camera_state,
     metadata: parseMetadata(row.metadata),
+    laneId: row.lane_id ?? null,
+    // Absent, not `false`, on a visible row — keeps this shape identical to
+    // cell-row-serialize.ts's (guarded by the by-ids byte-identity test).
+    ...(row.hidden_at != null ? { hidden: true as const } : {}),
   }
 }
 
@@ -585,8 +611,8 @@ async function fetchWatermarks(
  *  though MAX(server_seq) did not move; epoch likewise so they MISS after the
  *  project was wiped and re-created under the same ids (AQU-943), where
  *  MAX(server_seq) can even move BACKWARDS. */
-function makeEtag(fileId: string, w: Watermarks): string {
-  return `"${fileId}:${w.epoch}:${w.rebuiltSeq}:${w.maxSeq}"`
+function makeEtag(fileId: string, w: Watermarks, visibility = ""): string {
+  return `"${fileId}:${w.epoch}:${w.rebuiltSeq}:${w.maxSeq}${visibility}"`
 }
 
 /** The watermark advertised to clients as `maxServerSeq` (their next `?since=`
@@ -675,6 +701,12 @@ export async function handleCellsReadRequest(
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
   const laneFilter = qLane && qLane.length > 0 ? qLane : null
+  // AQU-730: when the wall is on, "no lane param" is no longer "every target
+  // lane". Below Maintainer the response is cut to granted lanes. The token
+  // is already verified above; 600+ and platform stay unrestricted (token "").
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  const laneIds = await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes)
+  const visibility = laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -708,7 +740,7 @@ export async function handleCellsReadRequest(
     "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
     "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state, metadata"
+    "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell
@@ -739,7 +771,7 @@ export async function handleCellsReadRequest(
     const watermarks = await fetchWatermarks(env.AQUILLA_PG, projectId, fileId)
     maxServerSeq = advertisedSeq(watermarks)
     projectEpoch = watermarks.epoch
-    etag = makeEtag(fileId, watermarks)
+    etag = makeEtag(fileId, watermarks, visibility)
     if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
       return new Response(null, { status: 304, headers: cacheHeaders(etag) })
     }
@@ -823,8 +855,17 @@ export async function handleCellsReadRequest(
           deltaBinds.push(sideFilter)
         }
         if (laneFilter !== null) {
-          deltaParts.push("AND (side = 'source' OR target_lang = ?)")
-          deltaBinds.push(laneFilter)
+          deltaParts.push(sourceOrTargetLaneSql())
+          deltaBinds.push(...targetLaneDualReadBinds(projectId, laneFilter))
+        }
+        const deltaWall = targetVisibilityClause({
+          laneIds,
+          sideExpr: "side",
+          laneIdExpr: "lane_id",
+        })
+        if (deltaWall) {
+          deltaParts.push(deltaWall.sql)
+          deltaBinds.push(...deltaWall.binds)
         }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
@@ -902,8 +943,17 @@ export async function handleCellsReadRequest(
     binds.push(...cellIdsFilter)
   }
   if (laneFilter !== null) {
-    parts.push("AND (side = 'source' OR target_lang = ?)")
-    binds.push(laneFilter)
+    parts.push(sourceOrTargetLaneSql())
+    binds.push(...targetLaneDualReadBinds(projectId, laneFilter))
+  }
+  const wall = targetVisibilityClause({
+    laneIds,
+    sideExpr: "side",
+    laneIdExpr: "lane_id",
+  })
+  if (wall) {
+    parts.push(wall.sql)
+    binds.push(...wall.binds)
   }
   const sql = parts.join(" ")
 

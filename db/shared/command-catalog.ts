@@ -345,13 +345,14 @@ Allowed kinds:
 - Staleness (400+): \`target.cell.repin\` \`{}\` — needs fileId + cellId.
 - File lifecycle (500+): \`file.rename\` \`{ name }\` · \`file.delete\` \`{}\` · \`file.restore\` \`{}\` — need fileId.
 - Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters', scope: [{ fileId, chapter? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
-- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId.
+- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, match?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive?, match? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId. \`match\` is \`{ forms?: string[], excludedForms?: string[], affixes?: boolean, foldMarks?: boolean }\` — see the terminology gotcha below.
 
 Not here: target text (use SetTranslation), source edits, cell structure (split/merge/insert/delete), audio (use LinkMedia), imports (use PlanImport), reorders/retimes, membership, and project lifecycle. Rules and Living Memory are not event-sourced at all — rules go through PatchSettings, memory through the agent-memory API — so they cannot be emitted here.
 Gotchas:
 - Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
 - Every referenced cell/comment/file/assignment/concept must exist at prepare — one bad reference rejects the whole plan (no silent skips).
 - Terminology: \`status: 'active'\` on create, and every update/delete/approve/reject, are BINDING writes gated by the org's termbase floor; \`status: 'draft'\` is a suggestion any contributor may stage. \`term.create\` naming an existing concept is rejected (use \`term.update\`) — omit \`conceptId\` and the server mints one. Status is not patchable via \`term.update\`; approve/reject are their own kinds so the audit trail keeps them apart.
+- Terminology matching is EXACT unless \`match\` says otherwise, and that is usually the difference between a term that works and one that silently never fires: \`forms\` are extra literal source surfaces treated as alternates of \`sourceTerm\`, \`excludedForms\` are surfaces a human rejected, \`affixes\` allows the project's configured prefixes/suffixes, \`foldMarks\` ignores combining marks. In an inflected language a concept with no \`forms\` matches the lemma ONLY (\`Боже Слово\` flags none of its inflected forms), so list the forms you need. \`match\` is replaced wholesale when present and left untouched when absent — send the full option set, and \`{}\` to clear it. An unrecognized key inside \`match\` is REJECTED, not ignored, so a \`forms\`/\`form\` typo fails loudly instead of quietly clearing your options. Read the existing termbase first with \`list_terms\`; \`forms\`/\`excludedForms\` hold at most 100 entries each.
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.
 
 Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — these are policy, not preferences, and no parameter turns any of them off:
@@ -549,6 +550,41 @@ Gotchas:
 - Refused while the cell still owns validators, waivers, comments, back-translations, audio takes, cell links or assignment rows: the delete projection removes ONE row and cleans up nothing else, so those would be orphaned. Clear them first — the error names what is holding it.
 - Refused on a file imported with preserved export slots (IDML/OOXML locators): removing one slice of a note block makes the export refuse to assemble it.
 - A lane that gains a translation between prepare and commit makes the plan stale rather than silently leaving an orphan.`,
+  },
+  {
+    kind: 'HideCell',
+    title: 'Hide cell',
+    oneLiner: 'Park a cell — out of translation and exports, reversibly.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### HideCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with ShowCell (stage the hides and the shows as two plans).
+Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter, at the same PROJECT_LEAD floor the editor's own **Hide cell** menu item uses.
+**This is the REVERSIBLE one.** Hiding takes the row out of the editor for everyone, in every language lane, and out of every export — but deletes NOTHING. The source text, every lane's translation, recordings, comments and validations survive and come back untouched on ShowCell. Reach for this, not DeleteCell, for a stray heading, a marker that bled through an import, or a paragraph the client does not want translated.
+Gotchas:
+- Sugar over EmitEvents: the staged plan you read back holds the equivalent \`source.cell.visibility.set\` events, not a \`HideCell\` entry. Behavior is identical either way. The raw EmitEvents door does NOT accept the kind — these named commands are the way in.
+- Refused at prepare when the cell does not exist, or is ALREADY hidden (a no-op plan is not worth a human's approval). Naming one cell twice in a plan is refused for the same reason.
+- Hiding is per CELL, not per lane: one command hides the row in every target language. There is no per-lane hide.
+- A translation a collaborator saves while the cell is hidden still applies and is there when you show it again — hiding is not a lock.
+- Cell reads carry \`hidden\` so you can tell what is already parked and skip it; a hidden cell is not work.
+Example: \`{ "kind": "HideCell", "fileId": "f1", "cellId": "c7" }\``,
+  },
+  {
+    kind: 'ShowCell',
+    title: 'Show cell',
+    oneLiner: 'Bring a hidden cell back with everything it had.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ShowCell
+Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with HideCell.
+Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the PROJECT_LEAD floor. The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
+Gotchas:
+- Sugar over EmitEvents, same as HideCell; the staged plan holds \`source.cell.visibility.set\` events.
+- Refused at prepare when the cell does not exist or is NOT currently hidden.
+- Find what to show: list the file's cells and look for \`hidden: true\` (the flag rides the SOURCE row — a target row never carries it).
+Example: \`{ "kind": "ShowCell", "fileId": "f1", "cellId": "c7" }\``,
   },
   {
     kind: 'SplitCell',

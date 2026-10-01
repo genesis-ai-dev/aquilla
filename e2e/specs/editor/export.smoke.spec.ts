@@ -43,8 +43,8 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
  *    Playwright intercepts as a download event, named after the source file.
  *  - A DOCX source artifact is persisted atomically and can be downloaded in
  *    its original structure without a missing-source error.
- *  - Download original (AQU-656) returns the imported USFM bytes; Export source
- *    injects the committed translation into the same file.
+ *  - Download original (AQU-656) returns the imported USFM bytes; the dialog's
+ *    own download injects the committed translation into the same file.
  *
  * What this does NOT cover:
  *  - USFM/PPTX reconstructed round-trips other than the original-vs-injected
@@ -106,8 +106,10 @@ test("DOCX import records its source and downloads the original structure", asyn
   await ws.waitForEditor()
   await ws.openExportDialog()
 
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog.getByRole("heading", { name: "Export" })).toBeVisible()
+  // By exact name: AQU-1352's "Created DOCX export … in Personal" toast is also
+  // role="dialog" with a heading that contains "Export".
+  const dialog = alice.getByRole("dialog", { name: "Export", exact: true })
+  await expect(dialog.getByRole("heading", { name: "Export", exact: true })).toBeVisible()
   await expect(dialog.locator('input[type="radio"][value="docx"]')).toBeChecked()
   await expect(dialog.getByText(/no source blob recorded/i)).toHaveCount(0)
 
@@ -153,12 +155,20 @@ test("Download original returns imported USFM bytes, not the translation-injecte
   expect(originalText).toContain("In the beginning God created the heavens and the earth.")
   expect(originalText).not.toContain(marker)
 
-  const [sourceDownload] = await Promise.all([
+  // The Export dialog's primary action is the translation round-trip: the
+  // committed translation injected into the same file. The dialog names a USFM
+  // export `<stem>.SFM` whatever extension the upload had (AQU-437), so this is
+  // NOT the `sample.usfm` that Download original hands back above.
+  await ws.openExportDialog()
+  const dialog = alice.getByRole("dialog")
+  const primary = dialog.getByRole("button", { name: /^Download sample\.SFM$/ })
+  await expect(primary).toBeVisible()
+  const [injectedDownload] = await Promise.all([
     alice.waitForEvent("download", { timeout: 15_000 }),
-    ws.clickExportSource(),
+    primary.click(),
   ])
-  const sourcePath = await sourceDownload.path()
-  expect(sourcePath).not.toBeNull()
-  const injected = await readFile(sourcePath!, "utf8")
-  expect(injected).toContain(marker)
+  expect(injectedDownload.suggestedFilename()).toBe("sample.SFM")
+  const injectedPath = await injectedDownload.path()
+  expect(injectedPath).not.toBeNull()
+  expect(await readFile(injectedPath!, "utf8")).toContain(marker)
 })

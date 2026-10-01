@@ -7,6 +7,17 @@ import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
 } from "@/lib/store/milestone-split-pref"
+import {
+  getUnresolvedCommentHighlight,
+  resetUnresolvedCommentHighlightCacheForTests,
+  setUnresolvedCommentHighlight,
+} from "@/lib/store/unresolved-comment-highlight-pref"
+import {
+  __resetLowMemoryForTests,
+  getLowMemoryMode,
+  isLowMemoryActive,
+  setLowMemoryMode,
+} from "@/lib/perf/low-memory"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -53,6 +64,10 @@ beforeEach(() => {
   localStorage.clear()
   resetMilestoneSplitCacheForTests()
   setMilestoneSplit(false)
+  resetUnresolvedCommentHighlightCacheForTests()
+  setUnresolvedCommentHighlight(false)
+  setLowMemoryMode("auto")
+  __resetLowMemoryForTests()
 })
 
 afterEach(() => {
@@ -101,6 +116,49 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(within(targetTermOptions).getByRole("radio", { name: "Focused cell only" }))
 
     expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
+  })
+
+  it("switches low-memory mode from the device setting and keeps the popover open (AQU-1191)", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    expect(within(modeTabs).getByRole("tab", { name: "Auto" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    fireEvent.click(within(modeTabs).getByRole("tab", { name: "On" }))
+
+    expect(getLowMemoryMode()).toBe("on")
+    expect(isLowMemoryActive()).toBe(true)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1191: the control is not gated on `fileOpen` the way the file-scoped
+  // rows above it are — it is a device setting, so it stays live when the rest
+  // of the popover greys out. NOTE this is a property of THIS component only:
+  // `ProjectWorkspace` mounts the whole file toolbar (and so this menu) only
+  // when a file is active, so in the running app the mode is not yet reachable
+  // with no file open. The QA bot walk on PR #897 caught that gap; making the
+  // menu reachable without a file is a separate change to a shared surface.
+  it("leaves low-memory mode enabled when fileOpen is false, unlike the file-scoped rows", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const modeTabs = screen.getByRole("tablist", { name: "Low-memory mode" })
+    // These primitives mark disabled state with `aria-disabled`, not the
+    // `disabled` attribute, so assert the attribute the user's AT actually sees.
+    const off = within(modeTabs).getByRole("tab", { name: "Off" })
+    expect(off).not.toHaveAttribute("aria-disabled", "true")
+    // A file-scoped control in the same popover IS disabled at this point.
+    expect(screen.getByRole("switch", { name: "Show line numbers" }))
+      .toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.click(off)
+
+    expect(getLowMemoryMode()).toBe("off")
+    expect(isLowMemoryActive()).toBe(false)
   })
 
   it("changes source direction via the tabs", () => {
@@ -275,5 +333,51 @@ describe("ViewSettingsMenu direction display", () => {
     })
     expect(handlers.onTargetDirectionModeChange).not.toHaveBeenCalled()
     expect(handlers.onSourceDirectionModeChange).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1259 (B): the reviewer's opt-in scanning view lives beside the other
+// editor view toggles and is a device preference, like the milestone split.
+describe("ViewSettingsMenu — highlight open comments", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Highlight open comments" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setUnresolvedCommentHighlight(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no rows to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Highlight open comments" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getUnresolvedCommentHighlight()).toBe(false)
   })
 })

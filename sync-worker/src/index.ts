@@ -9,6 +9,7 @@
 
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
+import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
@@ -72,6 +73,7 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
@@ -89,6 +91,7 @@ export { ProjectSync } from "./project-do"
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
@@ -119,6 +122,10 @@ declare global {
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
        *  routes speak the D1 `.prepare()/.batch()` API against the shim. */
       AQUILLA_PG?: AquillaDb
+      /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+       *  today's per-table queries), "shadow" (today's answer + access_grants
+       *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+      ACCESS_GRANTS_RESOLVER?: string
       /** Postgres (Neon) via Hyperdrive — the sole datastore. Required: when
        *  absent the worker fails fast (see `fetch`) rather than silently
        *  serving an empty local D1. */
@@ -137,6 +144,8 @@ declare global {
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
+      /** AQU-730. Unset locally and in e2e; dev and prod set it in wrangler. */
+      LANE_READ_WALL?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
       /** Exact Worker namespace selected by the deployment profile. */
@@ -291,6 +300,8 @@ const worker = {
       )
     }
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    // AQU-1352 P1: resolveProjectRoleShared reads the resolver mode off this handle.
+    setAccessGrantsMode(pgShim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
     // The runtime injects a full R2Bucket regardless of our narrower
     // LFS_SRC type above — wrap it once here so every downstream route only
     // ever holds a get/head/list handle, never put/delete.
@@ -331,6 +342,11 @@ const worker = {
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
+    // AQU-777: per-cell attachment bytes. Its own R2 prefix and its own
+    // allow-listed content types — see cell-attachments.ts for why this is a
+    // sibling of the audio route rather than a flag on it.
+    const attachmentResponse = await handleCellAttachmentRequest(request, env)
+    if (attachmentResponse) return attachmentResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
@@ -381,6 +397,8 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
+    if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)

@@ -58,7 +58,9 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioSelect, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
+import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -79,6 +81,12 @@ interface Props {
    * and the take is attached, injected, transcribed and listed under that.
    */
   targetSlot?: string
+  /**
+   * AQU-1462: the lane the member is recording in. A non-empty tag is stamped
+   * on the take's events so an archived lane can refuse them. Omitted for
+   * the default lane, which cannot be archived.
+   */
+  laneTag?: string
   /** The file's tracks, so the takes list can be grouped under a heading per
    *  track. Absent = one ungrouped list, exactly as it has always been. */
   timelineTracks?: readonly TimelineTrack[]
@@ -204,6 +212,7 @@ function GroupedTakes({
   username,
   session,
   onLastTakeRemoved,
+  laneTag,
 }: {
   groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
   project: ProjectRecord
@@ -213,6 +222,8 @@ function GroupedTakes({
   username: string
   session: FrontierSession | null
   onLastTakeRemoved?: (cellId: string) => void
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  laneTag?: string
 }) {
   const showHeadings = groups.length > 1
   return (
@@ -240,6 +251,7 @@ function GroupedTakes({
             <TakesStrip
               chromeless
               projectId={project.id}
+              project={project}
               fileId={cell.fileId}
               cellId={cell.id}
               takes={group.takes}
@@ -251,6 +263,7 @@ function GroupedTakes({
               sourceClip={isDefault ? sourceClip : null}
               author={username}
               session={session}
+              targetLang={laneTag}
             />
           </div>
         )
@@ -261,7 +274,7 @@ function GroupedTakes({
 
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, timelineTracks, username,
+  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   const t = useT()
@@ -609,6 +622,7 @@ export function AudioRecordingModal({
           label: take.label ?? undefined,
           trimStartMs: take.trimStartMs ?? undefined,
           trimEndMs: take.trimEndMs ?? undefined,
+          ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
         injectOptimisticAudioAttachment(
@@ -622,7 +636,7 @@ export function AudioRecordingModal({
         /* best-effort — the take simply keeps its fallback-width chip */
       }
     })()
-  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username])
+  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username, laneTag])
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -936,6 +950,7 @@ export function AudioRecordingModal({
         // The voice lands on the track the recorder is pointed at, not always
         // on the default row's generated-voice slot.
         slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       if (ok) {
         setTtsDone(true)
@@ -956,6 +971,7 @@ export function AudioRecordingModal({
           const displaceP = emitCellAudioSelect({
             projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
             audioId: sourceClip.audioId, slot: "recording", author: username,
+            ...(laneTag ? { targetLang: laneTag } : {}),
           })
           injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
           await displaceP
@@ -965,7 +981,7 @@ export function AudioRecordingModal({
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot])
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot, laneTag])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -1092,6 +1108,7 @@ export function AudioRecordingModal({
           durationMs: takeDurationMs,
           ...takeTrimWindow,
           label: takeLabel,
+          ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
       } catch (emitErr) {
@@ -1107,12 +1124,28 @@ export function AudioRecordingModal({
         })
         throw emitErr
       }
+      // AQU-490: a fresh recording validates itself, exactly as a direct human
+      // edit validates the cell (Sam's ruling — "the most directly understood
+      // by translators"). Decided HERE, on the recorder's own save path, and
+      // nowhere near emitCellAudioAttach: a denoise, the transcription's
+      // re-attach, a generated voice and an imported file all attach too, and
+      // none of them is a person saying "this is my take". At the default
+      // threshold of 1 this makes audio-validated track audio-recorded until a
+      // project raises the count or turns the audio self-validation switch
+      // off — the same trade text has always made.
+      const roleLevel = project.syncRole?.level ?? null
+      const autoValidate = shouldAutoValidateFreshRecording({
+        scopeCanValidate: audioValidationScope(project, { roleLevel, username }).canValidate,
+        allowSelfValidationAudio: project.allowSelfValidationAudio,
+        roleLevel,
+      })
+      const savedTakeId = `${result.audioId}.${result.ext}`
       // Optimistically surface the clip so the gutter mic flips to a play
       // button immediately. The bus poke below refetches the server projection,
       // but that races the outbox flush + projection and would otherwise leave
       // the icon stale until a manual reload.
       injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, {
-        audioId: `${result.audioId}.${result.ext}`,
+        audioId: savedTakeId,
         url: result.url,
         slot: targetSlot,
         mimeType: blob.type || null,
@@ -1125,8 +1158,28 @@ export function AudioRecordingModal({
         // trip) until the server projection lands and silently corrected it.
         trimStartMs: takeTrimWindow.trimStartMs ?? null,
         trimEndMs: takeTrimWindow.trimEndMs ?? null,
+        // The take's provenance, so the strip's control reads right before
+        // the projection comes back: a dub, recorded by me, and — when the
+        // rule says so — already carrying my vote.
+        role: "dub",
+        recordedBy: username,
+        validators: autoValidate ? [username] : [],
+        validatorCount: autoValidate ? 1 : 0,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
+      if (autoValidate) {
+        void emitCellAudioValidate({
+          projectId: project.id,
+          fileId: activeCell.fileId,
+          cellId: activeCell.id,
+          audioId: savedTakeId,
+          ...(laneTag ? { targetLang: laneTag } : {}),
+          author: username,
+        }).catch((err) => {
+          // Non-blocking, as for text: the take itself already landed.
+          console.warn("[audio auto-validate] emit failed:", err)
+        })
+      }
       // THE PRE-ROLL'S OTHER HALF. Kept head audio that isn't repositioned
       // just plays everything late — the original take-shift bug in a new
       // hat — so the take is anchored preRollMs BEFORE its line: the sample
@@ -1154,6 +1207,7 @@ export function AudioRecordingModal({
             fileId: activeCell.fileId,
             cellId: activeCell.id,
             targetOffsetMs: laneOffsetMs,
+            ...(laneTag ? { targetLang: laneTag } : {}),
             author: username,
           })
         } catch {
@@ -1207,7 +1261,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady])
+  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1243,6 +1297,7 @@ export function AudioRecordingModal({
         file,
         username,
         label,
+        ...(laneTag ? { targetLang: laneTag } : {}),
         // Sam, 2026-08-24: uploading is the other way audio gets onto an added
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
@@ -1270,7 +1325,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -1619,13 +1674,51 @@ export function AudioRecordingModal({
               showFilm && "flex-1",
             )}
           >
-          <div className="shrink-0 px-4 pt-3">
+          {/* THE ANCHORED SOURCE (AQU-1407) — the thing being translated, and
+              the one line in this panel a translator cannot afford to lose.
+              Josseline (Biblica ETT, Pattani Malay, 2026-09-24): "if we could
+              find a way to prevent the source from hiding".
+
+              Two things kept it from being readable, and both are fixed here:
+
+              STICKY, because this block used to be an ordinary first child of
+              the scrollable region below. On any viewport short enough to make
+              that region scroll — which is every laptop once the takes drawer
+              is open — reaching the record button scrolled the source off the
+              top, and it was gone for the countdown and the whole take. Pinned
+              to the top of its own scroller it survives every scroll position,
+              every phase, and every line change (the text is read straight off
+              `activeCell`, so navigating re-renders it in place).
+
+              SCROLLABLE, NOT CLAMPED, because it was `line-clamp-2`: a verse
+              longer than two lines was silently cut with no way to see the
+              rest. A capped, scrollable strip shows as much as the panel can
+              spare and keeps the remainder reachable — the ticket's "may
+              collapse to a scrollable strip, but it must never disappear".
+              The cap is deliberate: the performer's own line below owns a
+              measured five-line budget (`readAloudBudget`) that an unbounded
+              source would push out of the panel. */}
+          <div
+            data-testid="rec-source"
+            // `bg-popover`, not `bg-background`: the dialog surface is
+            // `bg-popover` (see `components/ui/dialog.tsx`), and a sticky strip
+            // in the wrong token is a visible seam in dark mode and lets the
+            // performer's line scroll THROUGH the source in light mode.
+            className="sticky top-0 z-10 shrink-0 bg-popover px-4 pt-3 pb-3"
+          >
             <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
               {t("editor.column.source")}
             </div>
-            <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
+            <p
+              data-testid="rec-source-text"
+              className="mt-0.5 max-h-20 overflow-y-auto text-xs leading-snug text-muted-foreground"
+              style={{ scrollbarGutter: "stable" }}
+            >
               {activeCell.original || <span className="text-muted-foreground/60 italic">{t("audio.recordingModal.emptySource")}</span>}
             </p>
+          </div>
+
+          <div className="shrink-0 px-4">
             {/* Who is speaking, and whether the camera is on them — the two
                 things a performer settles BEFORE the first word, so they sit
                 above the line rather than beside the meter.
@@ -1635,7 +1728,7 @@ export function AudioRecordingModal({
                 `readAloudBudget`; anything added inside it silently shrinks
                 the performer's type. Sharing the label's row costs the line
                 nothing at all. */}
-            <div className="mt-3 flex items-baseline gap-2">
+            <div className="flex items-baseline gap-2">
               <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
                 {t("audio.recordingModal.readAloudLabel")}
               </div>
@@ -2110,6 +2203,7 @@ export function AudioRecordingModal({
                   username={username}
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
+                  laneTag={laneTag}
                 />
               </div>
             )}
@@ -2279,6 +2373,7 @@ export function AudioRecordingModal({
                   username={username}
                   session={session ?? null}
                   onLastTakeRemoved={onLastTakeRemoved}
+                  laneTag={laneTag}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">

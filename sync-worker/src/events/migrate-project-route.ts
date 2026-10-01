@@ -11,6 +11,8 @@
 // deterministic id and (group_id, project_id).
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { ensureProjectLaneStmts } from '../../../db/shared/lanes'
+import { projectIdFor } from '../../../src/lib/migrate/ids'
 
 const PATH = '/migrate/project'
 
@@ -45,12 +47,55 @@ export async function handleMigrateProjectRequest(
   env: MigrateProjectEnv,
 ): Promise<Response | null> {
   if (new URL(request.url).pathname !== PATH) return null
-  if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+  if (request.method !== 'POST' && request.method !== 'GET') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
+
+  // Identity comes from the immutable GitLab project ID, never a mutable title.
+  // This preflight is deliberately read-only; POST remains compatible with the
+  // currently running migration daemon, including project lane initialization.
+  if (request.method === 'GET') {
+    const params = new URL(request.url).searchParams
+    const gitlabId = params.get('gitlabId') ?? ''
+    const projectId = params.get('projectId') ?? ''
+    const orgId = Number(params.get('orgId'))
+    const teamId = params.has('teamId') ? Number(params.get('teamId')) : null
+    const mustExist = params.get('mustExist')
+    if (!/^[1-9][0-9]*$/.test(gitlabId)
+      || projectId !== projectIdFor(gitlabId, 'gitlab')
+      || !Number.isSafeInteger(orgId) || orgId < 1
+      || (teamId !== null && (!Number.isSafeInteger(teamId) || teamId < 1))
+      || (mustExist !== 'true' && mustExist !== 'false')) {
+      return Response.json({ error: 'Invalid stable project identity or placement' }, { status: 400 })
+    }
+    const db = env.AQUILLA_PG
+    const project = await db.prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
+      .bind(projectId).first<{ id: string; name: string; org_id: number; archived_at: string | null }>()
+    if (project && (Number(project.org_id) !== orgId || project.archived_at !== null)) {
+      return Response.json({ error: 'Target project belongs to another org or is archived' }, { status: 409 })
+    }
+    if (!project && mustExist === 'true') {
+      return Response.json({ error: 'Previously migrated project is missing' }, { status: 409 })
+    }
+    const org = await db.prepare('SELECT id FROM organizations WHERE id = ?').bind(orgId).first()
+    if (!org) return Response.json({ error: 'Target organization missing' }, { status: 409 })
+    if (teamId !== null) {
+      const team = await db.prepare('SELECT org_id FROM groups WHERE id = ?')
+        .bind(teamId).first<{ org_id: number }>()
+      if (!team || Number(team.org_id) !== orgId) {
+        return Response.json({ error: 'Target team missing or belongs to another org' }, { status: 409 })
+      }
+      if (project) {
+        const grant = await db.prepare('SELECT group_id FROM group_project_grants WHERE project_id = ? AND group_id = ?')
+          .bind(projectId, teamId).first()
+        if (!grant) return Response.json({ error: 'Existing project lacks expected team grant; reconcile placement explicitly' }, { status: 409 })
+      }
+    }
+    return Response.json({ safetyVersion: 1, projectId, exists: !!project, name: project?.name ?? null })
+  }
 
   let body: unknown
   try {
@@ -83,6 +128,8 @@ export async function handleMigrateProjectRequest(
         .bind(body.teamId, body.projectId, body.roleLevel ?? 400, body.ownerUserId),
     )
   }
+
+  stmts.push(...ensureProjectLaneStmts(db, body.projectId))
 
   try {
     await db.batch(stmts)

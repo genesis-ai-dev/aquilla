@@ -23,6 +23,7 @@
 // `c.env.AQUILLA_PG` no-op gracefully if the binding is absent (test envs).
 
 import { Hono } from "hono"
+import { roleRequiredBody } from "../lib/role-denial"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
@@ -46,6 +47,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import {
+  getAssignmentsGivenBy,
   getFileChapters,
   getMyAssignments,
   getProjectAssignmentRoster,
@@ -63,6 +65,7 @@ import {
   DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
   encodeProjectDirectoryCursor,
   getCommentFloors,
+  attachGroupProject,
   getEffectiveOrgRole,
   getMemberProgressViewMinRole,
   DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
@@ -74,8 +77,10 @@ import {
   getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
+import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { auditMembershipChange, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
   applyInviteLaneScopes,
@@ -89,6 +94,8 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { createProjectShared } from "../../../db/shared/projects"
+import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
+import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -351,6 +358,8 @@ const createProjectSchema = z.object({
   id: z.string().min(1).max(256),
   name: z.string().min(1).max(256),
   orgId: z.number().int().optional(),
+  // AQU-1352 P2 (spec §3.5, D4): teams in orgId to create the project into.
+  teamIds: z.array(z.number().int()).max(50).optional(),
 })
 
 projects.post(
@@ -362,12 +371,37 @@ projects.post(
     const body = c.req.valid("json")
 
     let orgId: number | null = null
+    const teamIds = [...new Set(body.teamIds ?? [])]
+    if (teamIds.length > 0 && body.orgId == null) {
+      return c.json({ error: "teamIds requires orgId" }, 400)
+    }
     if (body.orgId != null) {
       // Creating into a specific org is an org-level function: require the
-      // caller's org role >= maintainer (see spec Risk 3).
+      // caller's org role >= maintainer (see spec Risk 3) OR, AQU-1352 D4,
+      // a team role >= project lead on EVERY selected team (at least one).
       const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
-      if (orgRole == null || orgRole < ROLE.MAINTAINER) {
-        return c.json({ error: "org role >= maintainer required to create a project here" }, 403)
+      const teamRoles = await loadTeamsInOrg(c.env, body.orgId, teamIds, user.id)
+      if (teamRoles.size !== teamIds.length) {
+        return c.json({ error: "every team must belong to this org" }, 400)
+      }
+      const leadsEveryTeam = teamRoles.size > 0 &&
+        [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
+      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsEveryTeam) {
+        // Name the org only for a member: a non-member must not learn it (spec §3.9 rule 4).
+        const org = orgRole == null
+          ? null
+          : await c.env.AQUILLA_PG.prepare("SELECT name FROM organizations WHERE id = ?")
+            .bind(body.orgId)
+            .first<{ name: string | null }>()
+        return c.json(
+          roleRequiredBody(
+            "org role >= maintainer, or team role >= project lead on every selected team, required to create a project here",
+            ROLE.MAINTAINER,
+            orgRole == null ? null : { level: orgRole, source: "org" },
+            org?.name ? [org.name] : undefined,
+          ),
+          403,
+        )
       }
       orgId = body.orgId
     } else {
@@ -393,6 +427,15 @@ projects.post(
     } catch (err) {
       console.error("project create failed:", err)
       return c.json({ error: "create failed" }, 500)
+    }
+
+    // AQU-1352 P2: attach the selected teams at the attach dialog's default.
+    // SWARM-TODO(AQU-1352): not transactional with the create; a failure here
+    // leaves the project without its team and the caller as creator only.
+    if (orgId != null) {
+      for (const teamId of teamIds) {
+        await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
+      }
     }
 
     return c.json({
@@ -789,7 +832,10 @@ projects.patch(
     const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
     if (!role) return c.json({ error: "not found or no access" }, 403)
     if (role.level < ROLE.MAINTAINER) {
-      return c.json({ error: "maintainer or higher required to rename a project" }, 403)
+      return c.json(
+        roleRequiredBody("maintainer or higher required to rename a project", ROLE.MAINTAINER, role),
+        403,
+      )
     }
 
     const { name } = c.req.valid("json")
@@ -812,7 +858,10 @@ projects.patch(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
-// POST /api/v2/projects/:projectId/archive — owner-only
+// POST /api/v2/projects/:projectId/archive — maintainer+ (AQU-1070)
+//   Archiving is reversible (DELETE below restores) and is the billing lever
+//   partners use to drop a finished language out of their active-lane band, so
+//   it sits with the maintainers who run the portfolio rather than org owners.
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.post("/:projectId/archive", authMiddleware, async (c) => {
@@ -821,8 +870,11 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can archive a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(
+      roleRequiredBody("maintainer+ required to archive a project", ROLE.MAINTAINER, role),
+      403,
+    )
   }
 
   try {
@@ -857,7 +909,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
-// DELETE /api/v2/projects/:projectId/archive — restore (owner-only)
+// DELETE /api/v2/projects/:projectId/archive — restore (maintainer+, AQU-1070)
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.delete("/:projectId/archive", authMiddleware, async (c) => {
@@ -866,8 +918,11 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 700) {
-    return c.json({ error: "only owners can restore a project" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(
+      roleRequiredBody("maintainer+ required to restore a project", ROLE.MAINTAINER, role),
+      403,
+    )
   }
 
   try {
@@ -902,7 +957,9 @@ projects.patch("/:projectId/lifecycle", authMiddleware, zValidator("json", lifec
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < 500) return c.json({ error: "project_lead+ required to change lifecycle" }, 403)
+  if (role.level < 500) {
+    return c.json(roleRequiredBody("project_lead+ required to change lifecycle", 500, role), 403)
+  }
   const { isActive } = c.req.valid("json")
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -922,7 +979,9 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
   const { deadline } = c.req.valid("json")
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET deadline_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -945,7 +1004,9 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
   if (!role) return c.json({ error: "not found or no access" }, 403)
   // AQU-507: naming who is responsible for a project is an administrative act
   // (mirrors the deadline gate), so it sits above PROJECT_LEAD.
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
   const { pmUserId } = c.req.valid("json")
 
   const project = await c.env.AQUILLA_PG.prepare(
@@ -999,6 +1060,21 @@ projects.get("/:projectId/assignments/mine", authMiddleware, async (c) => {
 })
 
 /**
+ * GET /api/v2/projects/:projectId/assignments/given — open assignments the
+ * caller handed out in this project (AQU-581: a lane coordinator's own list,
+ * so they can take back a mistake). Any project member; it only ever lists
+ * the caller's own.
+ */
+projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  const assignments = await getAssignmentsGivenBy(c.env, projectId, user.id)
+  return c.json({ assignments })
+})
+
+/**
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
  * + derived progress for THIS project. Maintainer+ on the project required.
  * Returns the same AssigneeWorkload shape as the org workload endpoint so
@@ -1009,7 +1085,26 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  if (role.level < ROLE.MAINTAINER) {
+    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
+  }
+
+  // Names on this roster are the member list. An owner-only roster floor must
+  // hide them here too — the Team card is how a maintainer still "sees" the
+  // roster after the Members card has closed, under a badge that still reads
+  // "only maintainers & owners".
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (project?.org_id != null) {
+    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    if (!canViewRoster(role.level, rosterMinRole)) {
+      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+    }
+  }
+
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })
@@ -1216,11 +1311,42 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 
+  // AQU-1352 §3.7: additive per-row origin data. Best-effort so a missing
+  // access_grants view never takes the roster down; rows then fall back to
+  // the legacy `role.source` rendering.
+  let origins = new Map<number, RosterOrigin>()
+  try {
+    origins = await loadRosterOrigins(c.env, projectId, project.org_id)
+  } catch (err) {
+    console.warn("[AQU-1352] roster origins unavailable", err)
+  }
+
+  // Spec §3.9 rule 4: a caller who cannot see the org (e.g. the ?minRole
+  // exception path below the roster floor) must not learn org/team names or
+  // ids from origins. Redact inherited paths; drop afterDirectRemoval.
+  let rowOrigins: Map<number, Partial<RosterOrigin>> = origins
+  if (project.org_id != null && origins.size > 0) {
+    const seesOrg = await new ViewerScope(c.env, user).canSeeOrg(Number(project.org_id))
+    if (!seesOrg) {
+      rowOrigins = new Map(
+        [...origins].map(([id, { afterDirectRemoval: _omit, ...o }]) => [
+          id,
+          { ...o, inheritedFrom: o.inheritedFrom ? redactOrgCrumbs(o.inheritedFrom) : null },
+        ]),
+      )
+    }
+  }
+
+  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+
   return c.json({
     members: members.map((m) => ({
+      ...rowOrigins.get(m.userId),
       userId: m.userId,
       username: m.username,
-      email: m.email,
+      // The `?minRole=` "view admins" bypass serves callers the org hid the
+      // roster from; they learn who the admins are, not how to email them.
+      ...(hideEmails ? {} : { email: m.email }),
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),
@@ -1285,6 +1411,7 @@ async function grantProjectMemberOne(
   callerRole: { level: number; name: string },
   callerUserId: number,
   entry: { username: string; role: number },
+  actor: AuthUser,
 ): Promise<ProjectGrantOutcome> {
   const { username, role } = entry
   // Caller cannot grant a role higher than their own level.
@@ -1326,6 +1453,7 @@ async function grantProjectMemberOne(
     }
   }
 
+  const roleBefore = await priorMembershipRole(env, actor, { scope: "project", projectId }, target.id)
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
      VALUES (?, ?, ?, ?)
@@ -1336,6 +1464,13 @@ async function grantProjectMemberOne(
   )
     .bind(projectId, target.id, role, callerUserId)
     .run()
+  await auditMembershipChange(env, actor, {
+    action: roleBefore === null ? "project.member.grant" : "project.member.role",
+    where: { scope: "project", projectId },
+    target: { id: target.id, username: target.username },
+    roleBefore,
+    roleAfter: role,
+  })
 
   return { ok: true, userId: target.id, username: target.username, role }
 }
@@ -1367,7 +1502,7 @@ projects.post(
     const callerRole = await resolveProjectRole(c.env, user, projectId)
     if (!callerRole) return c.json({ error: "no access to project" }, 403)
     if (callerRole.level < 500) {
-      return c.json({ error: "role >= project_lead required" }, 403)
+      return c.json(roleRequiredBody("role >= project_lead required", ROLE.PROJECT_LEAD, callerRole), 403)
     }
 
     const body = c.req.valid("json")
@@ -1388,7 +1523,7 @@ projects.post(
         { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
       > = []
       for (const entry of entries) {
-        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry)
+        const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry, user)
         if (outcome.ok) {
           notifyRoleChangeBestEffort(c, projectId, {
             userId: outcome.userId,
@@ -1406,7 +1541,7 @@ projects.post(
     }
 
     // Single-user mode — response + error statuses preserved exactly.
-    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body)
+    const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body, user)
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, PROJECT_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
@@ -1438,7 +1573,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   const callerRole = await resolveProjectRole(c.env, user, projectId)
   if (!callerRole) return c.json({ error: "no access to project" }, 403)
   if (callerRole.level < 600) {
-    return c.json({ error: "role >= maintainer required" }, 403)
+    return c.json(roleRequiredBody("role >= maintainer required", ROLE.MAINTAINER, callerRole), 403)
   }
 
   const existing = await c.env.AQUILLA_PG.prepare(
@@ -1457,10 +1592,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   // row of a user whose current level is >= yours, unless you are owner (700).
   const targetCurrentLevel = Number(existing.role_level)
   if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+    // Owner always passes the target cap, so it is the one level that is required.
     return c.json(
-      {
-        error: `cannot remove a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
-      },
+      roleRequiredBody(
+        `cannot remove a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+        ROLE.OWNER,
+        callerRole,
+      ),
       403,
     )
   }
@@ -1478,6 +1616,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  await auditMembershipChange(c.env, user, {
+    action: "project.member.remove",
+    where: { scope: "project", projectId },
+    target: { id: targetUserId, username: targetUser?.username },
+    roleBefore: Number(existing.role_level),
+    roleAfter: null,
+  })
   // The per-request memo may hold the pre-delete role (an owner removing
   // their own direct row resolved it above as the caller).
   forgetProjectRole(c.env, projectId, targetUserId)
@@ -1522,7 +1667,7 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < 500) {
-    return c.json({ error: "project_lead+ required to delete a file" }, 403)
+    return c.json(roleRequiredBody("project_lead+ required to delete a file", ROLE.PROJECT_LEAD, role), 403)
   }
 
   if (c.env.AQUILLA_PG) {
@@ -1621,7 +1766,7 @@ projects.post(
     }
     if (resolved.level < INVITE_MIN_ROLE) {
       return c.json(
-        { error: "You don't have permission to share this project" },
+        roleRequiredBody("You don't have permission to share this project", INVITE_MIN_ROLE, resolved),
         403,
       )
     }
@@ -1713,7 +1858,7 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < INVITE_MIN_ROLE) {
-    return c.json({ error: "role >= project_lead required" }, 403)
+    return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, role), 403)
   }
 
   const rows = await c.env.AQUILLA_PG.prepare(
@@ -1912,6 +2057,21 @@ projects.post(
       : invite.role_level
 
     try {
+      // [Pen test 2026-09-29] Claim the single-use invite (compare-and-swap)
+      // BEFORE granting membership, so two concurrent redeemers can't both be
+      // admitted. Same-user re-redeem (used_at already set) skips the claim.
+      if (!invite.used_at) {
+        const claim = await c.env.AQUILLA_PG.prepare(
+          `UPDATE project_invites
+           SET used_by = ?, used_at = CURRENT_TIMESTAMP
+           WHERE token = ? AND used_at IS NULL`,
+        )
+          .bind(user.id, token)
+          .run()
+        if (claim.meta.changes === 0) {
+          return c.json({ error: "Invite already used", code: "used" }, 410)
+        }
+      }
       if (existing) {
         await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
@@ -1940,15 +2100,6 @@ projects.post(
           finalRole,
         )
       }
-      // Atomic stamp: only the first concurrent redeemer wins; subsequent
-      // concurrent calls lose the WHERE race and are treated as same-user re-redeem.
-      await c.env.AQUILLA_PG.prepare(
-        `UPDATE project_invites
-         SET used_by = ?, used_at = CURRENT_TIMESTAMP
-         WHERE token = ? AND used_at IS NULL`,
-      )
-        .bind(user.id, token)
-        .run()
     } catch (err) {
       console.error("[invites] accept failed:", err)
       return c.json({ error: "Failed to accept invite" }, 500)
@@ -1966,7 +2117,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
 
   const callerRole = await resolveProjectRole(c.env, user, projectId)
   if (!callerRole || callerRole.level < INVITE_MIN_ROLE) {
-    return c.json({ error: "role >= project_lead required" }, 403)
+    return c.json(roleRequiredBody("role >= project_lead required", INVITE_MIN_ROLE, callerRole), 403)
   }
 
   const result = await c.env.AQUILLA_PG.prepare(

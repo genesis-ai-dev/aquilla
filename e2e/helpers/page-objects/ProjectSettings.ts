@@ -92,7 +92,9 @@ export class ProjectSettings {
   async openAddMemberDialog(projectId: string): Promise<Locator> {
     await this.openMembers(projectId)
     await this.page.getByRole("button", { name: /^Add a member$/i }).click()
-    const dialog = this.page.getByRole("dialog", { name: /Add a member/i })
+    // AQU-1352 §3.9: the header names the scope ("Add people to Org › Project")
+    // once it has loaded, and reads "Add a member" until then.
+    const dialog = this.page.getByRole("dialog", { name: /Add a member|Add people to/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     return dialog
   }

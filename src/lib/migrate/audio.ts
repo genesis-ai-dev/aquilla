@@ -9,7 +9,7 @@
 // for now (only the active clip per slot).
 
 import type { CodexCell } from "../codex-editor/types"
-import { audioAttachEventId, audioSelectEventId } from "./ids"
+import { audioAttachEventId, audioSelectEventId, audioValidateEventId } from "./ids"
 import type { IngestEvent } from "./types"
 
 export interface AudioImport {
@@ -23,6 +23,23 @@ export interface AudioImport {
   createdAt?: number
   mimeType?: string
   durationMs?: number
+  /**
+   * AQU-490: who signed this take off in Codex.
+   *
+   * Codex has had per-take validation since 2024 and the field teams have used
+   * it heavily — 2,577 validations by named users on the notebooks measured
+   * for the research board. Dropping it on the way in would tell the Pattani
+   * Malay and Chosen teams that none of that work happened.
+   */
+  validatedBy?: LegacyValidation[]
+}
+
+/** A Codex validation entry. Tombstoned rather than removed, hence isDeleted. */
+export interface LegacyValidation {
+  username?: string
+  creationTimestamp?: number
+  updatedTimestamp?: number
+  isDeleted?: boolean
 }
 
 // The on-disk attachment is richer than this repo's CodexCellAttachment type
@@ -36,6 +53,7 @@ interface LegacyAttachment {
   durationMs?: number
   mimeType?: string
   metadata?: { mimeType?: string; durationSec?: number }
+  validatedBy?: LegacyValidation[]
 }
 
 const basename = (p: string): string => p.split("/").pop() ?? p
@@ -58,6 +76,7 @@ function toImport(
     createdAt: att.createdAt,
     mimeType: att.mimeType ?? att.metadata?.mimeType,
     durationMs,
+    ...(att.validatedBy ? { validatedBy: att.validatedBy } : {}),
   }
 }
 
@@ -158,4 +177,54 @@ export function audioSelectEvent(
       slot: "recording",
     },
   }
+}
+
+/**
+ * AQU-490: one `cell.audio.validate` per live validator on a take.
+ *
+ * Codex has had per-take validation since 2024 and the field teams have used
+ * it heavily — 2,577 validations by named users across the notebooks measured
+ * for the research board. Without this, a migrated project arrives saying
+ * nobody has ever listened to anything, and the Pattani Malay and Chosen teams
+ * would be asked to re-do work they finished years ago.
+ *
+ * Three rules, each mirroring what the text-side mapping already does:
+ *
+ * - Tombstoned entries are DROPPED. Codex un-validates by setting isDeleted
+ *   rather than removing the row, so importing them would resurrect
+ *   validations their owners had explicitly withdrawn.
+ * - A validator with no username falls back to the migration's author, for
+ *   the reason `cell.validate` does: the sync-worker rejects an event with an
+ *   empty author and takes the whole ingest chunk down with it.
+ * - The event id is keyed on the VALIDATOR, never on the attach event, so a
+ *   re-sync converges on the same id even though the take's attach id moves.
+ *   Where the username is missing, the entry's own creationTimestamp keys it
+ *   instead — otherwise every nameless validator on one take would collide
+ *   into a single event, and only one of them would survive.
+ */
+export function audioValidateEvents(
+  cellId: string,
+  a: AudioImport,
+  opts: AudioEventOptions,
+): IngestEvent[] {
+  const out: IngestEvent[] = []
+  for (const v of a.validatedBy ?? []) {
+    if (v.isDeleted) continue
+    const username = typeof v.username === "string" ? v.username.trim() : ""
+    const validatorKey = username || (
+      typeof v.creationTimestamp === "number" ? `~ts:${v.creationTimestamp}` : ""
+    )
+    if (!validatorKey) continue
+    out.push({
+      id: audioValidateEventId(opts.projectId, opts.fileId, cellId, a.aquillaAudioId, validatorKey),
+      kind: "cell.audio.validate",
+      fileId: opts.fileId,
+      cellId,
+      parentId: null,
+      author: username || opts.fallbackAuthor,
+      clientTs: typeof v.creationTimestamp === "number" ? v.creationTimestamp : opts.fallbackTs,
+      payload: { audioId: a.aquillaAudioId },
+    })
+  }
+  return out
 }

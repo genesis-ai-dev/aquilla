@@ -49,10 +49,18 @@ export interface SearchHit {
   snippet: string
 }
 
+/** A file the agent asked the user to choose from (AQU-1468). */
+export interface FileCandidate {
+  id: string
+  name: string
+}
+
 export interface ToolResultData {
   cells?: PassageRow[]
   examples?: ExamplePair[]
   hits?: SearchHit[]
+  /** Set on a failed read/draft that asks "which file?"; rendered as buttons. */
+  candidates?: FileCandidate[]
 }
 
 // ── SSE frames (server → client), `data:`-prefixed JSON lines ─────────────
@@ -131,7 +139,7 @@ export interface AgentRunRequest {
   sessionId?: string
   /** ≤10 turns, client truncates. With sessionId: exactly the new user turn. */
   messages: { role: 'user' | 'assistant'; content: string }[]
-  context?: { fileId?: string; cellId?: string }
+  context?: { fileId?: string; cellId?: string; lane?: string }
   /**
    * User-level translator profile (all fields optional, free-text). Injected as
    * JSON into the agent's system prompt to tailor answers and pick the reply

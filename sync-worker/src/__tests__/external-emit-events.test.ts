@@ -696,6 +696,136 @@ describe('EmitEvents — terminology (AQU-1179)', () => {
     expect(JSON.stringify(launderedBody.error.details)).toContain('term.approve')
   })
 
+  // ── inflection variants (AQU-1175) ─────────────────────────────────────
+  //
+  // `match` was dropped by the validators, so a term staged with variants came
+  // back configured and matched only its lemma. These tests are the producer →
+  // consumer trace (AGENTS.md rule 12): the caller's `match` through the
+  // validator, the changeset engine and the /events perimeter, out the other
+  // side as `concepts.match_options` — the column the matcher and the compiled
+  // terminology rules actually read. A unit test on the validator alone would
+  // still pass if the engine dropped the key again.
+
+  it('term.create carries match.forms through to concepts.match_options', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const { res, body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'term.create',
+        payload: {
+          sourceTerm: 'Боже Слово',
+          renderings: [{ rendering: 'Word of God', status: 'preferred' }],
+          status: 'active',
+          match: {
+            forms: ['Божого Слова', 'Божому Слову'],
+            excludedForms: ['Слово Боже'],
+            affixes: true,
+            foldMarks: false,
+          },
+        },
+      },
+    ])
+    expect(res.status).toBe(200)
+
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{ source_term: string; match_options: unknown }>('concepts')
+    expect(concepts).toHaveLength(1)
+    expect(concepts[0].source_term).toBe('Боже Слово')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({
+      foldMarks: false,
+      affixes: true,
+      forms: ['Божого Слова', 'Божому Слову'],
+      excludedForms: ['Слово Боже'],
+    })
+  })
+
+  it('term.update adds variants to an existing concept without touching its other fields', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', match: { forms: ['covenants'] } } },
+    ])
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{
+      source_term: string
+      status: string
+      match_options: unknown
+    }>('concepts')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({ forms: ['covenants'] })
+    // COALESCE-per-column: a match-only patch is a valid patch and leaves the
+    // rest of the concept alone.
+    expect(concepts[0].source_term).toBe('covenant')
+    expect(concepts[0].status).toBe('active')
+  })
+
+  it('a malformed match is rejected at prepare rather than silently dropped', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+
+    const cases: [unknown, string][] = [
+      [{ forms: 'Божого Слова' }, 'match.forms must be an array'],
+      [{ forms: ['ok', ''] }, 'match.forms[1] must be a non-empty string'],
+      [{ affixes: 'yes' }, 'match.affixes must be a boolean'],
+      ['forms', 'match must be an object'],
+      [['forms'], 'match must be an object'],
+      [{ forms: Array.from({ length: 101 }, (_, i) => `f${i}`) }, 'at most 100 entries'],
+      // A near-miss key is the mistake this whole field exists to stop being
+      // silent: `form` would otherwise filter away and clear the options.
+      [{ form: ['Божого Слова'] }, 'match.form is not a match option'],
+      [{ forms: ['ok'], foldMark: true }, 'match.foldMark is not a match option'],
+    ]
+    for (const [match, expected] of cases) {
+      const { res, body } = await prepare(env, lead.token, [
+        { kind: 'term.update', payload: { conceptId: 'concept-1', match } },
+      ])
+      expect(res.status).toBe(400)
+      expect(JSON.stringify(body.error.details)).toContain(expected)
+    }
+    // Nothing landed: a rejected plan writes no concept row change.
+    const concepts = await tdb.rows<{ match_options: unknown }>('concepts')
+    expect(concepts[0].match_options).toBeNull()
+  })
+
+  it('match: {} clears the options rather than being rejected as empty', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+    await tdb.db
+      .prepare(`UPDATE concepts SET match_options = ?::text::jsonb WHERE concept_id = ?`)
+      .bind(JSON.stringify({ forms: ['covenants'], affixes: true }), 'concept-1')
+      .run()
+
+    // `match` is replaced wholesale, so {} is the only way to say "no options",
+    // and it is a real patch — not "you patched nothing".
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', match: {} } },
+    ])
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{ match_options: unknown }>('concepts')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({})
+  })
+
   it('a concept deleted between prepare and commit makes the plan stale, not a silent no-op', async () => {
     const env = makeEnv(tdb.db)
     const lead = await memberToken(tdb, 500)

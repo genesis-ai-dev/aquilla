@@ -13,12 +13,21 @@ vi.mock("@/context/OfflineStoreContext", () => ({
 }))
 
 const close = vi.fn()
-const createOfflineSyncManager = vi.fn((_options: { store: unknown }) => ({
-  close,
-  activeProjectIds: () => [],
-}))
+const createOfflineSyncManager = vi.fn((_options: { store: unknown }) => {
+  order.push("manager")
+  return { close, activeProjectIds: () => [] }
+})
 vi.mock("@/lib/offline/sync-manager", () => ({
   createOfflineSyncManager: (options: { store: unknown }) => createOfflineSyncManager(options),
+}))
+
+const order: string[] = []
+const recoverInterruptedDownloads = vi.fn((_store: unknown) => {
+  order.push("recover")
+  return [] as string[]
+})
+vi.mock("@/lib/offline/download", () => ({
+  recoverInterruptedDownloads: (store: unknown) => recoverInterruptedDownloads(store),
 }))
 
 const buildProjectAwareMinter = vi.fn((_getJwt: () => string | null) => vi.fn())
@@ -32,12 +41,22 @@ beforeEach(() => {
   close.mockClear()
   createOfflineSyncManager.mockClear()
   buildProjectAwareMinter.mockClear()
+  recoverInterruptedDownloads.mockClear()
+  order.length = 0
 })
 
 describe("OfflineSyncManagerMount", () => {
   it("does nothing while no offline store is booted (browser SPA / not-yet-ready Tauri)", () => {
     render(<OfflineSyncManagerMount />)
     expect(createOfflineSyncManager).not.toHaveBeenCalled()
+    expect(recoverInterruptedDownloads).not.toHaveBeenCalled()
+  })
+
+  it("rolls back interrupted downloads before the manager starts", () => {
+    mockStore = { id: "fake-store" }
+    render(<OfflineSyncManagerMount />)
+    expect(recoverInterruptedDownloads).toHaveBeenCalledWith(mockStore)
+    expect(order).toEqual(["recover", "manager"])
   })
 
   it("starts the manager once a store is available, and tears it down on unmount", () => {

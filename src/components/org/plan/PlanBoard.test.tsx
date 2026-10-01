@@ -744,7 +744,10 @@ describe("the row's link follows the audio once the text is done (round 5)", () 
     const onOpenShortfall = vi.fn()
     render(
       <PlanBoard
-        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96 })]}
+        // AQU-490: the takes that EXIST are signed off, so the only thing
+        // outstanding is the four not yet recorded — which is what this
+        // test is about. Before the flip, unvalidated takes were invisible.
+        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96, audioValidatedCount: 96 })]}
         now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
         onOpenShortfall={onOpenShortfall}
       />,

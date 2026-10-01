@@ -1,4 +1,4 @@
-import { useState, type RefObject, type UIEventHandler } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject, type UIEventHandler } from "react"
 import { FileText, Languages } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -56,6 +56,19 @@ export interface AgentWorkbenchCell {
   canValidate?: boolean
 }
 
+/**
+ * What the workspace reports back about a committed workbench target edit.
+ *
+ * AQU-1497: the only bit the pane needs is whether the commit path validated
+ * the edit by itself (`shouldAutoValidateHumanEdit`). That validation owes the
+ * file's repeated segments its text exactly as a click on the validation
+ * control does, and no click ever follows it — so the pane has to notice it to
+ * pay the debt (see `settleOwedRepetitions` below).
+ */
+export interface AgentTargetCommitOutcome {
+  autoValidated: boolean
+}
+
 interface AgentContextPaneProps {
   kind: "source" | "target"
   cells: AgentWorkbenchCell[]
@@ -69,7 +82,10 @@ interface AgentContextPaneProps {
   scrollContainerRef?: RefObject<HTMLDivElement | null>
   onScroll?: UIEventHandler<HTMLDivElement>
   editable?: boolean
-  onCommitTarget?: (cellId: string, snapshot: TranslatedEditorCommit) => void | Promise<void>
+  onCommitTarget?: (
+    cellId: string,
+    snapshot: TranslatedEditorCommit,
+  ) => AgentTargetCommitOutcome | void | Promise<AgentTargetCommitOutcome | void>
   isAnonymous?: boolean
   isCompletionConfigured?: boolean
   isCompletionAvailable?: boolean
@@ -83,6 +99,11 @@ interface AgentContextPaneProps {
   validationRequirement?: number
   canValidate?: boolean
   onValidationChange?: (cellId: string, validated: boolean) => unknown
+  /** AQU-1497: a settled human validation in this pane — the workspace fills
+   *  the file's repeated source segments from it (AQU-1391). The explicit
+   *  validation control reaches it through `onValidationChange`; a typed edit
+   *  the commit path auto-validated reaches it from here, on leaving the cell. */
+  onCellValidated?: (cellId: string) => unknown
   cellLockHolders?: ReadonlyMap<string, string>
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
@@ -117,6 +138,7 @@ export function AgentContextPane({
   validationRequirement = 1,
   canValidate = false,
   onValidationChange,
+  onCellValidated,
   cellLockHolders,
   onClaimCell,
   onReleaseCell,
@@ -134,9 +156,70 @@ export function AgentContextPane({
   const [overflowCellId, setOverflowCellId] = useState<string | null>(null)
   const [writeError, setWriteError] = useState<{ cellId: string; message: string } | null>(null)
   const targetEditable = !isSource && editable && Boolean(onCommitTarget)
+
+  // AQU-1497: a human validation in this pane owes the file's repeated source
+  // segments its text ("Validating one fills the rest" — AQU-1391). The
+  // explicit validation control pays that through `onValidationChange`, which
+  // the workspace handles. A TYPED translation has no click to hang it on: the
+  // commit path validates the edit itself, so the debt is recorded here and
+  // paid when the edit is SETTLED — the editor no longer holds focus.
+  //
+  // Paying on an idle save with the caret still in the cell would re-broadcast
+  // half-typed text to every repetition on each pause (the AQU-1484 rule,
+  // mirrored from `settleOwedRepetitions` in EditorTable).
+  const targetFocusedRef = useRef(false)
+  const repetitionOwedCellRef = useRef<string | null>(null)
+  // Latest-ref so settling never depends on the handler's identity: it runs
+  // from blur/unmount paths where a changing dependency would be a hazard.
+  const onCellValidatedRef = useRef(onCellValidated)
+  useEffect(() => { onCellValidatedRef.current = onCellValidated }, [onCellValidated])
+  const settleOwedRepetitions = useCallback(() => {
+    const cellId = repetitionOwedCellRef.current
+    if (!cellId || targetFocusedRef.current) return
+    repetitionOwedCellRef.current = null
+    void Promise.resolve(onCellValidatedRef.current?.(cellId)).catch((err) => {
+      console.warn("[repetition-propagation] failed:", err)
+    })
+  }, [])
+  /**
+   * AQU-1497: the Target pane's validation control, wrapped so a validation it
+   * records also fills the file's repeated source segments — the same trigger
+   * the editor row owns for its gutter check (`emitValidationChange` in
+   * EditorTable).
+   *
+   * Only on the way IN: un-validating withdraws a sign-off, it does not decide
+   * any text is done, so it must push nothing anywhere. And only once the
+   * workspace reports the change accepted (`false` = refused or failed), so a
+   * validation that never landed propagates nothing.
+   */
+  const handleValidationChange = useCallback((cellId: string, validated: boolean) => {
+    const change = Promise.resolve(onValidationChange?.(cellId, validated))
+    void change.then(
+      (accepted) => {
+        if (!validated || accepted === false) return
+        void Promise.resolve(onCellValidatedRef.current?.(cellId)).catch((err) => {
+          console.warn("[repetition-propagation] failed:", err)
+        })
+      },
+      // A failed validation is the control's to surface; nothing is owed.
+      () => {},
+    )
+    return change
+  }, [onValidationChange])
   const activeEditingCellId = editingCellId && cells.some((cell) => cell.cellId === editingCellId)
     ? editingCellId
     : null
+  // The editor can go away without ever firing a blur — the translator clicks
+  // straight into another cell, the open file changes, the workbench collapses.
+  // Each of those settles the edit too, so an owed propagation is never
+  // stranded waiting for a blur that will not come.
+  useEffect(() => {
+    if (!activeEditingCellId) return
+    return () => {
+      targetFocusedRef.current = false
+      settleOwedRepetitions()
+    }
+  }, [activeEditingCellId, settleOwedRepetitions])
   const cellCount = totalCells ?? cells.length
   const paneMeta = [language || null, `${cellCount} cell${cellCount === 1 ? "" : "s"}`]
     .filter(Boolean)
@@ -295,7 +378,7 @@ export function AgentContextPane({
                           validationRequirement={validationRequirement}
                           canValidate={canValidate}
                           canValidateThisCell={Boolean(cell.canValidate)}
-                          onValidationChange={(validated) => onValidationChange(cell.cellId, validated)}
+                          onValidationChange={(validated) => handleValidationChange(cell.cellId, validated)}
                         />
                       ) : (
                         <div data-testid="validation-gutter" className="w-6 shrink-0" />
@@ -309,19 +392,36 @@ export function AgentContextPane({
                           idmlConfiguration={cell.idmlConfiguration}
                           onCommit={(snapshot) => {
                             setWriteError(null)
-                            void Promise.resolve(onCommitTarget?.(cell.cellId, snapshot)).catch((error) => {
+                            void Promise.resolve(onCommitTarget?.(cell.cellId, snapshot)).then((outcome) => {
+                              // AQU-1497: the commit path validated this edit by
+                              // itself, so the repetitions are owed its text —
+                              // paid now if the translator has already left the
+                              // cell, otherwise by the blur below.
+                              if (!outcome?.autoValidated) return
+                              repetitionOwedCellRef.current = cell.cellId
+                              settleOwedRepetitions()
+                            }).catch((error) => {
                               setWriteError({
                                 cellId: cell.cellId,
                                 message: error instanceof Error ? error.message : "Could not save this translation.",
                               })
                             })
                           }}
-                          onFocus={() => onClaimCell?.(cell.cellId)}
-                          onBlur={() => onReleaseCell?.(cell.cellId)}
+                          onFocus={() => {
+                            targetFocusedRef.current = true
+                            onClaimCell?.(cell.cellId)
+                          }}
+                          onBlur={() => {
+                            targetFocusedRef.current = false
+                            onReleaseCell?.(cell.cellId)
+                            settleOwedRepetitions()
+                          }}
                           onSelectionChange={(selection) => onTargetPresenceSelection?.(cell.cellId, selection)}
                           onEscapeToGrid={() => {
+                            targetFocusedRef.current = false
                             onReleaseCell?.(cell.cellId)
                             setEditingCellId(null)
+                            settleOwedRepetitions()
                           }}
                           placeholder={t("agentWorkspace.notTranslated")}
                           editable={canEditCell}

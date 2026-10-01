@@ -24,6 +24,7 @@
 import type { Env } from "../types"
 import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
+import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -93,6 +94,8 @@ export interface OrgAssignmentRow {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -115,6 +118,7 @@ export async function getOrgAssignmentWorkload(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
+            ln.name            AS lane_name,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
@@ -123,6 +127,8 @@ export async function getOrgAssignmentWorkload(
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -136,6 +142,7 @@ export async function getOrgAssignmentWorkload(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_name: string | null
       cells_total: number
       cells_done: number
       deadline: string | null
@@ -151,6 +158,7 @@ export async function getOrgAssignmentWorkload(
     username: r.assignee_username,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
@@ -219,6 +227,8 @@ export interface UnitAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): the lane this assignment is pinned to. '' = default. */
   targetLang: string
+  /** Display name from the lane row, when one exists. */
+  laneName?: string | null
   deadline: string | null
   /** The assignment's cells that are inside this unit and still exist. */
   cellsTotal: number
@@ -268,12 +278,29 @@ const MAX_VALIDATION_LEVEL = 15
  * the `validation_count` generated column so we never parse the settings blob.
  */
 async function readValidationCount(env: Env, projectId: string): Promise<number> {
+  return readThreshold(env, projectId, "validation_count")
+}
+
+/**
+ * AQU-490: the audio twin, read through its own generated column (0096) for
+ * the same reason — the settings blob runs to megabytes and this panel is on
+ * the plan inspector's hot path.
+ */
+async function readValidationCountAudio(env: Env, projectId: string): Promise<number> {
+  return readThreshold(env, projectId, "validation_count_audio")
+}
+
+async function readThreshold(
+  env: Env,
+  projectId: string,
+  column: "validation_count" | "validation_count_audio",
+): Promise<number> {
   const row = await env.AQUILLA_PG.prepare(
-    "SELECT validation_count FROM project_settings WHERE project_id = ?",
+    `SELECT ${column} AS threshold FROM project_settings WHERE project_id = ?`,
   )
     .bind(projectId)
-    .first<{ validation_count: string | number | null }>()
-  const value = Math.floor(Number(row?.validation_count))
+    .first<{ threshold: string | number | null }>()
+  const value = Math.floor(Number(row?.threshold))
   return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
 }
 
@@ -303,7 +330,10 @@ export async function getUnitAssignments(
   sectionKey: string,
   lane: string,
 ): Promise<UnitAssignment[]> {
-  const validationCount = await readValidationCount(env, projectId)
+  const [validationCount, validationCountAudio] = await Promise.all([
+    readValidationCount(env, projectId),
+    readValidationCountAudio(env, projectId),
+  ])
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
   // all. Built as a fragment so the bind only exists when the predicate does.
@@ -341,11 +371,10 @@ export async function getUnitAssignments(
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id = ?
      ), audio AS (
-       SELECT ca.cell_id,
-              MAX(CASE WHEN ca.selected = 1 AND ca.approved = 1 THEN 1 ELSE 0 END) AS validated
-         FROM cell_audio ca
-        WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
-        GROUP BY ca.cell_id
+       -- AQU-490: the shared definition, not a fourth hand-copy of it. This
+       -- panel sits directly under the unit's own audio bar, so the two must
+       -- count the same cells by construction rather than by agreement.
+       ${AUDIO_CTE_SQL}
      )
      SELECT a.assignment_id    AS assignment_id,
             a.assignee_user_id AS assignee_user_id,
@@ -362,8 +391,13 @@ export async function getUnitAssignments(
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
-            COUNT(*) FILTER (WHERE au.cell_id IS NOT NULL)::integer AS recorded,
-            COUNT(*) FILTER (WHERE COALESCE(au.validated, 0) = 1)::integer AS audio_validated
+            COUNT(*) FILTER (WHERE COALESCE(au.has_dub, 0) = 1)::integer AS recorded,
+            -- Against the project's CURRENT audio threshold, for the same
+            -- reason the text count above it is: a stored verdict would disagree
+            -- with the bar drawn above this panel the moment somebody changed
+            -- the required number.
+            COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated,
+            MAX(ln.name) AS lane_name
        FROM assignments a
        JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
@@ -377,6 +411,8 @@ export async function getUnitAssignments(
                         AND t.target_lang = ?
        LEFT JOIN audio au ON au.cell_id = c.cell_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND ac.file_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -396,8 +432,8 @@ export async function getUnitAssignments(
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
-    // policy CTE's project, the audio CTE's (project, file), the validation
-    // threshold in the SELECT list, the lane on the target join, then the
+    // policy CTE's project, the audio CTE's (project, file), the text then
+    // audio thresholds in the SELECT list, the lane on the target join, then the
     // WHERE — and the section key last, only when the fragment above put a
     // placeholder there. Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
@@ -406,6 +442,7 @@ export async function getUnitAssignments(
       projectId,
       fileId,
       validationCount,
+      validationCountAudio,
       lane,
       projectId,
       fileId,
@@ -417,6 +454,7 @@ export async function getUnitAssignments(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_name: string | null
       deadline: string | null
       chapter_key: string
       cells_total: number
@@ -440,6 +478,7 @@ export async function getUnitAssignments(
         username: r.assignee_username,
         scopeLabel: r.scope_label,
         targetLang: r.target_lang ?? "",
+        laneName: r.lane_name,
         deadline: r.deadline,
         cellsTotal: 0,
         translated: 0,
@@ -493,15 +532,63 @@ export interface MyAssignment {
   fileId: string | null
   /** Display name for `fileId` from `files.name`; null when `fileId` is null. */
   fileName: string | null
+  /**
+   * AQU-894: EVERY file the assignment's resolved cells touch, ascending.
+   *
+   * `fileId` above is one arbitrary member of this set (`LIMIT 1`), which is
+   * all the inbox's "open the right file" click needs. It cannot answer "is
+   * this file mine?", because a books-scope assignment over GEN + EXO reports
+   * one of the two and says nothing about the other — so a sidebar reading
+   * `fileId` alone would mark half a person's own work as somebody else's.
+   * Empty only when the scope resolved to zero cells.
+   */
+  fileIds: string[]
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /** Display name of that lane, when the row exists. */
+  laneName?: string | null
+  /** Opaque lane id, for deep links. */
+  laneId?: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number
   cellsDone: number
   createdAt: number
+}
+
+/**
+ * assignment_id → the distinct files its resolved cells live in (AQU-894).
+ *
+ * A second read rather than an aggregate in the inbox query itself: the inbox
+ * is a once-per-project-open read, and one plain SELECT that any Postgres
+ * driver returns as plain rows is worth more here than saving a round trip on
+ * a `json_agg` whose shape depends on how the driver decodes a JSON column.
+ *
+ * Callers pass the assignment ids they already selected, so this inherits
+ * their authorization exactly — it never widens what the caller may see.
+ */
+async function fileIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  for (const id of assignmentIds) byAssignment.set(id, [])
+  if (assignmentIds.length === 0) return byAssignment
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.file_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; file_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
 }
 
 /**
@@ -517,6 +604,8 @@ export async function getMyAssignments(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ln.name AS lane_name,
+            ln.id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -526,6 +615,8 @@ export async function getMyAssignments(
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -537,6 +628,8 @@ export async function getMyAssignments(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -546,19 +639,85 @@ export async function getMyAssignments(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
+  }))
+}
+
+/** An open assignment the caller handed out, with who it went to. */
+export interface GivenAssignment {
+  assignmentId: string
+  fileId: string | null
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** '' = default lane. */
+  targetLang: string
+  cellsTotal: number
+  cellsDone: number
+}
+
+/**
+ * AQU-581: the open assignments `userId` created in one project, newest
+ * first — the list a lane coordinator removes their own mistakes from.
+ */
+export async function getAssignmentsGivenBy(
+  env: Env,
+  projectId: string,
+  userId: number,
+): Promise<GivenAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id, a.assignee_user_id AS assignee_user_id,
+            u.username AS username, a.scope_label AS scope_label,
+            a.target_lang AS target_lang,
+            ${CELLS_TOTAL_SUBQUERY} AS cells_total,
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+      WHERE a.project_id = ? AND a.created_by = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number | string
+      username: string | null
+      scope_label: string
+      target_lang: string | null
+      cells_total: number
+      cells_done: number
+      file_id: string | null
+    }>()
+
+  return (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    fileId: r.file_id,
+    assigneeUserId: Number(r.assignee_user_id),
+    username: r.username,
+    scopeLabel: r.scope_label,
+    targetLang: r.target_lang ?? "",
+    cellsTotal: Number(r.cells_total),
+    cellsDone: Number(r.cells_done),
   }))
 }
 
@@ -584,6 +743,8 @@ export async function getMyAssignmentsAcrossOrg(
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ln.name AS lane_name,
+            ln.id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -594,6 +755,8 @@ export async function getMyAssignmentsAcrossOrg(
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -607,6 +770,8 @@ export async function getMyAssignmentsAcrossOrg(
       scope_kind: string
       scope_label: string
       target_lang: string
+      lane_name: string | null
+      lane_id: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -616,15 +781,21 @@ export async function getMyAssignmentsAcrossOrg(
       file_name: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  const results = rows.results ?? []
+  const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+
+  return results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
     fileId: r.file_id,
     fileName: r.file_name,
+    fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneName: r.lane_name,
+    laneId: r.lane_id,
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,

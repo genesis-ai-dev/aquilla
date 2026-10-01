@@ -127,29 +127,35 @@ describe("CellStore.getChainHeadCellId", () => {
 // synthesis). Flipping the assembled VIEW instead carries the change to exactly
 // the things that ask "is this line done".
 describe("CellStore.setOwnTakeCellIds", () => {
+  // REVERSED 2026-09-22. This block used to assert that a text-empty line with
+  // a take reads as unvalidated rather than empty — the AQU-646 workaround
+  // from before audio had its own validation, so a dub could be validated and
+  // counted at all. It has its own now, and Sam's ruling is that a line with
+  // no text is not translated text: its status stays "empty", its progress
+  // lives on the audio bar, and the text control never appears on it. The
+  // FLAG survives, because navigation and the empty-target rule still need to
+  // know a silent line is deliberately silent.
   const blank = () => [
     row("t1", { value: "" }),
     row("t1", { side: "target", value: "", eventId: "tgt-t1" }),
   ]
 
-  it("a text-empty line with a take reads as unvalidated, not empty", () => {
+  it("marks a text-empty line with a take, but leaves its status EMPTY", () => {
     const store = makeStore(blank())
     expect(store.getCellView("t1")?.status).toBe("empty")
     store.setOwnTakeCellIds(new Set(["t1"]))
     const view = store.getCellView("t1")
-    expect(view?.status).toBe("unvalidated")
+    expect(view?.status).toBe("empty")
     expect(view?.hasOwnTake).toBe(true)
   })
 
-  it("...and as VALIDATED once somebody validates it", () => {
-    // The row deriveStatus can't read: empty text wins over validated=true, so
-    // the flip has to consult the target row itself.
+  it("does not read a validated-but-empty row as validated text", () => {
     const store = makeStore([
       row("t1", { value: "" }),
       row("t1", { side: "target", value: "", eventId: "tgt-t1", validated: true }),
     ])
     store.setOwnTakeCellIds(new Set(["t1"]))
-    expect(store.getCellView("t1")?.status).toBe("validated")
+    expect(store.getCellView("t1")?.status).toBe("empty")
   })
 
   it("leaves a line with text alone", () => {
@@ -163,34 +169,29 @@ describe("CellStore.setOwnTakeCellIds", () => {
     expect(view?.hasOwnTake).toBe(true)
   })
 
-  it("carries hasOwnTake onto the summary, which is what the counters read", () => {
+  it("carries hasOwnTake onto the summary without changing its status", () => {
     const store = makeStore(blank())
     store.setOwnTakeCellIds(new Set(["t1"]))
     const summary = store.getAllSummaries().find((s) => s.id === "t1")
     expect(summary?.hasOwnTake).toBe(true)
-    expect(summary?.status).toBe("unvalidated")
+    expect(summary?.status).toBe("empty")
   })
 
-  it("reverts the moment the take goes away", () => {
+  it("drops the flag the moment the take goes away", () => {
     const store = makeStore(blank())
     store.setOwnTakeCellIds(new Set(["t1"]))
-    expect(store.getCellView("t1")?.status).toBe("unvalidated")
+    expect(store.getCellView("t1")?.hasOwnTake).toBe(true)
     store.setOwnTakeCellIds(new Set())
-    const view = store.getCellView("t1")
-    expect(view?.status).toBe("empty")
-    expect(view?.hasOwnTake).toBeUndefined()
+    expect(store.getCellView("t1")?.hasOwnTake).toBeUndefined()
   })
 
   it("survives a runtime update — audio comes from a different source", () => {
-    // setRuntime replaces the whole context; blanking the take set there would
-    // make every dubbed line flicker back to empty on an unrelated lane or
-    // audit-stats change.
     const store = makeStore(blank())
     store.setOwnTakeCellIds(new Set(["t1"]))
     store.setRuntime({
       projectId: "p", fileId: "f", username: "alice",
       requiredValidations: 1, auditStats: new Map(),
     })
-    expect(store.getCellView("t1")?.status).toBe("unvalidated")
+    expect(store.getCellView("t1")?.hasOwnTake).toBe(true)
   })
 })

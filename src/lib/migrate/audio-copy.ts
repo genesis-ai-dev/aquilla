@@ -7,7 +7,7 @@
 // Everything here is a pure function of its inputs — deterministic + unit-tested.
 
 import type { CodexCell } from "../codex-editor/types"
-import { collectAllCellAudio, audioAttachEvent, audioSelectEvent } from "./audio"
+import { collectAllCellAudio, audioAttachEvent, audioValidateEvents, audioSelectEvent } from "./audio"
 import type { AudioImport, AudioEventOptions } from "./audio"
 import type { DiscoveredPointer } from "./gitlab/lfs"
 import { pointersToFilesPath } from "./gitlab/lfs"
@@ -84,7 +84,13 @@ export function buildCellAudioEvents(
   selectedAquillaAudioId: string | null,
   opts: AudioEventOptions,
 ): IngestEvent[] {
-  const events: IngestEvent[] = copiedTakes.map((take) => audioAttachEvent(cellId, take, opts))
+  const events: IngestEvent[] = []
+  for (const take of copiedTakes) {
+    events.push(audioAttachEvent(cellId, take, opts))
+    // AQU-490: the take's Codex validations ride immediately behind its
+    // attach, so a validate can never precede the row it votes on.
+    events.push(...audioValidateEvents(cellId, take, opts))
+  }
   if (
     selectedAquillaAudioId &&
     copiedTakes.some((t) => t.aquillaAudioId === selectedAquillaAudioId)

@@ -7,7 +7,11 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
+    source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
+    sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {
@@ -28,6 +32,15 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
       "e2e/specs/orgs/account-switcher.smoke.spec.ts",
       "e2e/specs/orgs/members.smoke.spec.ts",
     ],
+  },
+  {
+    // AQU-1153: the share / invite journey — Add a member (+ Invite link tab),
+    // the org members page's "Add to projects" dialog, the recipient typeahead
+    // they share, and /join/:token — has its own smoke spec, but none of these
+    // files carry a domain keyword above, so they fell through to the core
+    // sentinels and PR #882 shipped a stale locator in that spec ungated.
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectMembersPage|ProjectSettings\/AddProjectMemberDialog|SharePanel|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
   },
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
@@ -62,6 +75,14 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    // AQU-657: document-understanding tags (and the route that asks for them)
+    // reach a user through retrieval and few-shot selection, so they select the
+    // AI predict journey rather than falling through to the generic
+    // shared-runtime sentinel.
+    source: /^(?:src\/lib\/understanding|auth-worker\/src\/routes\/ai-passage-tags)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
     // AQU-1025: few-shot retrieval is the AI predict journey, not collab.
     source: /(?:sync-worker\/.*branching-search|src\/lib\/sync\/branching-search)/i,
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
@@ -85,10 +106,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
-    // `parsers`/`biblica` are the importer's own reading layer — a change there
-    // only reaches a user through an import, so it selects the import sentinel
-    // rather than falling through to the generic shared-runtime one.
-    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
+    // `parsers` and the partner integrations are the importer's own reading layer
+    // — a change there only reaches a user through an import, so it selects the
+    // import sentinel rather than falling through to the generic shared-runtime
+    // one. Partner readers moved under `src/partner-integrations/` in AQU-1286.
+    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|audio|voice|video|search|sidebar|timeline|storage)|src\/partner-integrations\/|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {

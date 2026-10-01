@@ -35,14 +35,21 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(denied.status).toBe(403)
   })
 
-  it("includes per-project audio progress (distinct live cells + selected recorded ms)", async () => {
+  it("includes per-project audio progress (cells with a selected dub + its recorded ms)", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Mark', 1, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e3', 1, 'pb', 'file.create', 'wendi', '{}', 500, 500, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000), ('f3', 'pb', 'MRK', 'e3', 50, 50, 500)").run()
-    // pa: c1+c2 selected recordings (90000ms); c3 unselected (counts as a cell w/ audio, not recorded ms); c4 deleted (excluded)
+    // pa: c1+c2 selected recordings (90000ms); c3 unselected; c4 deleted.
+    //
+    // AQU-490 narrowed "has audio" from any live take to a SELECTED dub take,
+    // so c3 no longer counts. The word that does the work in practice is
+    // "dub", not "selected" — attaching selects, so an unselected-only cell is
+    // vanishingly rare — but the two must name the same set as the histogram
+    // the board reads, or a cell could sit in the denominator and never reach
+    // the numerator and audio could never read 100%.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts) VALUES
         ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',60000,1,0,'ae1',1),
@@ -55,7 +62,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; recordedMs: number }> }
     const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
-    expect(byId.pa).toMatchObject({ audioCells: 3, recordedMs: 90000 })
+    expect(byId.pa).toMatchObject({ audioCells: 2, recordedMs: 90000 })
     expect(byId.pb).toMatchObject({ audioCells: 0, recordedMs: 0 })
   })
 
@@ -165,20 +172,92 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
   })
 
-  it("AQU-508: validatedAudioCells counts cells whose selected clip is approved, distinct from coverage", async () => {
+  it("AQU-1458: an archived lane row is flagged, and a settings-only archive is too", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Acts', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pb', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "English", targetLanes: ["sw"], archivedLanes: ["sw"] })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at) VALUES
+        ('deflane1', 'pa', 'target', 'Spanish', '', 0, NULL),
+        ('swlane01', 'pa', 'target', 'Swahili', 'sw', 1, '2026-09-01T00:00:00Z'),
+        ('frlane01', 'pa', 'target', 'French', 'fr', 2, NULL),
+        ('deflane2', 'pb', 'target', 'English', '', 0, NULL),
+        ('swlane02', 'pb', 'target', 'Swahili', 'sw', 1, NULL)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; archived?: boolean }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    const byLane = Object.fromEntries(pa.lanes.map((l) => [l.lane, l]))
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "sw", "fr"])
+    expect(byLane[""].archived).toBeUndefined()
+    expect(byLane.sw.archived).toBe(true)
+    expect(byLane.fr.archived).toBeUndefined()
+    const pb = body.projects.find((p) => p.id === "pb")!
+    expect(pb.lanes.find((l) => l.lane === "sw")?.archived).toBe(true)
+    expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
+  })
+
+  it("AQU-1473: the primary language stored in targetLanes is the default lane, not a second one", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    // Create writes the primary into both targetLanguage and the complete registry.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "Spanish", targetLanes: ["Spanish", "French"] })).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Spanish', '')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
+    ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; name?: string | null }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "French"])
+    expect(pa.lanes.find((l) => l.lane === "")?.name).toBe("Spanish")
+  })
+
+  it("AQU-1473: a primary stored as a language code still collapses onto the default lane", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanguage: "es", targetLanes: ["Spanish"] })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes?: Array<{ lane: string }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes ?? []).toEqual([])
+  })
+
+  it("AQU-490: validatedAudioCells counts votes against the threshold, distinct from coverage", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000)").run()
-    // c1: selected + approved            → audio-validated
-    // c2: selected, not approved         → covered, not validated
-    // c3: approved but NOT selected (a re-record superseded the approved take)
+    // c1: selected, one vote             → audio-validated
+    // c2: selected, no votes              → covered, not validated
+    // c3: a validated take superseded by a re-record that has no votes yet
     //     → covered (the new selected take), NOT audio-validated
     // c4: deleted (excluded from both)
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, approved, event_id, created_ts) VALUES
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts) VALUES
         ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',60000,1,0,1,'ae1',1),
         ('pa','f1','c2','a2','recording','frontier-audio://a2.wav',30000,1,0,0,'ae2',1),
         ('pa','f1','c3','a3old','recording','frontier-audio://a3old.wav',30000,0,0,1,'ae3o',1),
@@ -190,11 +269,67 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number }> }
     const pa = body.projects.find((p) => p.id === "pa")!
-    // Coverage: c1, c2, c3 have a live clip (c4 deleted) → 3.
+    // Coverage: c1, c2, c3 each have a selected dub (c4 deleted) → 3.
     expect(pa.audioCells).toBe(3)
-    // Validated: only c1 (selected + approved). c3's approved take is no longer
-    // selected, so the re-record correctly drops it back to needs-re-validation.
+    // Validated: only c1. c3's validated take is no longer selected, so the
+    // re-record correctly drops it back to needing validation again.
     expect(pa.validatedAudioCells).toBe(1)
+  })
+
+  // AQU-490. Measured on this machine's dev database before the fix: a media
+  // project reported 52.9 HOURS recorded and every cell covered, because one
+  // imported programme clip is attached and selected on all of them and its
+  // duration was counted once per cell. Nobody had dubbed a line of it.
+  it("AQU-490: an imported source clip is neither coverage nor recorded time", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Episode 1', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'EP1', 'e1', 3, 0, 1000)").run()
+    // The same forty-minute clip on all three cells, as an import leaves it,
+    // plus one real dub on c1.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, role, validator_count, event_id, created_ts) VALUES
+        ('pa','f1','c1','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c2','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c3','src','recording','frontier-audio://src.wav',2400000,1,0,'source',0,'ae1',1),
+        ('pa','f1','c1','dub1','track-2','frontier-audio://dub1.wav',8000,1,0,'dub',1,'ae2',2)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number; recordedMs: number }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa).toMatchObject({ audioCells: 1, validatedAudioCells: 1, recordedMs: 8000 })
+  })
+
+  // Two tracks sound together, so the weaker one governs. Without the MIN,
+  // "some selected take is validated" would call c1 done while a whole track
+  // went unheard.
+  it("AQU-490: a multi-track cell is only as validated as its weakest track", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Episode 1', 1, 1)").run()
+    // This project asks for two validators on a recording.
+    await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)")
+      .bind(JSON.stringify({ validationCountAudio: 2 })).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'EP1', 'e1', 2, 0, 1000)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, role, validator_count, event_id, created_ts) VALUES
+        ('pa','f1','c1','a1','recording','frontier-audio://a1.wav',1000,1,0,'dub',3,'ae1',1),
+        ('pa','f1','c1','a2','track-2','frontier-audio://a2.wav',1000,1,0,'dub',1,'ae2',2),
+        ('pa','f1','c2','b1','recording','frontier-audio://b1.wav',1000,1,0,'dub',2,'ae3',3),
+        ('pa','f1','c2','b2','track-2','frontier-audio://b2.wav',1000,1,0,'dub',2,'ae4',4)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; audioCells: number; validatedAudioCells: number }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    // c1's second track has one vote against a threshold of two, so only c2
+    // counts — even though c1's first track has three.
+    expect(pa).toMatchObject({ audioCells: 2, validatedAudioCells: 1 })
   })
 
   // AQU-1083 — the org/project policy reaching the dashboard.
@@ -221,7 +356,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
               ('pa','f1','v1','source','In the beginning','verse','e1',1)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, approved, event_id, created_ts) VALUES
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts) VALUES
         ('pa','f1','h1','ah','generatedVoice','frontier-audio://h.wav',5000,1,0,1,'aeh',1),
         ('pa','f1','v1','av','recording','frontier-audio://v.wav',7000,1,0,1,'aev',1)`,
     ).run()
@@ -683,5 +818,163 @@ describe("plan unit rollup", () => {
   it("reports zeroes for a project with no files", async () => {
     await seedOrg()
     expect(await portfolio()).toMatchObject({ unitsTotal: 0, unitsDone: 0, unitsOverdue: 0 })
+  })
+})
+
+/**
+ * AQU-1071 — the org's active-language count, served beside the rollup.
+ *
+ * This is the number the enterprise billing band is read off, so it is counted by
+ * the same helper billing counts with (`countTargetLanesByOrg` → the plans.ts
+ * rule): distinct language tags; archived lanes, archived projects and paused
+ * (`is_active = false`, AQU-1070) projects excluded.
+ * The org dashboard tile reads it straight from here rather than tallying the
+ * lane chips on screen, which would double-count a language two projects share
+ * and would count an archived lane that still has progress rows.
+ */
+describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)", () => {
+  async function seedOrgWithLanes() {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES
+        ('pa', 'John', 1, 1, NULL),
+        ('pb', 'Mark', 1, 1, NULL),
+        ('pc', 'Luke', 1, 1, NULL),
+        ('pz', 'Retired', 1, 1, '2026-01-01')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES
+        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Bambara","Dioula"]}', 1),
+        ('pb', '{"targetLanguage":"Dioula"}', 1),
+        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+  }
+
+  async function languageCount(): Promise<number> {
+    const res = await app.request(
+      "/api/v2/orgs/1/portfolio",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { activeLanguageCount: number }).activeLanguageCount
+  }
+
+  it("counts each active target language once across the org", async () => {
+    await seedOrgWithLanes()
+    // Bambara (pa, listed twice — primary and lane), Dioula (pa and pb), and
+    // Fulfulde (pc). Songhai is archived and Zarma's project is archived, so
+    // neither is a language this org is still translating into.
+    expect(await languageCount()).toBe(3)
+  })
+
+  it("is zero for an org with no projects, rather than absent", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    expect(await languageCount()).toBe(0)
+  })
+
+  it("is org-wide, so a filtered page of projects does not shrink it", async () => {
+    // The tile must agree with the invoice whatever the table is showing, so the
+    // count is deliberately not scoped to the requested page or search.
+    await seedOrgWithLanes()
+    const res = await app.request(
+      "/api/v2/orgs/1/portfolio?q=john&limit=1",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: unknown[]; activeLanguageCount: number }
+    expect(body.projects).toHaveLength(1)
+    expect(body.activeLanguageCount).toBe(3)
+  })
+})
+
+describe("AQU-1421 portfolio lane visibility", () => {
+  const sql = (q: string) => env.AQUILLA_PG.prepare(q).run()
+
+  async function seedSplitProject() {
+    await seedUser(1, "owner")
+    await seedUser(2, "translator")
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)")
+    await sql("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)")
+    await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Tok Pisin', 1, 1)")
+    await sql("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('pa', 2, 400)")
+    await sql(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES ('pa', '{"targetLanguage":"Spanish","targetLanes":["es"]}', 1)`,
+    )
+    await sql("INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Spanish', ''), ('eslane01', 'pa', 'target', 'Spanish Team', 'es')")
+    await sql("INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('pa', 2, 'eslane01', 400)")
+    await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'owner', '{}', 1, 1, 1)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, ai_drafted_count, last_edit_at) VALUES ('f1', 'pa', 'Episode 1', 'e1', 80, 20, 5, 9000)")
+    await sql(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, updated_at)
+       VALUES ('pa', 'f1', 'file', '', '', 70, 20, '{}', 8000),
+              ('pa', 'f1', 'file', '', 'es', 10, 3, '{}', 1000)`,
+    )
+    await sql(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted) VALUES
+        ('pa', 'f1', 'c-hidden', 'target', '', 'draft', 'e1', 1, 1),
+        ('pa', 'f1', 'c-mine', 'target', 'es', 'draft', 'e1', 1, 1)`,
+    )
+    await sql(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts)
+       VALUES ('pa', 'f1', 'c-mine', 'a1', 'recording', 'frontier-audio://a1.wav', 1000, 1, 0, 'e1', 1)`,
+    )
+  }
+
+  async function rowFor(userId: number) {
+    const rows = await getOrgPortfolios(env as unknown as Env, [1], { userId, isAdmin: false })
+    return rows.find((row) => row.id === "pa")!
+  }
+
+  it("hides the ungranted lane's name, text totals, and default language, and keeps audio and plan units", async () => {
+    await seedSplitProject()
+    env.LANE_READ_WALL = "1"
+    try {
+      const translator = await rowFor(2)
+      expect(translator.lanes.map((lane) => lane.lane)).toEqual(["es"])
+      expect(translator).toMatchObject({
+        totalCells: 10,
+        filledCells: 3,
+        validatedCells: 0,
+        aiDraftedCells: 1,
+        lastEditAt: 1000,
+        targetLanguage: null,
+        sourceLanguage: null,
+        audioCells: 1,
+        unitsTotal: 1,
+      })
+      expect(translator.lanes[0]).toMatchObject({ lane: "es", totalCells: 10, filledCells: 3 })
+
+      const owner = await rowFor(1)
+      expect(owner.lanes.map((lane) => lane.lane).sort()).toEqual(["", "es"])
+      expect(owner).toMatchObject({
+        totalCells: 80,
+        aiDraftedCells: 5,
+        lastEditAt: 9000,
+        targetLanguage: "Spanish",
+        audioCells: 1,
+        unitsTotal: 1,
+      })
+    } finally {
+      env.LANE_READ_WALL = undefined
+    }
+  })
+
+  it("leaves the cross-lane totals in place while the wall is off", async () => {
+    await seedSplitProject()
+    env.LANE_READ_WALL = undefined
+    const translator = await rowFor(2)
+    expect(translator.lanes.map((lane) => lane.lane).sort()).toEqual(["", "es"])
+    expect(translator).toMatchObject({
+      totalCells: 80,
+      aiDraftedCells: 5,
+      targetLanguage: "Spanish",
+    })
   })
 })

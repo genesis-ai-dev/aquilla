@@ -95,6 +95,34 @@ function contentHash(text: string): string {
   return (h >>> 0).toString(16).padStart(8, "0")
 }
 
+/**
+ * AQU-1520: a source cell's `metadata` bucket, normalized to a plain object or
+ * `null`.
+ *
+ * `cells.metadata` is JSONB and reaches us as a parsed object through the
+ * shim, but a value that predates the column's current use — or a row written
+ * by an older path — can be a JSON string, an array, or a scalar. Only a plain
+ * object is a usable envelope (`readImportMilestone()` in
+ * `src/lib/milestone-navigation.ts` rejects anything else), so anything else
+ * becomes `null` and the snapshot copies no metadata for that cell rather than
+ * writing a shape the navigator cannot read.
+ */
+function cellMetadata(
+  value: unknown,
+): Record<string, unknown> | null {
+  const decoded = typeof value === "string"
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown
+        } catch {
+          return null
+        }
+      })()
+    : value
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) return null
+  return decoded as Record<string, unknown>
+}
+
 function countWords(text: string): number {
   const trimmed = text.trim()
   return trimmed ? trimmed.split(/\s+/).length : 0
@@ -413,6 +441,41 @@ export async function snapshotSourceFiles(
 }
 
 /**
+ * AQU-1453: which source cells of a project are currently PARKED, as a set of
+ * `file_id\0cell_id` keys.
+ *
+ * Returns `null` — not an empty set — when the question cannot be answered,
+ * which is the whole point of the signature. `cells.hidden_at` arrives with
+ * migration 0116, and this module's documented posture is that a snapshot must
+ * degrade rather than fail on a database that predates a column. `null` means
+ * "this deployment has no visibility to copy", and `snapshotSourceCells` then
+ * behaves exactly as it did before this change; an empty set would instead mean
+ * "nothing is parked", which on an older database would be a guess.
+ *
+ * Deliberately a separate query rather than two more columns on the main cell
+ * SELECT: folding `hidden_at` into that one would make a missing column abort
+ * the entire snapshot, turning a lost nuance into a clone with no cells at all.
+ */
+async function hiddenSourceCellKeys(
+  env: Env,
+  projectId: string,
+): Promise<Set<string> | null> {
+  if (!env.AQUILLA_PG) return null
+  try {
+    const rows = await env.AQUILLA_PG.prepare(
+      `SELECT file_id, cell_id
+         FROM cells
+        WHERE project_id = ? AND side = 'source' AND hidden_at IS NOT NULL`,
+    )
+      .bind(projectId)
+      .all<{ file_id: string; cell_id: string }>()
+    return new Set((rows.results ?? []).map((r) => `${r.file_id}\0${r.cell_id}`))
+  } catch {
+    return null
+  }
+}
+
+/**
  * Snapshot every source-side cell from `upstreamProjectId` as a burst of
  * local source events on `targetProjectId`. Used by the detach flow
  * (project lifecycle step 4) AND by clone-mode linking at creation time
@@ -426,6 +489,13 @@ export async function snapshotSourceFiles(
  * Existing local source cells receive `source.cell.commit` events chained to
  * their current head; missing rows receive `source.cell.create` genesis
  * events. Events are authored by the detacher.
+ *
+ * AQU-1453: a cell the upstream lead PARKED arrives parked. Hiding a cell is
+ * part of curating a source, so a project cloned from a curated source must not
+ * start by un-parking everything its upstream deliberately set aside. The copy
+ * is an ordinary `source.cell.visibility.set` event rather than a bare column
+ * write, so the receiving project's own lead can show the cell again — the
+ * acceptance criterion is that the hide stays reversible downstream.
  *
  * Returns the count of cell events emitted (0 if the cells projection isn't
  * available yet — same defensive posture as emitLinkSourceEvent).
@@ -448,6 +518,15 @@ export async function snapshotSourceCells(
   // upstream's.
   const fileIdMap = await snapshotSourceFiles(env, args)
 
+  // AQU-1453: the upstream's parked cells, and the target's own, read once
+  // rather than per cell. `null` from either means this deployment predates
+  // `cells.hidden_at` (see `hiddenSourceCellKeys`) — visibility is then left
+  // entirely alone and the rest of the snapshot proceeds untouched.
+  const upstreamHidden = await hiddenSourceCellKeys(env, args.upstreamProjectId)
+  const targetHidden = upstreamHidden === null
+    ? null
+    : await hiddenSourceCellKeys(env, args.targetProjectId)
+
   // Phase 1A's `cells` table has schema columns:
   //   project_id, file_id, cell_id, side, value, value_html, type,
   //   canonical_ref, anchor_cell_id, event_id, source_event_id,
@@ -464,10 +543,17 @@ export async function snapshotSourceCells(
     type: string | null
     canonical_ref: string | null
     anchor_cell_id: string | null
+    metadata: Record<string, unknown> | null
   }> = []
   try {
     const rows = await env.AQUILLA_PG.prepare(
-      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id
+      // AQU-1520: `metadata` carries the import envelope
+      // (`aquillaImport.milestone`) the section navigator builds its titles
+      // from. A clone that copies text/type/ref but not this one shows
+      // app-invented "Part N" divisions where the upstream shows "Acts
+      // Preface" and the named chapter sections.
+      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
+              metadata
          FROM cells
         WHERE project_id = ? AND side = 'source'`,
     )
@@ -480,6 +566,7 @@ export async function snapshotSourceCells(
         type: string | null
         canonical_ref: string | null
         anchor_cell_id: string | null
+        metadata: Record<string, unknown> | null
       }>()
     cells = rows.results ?? []
   } catch {
@@ -499,6 +586,10 @@ export async function snapshotSourceCells(
     // belongs to a different project (or doesn't exist under this one).
     const targetFileId = fileIdMap.get(cell.file_id) ?? cell.file_id
     const id = makeEventId()
+    // AQU-1520: normalized once — the genesis payload below and the `cells`
+    // row it projects to must carry the same envelope, or a log replay would
+    // disagree with the row it rebuilt.
+    const metadata = cellMetadata(cell.metadata)
     try {
       const existing = await env.AQUILLA_PG.prepare(
         `SELECT event_id
@@ -521,6 +612,11 @@ export async function snapshotSourceCells(
             valueHtml: cell.value_html ?? undefined,
             type: cell.type ?? undefined,
             canonicalRef: cell.canonical_ref ?? undefined,
+            // AQU-1520: the import envelope travels with the genesis event, so
+            // a replay of the log rebuilds the clone's section navigation too
+            // — the `cells` insert below is a projection of this payload, not
+            // an independent truth.
+            metadata: metadata ?? undefined,
           })
       const serverSeq = await nextServerSeq(env, args.targetProjectId)
 
@@ -548,6 +644,7 @@ export async function snapshotSourceCells(
 
       const hash = contentHash(cell.value)
       const wordCount = countWords(cell.value)
+      const metadataJson = metadata === null ? null : JSON.stringify(metadata)
       if (existing) {
         await env.AQUILLA_PG.prepare(
           `UPDATE cells
@@ -575,11 +672,17 @@ export async function snapshotSourceCells(
           .run()
       } else {
         await env.AQUILLA_PG.prepare(
+          // AQU-1240 slice 8: snapshotted source rows -> the target project's
+          // source lane. Inlined (mirrors laneIdResolveSql('source')); NULL until
+          // the project's lanes exist, then filled by the backfill.
           `INSERT INTO cells (
             project_id, file_id, cell_id, side, value, value_html, type,
             canonical_ref, anchor_cell_id, event_id, source_event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash
-          ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)`,
+            last_editor, last_edit_at, validated, word_count, content_hash,
+            metadata, lane_id
+          ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+                    ?::text::jsonb,
+                    (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'source'))`,
         )
           .bind(
             args.targetProjectId,
@@ -595,8 +698,68 @@ export async function snapshotSourceCells(
             now,
             wordCount,
             hash,
+            // AQU-1520: projects the genesis payload's import envelope, so the
+            // clone's section navigator reads the upstream's real divisions
+            // instead of falling back to "Part N". JSON text + an explicit
+            // cast, the same shape the sync-worker projection binds JSONB with.
+            metadataJson,
+            args.targetProjectId,
           )
           .run()
+      }
+      // AQU-1453: carry the cell's visibility across, in whichever direction it
+      // differs. A re-snapshot (detach, or a second clone onto the same target)
+      // has to be able to SHOW a cell the upstream un-parked as well as hide one
+      // it parked, or the target drifts a little further from its source on
+      // every pass.
+      //
+      // Only when it actually differs: the overwhelming case is a project with
+      // nothing parked, and an unconditional event per cell would put one
+      // no-op `source.cell.visibility.set` in the log for every verse of a
+      // Bible.
+      if (upstreamHidden !== null) {
+        const wantHidden = upstreamHidden.has(`${cell.file_id}\0${cell.cell_id}`)
+        // A row that does not exist yet cannot be parked, so a fresh create is
+        // visible — which is what makes `false` the right default here.
+        const isHidden = targetHidden?.has(`${targetFileId}\0${cell.cell_id}`) ?? false
+        if (wantHidden !== isHidden) {
+          const visibilityEventId = makeEventId()
+          const visibilitySeq = await nextServerSeq(env, args.targetProjectId)
+          await env.AQUILLA_PG.prepare(
+            `INSERT INTO events
+               (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+                author, payload, client_ts, server_ts, server_seq)
+             VALUES (?, 1, ?, ?, ?, NULL, 'source.cell.visibility.set',
+                     ?, ?, ?, ?, ?)`,
+          )
+            .bind(
+              visibilityEventId,
+              args.targetProjectId,
+              targetFileId,
+              cell.cell_id,
+              args.authorUsername,
+              JSON.stringify({ hidden: wantHidden }),
+              now,
+              now,
+              visibilitySeq,
+            )
+            .run()
+          // `parent_id` is NULL and `cells.event_id` is deliberately NOT moved:
+          // `source.cell.visibility.set` is non-chain-mutating (AQU-1422), so
+          // parking a cell must not advance the source head and make every
+          // lane's translation of it go stale under AD-9.
+          await env.AQUILLA_PG.prepare(
+            `UPDATE cells SET hidden_at = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+          )
+            .bind(
+              wantHidden ? now : null,
+              args.targetProjectId,
+              targetFileId,
+              cell.cell_id,
+            )
+            .run()
+        }
       }
       emitted++
     } catch (err) {

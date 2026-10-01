@@ -11,8 +11,13 @@
 //
 // ENV VARS (see scripts/migrate-fetch.ts for the full live runbook):
 //   FRONTIER_USERNAME + FRONTIER_PASSWORD  -> exchanged here for GitLab creds
+//   FRONTIER_TOKEN    + GITLAB_URL         -> a GitLab token used directly
 //   FRONTIER_API                           -> overrides the API endpoint
 //                                             (default https://api.frontierrnd.com/api/v1)
+//
+// Both sets may be present. The direct token is TRIED first, not trusted
+// first: `resolveCredentialsFromEnv` verifies it against GitLab and falls
+// through to the password grant when GitLab rejects it (AQU-1347).
 
 export const DEFAULT_FRONTIER_API = "https://api.frontierrnd.com/api/v1"
 
@@ -24,7 +29,7 @@ export type CredentialSource = "direct-token" | "frontier-login"
 export function describeCredentialSource(source: CredentialSource | undefined): string {
   switch (source) {
     case "direct-token":
-      return "FRONTIER_TOKEN + GITLAB_URL (direct GitLab token; takes precedence over FRONTIER_USERNAME/PASSWORD)"
+      return "FRONTIER_TOKEN + GITLAB_URL (direct GitLab token; tried first, falls back to FRONTIER_USERNAME/PASSWORD when GitLab rejects it)"
     case "frontier-login":
       return "FRONTIER_USERNAME + FRONTIER_PASSWORD (Frontier password grant)"
     default:
@@ -121,33 +126,145 @@ export async function loginToFrontier(
   }
 }
 
+/** The outcome of asking GitLab whether a token is actually good. */
+export interface CredentialCheck {
+  ok: boolean
+  /**
+   * Why it is not ok, in words safe to print: an HTTP status line, or the
+   * reason GitLab could not be reached. NEVER the token. Undefined when ok.
+   */
+  reason?: string
+}
+
 /**
- * Resolve GitLab credentials from the environment. Preferred path is the
- * Frontier password grant (FRONTIER_USERNAME + FRONTIER_PASSWORD). A direct
- * escape hatch (FRONTIER_TOKEN + GITLAB_URL) skips the Frontier round-trip
- * entirely — handy when you already hold a GitLab token.
+ * Ask GitLab whether these credentials work, via the cheapest authenticated
+ * call there is (`GET /api/v4/user` — the token's own identity, one row, no
+ * pagination).
  *
- * @throws with an actionable message if neither credential set is present.
+ * This exists because a token that is merely PRESENT is not a token that
+ * WORKS, and the resolver used to treat the two as the same thing. Checking
+ * here, once, is what lets `resolveCredentialsFromEnv` fall through to the
+ * password grant instead of handing a dead token to the caller and letting it
+ * surface hours later as a bare 401 from whatever call happened to be first.
+ */
+export async function verifyGitLabToken(
+  creds: GitLabCredentials,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CredentialCheck> {
+  const url = `${trimTrailingSlash(creds.gitlabUrl)}/api/v4/user`
+  let response: Response
+  try {
+    response = await fetchImpl(url, {
+      headers: { Authorization: `Bearer ${creds.gitlabToken}` },
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      reason:
+        `could not reach ${url}: ` +
+        (error instanceof Error ? error.message : String(error)),
+    }
+  }
+  if (response.ok) return { ok: true }
+  return { ok: false, reason: `${response.status} ${response.statusText}`.trim() }
+}
+
+/** Hooks for `resolveCredentialsFromEnv`, so tests can drive it without a network. */
+export interface ResolveCredentialsOptions {
+  /** Defaults to `verifyGitLabToken`. */
+  verify?: (creds: GitLabCredentials) => Promise<CredentialCheck>
+  /** Where the "which path did we use" line goes. Defaults to stderr. */
+  log?: (message: string) => void
+}
+
+function defaultLog(message: string): void {
+  process.stderr.write(`${message}\n`)
+}
+
+/**
+ * Resolve GitLab credentials from the environment, VERIFYING whichever path it
+ * takes and falling through when the first one is dead.
+ *
+ * Order: the direct escape hatch (FRONTIER_TOKEN + GITLAB_URL) first, because
+ * somebody who set it meant to skip the Frontier round-trip — then the Frontier
+ * password grant (FRONTIER_USERNAME + FRONTIER_PASSWORD).
+ *
+ * WHY THE FALL-THROUGH EXISTS (AQU-1347). The nightly delta sync failed 60
+ * runs in a row over two months (AQU-1344) for one reason: `FRONTIER_TOKEN`
+ * had expired, and because the resolver returned it unchecked the moment it
+ * was set, it SHADOWED a username/password pair that was valid the whole time.
+ * Precedence without verification is just a single point of failure wearing a
+ * preference's clothes. Now an expired direct token costs a log line, not a
+ * nightly run.
+ *
+ * Every failure names the env vars behind it and never the values — the whole
+ * point is an operator reading CI output learning WHICH secret to rotate.
+ *
+ * @throws when no credential set is present, or when every present one fails.
  */
 export async function resolveCredentialsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
+  options: ResolveCredentialsOptions = {},
 ): Promise<GitLabCredentials> {
+  const verify = options.verify ?? ((creds) => verifyGitLabToken(creds))
+  const log = options.log ?? defaultLog
+
   const directToken = env.FRONTIER_TOKEN?.trim()
   const directUrl = env.GITLAB_URL?.trim()
+  const username = env.FRONTIER_USERNAME?.trim()
+  const password = env.FRONTIER_PASSWORD
+  const apiEndpoint = env.FRONTIER_API?.trim() || DEFAULT_FRONTIER_API
+  const hasLogin = Boolean(username && password)
+
+  let directFailure: string | undefined
+
   if (directToken && directUrl) {
-    return {
+    const direct: GitLabCredentials = {
       gitlabToken: directToken,
       gitlabUrl: trimTrailingSlash(directUrl),
       accessToken: "",
       source: "direct-token",
     }
+    const check = await verify(direct)
+    if (check.ok) {
+      log("GitLab credentials: using FRONTIER_TOKEN + GITLAB_URL (direct token accepted).")
+      return direct
+    }
+    directFailure = `FRONTIER_TOKEN was rejected by GitLab (${check.reason ?? "no response"})`
+    if (!hasLogin) {
+      throw new Error(
+        `${directFailure}. Rotate FRONTIER_TOKEN, or set FRONTIER_USERNAME + ` +
+          "FRONTIER_PASSWORD so the Frontier password grant can take over.",
+      )
+    }
+    log(
+      `${directFailure} — falling back to the FRONTIER_USERNAME + FRONTIER_PASSWORD ` +
+        "password grant.",
+    )
   }
 
-  const username = env.FRONTIER_USERNAME?.trim()
-  const password = env.FRONTIER_PASSWORD
-  if (username && password) {
-    const apiEndpoint = env.FRONTIER_API?.trim() || DEFAULT_FRONTIER_API
-    return loginToFrontier(username, password, apiEndpoint)
+  if (hasLogin) {
+    let brokered: GitLabCredentials
+    try {
+      brokered = await loginToFrontier(username!, password!, apiEndpoint)
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error)
+      // Both paths named in ONE message. Two separate failures reported one at
+      // a time is how AQU-1344 stayed invisible: each run's log only ever
+      // showed the first one, so the working path never got mentioned.
+      throw new Error(
+        directFailure === undefined
+          ? why
+          : `Both GitLab credential paths failed. ${directFailure}. ` +
+            `Frontier password grant also failed: ${why}`,
+        { cause: error },
+      )
+    }
+    log(
+      "GitLab credentials: using FRONTIER_USERNAME + FRONTIER_PASSWORD " +
+        "(Frontier password grant accepted).",
+    )
+    return brokered
   }
 
   throw new Error(

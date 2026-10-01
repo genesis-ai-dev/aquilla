@@ -28,7 +28,7 @@ describe("changed-file E2E impact selection", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
       "db/postgres/migrations/0095_workspace_subscription_state.sql",
-      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
+      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/transcription.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
         "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")
@@ -95,11 +95,53 @@ describe("changed-file E2E impact selection", () => {
     }
   })
 
+  it("maps the document-understanding tag layer to the AI completion journey", () => {
+    // AQU-657: tags reach a user through retrieval and few-shot selection, so a
+    // change to them must not fall through to the generic shared-runtime sentinel.
+    for (const file of [
+      "src/lib/understanding/passage-tags.ts",
+      "src/lib/understanding/passage-tag-store.ts",
+      "auth-worker/src/routes/ai-passage-tags.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
+    }
+  })
+
   it("maps Knowledge Base clients and routes to the project-settings persistence journey", () => {
     expect(selectAffectedE2E([
       "src/components/knowledge/KnowledgeBaseSurface.tsx",
       "auth-worker/src/routes/knowledge.ts",
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
+  })
+
+  it("maps the share / invite surfaces to the share-invite journey (AQU-1153)", () => {
+    // PR #882 restyled UsernameTypeahead's mode switch as tabs and merged with a
+    // stale button locator in share-invite.smoke: none of these files carried a
+    // domain keyword, so the push gate ran only the core sentinels.
+    const available = [...specs, "e2e/specs/projects/share-invite.smoke.spec.ts"]
+    for (const file of [
+      "src/components/UsernameTypeahead.tsx",
+      "src/components/MemberMultiAddRow.tsx",
+      "src/components/MultiProjectInviteDialog.tsx",
+      "src/components/ProjectMembersPage.tsx",
+      "src/components/ProjectSettings/AddProjectMemberDialog.tsx",
+      "src/components/SharePanel.tsx",
+      "src/components/JoinPage.tsx",
+      "src/hooks/useUserSearch.ts",
+      "src/lib/sync/invites.ts",
+      "auth-worker/src/routes/invites.ts",
+      "auth-worker/src/services/invite-scopes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], available).specs, file).toContain(
+        "e2e/specs/projects/share-invite.smoke.spec.ts",
+      )
+    }
+    // A matched domain rule replaces the core-sentinel fallback outright.
+    expect(selectAffectedE2E(["src/components/UsernameTypeahead.tsx"], available).specs).toEqual([
+      "e2e/specs/projects/share-invite.smoke.spec.ts",
+    ])
   })
 
   it("maps app font-size preference and boot script to preferences persist-reload", () => {
@@ -117,8 +159,9 @@ describe("changed-file E2E impact selection", () => {
 
   it("maps a format parser to the import journey rather than shared runtime", () => {
     for (const file of [
-      "src/lib/parsers/biblica-ebl.ts",
-      "src/lib/biblica/ebl/notes.ts",
+      "src/lib/parsers/usfm.ts",
+      "src/partner-integrations/biblica/parsers/biblica-ebl.ts",
+      "src/partner-integrations/biblica/ebl/notes.ts",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",

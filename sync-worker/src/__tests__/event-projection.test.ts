@@ -104,7 +104,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang)')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
     // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
     // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
     // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
@@ -163,7 +163,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
     // bind order (mirrors the INSERT column list):
@@ -509,8 +509,17 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
   })
 })
 
-describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalidate (AQU-508)', () => {
-  it('cell.audio.validate emits a single cell_audio approve UPDATE keyed by audio_id', () => {
+// AQU-508 shipped these two kinds as a boolean stamp on cell_audio
+// (approved / approved_by / approved_ts). No client ever emitted them, and a
+// boolean could not express "this project requires two reviewers" — so AQU-490
+// replaced the stamp with per-validator rows counted against the project's
+// threshold at READ time, the same shape text has used since FRO-279.
+//
+// The statement shapes are pinned here; the data outcomes (idempotence, the
+// out-of-order guard, trim discarding votes, fill-only authorship) live in
+// audio-validators-projection.test.ts against real Postgres.
+describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalidate (AQU-490)', () => {
+  it('cell.audio.validate inserts a validator row and re-derives the take’s count', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
@@ -518,17 +527,16 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       makeEvent('cell.audio.validate', { audioId: 'a1' }),
       stmts,
     )
-    // Audio validation touches only cell_audio — no chain head, no counters.
-    expect(touches).toEqual(['cell_audio'])
-    expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 1')
-    expect(recorded[0].sql).toContain('approved_by = ?')
-    expect(recorded[0].sql).toContain('approved_ts = ?')
-    // Bound: author, serverTs, project, file, cell, audioId.
-    expect(recorded[0].args).toEqual(['alice', 2000, 'proj-1', 'file-a', 'cell-1', 'a1'])
+    // Both tables, or a client invalidates the names and not the count.
+    expect(touches).toEqual(['cell_audio', 'cell_audio_validators'])
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain('INSERT INTO cell_audio_validators')
+    expect(recorded[0].sql).toContain('ON CONFLICT')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000])
+    expect(recorded[1].sql).toContain('SET validator_count')
   })
 
-  it('cell.audio.unvalidate clears approval (approved = 0, approver nulled)', () => {
+  it('cell.audio.unvalidate deletes the author’s own row by default', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
@@ -536,10 +544,10 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       makeEvent('cell.audio.unvalidate', { audioId: 'a1' }),
       stmts,
     )
-    expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain('UPDATE cell_audio SET approved = 0')
-    expect(recorded[0].sql).toContain('approved_by = NULL')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1'])
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain('DELETE FROM cell_audio_validators')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice'])
+    expect(recorded[1].sql).toContain('SET validator_count')
   })
 
   it('is not chain-mutating', () => {
@@ -547,7 +555,11 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
     expect(isChainMutatingKind('cell.audio.unvalidate')).toBe(false)
   })
 
-  it('round-trips against real Postgres: validate sets approved=1, unvalidate clears it', async () => {
+  // The retirement, pinned. `approved` stays in the schema until a contract
+  // migration can drop it, and nothing may start writing it again: a stamp
+  // survives a threshold change and a projection rebuild replays at the
+  // default, so the column would assert the wrong answer at the wrong moment.
+  it('round-trips against real Postgres and leaves the retired approved stamp alone', async () => {
     const { db, rows } = await makeTestDb({
       cell_audio: [
         {
@@ -558,20 +570,21 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
       ],
     })
 
-    const approveStmts: AquillaStatement[] = []
-    buildEventProjectionStmts(db, makeEvent('cell.audio.validate', { audioId: 'a1' }), approveStmts)
-    await db.batch(approveStmts)
-    let audio = await rows<{ approved: number; approved_by: string | null; approved_ts: number | null }>('cell_audio')
-    expect(audio[0].approved).toBe(1)
-    expect(audio[0].approved_by).toBe('alice')
-    expect(audio[0].approved_ts).toBe(2000)
+    const validateStmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('cell.audio.validate', { audioId: 'a1' }), validateStmts)
+    await db.batch(validateStmts)
+    let audio = await rows<{ validator_count: number; approved: number; approved_by: string | null }>('cell_audio')
+    expect(audio[0].validator_count).toBe(1)
+    expect(audio[0].approved).toBe(0)
+    expect(audio[0].approved_by).toBeNull()
+    expect(await rows('cell_audio_validators')).toHaveLength(1)
 
     const clearStmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('cell.audio.unvalidate', { audioId: 'a1' }), clearStmts)
     await db.batch(clearStmts)
     audio = await rows('cell_audio')
-    expect(audio[0].approved).toBe(0)
-    expect(audio[0].approved_by).toBeNull()
+    expect(audio[0].validator_count).toBe(0)
+    expect(await rows('cell_audio_validators')).toHaveLength(0)
   })
 })
 
@@ -893,6 +906,10 @@ describe('isChainMutatingKind', () => {
     // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
     // would lose the genesis slot to the cell's own create on rebuild).
     'source.cell.reanchor': false,
+    // AQU-1422: hide/show moves only cells.hidden_at on the shared source
+    // row and never advances the source head (a hide must not make every
+    // lane's translation go stale under AD-9) — non-chain-mutating by design.
+    'source.cell.visibility.set': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,
@@ -934,6 +951,10 @@ describe('isChainMutatingKind', () => {
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,
+    // AQU-777: an attachment hangs off the cell as reference context; it
+    // never touches the cell's own text chain.
+    'cell.attachment.add': false,
+    'cell.attachment.remove': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,

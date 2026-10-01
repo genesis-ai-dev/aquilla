@@ -22,11 +22,25 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
-import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
+import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
+import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
+import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
+import { selectedDubTakes } from "@/lib/sync/cell-audio-read-types"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
+import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import {
+  batchValidateTelemetry,
+  batchValidateToast,
+  summarizeBatchValidate,
+} from "@/lib/review/batch-validate-summary"
+import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+import posthog from "@/lib/posthog"
 
 interface Props {
   project: ProjectRecord
@@ -47,6 +61,13 @@ interface Props {
    * never fires a guaranteed-403; the server stays authoritative.
    */
   myScopes: MemberScope[]
+  /**
+   * AQU-490: the file's audio, so bulk validation can see the takes. The
+   * selection reads cells straight from the store, which never carry
+   * attachments — without this the audio action would find nothing to do on
+   * every file, silently.
+   */
+  audioByCellId?: Parameters<typeof mergeCellsWithAudio>[1]
   completeSingle?: (cell: CellData) => Promise<boolean> | void
   completeBatch?: (cells: CellData[]) => Promise<void> | void
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
@@ -81,12 +102,17 @@ type Running =
   | { kind: "translate" }
   | { kind: "validate" }
   | { kind: "voice" }
+  | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, username, activeLane, myScopes, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const t = useT()
+  // AQU-1503: skip clauses join the way a list is written in the reader's
+  // language rather than with a hardcoded separator.
+  const { list: formatLocaleList } = useFormat()
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
+  const commitAudioValidation = useAudioValidationCommit(session?.jwt ?? null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -114,12 +140,9 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     [selectedCells],
   )
   const validatableCount = useMemo(
-    () => selectedCells.filter(
-      (c) =>
-        isBulkValidationEligible(c) &&
-        !c.activeValidators.includes(username) &&
-        isInMemberScope(myScopes, c.fileId, activeLane),
-    ).length,
+    // AQU-490: shared with ProjectWorkspace.runBatchValidate, which used to
+    // apply neither of these two guards.
+    () => selectedCells.filter((c) => isBulkValidatableByMe(c, username, myScopes, activeLane)).length,
     [selectedCells, username, myScopes, activeLane],
   )
   const unvalidatableCount = useMemo(
@@ -171,8 +194,148 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   )
   const isBusy = running.kind !== "idle"
 
+  /**
+   * AQU-1459: the SAME permission `commitCompletedCells` applies, asked BEFORE
+   * the model is called instead of after it answers. A validator (Reviewer)
+   * passes the `cell.validate` check that keeps the whole bar on screen, so
+   * Translate used to stay live for them: the click spent tokens on drafts the
+   * commit then refused with "You do not have permission to commit target
+   * cells". The header's Run completions / Complete all already gate on this
+   * (`workspace-actions/registry.ts`); this is the affordance that did not.
+   *
+   * `canPerform` fails OPEN on an unknown role, so local/legacy projects with
+   * no `syncRole` keep Translate — same convention as the suppression check
+   * below. `project.syncRole` is re-read on every render, so a role downgrade
+   * or lane grant that lands through the app's usual refresh takes effect here
+   * without a reload.
+   */
+  const roleLevel = project.syncRole?.level ?? null
+  const canCommitTarget = canPerform("target.cell.commit", roleLevel)
+
+  // AQU-490: bulk AUDIO validation — a SEPARATE action beside the text one,
+  // per Sam's ruling. Never merged: a reviewer signing off translations has
+  // not listened to the recordings, and one button doing both would collect
+  // sign-off nobody meant to give.
+  /**
+   * The selection's takes, split into what I can still give and what I can
+   * take back. One pass, because both halves walk the same merged cells and
+   * ask the same adapter — and because a second pass is how the two counts
+   * would eventually disagree about the same take.
+   */
+  const { audioTakeTargets, audioRemoveTargets, audioHasAnyTake } = useMemo(() => {
+    const give: Array<{ fileId: string; cellId: string; audioId: string }> = []
+    const back: Array<{ fileId: string; cellId: string; audioId: string }> = []
+    if (!audioByCellId) return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: false }
+    let anyTake = false
+    const merged = mergeCellsWithAudio(selectedCells, audioByCellId)
+    for (const cell of merged) {
+      for (const take of audioValidationTakes(
+        audioEntryFromCell(cell),
+        project,
+        { roleLevel: project.syncRole?.level ?? null, username },
+        () => "",
+      )) {
+        anyTake = true
+        const target = { fileId: cell.fileId, cellId: cell.id, audioId: take.audioId }
+        if (isBulkAudioValidatableByMe(cell, take, username, myScopes, activeLane)) give.push(target)
+        if (isBulkAudioUnvalidatableByMe(cell, take, username, myScopes, activeLane)) back.push(target)
+      }
+    }
+    return { audioTakeTargets: give, audioRemoveTargets: back, audioHasAnyTake: anyTake }
+  }, [selectedCells, audioByCellId, myScopes, activeLane, project, username])
+
+  /**
+   * Does this FILE have audio at all? The pair's presence turns on this rather
+   * than on the selection: Sam's ruling of 2026-09-22 is that the buttons never
+   * disappear once you are working with audio, only enable and disable. Keying
+   * on the selection is what made "Validate audio" vanish the moment you used
+   * it — the very click that emptied it also hid the way back.
+   *
+   * A text-only file still shows only the text pair, so nothing grows two dead
+   * buttons it can never use.
+   */
+  const fileHasAudio = useMemo(() => {
+    if (!audioByCellId) return false
+    for (const entry of audioByCellId.values()) {
+      if (selectedDubTakes(entry).length > 0) return true
+    }
+    return false
+  }, [audioByCellId])
+
+  /** Why the validate button is dark, in the selection's own terms. */
+  const validateAudioDisabledReason = useMemo(() => {
+    if (audioTakeTargets.length > 0) return null
+    if (!audioHasAnyTake) return t("editor.selection.validateAudioNoTakes")
+    if (audioRemoveTargets.length > 0) return t("editor.selection.validateAudioAllMine")
+    return t("editor.selection.validateAudioNothingEligible")
+  }, [audioTakeTargets, audioRemoveTargets, audioHasAnyTake, t])
+
+  const onValidateAudio = useCallback(async () => {
+    if (isBusy || audioTakeTargets.length === 0) return
+    if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
+    setRunning({ kind: "validate-audio" })
+    try {
+      // AWAITED, unlike the text loop beside it. These are not fire-and-forget
+      // here because the commit below flushes the outbox, and a flush that
+      // outruns its own enqueues sends nothing (AQU-490, 2026-09-22).
+      for (const target of audioTakeTargets) {
+        await emitCellAudioValidate({
+          projectId: project.id,
+          fileId: target.fileId,
+          cellId: target.cellId,
+          audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: username,
+        })
+      }
+      toast.add({
+        type: "success",
+        title: t("editor.selection.validatedAudioToast", { count: audioTakeTargets.length }),
+      })
+      // NOT `onValidationCommitted` — that is the TEXT refresher, and routing
+      // audio through it is why the gutter stayed hollow after a bulk vote.
+      // Every file the selection touched, because a subtitle selection's takes
+      // can live on a cue sibling.
+      await commitAudioValidation(audioTakeTargets.map((target) => target.fileId))
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
+
+  /** The opposite action, which the audio side simply did not have. */
+  const onUnvalidateAudio = useCallback(async () => {
+    if (isBusy || audioRemoveTargets.length === 0) return
+    if (!canPerform("cell.audio.unvalidate", project.syncRole?.level ?? null)) return
+    setRunning({ kind: "validate-audio" })
+    try {
+      for (const target of audioRemoveTargets) {
+        // No `targetUsername`: absent means "my own vote", and removing
+        // somebody else's is a maintainer action that lives elsewhere.
+        // AQU-1462 stamps the lane so an archived lane can refuse the vote.
+        // The vote itself stays shared across languages.
+        await emitCellAudioUnvalidate({
+          projectId: project.id,
+          fileId: target.fileId,
+          cellId: target.cellId,
+          audioId: target.audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: username,
+        })
+      }
+      toast.add({
+        type: "success",
+        title: t("editor.selection.unvalidatedAudioToast", { count: audioRemoveTargets.length }),
+      })
+      await commitAudioValidation(audioRemoveTargets.map((target) => target.fileId))
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
+
   const onTranslate = useCallback(async () => {
     if (isBusy) return
+    // AQU-1459: never call the model for someone whose commit is already denied.
+    if (!canCommitTarget) return
     setRunning({ kind: "translate" })
     try {
       const missing = selectedCells.filter(
@@ -184,7 +347,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, completeBatch, isBusy])
+  }, [selectedCells, completeBatch, isBusy, canCommitTarget])
 
   const onVoice = useCallback(async () => {
     if (isBusy || !onVoiceTogether) return
@@ -198,37 +361,44 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
 
   const onValidate = useCallback(() => {
     if (isBusy) return
-    if (validatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      let validated = 0
-      let alreadyValidated = 0
-      for (const cell of selectedCells) {
-        if (!isBulkValidationEligible(cell)) continue
-        if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
-        if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue // AQU-633: skip out-of-scope
-        if (!cell.targetEventId || !project.id) continue
+      // AQU-1503: the eligibility split, the toast wording and the telemetry
+      // now come from the same summary the "Batch validate text…" workspace
+      // action uses, so the two surfaces can no longer disagree about what a
+      // batch did — and neither can end in silence. The old loop reported only
+      // one class of skip ("already validated"); an AI draft, an out-of-scope
+      // cell or an unsaved edit fell out of the count with nothing said.
+      const summary = summarizeBatchValidate(selectedCells, {
+        username,
+        myScopes,
+        activeLane,
+        hasTarget: Boolean(project.id),
+      })
+      for (const cell of summary.validatable) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
-          editEventId: cell.targetEventId,
+          editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
-        validated++
       }
-      const msg = alreadyValidated > 0
-        ? t("editor.selection.validatedToastSkipped", { count: validated, already: alreadyValidated })
-        : t("editor.selection.validatedToast", { count: validated })
-      toast.add({ type: "success", title: msg })
+      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
+      const message = batchValidateToast(summary, t, formatLocaleList)
+      toast.add({
+        type: message.type,
+        title: message.title,
+        ...(message.description ? { description: message.description } : {}),
+      })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
-      if (validated > 0) onValidationCommitted?.()
+      if (summary.validatable.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted, t])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -267,8 +437,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   // canPerform fails OPEN when the role is unknown (local/legacy projects
   // with no syncRole), so this only suppresses the bar for a KNOWN
   // sub-reviewer role — never blocks legacy non-cloud projects.
-  const roleLevel = project.syncRole?.level ?? null
-  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canPerform("target.cell.commit", roleLevel)) {
+  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canCommitTarget) {
     return null
   }
 
@@ -283,7 +452,10 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       role="toolbar"
       aria-label={t("editor.selection.actions")}
     >
-      <span className="font-medium">
+      {/* Never wraps: with two validation pairs beside it the label was the
+          only flexible thing left and folded onto four lines. It keeps its
+          width; the buttons take the squeeze (Sam, 2026-09-22). */}
+      <span className="shrink-0 whitespace-nowrap font-medium">
         {t("editor.selection.count", { count: selectedCells.length })}
         {missingCount > 0 && (
           <span className="ms-1 text-muted-foreground">
@@ -322,6 +494,9 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       {!audioMode && (
         <>
       <AppTooltip content={
+        // AQU-1459: the permission reason comes FIRST. A validator sees why the
+        // button is dark in the terms of their role, not "all translated".
+        !canCommitTarget ? t("editor.selection.translateNoPermission") :
         !completeBatch ? t("editor.selection.translateNotConfigured") :
         missingCount === 0 ? t("editor.selection.allTranslated") :
         t("editor.selection.translateTooltip", { count: missingCount })
@@ -331,7 +506,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           size="sm"
           variant="default"
           onClick={onTranslate}
-          disabled={isBusy || missingCount === 0 || !completeBatch}
+          disabled={isBusy || missingCount === 0 || !completeBatch || !canCommitTarget}
         >
           {running.kind === "translate" ? (
             <Spinner className="me-1 size-3.5" />
@@ -361,7 +536,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           {running.kind === "validate" ? (
             <Spinner className="me-1 size-3.5" />
           ) : null}
-          {t("editor.selection.validate")}
+          {t("editor.selection.validateText")}
           {validatableCount > 0 && (
             <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {validatableCount}
@@ -389,6 +564,68 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           )}
         </Button>
       </AppTooltip>
+        </>
+      )}
+      {/* AQU-490 — the audio pair, and it is a PAIR: "Validate audio" used to
+          be a lone button that vanished the moment you used it, so the click
+          that emptied it also hid the way back. Sam, 2026-09-22: it behaves
+          like the text pair beside it, always present and merely enabled or
+          disabled, with an opposite action.
+
+          Present once the FILE has audio rather than once the SELECTION has
+          something to validate — that difference is the fix. A text-only file
+          still shows only the text pair, so nothing grows two dead buttons.
+
+          OUTSIDE the `!audioMode` branch, unlike the text actions: the Audio
+          view is where recordings are worked on, and this is the one
+          validation it offers. */}
+      {fileHasAudio && (
+        <>
+          <AppTooltip content={
+            validateAudioDisabledReason
+              ? validateAudioDisabledReason
+              : t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })
+          }>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onValidateAudio}
+              disabled={isBusy || audioTakeTargets.length === 0}
+            >
+              {running.kind === "validate-audio" ? <Spinner className="me-1 size-3.5" /> : null}
+              {t("editor.selection.validateAudio")}
+              {audioTakeTargets.length > 0 && (
+                <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+                  {audioTakeTargets.length}
+                </span>
+              )}
+            </Button>
+          </AppTooltip>
+          <AppTooltip content={
+            audioRemoveTargets.length === 0
+              ? t("editor.selection.noAudioValidations")
+              : t("editor.selection.unvalidateAudioTooltip", { count: audioRemoveTargets.length })
+          }>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onUnvalidateAudio}
+              disabled={isBusy || audioRemoveTargets.length === 0}
+            >
+              {t("editor.selection.removeMyAudioValidations")}
+              {audioRemoveTargets.length > 0 && (
+                <span className="ms-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+                  {audioRemoveTargets.length}
+                </span>
+              )}
+            </Button>
+          </AppTooltip>
+        </>
+      )}
+      {!audioMode && (
+        <>
       {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}

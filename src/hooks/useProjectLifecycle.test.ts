@@ -13,7 +13,9 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 
 // Mock the API call
 const toggleLifecycleMock = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   toggleProjectLifecycle: (...args: unknown[]) => toggleLifecycleMock(...args),
 }))
 

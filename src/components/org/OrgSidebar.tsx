@@ -1,6 +1,6 @@
 import { startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import type { LucideIcon } from "lucide-react"
+import { KeyRound, type LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -143,6 +143,13 @@ export function OrgSidebar() {
           <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.members} />
             {t("editor.navTitle.members")}
+          </OrgNavLink>
+        )}
+        {/* AQU-1352 §3.6: same roster gate as Members (and GET /users/:id/access). */}
+        {showMembersNav && activeOrgId != null && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access")} className={link}>
+            <NavIcon icon={KeyRound} />
+            {t("org.access.page.title")}
           </OrgNavLink>
         )}
         {isAdmin && activeOrgId != null && (

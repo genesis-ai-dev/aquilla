@@ -51,6 +51,11 @@ export const nav = defineNamespace({
     "nav.help.contactSupport": "Contact support",
     "nav.help.report": "Report",
 
+    // -- FeedbackButton (AQU-1028): the always-visible shell affordance that
+    // opens the same dialog as nav.help.report. --
+    "nav.feedback.buttonLabel": "Feedback",
+    "nav.feedback.buttonTooltip": "Send feedback to the Aquilla team",
+
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
     "nav.dock.agentTab": "Agent",
@@ -121,23 +126,37 @@ export const nav = defineNamespace({
       "untranslated",
     ),
     "nav.workspaceActions.completeAll.confirmLabel": "Draft all",
-    "nav.workspaceActions.batchValidate.label": "Batch validate…",
-    "nav.workspaceActions.batchValidate.title": "Batch validate",
-    "nav.workspaceActions.batchValidate.description": plural(
+    "nav.workspaceActions.batchValidate.label": "Batch validate text…",
+    "nav.workspaceActions.batchValidateAudio.label": "Batch validate audio…",
+    "nav.workspaceActions.batchValidateAudio.title": "Validate every take in this file?",
+    "nav.workspaceActions.batchValidateAudio.description": plural({
+      one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
+      other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
+    }),
+    "nav.workspaceActions.batchValidate.title": "Batch validate text",
+    // AQU-1507: the old `…batchValidate.description` promised the file's whole
+    // unvalidated count — untranslated cells, untouched AI drafts and cells
+    // already signed off by the reader included — while the run validates only
+    // what `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: these
+    // two keys state what THIS run will do, and the skipped cells are named by
+    // the shared `editor.batchValidate.skip.*` clauses after them.
+    "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cell is currently unvalidated.)",
+          "This validates {count} eligible cell under your name — human-authored " +
+          "or human-edited text you have not signed off yet.",
         other:
-          "This marks eligible human-authored or human-edited cells as validated " +
-          "under your name. Untouched AI drafts are excluded and still need " +
-          "individual review. ({unvalidated} cells are currently unvalidated.)",
+          "This validates {count} eligible cells under your name — human-authored " +
+          "or human-edited text you have not signed off yet.",
       },
-      "unvalidated",
+      "count",
     ),
-    // Optional trailing clause (AQU-586 per-run cap), concatenated after the
-    // description above — same composition as moreAfterThis.
+    "nav.workspaceActions.batchValidate.nothingToValidate":
+      "Nothing in this file can be batch-validated right now.",
+    // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
+    // confirmation body built from the two keys above — same composition as
+    // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
         one:
@@ -248,7 +267,7 @@ export const nav = defineNamespace({
     "nav.report.descriptionEnabled":
       "Describe what went wrong. Your report will be sent along with session context.",
     "nav.report.descriptionDisabled":
-      "Analytics are off — your report won't be sent automatically. You can copy it to share manually.",
+      "Analytics are off, so no session replay is attached — your message still reaches the Aquilla team.",
     "nav.report.thanks": "Thanks — report received.",
     "nav.report.replayLinked": "Session replay linked to the report.",
     "nav.report.descriptionFieldLabel": "Description",
@@ -256,8 +275,21 @@ export const nav = defineNamespace({
     "nav.report.descriptionRequired": "Description is required",
     "nav.report.capturedContext": "Captured context:",
     "nav.report.analyticsOffNotice":
-      "Usage data collection is off. Enable it in Preferences if you'd like reports to be sent automatically — or use \"Copy report\" to share it manually.",
+      "Usage data collection is off, so this report carries no session replay. Enable it in Preferences if you'd like future reports to include one.",
     "nav.report.sendReport": "Send report",
+    "nav.report.sending": "Sending…",
+    "nav.report.sendFailed":
+      "Couldn't send your report. Check your connection and try again, or copy it to share another way.",
+    "nav.report.notDelivered":
+      "Report received, but this environment has no mail delivery configured — the team won't be emailed.",
+    "nav.report.attachScreenshot": "Attach a screenshot",
+    "nav.report.capturingScreenshot": "Choose what to share…",
+    "nav.report.retakeScreenshot": "Retake",
+    "nav.report.removeScreenshot": "Remove screenshot",
+    "nav.report.screenshotAttached": "Screenshot attached",
+    "nav.report.screenshotAlt": "Screenshot attached to this report",
+    "nav.report.screenshotFailed":
+      "Couldn't capture a screenshot. You can still send the report without one.",
     "nav.report.copyReport": "Copy report",
     "nav.report.copied": "Copied!",
 
@@ -276,6 +308,8 @@ export const nav = defineNamespace({
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
+    "nav.fileRow.notAssignedToYou": "Not assigned to you. You can still open it.",
+    "nav.fileRow.notAssignedTooltip": "{name} — not assigned to you. You can still open it.",
 
     // -- ExpandableFileList --
     "nav.fileList.filterFiles": "Filter files",
@@ -361,6 +395,8 @@ export const nav = defineNamespace({
     "nav.outbox.eventAttachAudio": "Attach audio",
     "nav.outbox.eventSelectAudio": "Select audio",
     "nav.outbox.eventRemoveAudio": "Remove audio",
+    "nav.outbox.eventValidateAudio": "Validate recording",
+    "nav.outbox.eventUnvalidateAudio": "Unvalidate recording",
     "nav.outbox.previewEditRef": "→ edit {id}",
     "nav.outbox.previewAudioSlot": "{slot} slot",
     "nav.outbox.previewAudio": "audio",
@@ -570,6 +606,20 @@ export const nav = defineNamespace({
           "Dropdown item that opens the 'Report a problem' dialog (nav.report.*).",
       },
 
+      // -- FeedbackButton (AQU-1028) --
+      "nav.feedback.buttonLabel": {
+        description:
+          "Visible label of the always-present feedback button in the app shell's " +
+          "sidebar footer. It opens the same dialog as nav.help.report; this one is the " +
+          "discoverable entry point, so the word should read as an invitation rather " +
+          "than a fault report.",
+        maxLength: 12,
+      },
+      "nav.feedback.buttonTooltip": {
+        description:
+          "Tooltip and accessible name for that button, naming who receives the message.",
+      },
+
       // -- LeftDock --
       "nav.dock.filesTab": {
         description:
@@ -739,26 +789,55 @@ export const nav = defineNamespace({
           "confirmation, per this catalog's convention.",
         maxLength: 24,
       },
+      "nav.workspaceActions.batchValidateAudio.label": {
+        description:
+          "Menu item that adds the current user's validation to every recording "
+          + "in the open file. SEPARATE from the text action beside it — signing "
+          + "off a translation says nothing about whether anyone has listened to "
+          + "its recording. The word is 'validate', never 'approve'.",
+        maxLength: 26,
+      },
+      "nav.workspaceActions.batchValidateAudio.title": {
+        description: "Confirmation dialog title for the bulk recording validation above.",
+      },
+      "nav.workspaceActions.batchValidateAudio.description": {
+        description:
+          "Confirmation body for bulk recording validation. Says how many takes "
+          + "will be signed off, and that text-to-speech takes are left out — "
+          + "those are reviewed one at a time, like AI-drafted text.",
+        placeholders: { takes: "How many recordings this will validate." },
+      },
       "nav.workspaceActions.batchValidate.title": {
         description: "Heading of the confirmation dialog for the action above.",
         maxLength: 24,
       },
-      "nav.workspaceActions.batchValidate.description": {
+      "nav.workspaceActions.batchValidate.willValidate": {
         description:
-          "Body of the confirmation dialog above. nav.workspaceActions." +
-          "batchValidate.capNote (if the project caps per-run batch size) is " +
-          "concatenated directly after this string with no added space — end this " +
-          "string with its own closing parenthesis and no trailing space.",
+          "First sentence of the confirmation body above, stating how many cells " +
+          "this run will actually sign off — NOT how many the file has left " +
+          "unvalidated (AQU-1507: they differ whenever a cell is untranslated, an " +
+          "untouched AI draft, outside the reader's assignment, or already theirs). " +
+          "A skipped-cells clause and then batchValidate.capNote are concatenated " +
+          "after it, each with its own leading space, so end this string with a " +
+          "period and no trailing space.",
         placeholders: {
-          unvalidated: "How many cells in the file are not yet validated.",
+          count: "How many cells this run will validate. Selects the plural form.",
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.nothingToValidate": {
+        description:
+          "Stands in for willValidate when the run would validate nothing at all, " +
+          "so the dialog never opens with a promise it cannot keep. Neutral, not " +
+          "an error — the reasons follow in the skipped clause after it. Ends with " +
+          "a period and no trailing space.",
+        maxLength: 160,
+      },
       "nav.workspaceActions.batchValidate.capNote": {
         description:
-          "Optional clause appended after nav.workspaceActions.batchValidate." +
-          "description (see that key's note) when the project caps how many " +
-          "cells one batch-validate run processes. Leading space is intentional.",
+          "Optional clause appended last in that confirmation body when the " +
+          "project caps how many cells one batch-validate run processes. Leading " +
+          "space is intentional.",
         placeholders: {
           cap: "The project's configured per-run validation cap.",
         },
@@ -1099,10 +1178,9 @@ export const nav = defineNamespace({
       },
       "nav.report.analyticsOffNotice": {
         description:
-          "Amber notice shown only when analytics consent is off, pointing the user at " +
-          "Preferences and at the 'Copy report' fallback. Contains a literal quoted " +
-          "phrase matching nav.report.copyReport's wording — keep them consistent if " +
-          "either is retranslated.",
+          "Amber notice shown only when analytics consent is off. Since AQU-1028 the " +
+          "report itself always reaches the team over the network, so this explains the " +
+          "one thing consent still governs: whether a session replay is attached.",
         screenshot: "confirm-dialog",
       },
       "nav.report.sendReport": {
@@ -1119,6 +1197,71 @@ export const nav = defineNamespace({
         description:
           "Replaces nav.report.copyReport's label for a moment right after a " +
           "successful copy.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sending": {
+        description:
+          "Disabled state of the submit button while the report (and any attached " +
+          "screenshot) is uploading.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.sendFailed": {
+        description:
+          "Error shown in the dialog when the upload failed — offline, or the server " +
+          "refused it. Points at retrying or at the Copy report fallback.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.notDelivered": {
+        description:
+          "Shown after a successful submit in an environment whose worker has no mail " +
+          "binding (local dev, E2E): the report was stored but no email was sent.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.attachScreenshot": {
+        description:
+          "Button that starts a screen capture to attach to the report. Opens the " +
+          "browser's own share-picker, so the label promises an attachment, not an " +
+          "instant grab.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.capturingScreenshot": {
+        description:
+          "Disabled label on the attach button while the browser's screen-share picker " +
+          "is open and the user has not chosen a surface yet.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.retakeScreenshot": {
+        description:
+          "Button next to the attached screenshot thumbnail that discards it and starts " +
+          "a fresh capture.",
+        screenshot: "confirm-dialog",
+        maxLength: 12,
+      },
+      "nav.report.removeScreenshot": {
+        description:
+          "Accessible label for the button that detaches the captured screenshot from " +
+          "the report.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotAttached": {
+        description:
+          "Caption beside the thumbnail confirming an image will be sent with the report.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.screenshotAlt": {
+        description:
+          "Alt text for the thumbnail preview of the captured screenshot inside the " +
+          "dialog.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.screenshotFailed": {
+        description:
+          "Error shown when the screen capture itself failed (not when the user simply " +
+          "dismissed the picker, which is silent). Reassures that the report can still " +
+          "be sent without an image.",
         screenshot: "confirm-dialog",
       },
 
@@ -1178,6 +1321,22 @@ export const nav = defineNamespace({
       },
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",
+      },
+      "nav.fileRow.notAssignedToYou": {
+        description:
+          "Screen-reader-only text on a dimmed file row (AQU-894), carrying the same " +
+          "meaning the dimming carries visually. Both sentences matter: the second one " +
+          "is what keeps it from being heard as a locked file.",
+      },
+      "nav.fileRow.notAssignedTooltip": {
+        description:
+          "Tooltip on a dimmed file row (AQU-894): this project uses assignments, the " +
+          "reader holds some, and this file isn't one of theirs. The second sentence is " +
+          "load-bearing — the row is only de-emphasised, never locked, and without it the " +
+          "dimming reads as 'you may not open this'. Keep both parts.",
+        placeholders: {
+          name: "The file's name, or the '{name} (imported as {original})' form when it was renamed on import.",
+        },
       },
 
       // -- ExpandableFileList --
@@ -1367,6 +1526,8 @@ export const nav = defineNamespace({
       "nav.outbox.eventAttachAudio": { description: "Row title for attaching an audio recording to a cell." },
       "nav.outbox.eventSelectAudio": { description: "Row title for choosing which attached audio take is active." },
       "nav.outbox.eventRemoveAudio": { description: "Row title for removing an attached audio recording." },
+      "nav.outbox.eventValidateAudio": { description: "Row title for marking one audio take validated. The word is 'validate', never 'approve' (AQU-290 glossary)." },
+      "nav.outbox.eventUnvalidateAudio": { description: "Row title for withdrawing a validation from one audio take." },
       "nav.outbox.previewEditRef": {
         description:
           "Fallback row preview for validate/unvalidate events, which have no text " +

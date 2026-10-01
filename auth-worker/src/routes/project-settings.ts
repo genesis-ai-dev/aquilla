@@ -48,7 +48,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE } from "../types"
+import { ROLE, type AuthUser } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import {
   getTermbaseEditMinRoleForProject,
@@ -58,9 +58,25 @@ import {
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
+  patchProjectSettingsShared,
   updateProjectSettingsShared,
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
+import {
+  insertTargetLane,
+  readLaneLastChange,
+  renameTargetLane,
+  setTargetLaneArchived,
+} from "../../../db/shared/lanes"
+import { planNewTargetLane } from "../../../src/lib/lanes/lane-create"
+import { newLaneId } from "../../../src/lib/lanes/lane-id"
+import {
+  filterSettingsToVisibleLanes,
+  type LaneIdentity,
+  laneReadWallEnabled,
+  visibleLaneTags,
+} from "../../../src/lib/lanes/read-wall"
+import type { AquillaDb } from "../../../db/shim/postgres"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -114,6 +130,27 @@ const LANGUAGE_KEYS = new Set([
  */
 const AUTOPILOT_KEY = "autopilotEnabled"
 const AUTOPILOT_WRITE_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/**
+ * AQU-1408: the interlinear alignment seeds — the ± pseudo-counts a member
+ * writes by confirming (✓) or rejecting (✕) a word-alignment suggestion in the
+ * BT tab. A write whose only *changed* key is this one is admitted at
+ * contributor(400)+.
+ *
+ * Until this ticket the key rode the flat maintainer floor, which made the
+ * panel's confirm/reject buttons a silently dead control for everyone below
+ * 600: the click updated the in-memory model, the optimistic local apply was
+ * (correctly) refused by the AQU-255 guard, and the seed never reached the
+ * server — so the decision was gone on reload (Biblica ETT, 2026-09-24).
+ *
+ * Contributor is the floor because this is the same act as correcting a
+ * back-translation, which `cell.backtranslation.set` already admits at
+ * ROLE.CONTRIBUTOR: a person who writes the translation says what its words
+ * mean. It hands them nothing else — every other key in the blob keeps the
+ * maintainer gate above.
+ */
+const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
+const ALIGNMENT_SEEDS_WRITE_MIN_ROLE = ROLE.CONTRIBUTOR
 
 /**
  * Top-level settings keys whose value differs between the stored blob and an
@@ -171,8 +208,43 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  return c.json(await withOrgDefaults(c.env, projectId, response))
+  const wallOn = laneReadWallEnabled(c.env.LANE_READ_WALL)
+  const visible = visibleLaneTags({
+    enabled: wallOn,
+    role: role.level,
+    laneGrants: wallOn && role.level < ROLE.MAINTAINER
+      ? await laneGrantsFor(c.env.AQUILLA_PG, projectId, user.id)
+      : null,
+  })
+  const lanes = visible === null ? [] : await targetLaneIdentities(c.env.AQUILLA_PG, projectId)
+  return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible, lanes)))
 })
+
+async function targetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
+  const rows = await db
+    .prepare(
+      `SELECT id, name, legacy_tag FROM lanes
+        WHERE project_id = ? AND role = 'target'`,
+    )
+    .bind(projectId)
+    .all<{ id: string; name: string; legacy_tag: string | null }>()
+  return (rows.results ?? []).map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
+}
+
+async function laneGrantsFor(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<Array<{ lane: string; level: number }>> {
+  const rows = await db
+    .prepare(
+      `SELECT lane, role_level FROM project_member_lane_roles
+        WHERE project_id = ? AND user_id = ?`,
+    )
+    .bind(projectId, userId)
+    .all<{ lane: string; role_level: number }>()
+  return (rows.results ?? []).map((row) => ({ lane: row.lane, level: row.role_level }))
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // PUT/PATCH /api/v2/projects/:projectId/settings
@@ -240,7 +312,12 @@ projectSettings.on(
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
         && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
-      if (!terminologyOnly && !languageOnly && !autopilotOnly && !countStructuralOnly) {
+      const alignmentSeedsOnly = changed.length > 0
+        && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
+      if (
+        !terminologyOnly && !languageOnly && !autopilotOnly
+        && !countStructuralOnly && !alignmentSeedsOnly
+      ) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
@@ -283,6 +360,19 @@ projectSettings.on(
           return c.json(
             {
               error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
+            },
+            403,
+          )
+        }
+      } else if (alignmentSeedsOnly) {
+        // AQU-1408: server-enforced, not merely a client floor — the panel's
+        // confirm/reject buttons are visible to the whole project, so the
+        // answer to "may this decision be saved?" has to be the same one the
+        // client shows.
+        if (role.level < ALIGNMENT_SEEDS_WRITE_MIN_ROLE) {
+          return c.json(
+            {
+              error: `role >= contributor (${ALIGNMENT_SEEDS_WRITE_MIN_ROLE}) required to confirm or reject word alignments`,
             },
             403,
           )
@@ -351,6 +441,227 @@ projectSettings.on(
       void notifyPromise
     }
     return c.json(await withOrgDefaults(c.env, projectId, fresh))
+  },
+)
+
+const renameLaneSchema = z.object({
+  name: z.string(),
+})
+
+const createLaneSchema = z.object({
+  name: z.string(),
+  language: z.string(),
+})
+
+const archiveLaneSchema = z.object({
+  archived: z.boolean(),
+})
+
+/**
+ * Same floor as a language-only settings write: maintainer by default, or the
+ * org's languageEditMinRole when that org let project leads edit languages.
+ */
+async function denyLanguageWrite(
+  env: AuthHonoEnv["Bindings"],
+  user: AuthUser,
+  projectId: string,
+): Promise<{ error: string } | null> {
+  const role = await resolveProjectRole(env, user, projectId)
+  if (!role) return { error: "no access to project" }
+  const floor = await getLanguageEditMinRoleForProject(env, projectId)
+  if (role.level < floor) {
+    return { error: `role >= ${floor} required to change this project's languages` }
+  }
+  return null
+}
+
+/** Add or remove one tag in targetLanes / archivedLanes, bumping the version. */
+async function mergeSettingsArray(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  key: "targetLanes" | "archivedLanes",
+  tag: string,
+  present: boolean,
+): Promise<"ok" | "conflict" | "error"> {
+  if (!tag) return "ok"
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const current = await loadProjectSettings(db, projectId)
+    const raw = current.settings[key]
+    const list = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : []
+    const has = list.includes(tag)
+    if (has === present) return "ok"
+    const next = present ? [...list, tag] : list.filter((item) => item !== tag)
+    const result = await patchProjectSettingsShared(db, {
+      projectId,
+      ops: [{ key, value: next }],
+      ifMatchVersion: current.version,
+      updatedBy: userId,
+    })
+    if (result.status === "ok") return "ok"
+    if (result.status === "conflict") continue
+    return "error"
+  }
+  return "conflict"
+}
+
+// AQU-1418: lane rows are what the screen edits. The settings string registry
+// stays in step so events, the external API, and older clients still resolve
+// a lane by its legacy tag. The id is never shown. A duplicate display name
+// is refused; the database does not have a unique constraint on name.
+projectSettings.post(
+  "/:projectId/lanes",
+  authMiddleware,
+  zValidator("json", createLaneSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const body = c.req.valid("json")
+    const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    const targetLanguage =
+      typeof current.settings.targetLanguage === "string" ? current.settings.targetLanguage : null
+    const laneId = newLaneId()
+    const plan = planNewTargetLane({
+      laneId,
+      name: body.name,
+      language: body.language,
+      targetLanguage,
+      existing: (current.lanes ?? []).map((lane) => ({
+        id: lane.id,
+        name: lane.name,
+        legacyTag: lane.legacyTag,
+      })),
+    })
+    if (!plan.ok) {
+      const status = plan.problem === "duplicate" ? 409 : 400
+      const error = plan.problem === "duplicate" ? "duplicate_name" : plan.problem
+      return c.json({ error }, status)
+    }
+    try {
+      await insertTargetLane(c.env.AQUILLA_PG, projectId, {
+        id: laneId,
+        name: plan.name,
+        langCode: plan.langCode,
+        legacyTag: plan.legacyTag,
+      })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return c.json({ error: `write failed: ${message}` }, 500)
+    }
+    const synced = await mergeSettingsArray(
+      c.env.AQUILLA_PG,
+      projectId,
+      user.id,
+      "targetLanes",
+      plan.legacyTag,
+      true,
+    )
+    if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
+    if (synced === "error") return c.json({ error: "write failed" }, 500)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+    const lane = fresh.lanes?.find((row) => row.id === laneId) ?? null
+    return c.json({ lane }, 201)
+  },
+)
+
+projectSettings.patch(
+  "/:projectId/lanes/:laneId",
+  authMiddleware,
+  zValidator("json", renameLaneSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await renameTargetLane(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").name,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    if (result.status === "duplicate") {
+      return c.json({ error: "duplicate_name" }, 409)
+    }
+    if (result.status === "empty" || result.status === "too_long") {
+      return c.json({ error: result.status }, 400)
+    }
+    if (result.status !== "ok") return c.json({ error: result.status }, 400)
+    return c.json({ lane: result.lane })
+  },
+)
+
+// AQU-1464: "is anyone still working in this lane?" — read by the archive
+// confirmation dialog before a PM locks the lane (AQU-1462 / AQU-1463 made
+// archiving a hard write-lock, so archiving a busy lane interrupts a translator
+// mid-session).
+//
+// Gated by the SAME `denyLanguageWrite` floor as archiving itself: whoever may
+// archive a lane may see when it was last touched, and nobody below that floor
+// can read a member's name and activity time out of it. A Contributor gets 403,
+// which is also why the client never has to hide the value itself.
+projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const laneId = c.req.param("laneId") as string
+  const denied = await denyLanguageWrite(c.env, user, projectId)
+  if (denied) return c.json(denied, 403)
+  // Confirm the lane is real first, so an unknown id reads as 404 rather than
+  // as the indistinguishable "this lane has never been edited".
+  const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+  const lane = (current.lanes ?? []).find((row) => row.id === laneId && row.role === "target")
+  if (!lane) return c.json({ error: "lane not found" }, 404)
+  try {
+    const lastChange = await readLaneLastChange(c.env.AQUILLA_PG, projectId, laneId)
+    return c.json({ lastChange })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return c.json({ error: `read failed: ${message}` }, 500)
+  }
+})
+
+projectSettings.post(
+  "/:projectId/lanes/:laneId/archive",
+  authMiddleware,
+  zValidator("json", archiveLaneSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const archived = c.req.valid("json").archived
+    const result = await setTargetLaneArchived(c.env.AQUILLA_PG, projectId, laneId, archived)
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    if (result.status === "default_lane") return c.json({ error: "default_lane" }, 400)
+    const tag = result.lane.legacyTag ?? ""
+    const synced = await mergeSettingsArray(
+      c.env.AQUILLA_PG,
+      projectId,
+      user.id,
+      "archivedLanes",
+      tag,
+      archived,
+    )
+    if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
+    if (synced === "error") return c.json({ error: "write failed" }, 500)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
 

@@ -122,11 +122,13 @@ export interface CloudProjectSummary {
  */
 export async function createCloudProject(
   jwt: string,
-  project: { id: string; name: string; orgId?: number },
+  project: { id: string; name: string; orgId?: number; teamIds?: number[] },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<void> {
   const body: Record<string, unknown> = { id: project.id, name: project.name }
   if (project.orgId != null) body.orgId = project.orgId
+  // AQU-1352 P2: create into teams (server attaches each one).
+  if (project.orgId != null && project.teamIds?.length) body.teamIds = project.teamIds
   const res = await fetch(`${apiUrl}/api/v2/projects`, {
     method: "POST",
     headers: {

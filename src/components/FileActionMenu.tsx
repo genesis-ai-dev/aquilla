@@ -14,9 +14,6 @@ interface FileActionMenuProps {
   /** Opens the Export dialog for this file. Always shown — the dialog
    *  explains the block when org policy forbids export (AQU-253). */
   onExport?: () => void
-  /** Optional. Present only for file types we can export back to source
-   *  format with round-trip fidelity (USFM today). */
-  onExportSource?: () => void
   /** AQU-656: mint a token on click, then download the imported bytes. */
   onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller
@@ -35,7 +32,7 @@ interface FileActionMenuProps {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork,
+  onShowDetails, onRename, onMove, onExport, onDownloadOriginal, onAssignWork,
   onSegmentation, onDelete,
 }: FileActionMenuProps) {
   const t = useT()
@@ -66,11 +63,6 @@ export function FileActionMenu({
         {onExport && (
           <MenuItem onClick={onExport}>
             <Download /> {t("nav.workspaceActions.export")}
-          </MenuItem>
-        )}
-        {onExportSource && (
-          <MenuItem onClick={onExportSource}>
-            <Download /> {t("fileDetails.exportSource")}
           </MenuItem>
         )}
         {onDownloadOriginal && (

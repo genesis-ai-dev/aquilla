@@ -37,11 +37,32 @@ vi.mock("@/lib/frontier/orgs", () => ({
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: vi.fn(async () => [
-    { id: "pa", name: "John" },
-    { id: "pb", name: "Mark" },
+    { id: "pa", name: "John", targetLanguage: "Bambara" },
+    { id: "pb", name: "Mark", targetLanguage: "French" },
   ]),
 }))
 vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
+
+// AQU-1173: record the `loading` the inbox hands the table on EVERY render.
+// The flake was a one-render window, not a lasting state, so it has to be
+// observed per render — a DOM probe after `waitFor` samples one moment and
+// only lands inside the window on a slow enough machine. The wrapper
+// delegates, so the other specs in this file see the real table.
+const { tableRenders } = vi.hoisted(() => ({
+  tableRenders: [] as { loading: boolean; rows: number }[],
+}))
+
+vi.mock("@/components/ui/data-table", async (importActual) => {
+  const actual = await importActual<typeof import("@/components/ui/data-table")>()
+  const Real = actual.DataTable
+  return {
+    ...actual,
+    DataTable: (props: Parameters<typeof Real>[0]) => {
+      tableRenders.push({ loading: Boolean(props.loading), rows: props.data.length })
+      return <Real {...props} />
+    },
+  }
+})
 
 import { getMyAssignmentsForOrg } from "@/lib/sync/assignments"
 const mockGetMy = vi.mocked(getMyAssignmentsForOrg)
@@ -50,6 +71,7 @@ beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   navigate.mockClear()
+  tableRenders.length = 0
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -72,9 +94,59 @@ describe("AssignedToMe", () => {
     mockGetMy.mockImplementation(() => new Promise(() => {}))
     renderInbox()
 
-    await waitFor(() => expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument())
-    expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    // AQU-1173: wait on the state actually being asserted. Waiting on the
+    // search box instead and then probing the skeleton synchronously made
+    // this order-dependent — the table mounts one commit before the
+    // skeleton did, so a full-suite run could observe the gap.
+    await waitFor(() => {
+      expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    })
+    expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument()
     expect(document.querySelector(".animate-pulse")).toBeTruthy()
+  })
+
+  // AQU-1173 regression guard — the root cause behind the flake above.
+  // OrgProvider resolves the active org after mount, so the inbox re-renders
+  // with a real org one render BEFORE its fetch effect runs. While `loading`
+  // was its own state it lagged that render, and the table was handed
+  // `loading: false` with zero rows — the settled "no assignments" view — for
+  // one frame before the skeleton replaced it.
+  it("never hands the table a settled state while the active org's assignments are pending", async () => {
+    mockGetMy.mockImplementation(() => new Promise(() => {}))
+    renderInbox()
+
+    await waitFor(() => {
+      expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    })
+    expect(tableRenders.length).toBeGreaterThan(0)
+    expect(tableRenders.filter((render) => !render.loading)).toEqual([])
+  })
+
+  // AQU-1251: the regression guard for the flake. `loading` used to be a
+  // `useState` the fetch effect flipped, so between "the org directory resolved"
+  // and "the effect for that org ran" the table rendered with a stale
+  // `loading === false` — an authoritative "You have no open assignments." for a
+  // request that had not been made yet. It is now derived from whether the held
+  // result matches the current `(jwt, orgId)`, so that render cannot exist.
+  //
+  // The org resolves asynchronously here (listMyOrgs is a promise), which is the
+  // window the bug lived in; the assignments read never settles, so the ONLY
+  // correct state for the whole test is "loading".
+  it("never paints an empty state while the active org's assignments are unresolved", async () => {
+    mockGetMy.mockImplementation(() => new Promise(() => {}))
+    renderInbox()
+
+    // The table only mounts once an org is active, so this resolves exactly at
+    // the render the stale flag used to corrupt.
+    await screen.findByPlaceholderText("Search assignments…")
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
+
+    // And it stays loading — nothing resolved it, so nothing may dismiss it.
+    // A fixed wait would only prove the machine was slow; poll the mock instead.
+    await waitFor(() => expect(mockGetMy).toHaveBeenCalledWith("jwt", 1))
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
+    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
   })
 
   it("aggregates the caller's open assignments across projects with progress", async () => {
@@ -96,10 +168,10 @@ describe("AssignedToMe", () => {
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
-  // AQU-538 (§3.5): a lane-pinned assignment shows a lane chip and deep-links
-  // into the project at that lane (?lane=<tag>); the default lane ('') does not.
+  // AQU-729 / AQU-538 (§3.5): every assignment shows its lane; named lanes use
+  // the tag, the default lane ('') uses the project's target language label.
   // AQU-690: when fileId is present, open that file in the editor.
-  it("renders a lane chip and navigates with ?lane= for a lane-pinned assignment", async () => {
+  it("renders lane chips and navigates with ?lane= for a lane-pinned assignment", async () => {
     mockGetMy.mockResolvedValue([
       { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
       { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
@@ -107,14 +179,17 @@ describe("AssignedToMe", () => {
     renderInbox()
 
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
-    // The lane chip renders the tag for the pinned lane only.
     expect(screen.getByText("es")).toBeInTheDocument()
+    expect(screen.getByText("French")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("John scope"))
-    expect(navigate).toHaveBeenCalledWith("/project/pa/editor/file/f1?lane=es")
+    expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?lane=es")
 
+    // AQU-1474: the default lane is an explicit, empty `?lane=`, never a bare
+    // URL. The editor reads an absent lane param as "keep the lane last used",
+    // which would open this default-lane assignment in the wrong language.
     fireEvent.click(screen.getByText("Mark scope"))
-    expect(navigate).toHaveBeenCalledWith("/project/pb/editor/file/f2")
+    expect(navigate).toHaveBeenLastCalledWith("/project/pb/editor/file/f2?lane=")
   })
 
   it("shows an empty state when there are no assignments", async () => {

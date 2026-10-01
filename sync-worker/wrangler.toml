@@ -22,6 +22,8 @@ AUTH_WORKER_URL = "http://127.0.0.1:8788"
 # SPA host for the ask-mode approval deep link (external/prepare.ts
 # approvalUrlFor). Local dev stack serves the SPA via Vite on 5173.
 BASE_URL = "http://localhost:5173"
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
 
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker
@@ -156,6 +158,9 @@ binding = "CF_VERSION_METADATA"
 
 [env.production.vars]
 ENVIRONMENT = "production"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles in production. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
 # PostHog ingest region + *project* token (public — same one shipped in the SPA
 # bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
@@ -224,11 +229,16 @@ binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
 ENVIRONMENT = "development"
+# AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
+# written project_member_lane_roles on dev. Local and e2e leave it unset.
+LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker-dev"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
 # SPA host for the ask-mode approval deep link (external/prepare.ts).
 BASE_URL = "https://dev.aquilla.app"
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
 
 [[env.development.durable_objects.bindings]]
 name = "ProjectSync"

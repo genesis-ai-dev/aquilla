@@ -39,6 +39,24 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
+/** The domain kind an imported TMX file is stored under (`importedFileKind`).
+ *  Like `"codex"` above it reaches the client as `file.type` without being a
+ *  member of `FileType`. */
+export const TRANSLATION_MEMORY_FILE_KIND = "translation-memory"
+
+/**
+ * Is this file an imported translation memory?
+ *
+ * Takes the wire string rather than `FileType` on purpose: a TMX imported
+ * through the app arrives as `"translation-memory"`, which a `type === "tmx"`
+ * test never matches (AQU-1393 — the Examples panel showed a real TMX as an
+ * ordinary project file). `"tmx"` still counts: rows created with the parser id
+ * as their kind — API imports, and files that predate the domain kind.
+ */
+export function isTranslationMemoryFile(type: string): boolean {
+  return type === TRANSLATION_MEMORY_FILE_KIND || type === "tmx"
+}
+
 /** Content-aware section capability. `hasScriptureContent` is persisted in
  * the normalized import manifest for Scripture-shaped spreadsheets and custom
  * formats; native Scripture types remain compatible with older records. */
@@ -480,6 +498,20 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
+   * still use `legacyTag` ('' is the default target lane). Absent until the
+   * settings read returns them.
+   */
+  lanes?: {
+    id: string
+    role: "source" | "target"
+    name: string
+    langCode: string | null
+    legacyTag: string | null
+    position: number
+    archivedAt: string | null
+  }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
@@ -603,6 +635,17 @@ export interface ProjectRecord {
    *   allowSelfValidation is false.
    */
   allowSelfValidation?: boolean
+  /**
+   * AQU-490: the audio twins of the three above. SEPARATE keys, by Sam's
+   * ruling — a project can want two ears on a recording and one on a
+   * translation, or trust a different set of people with each. Neither set is
+   * ever read as a fallback for the other; absent means unrestricted on both
+   * sides. All three ARE enforced server-side (sync-worker route.ts), unlike
+   * the text trio's long-standing SWARM-TODOs.
+   */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).

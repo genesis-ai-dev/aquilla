@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { Building2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { Badge } from "@/components/ui/badge"
+import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
@@ -12,24 +12,51 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { laneChipLabel } from "./project-lanes"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { getPortfolio } from "@/lib/frontier/portfolio"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
+/**
+ * The lane is always emitted, as an empty `?lane=` for a default-lane
+ * assignment. The editor reads an ABSENT lane param as "keep the lane last
+ * used" (see `resolveDeepLinkLane`), so a bare URL would open a default-lane
+ * assignment in whatever language the assignee had open before.
+ */
 function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  return a.targetLang
-    ? `${base}?lane=${encodeURIComponent(a.targetLang)}`
-    : base
+  const lane = a.laneId || a.targetLang
+  return lane
+    ? `${base}?lane=${encodeURIComponent(lane)}`
+    : `${base}?lane=`
 }
 
 function progressPct(a: MyOrgAssignment): number {
   return a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
 }
+
+/**
+ * One settled answer for one `(jwt, orgId)` request (AQU-1251). Carrying the
+ * request identity on the result is what lets the component decide whether it
+ * is still loading by looking at state it already has, instead of trusting a
+ * separate `loading` flag to have been updated by the right effect run.
+ */
+interface InboxResult {
+  jwt: string
+  orgId: number
+  rows: MyOrgAssignment[]
+  laneLabels: Map<string, string>
+  error: string | null
+}
+
+/** Stable empties — identity feeds `useMemo` deps, so fresh ones would churn. */
+const NO_ROWS: MyOrgAssignment[] = []
+const NO_LANE_LABELS: Map<string, string> = new Map()
 
 /**
  * The assignee's "Assigned to me" inbox — the caller's open assignments across
@@ -47,31 +74,61 @@ export function AssignedToMe() {
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
 
-  const [rows, setRows] = useState<MyOrgAssignment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // AQU-1251: rows, error and "am I loading" are ONE value keyed to the request
+  // that produced it, derived during render — never three `useState`s an effect
+  // has to keep in step.
+  //
+  // They used to be separate, with `loading` flipped inside the fetch effect.
+  // That left a render where the table was already on screen but the effect for
+  // the current org had not run yet, so a stale `loading === false` painted an
+  // authoritative "You have no open assignments." before the skeleton appeared.
+  // `activeOrgId` is null during startup while the org directory resolves, and
+  // that null took the early-return branch below and set `loading` false — so
+  // the flash happened on a normal page load, not just under test. It also made
+  // the skeleton assertion in AssignedToMe.test.tsx order-dependent: whether the
+  // bad render was still on screen when the assertion ran came down to how
+  // quickly React flushed the effect, which is exactly the machine-speed
+  // dependency AGENTS.md rule 15 forbids.
+  //
+  // Keying the result to `(jwt, orgId)` closes the window by construction: a
+  // result for a different org cannot satisfy the current request, so `loading`
+  // stays true until the answer for THIS org is in hand.
+  const [result, setResult] = useState<InboxResult | null>(null)
+  const laneFallbackLabel = t("org.projectOverview.laneDefaultFallback")
+
+  const settled =
+    result && result.jwt === jwt && result.orgId === activeOrgId ? result : null
+  const loading = jwt != null && activeOrgId != null && settled == null
+  const rows = settled?.rows ?? NO_ROWS
+  const error = settled?.error ?? null
+  const defaultLaneLabelByProjectId = settled?.laneLabels ?? NO_LANE_LABELS
 
   useEffect(() => {
-    if (!jwt || activeOrgId == null) {
-      setRows([])
-      setLoading(false)
-      return
-    }
+    if (!jwt || activeOrgId == null) return
     let cancelled = false
-    setLoading(true)
-    setError(null)
     void (async () => {
       try {
-        const all = await getMyAssignmentsForOrg(jwt, activeOrgId)
+        // AQU-729: lane labels are display-only. A portfolio miss must not
+        // hide the assignments themselves — that is the bug this list is
+        // here to avoid.
+        const [all, portfolio] = await Promise.all([
+          getMyAssignmentsForOrg(jwt, activeOrgId),
+          getPortfolio(jwt, activeOrgId).catch(() => []),
+        ])
         if (cancelled) return
-        // Pair rows + loading so org-assigned-table never mounts empty while
-        // the fetch result is already in hand (avoids a race with content asserts).
-        setRows(all)
-        setLoading(false)
+        const laneLabels = new Map(
+          portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""]),
+        )
+        setResult({ jwt, orgId: activeOrgId, rows: all, laneLabels, error: null })
       } catch (e) {
         if (cancelled) return
-        setError(e instanceof Error ? e.message : String(e))
-        setLoading(false)
+        setResult({
+          jwt,
+          orgId: activeOrgId,
+          rows: NO_ROWS,
+          laneLabels: NO_LANE_LABELS,
+          error: e instanceof Error ? e.message : String(e),
+        })
       }
     })()
     return () => { cancelled = true }
@@ -91,10 +148,12 @@ export function AssignedToMe() {
           return (
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate">{a.scopeLabel}</span>
-              {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
-              {a.targetLang ? (
-                <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
-              ) : null}
+              <AssignmentLaneBadge
+                targetLang={a.targetLang}
+                laneName={a.laneName}
+                defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
+                fallbackLabel={laneFallbackLabel}
+              />
             </div>
           )
         },
@@ -162,7 +221,7 @@ export function AssignedToMe() {
         ),
       },
     ],
-    [t],
+    [t, defaultLaneLabelByProjectId, laneFallbackLabel],
   )
 
   return (
@@ -205,11 +264,17 @@ export function AssignedToMe() {
                 const q = String(filterValue).trim().toLowerCase()
                 if (!q) return true
                 const a = row.original
+                const laneLabel = laneChipLabel(
+                  a.targetLang ?? "",
+                  defaultLaneLabelByProjectId.get(a.projectId) ?? "",
+                  laneFallbackLabel,
+                  a.laneName,
+                )
                 return (
                   a.scopeLabel.toLowerCase().includes(q) ||
                   a.projectName.toLowerCase().includes(q) ||
                   (a.fileName ? a.fileName.toLowerCase().includes(q) : false) ||
-                  (a.targetLang ? a.targetLang.toLowerCase().includes(q) : false)
+                  laneLabel.toLowerCase().includes(q)
                 )
               }}
               emptyState={(table) => {

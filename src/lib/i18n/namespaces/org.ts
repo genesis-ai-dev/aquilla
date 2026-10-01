@@ -13,6 +13,52 @@ export const org = defineNamespace({
     "org.breadcrumb.allOrganizations": "All organizations",
     "org.breadcrumb.organizationFallback": "Organization",
 
+    // -- AQU-1352 access primitives: grant-origin badges, inspector, inherited controls --
+    // "Direct"/"Creator" origin badges → org.accessModelLegend.{direct,creator}.label (same grant-path names)
+    "org.access.addPeopleTo": "Add people to {path}",
+    "org.access.origin.inherited": "Inherited",
+    "org.access.origin.inheritedFrom": "Inherited · {path}",
+    "org.access.origin.platform": "Platform admin",
+    "org.access.effective.direct": "{role} (direct)",
+    "org.access.effective.via": "{role} (via {path})",
+    "org.access.effective.creator": "{role} (creator)",
+    "org.access.effective.platform": "{role} (platform admin)",
+    "org.access.inherited.tooltip": "Set at {path} — change it there",
+    "org.access.inherited.link": "Change at {path}",
+    "org.access.noAccess": "No access",
+    "org.access.unknownRole": "Unknown role",
+    "org.access.inspector.yourAccess": "Your access",
+    "org.access.inspector.guest": "Guest",
+    "org.access.inspector.guestOf": "Guest of {org}",
+    "org.access.inspector.effectiveHere": "Effective here ({path})",
+    "org.access.inspector.everythingElse": "Everything else",
+    "org.access.inspector.nothingElse": "No other access you can see",
+    "org.access.inspector.grantedBy": "by {name}",
+    "org.access.inspector.manageAccess": "Manage access",
+    "org.access.inspector.open": "Show access for {name}",
+    "org.access.inspector.thisProject": "this project",
+    "org.access.inspector.loading": "Loading access…",
+    "org.access.inspector.loadError": "Couldn't load this person's access.",
+    "org.access.inspector.forbidden": "You can't see this person's access.",
+    "org.access.scope.org": "org",
+    "org.access.scope.team": "team",
+    "org.access.scope.project": "project",
+    "org.access.scope.lane": "lane",
+    // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
+    "org.roster.stillHasAccess": "They will still have {role} access through {path}.",
+    "org.roster.removeThere": "Remove at {path}",
+    "org.roster.countBreakdown": "({direct} direct · {inherited} inherited)",
+    // -- AQU-1352 §3.6 People & access page (AQU-1072) --
+    "org.access.page.title": "People & access",
+    "org.access.page.treeView": "By scope",
+    "org.access.page.noDirect": "No direct grants",
+    "org.access.page.chip": "{role} @ {path}",
+    "org.access.page.loadError": "Couldn't load people and access for this organization.",
+    "org.access.page.csvPerson": "Person",
+    "org.access.page.csvOrigin": "Origin",
+    "org.access.page.csvGrantedBy": "Granted by",
+    "org.access.page.csvGrantedAt": "Granted at",
+
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
@@ -112,6 +158,10 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
+    // AQU-1071: the enterprise billing band is read off this number — distinct
+    // active target languages across the org, archived lanes excluded.
+    "org.orgHome.activeLanguages": "Active languages",
+    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -325,7 +375,6 @@ export const org = defineNamespace({
     "org.teamDetail.deletingButton": "Deleting…",
     "org.teamDetail.accessLevelDefinitionsAriaLabel": "Access level definitions",
     "org.teamDetail.addMemberButton": "Add member",
-    "org.teamDetail.addMembersDialogTitle": "Add members to '{name}'",
     "org.teamDetail.removeAriaLabel": "Remove {name}",
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
@@ -336,6 +385,11 @@ export const org = defineNamespace({
       "Add org members to this team to grant them shared project access.",
     "org.teamDetail.roleForAriaLabel": "Role for {name}",
     "org.teamDetail.orgLevelRoleAriaLabel": "Org-level role: {role}",
+    // AQU-1352 P2: team-scope role column.
+    "org.teamDetail.teamRoleColumn": "Team role",
+    "org.teamDetail.teamRoleInherit": "Inherit",
+    "org.teamDetail.teamRoleForAriaLabel": "Team-wide role of {name}",
+    "org.teamDetail.teamRoleUpdateFailed": "Couldn't update the team role.",
     "org.teamDetail.removeMaintainersOnlyAriaLabel": "Remove {username} — maintainers only",
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
@@ -521,6 +575,8 @@ export const org = defineNamespace({
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
+    "org.projectOverview.membersVisibilityDescription":
+      "Who can see the member roster on this project.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -802,6 +858,8 @@ export const org = defineNamespace({
     "org.overviewLaneTable.openAction": "Open",
     "org.overviewLaneTable.staffAction": "Staff…",
     "org.overviewLaneTable.addLanguageAction": "Add language",
+    "org.overviewLaneTable.archivedGroup": "Archived ({count})",
+    "org.overviewLaneTable.archivedBadge": "Archived",
 
     // -- ProjectLaneSubRows: expanded per-lane detail for an OrgHome project row --
     "org.projectLaneSubRows.noActivity": "No activity",
@@ -942,6 +1000,9 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.editScopesAriaLabel": "Edit {username}'s lane scopes on this project",
     "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
     "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
+    "org.memberLaneScopeEditor.languagesLegend": "Languages they can work in",
+    "org.memberLaneScopeEditor.mainLanguageFallback": "Main language",
+    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language in this project)",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "Lane code (e.g. es)",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
     // "Add" → common.add (identical text)
@@ -1037,6 +1098,18 @@ export const org = defineNamespace({
     "org.staffLanePopover.orgMemberPhrase": "org member",
     "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
     "org.staffLanePopover.searchPlaceholder": "Search your organization",
+    // AQU-731: the four ways the org roster comes back unusable, each named
+    // rather than collapsed into "no one in your organization yet".
+    "org.staffLanePopover.rosterLoading": "Loading your organization…",
+    "org.staffLanePopover.rosterNoOrg":
+      "No organization is selected, so there is no roster to search. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterHidden":
+      "Your organization hides its member list. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterNoAccess":
+      "You can staff this lane, but you can’t see this organization’s member list. Invite the person to the project instead.",
+    "org.staffLanePopover.rosterLoadFailed": "Couldn’t load your organization’s members.",
+    "org.staffLanePopover.rosterEmpty": "No one in your organization yet.",
+    "org.staffLanePopover.rosterNoMatch": "No org members match.",
     // "Search org members" aria-label → org.teamDetail.searchOrgMembersAriaLabel (identical text)
     "org.staffLanePopover.searchScopeNote":
       "Searches your organization only. Adding someone from outside it?",
@@ -1182,6 +1255,9 @@ export const org = defineNamespace({
     "org.orgProjectsPage.roleFilter.all": "All roles",
     // AQU-1043: last-edit recency options. Fixed windows, not free-form
     // dates; "any time" is the default.
+    // AQU-1070: toolbar toggle that folds soft-archived projects into the list,
+    // greyed out, instead of sending the PM to the separate Archived page.
+    "org.orgProjectsPage.showArchived": "Show archived",
     "org.orgProjectsPage.updatedFilter.any": "Updated any time",
     "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
@@ -1491,6 +1567,71 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.access.addPeopleTo": {
+        description:
+          "AQU-1352: header of the add-people dialog on a team or project. {path} is the scope breadcrumb, e.g. 'Biblica › Pattani Malay Bible'.",
+        placeholders: { path: "Scope breadcrumb of org/team/project names joined by ' › ' — not translated." },
+      },
+      "org.access.origin.inheritedFrom": {
+        description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.effective.direct": {
+        description: "Direct role shown beside a different effective role.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.effective.via": {
+        description: "Effective role and the ancestor scope it is inherited through.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.open": {
+        description: "Accessible name of the button that opens the member-access inspector for a person.",
+        placeholders: { name: "The person's username or display name." },
+      },
+      "org.access.page.chip": {
+        description: "People & access person view: one grant chip, the role held at a scope.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.effective.creator": {
+        description: "Effective role held because the person created the scope.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.effective.platform": {
+        description: "Effective role held as platform administrator.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\"." },
+      },
+      "org.access.inherited.tooltip": {
+        description: "Tooltip on a disabled role control for an inherited grant.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.roster.stillHasAccess": {
+        description: "Remove-member dialog: after removing the direct project grant, the person keeps access through a team or org grant.",
+        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
+      },
+      "org.roster.removeThere": {
+        description: "Link in the remove-member dialog to the team or org page where the surviving grant can be removed.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
+      },
+      "org.roster.countBreakdown": {
+        description: "Suffix after the project members heading splitting the total into direct and inherited members.",
+        placeholders: { direct: "Number of members with a grant on this project.", inherited: "Number of members whose access comes from a team or org." },
+      },
+      "org.access.inherited.link": {
+        description: "Link beside a disabled inherited role control; goes to the scope where the grant lives.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.guestOf": {
+        description: "Member inspector header label for someone with no org membership.",
+        placeholders: { org: "Organization name." },
+      },
+      "org.access.inspector.effectiveHere": {
+        description: "Member inspector section heading: the role at the scope the inspector was opened from.",
+        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.inspector.grantedBy": {
+        description: "Who made a grant, inside a member inspector row.",
+        placeholders: { name: "Display name of the granting user." },
+      },
       "org.overview.showMoreProjects": {
         description:
           "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
@@ -1772,10 +1913,6 @@ export const org = defineNamespace({
         description:
           "Accessible name for the small '?' help affordance next to the Members heading on TeamDetail, whose tooltip lists every access-level description.",
       },
-      "org.teamDetail.addMembersDialogTitle": {
-        description: "Title of the add-members dialog on TeamDetail, naming the team members are being added to.",
-        placeholders: { name: "The team's name — not translated." },
-      },
       "org.teamDetail.removeAriaLabel": {
         description:
           "Accessible name for a 'remove' control on TeamDetail — used both for a staged-member chip's × button and for a team member row's Remove action. {name} is whichever person's username is being removed.",
@@ -1790,6 +1927,20 @@ export const org = defineNamespace({
         description:
           "Accessible name for a role-picker select trigger on TeamDetail — used both for a team member's org-role picker and a team's per-project role picker. {name} names whichever person or project the picker is for.",
         placeholders: { name: "Username (member picker) or project name (project picker) — not translated." },
+      },
+      "org.teamDetail.teamRoleColumn": {
+        description: "Column header on TeamDetail's members table for the member's role within this team.",
+      },
+      "org.teamDetail.teamRoleInherit": {
+        description:
+          "Team-role option meaning the member has no team-wide role and gets access only from each attached project's team grant.",
+      },
+      "org.teamDetail.teamRoleForAriaLabel": {
+        description: "Accessible name for a member's team-role picker on TeamDetail.",
+        placeholders: { name: "Username of the team member — not translated." },
+      },
+      "org.teamDetail.teamRoleUpdateFailed": {
+        description: "Toast title when saving a member's team role fails.",
       },
       "org.teamDetail.orgLevelRoleAriaLabel": {
         description:
@@ -2307,6 +2458,21 @@ export const org = defineNamespace({
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
       },
+      "org.overviewLaneTable.archivedGroup": {
+        description:
+          "Toggle for the collapsible group under the project overview's Languages table " +
+          "that tucks the project's archived (retired) target-language lanes out of the " +
+          "main list; expanding it lists them, each with an 'Archived' badge. A heading " +
+          "naming the group, with the count in parentheses — not a verb.",
+        placeholders: { count: "Number of archived lanes in the group." },
+      },
+      "org.overviewLaneTable.archivedBadge": {
+        description:
+          "Small outline badge beside one lane's name inside the expanded Archived group " +
+          "on the project overview, marking that language lane as archived (retired). It " +
+          "describes the lane, so where the word must agree with a noun it agrees with " +
+          "the word used for a language lane.",
+      },
       "org.orgProjectsDataTable.unitsColumn": {
         description:
           "Column header on the org projects table: how many of a project's planning " +
@@ -2465,6 +2631,26 @@ export const org = defineNamespace({
           "Popover heading naming whose lane/file scopes are being edited, in the matrix's freeform scope editor.",
         placeholders: { username: "The member's username — not translated." },
       },
+      "org.memberLaneScopeEditor.languagesLegend": {
+        description:
+          "Heading over a checkbox list of a project's target languages, in the " +
+          "popover that limits one member to some of them. Ticking none leaves the " +
+          "member free to work in every language.",
+      },
+      "org.memberLaneScopeEditor.mainLanguageFallback": {
+        description:
+          "Name shown for a project's main target language in that checkbox list " +
+          "when the project has not named its main language.",
+      },
+      "org.memberLaneScopeEditor.unknownLane": {
+        description:
+          "A checkbox in the same list for a language this member is limited to " +
+          "that the project doesn't have (an old typo or a removed language), " +
+          "shown so it can be unticked.",
+        placeholders: {
+          lane: "The language code as stored on the member.",
+        },
+      },
       "org.memberLaneScopeEditor.newLaneCodeAriaLabel": {
         description:
           "Accessible name for the text input where a new lane code is typed, in the matrix's freeform scope editor. No visible form label, only a placeholder example.",
@@ -2571,6 +2757,22 @@ export const org = defineNamespace({
         description:
           "Subheading under org.staffLanePopover.staffLaneHeading explaining what the popover does. Rendered via RichMessage with {member} substituted as a bold span whose text is the translated org.staffLanePopover.orgMemberPhrase — supplied as a node (not raw data) so its emphasis and word position both survive translation.",
         placeholders: { member: "The already-translated, bold-styled 'org member' phrase (org.staffLanePopover.orgMemberPhrase) — do not interpolate it as plain data." },
+      },
+      "org.staffLanePopover.rosterNoAccess": {
+        description:
+          "Shown in place of the org member list when the roster fetch was refused because the operator is not a member of the org (403 without the roster-hidden policy flag). They can still staff the lane — the point is that this particular search can't help them, and the project-invite link below can. Do not translate as a permission error about staffing itself.",
+      },
+      "org.staffLanePopover.rosterHidden": {
+        description:
+          "Shown in place of the org member list when org policy hides the roster from this operator. Distinct from rosterNoAccess (no membership) and from rosterEmpty (the org really has no members).",
+      },
+      "org.staffLanePopover.rosterNoOrg": {
+        description:
+          "Shown in place of the org member list when no organization is in context at all, so no roster fetch was ever made.",
+      },
+      "org.staffLanePopover.rosterEmpty": {
+        description:
+          "Shown when the roster loaded successfully and the organization genuinely has no other members. Reserved for that one case — the unavailable-roster cases have their own keys.",
       },
       "org.staffLanePopover.addToLaneButton": {
         description: "Primary confirm button that grants the selected role scoped to the named lane.",

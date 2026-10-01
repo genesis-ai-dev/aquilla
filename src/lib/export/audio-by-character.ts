@@ -33,6 +33,7 @@ import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
+import { isInternalIdName, stripInternalIds } from "./internal-id-names"
 
 export interface CharacterClip {
   cellId: string
@@ -136,6 +137,17 @@ export function characterIdentity(
   const explicit = assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId
   if (!explicit) return { key: UNNAMED_CHARACTER_KEY, name: UNNAMED_CHARACTER_LABEL }
   const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+  // AQU-1461: A VOICE NAMED BY ITS ID IS NOT A CAST CHARACTER. The New voice
+  // modal requires a name, but `voices` is persisted project JSON that imports,
+  // other clients and the Agent API all write — so an id can arrive here, and it
+  // used to travel straight into `..._a89dec11-d60e-48c1-….wav`. Reusing the
+  // uncast label rather than inventing a third one keeps the GROUPING keyed on
+  // `voice.id`, so two id-named voices stay two tracks, and lands the delivered
+  // file on `NO_CHARACTER` — the name this export already uses for a line with
+  // no character to put there.
+  if (isInternalIdName(voice.name) || voice.name.trim() === "") {
+    return { key: voice.id, name: UNNAMED_CHARACTER_LABEL, ...(voice.color ? { color: voice.color } : {}) }
+  }
   return { key: voice.id, name: voice.name, ...(voice.color ? { color: voice.color } : {}) }
 }
 
@@ -397,7 +409,13 @@ export function characterKey(name: string): string {
  * mouthful in a folder of forty tracks. `NO_CHARACTER` reads beside `JESUS`.
  */
 export function characterFileKey(name: string): string {
-  return name === UNNAMED_CHARACTER_LABEL ? UNNAMED_CHARACTER_KEY : characterKey(name)
+  if (name === UNNAMED_CHARACTER_LABEL) return UNNAMED_CHARACTER_KEY
+  // AQU-1461: an id that rode in on part of a name loses the id and keeps the
+  // rest; a name that is nothing BUT an id has no readable part, so it lands on
+  // the same key as an uncast line rather than on `characterKey`'s "unnamed",
+  // which would read as a deliberate cast member called "unnamed".
+  const readable = stripInternalIds(name)
+  return readable.trim() === "" ? UNNAMED_CHARACTER_KEY : characterKey(readable)
 }
 
 export interface ExportAudioArgs {
@@ -508,7 +526,12 @@ export async function exportAudioByCharacter(
     if (track.length === 0) continue
     const wav = encodeWavPcm16Chunks([track], TARGET_RATE)
     // codex-editor's naming, plus its disambiguator for same-named cast.
-    const stem = args.fileBase ? `${characterKey(args.fileBase)}_` : ""
+    // AQU-1461: the stem is the FILE's display name, so an id in it ships in
+    // every entry of the zip. Dropped rather than replaced when that is all it
+    // was: the per-character name is still unambiguous without it, and the zip's
+    // own name is separately editable in the dialog.
+    const fileStem = args.fileBase ? stripInternalIds(args.fileBase) : ""
+    const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
     const base = `${stem}${args.langCode}_${characterFileKey(group.name)}`
     // Keyed case-blind (2026-08-27): "JESUS" and "Jesus" are two characters to
     // this sanitiser and one filename to macOS and Windows, so without the fold

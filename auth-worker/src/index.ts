@@ -73,14 +73,20 @@ import invitesRoutes from "./routes/invites"
 import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
+import meRoutes from "./routes/me"
+import accessRoutes from "./routes/access"
+import orgAccessRoutes from "./routes/org-access"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
+import transcriptionRoutes from "./routes/transcription"
 import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
+import aiSeamsRoutes from "./routes/ai-seams"
+import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -99,6 +105,7 @@ import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
@@ -113,6 +120,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
@@ -124,7 +132,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -232,10 +240,13 @@ app.get("/", (c) =>
       "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
+      "/api/v1/audio/transcriptions",
       "/api/v1/chat/ab-feedback",
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
+      "/api/v1/ai/seams/classify",
+      "/api/v1/ai/passage-tags/classify",
     ],
   }),
 )
@@ -252,6 +263,9 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/users", accessRoutes)
+app.route("/api/v2/me", meRoutes)
+app.route("/api/v2/orgs", orgAccessRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -305,6 +319,9 @@ app.route("/api/v2/invites", invitesRoutes)
 // request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
+// AQU-1028: in-app feedback (message + optional screenshot). Session JWT
+// required, per-user throttle inside (routes/feedback.ts).
+app.route("/api/v2/feedback", feedbackRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
 app.route("/api/v2", billingWorkspaceRoutes)
@@ -328,6 +345,7 @@ app.route("/api/v2/changesets", changesetApprovalsRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+app.route("/api/v1/audio", transcriptionRoutes)
 // Unknown-text import classification. Deliberately separate from chat: the
 // server owns the prompt and accepts only bounded file metadata + a sample.
 app.route("/api/v1/import", importClassifyRoutes)
@@ -342,6 +360,15 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1386: seam classification for meaning-unit drafting. Session-authed;
+// batches a window of cell boundaries into one Jev decision call and falls back
+// to punctuation whenever the model is unavailable or unconfident.
+app.route("/api/v1/ai/seams", aiSeamsRoutes)
+// AQU-657: document-understanding tags over AQU-1387's passage spine. Same
+// session auth, same Jev batching and same heuristic fallback as the seam
+// route; answers who is in a passage, whether it opens a scene, whether it is
+// speech, and which passages it leans on.
+app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
@@ -410,6 +437,8 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // AQU-1352 P1: resolveProjectRoleShared (internal AI routes) reads the mode off this handle.
+  setAccessGrantsMode(shim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
   // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their

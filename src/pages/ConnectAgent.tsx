@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
@@ -15,7 +16,8 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import { connectionRequest, type AgentConnectionRequest } from "@/lib/sync/agent-connect"
+import { buildApprovedMessage, connectionRequest, type AgentConnectionRequest } from "@/lib/sync/agent-connect"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 
 type Mode = "ask" | "act"
 type ScopeKind = "project" | "org"
@@ -44,6 +46,7 @@ function ConnectAgentContent() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [result, setResult] = useState<"approved" | "denied" | null>(null)
+  const [copied, setCopied] = useState(false)
   const inFlight = useRef(false)
   // Account changes invalidate the loaded consent and selected scope.
   useEffect(() => {
@@ -70,9 +73,11 @@ function ConnectAgentContent() {
   useEffect(() => {
     if (orgId && !orgOptions.some(o => String(o.id) === orgId)) setOrgId("")
   }, [orgId, orgOptions])
+  // With exactly one eligible org there is nothing to choose: default to it.
+  const effectiveOrgId = orgId || (orgOptions.length === 1 ? String(orgOptions[0].id) : "")
   const scopeChosen = scopeKind === "project"
     ? projectOptions.some(p => p.id === projectId)
-    : orgOptions.some(o => String(o.id) === orgId)
+    : orgOptions.some(o => String(o.id) === effectiveOrgId)
   async function review() {
     if (!jwt || inFlight.current) return
     inFlight.current = true; setBusy(true); setError(false)
@@ -93,7 +98,7 @@ function ConnectAgentContent() {
       await connectionRequest(jwt, "decision", { user_code: code.toUpperCase().trim(), approve,
         ...(approve ? {
           mode,
-          ...(scopeKind === "project" ? { project_id: projectId } : { org_id: orgId }),
+          ...(scopeKind === "project" ? { project_id: projectId } : { org_id: effectiveOrgId }),
           code_confirmed: confirmed,
         } : {}) })
       setResult(approve ? "approved" : "denied")
@@ -107,6 +112,14 @@ function ConnectAgentContent() {
       <CardContent className="flex flex-col gap-4">
         {loading ? <Spinner /> : !session ? <FrontierLoginForm onSuccess={() => {}} /> : result ? <>
           <p role="status">{t(result === "approved" ? "onboarding.connect.approved" : "onboarding.connect.denied")}</p>
+          {result === "approved" && <Field>
+            <FieldLabel htmlFor="approved-message">{t("onboarding.connect.handoff")}</FieldLabel>
+            <Textarea id="approved-message" readOnly rows={5} value={buildApprovedMessage(AUTH_BASE, code.toUpperCase().trim())} />
+            <Button variant="outline" onClick={() => {
+              void navigator.clipboard.writeText(buildApprovedMessage(AUTH_BASE, code.toUpperCase().trim()))
+                .then(() => setCopied(true), () => setCopied(false))
+            }}>{t(copied ? "onboarding.connect.handoffCopied" : "onboarding.connect.handoffCopy")}</Button>
+          </Field>}
           <Link to="/preferences/api-tokens?awaiting=1">{t("onboarding.connect.manage")}</Link>
         </> : <>
           <p>{t("onboarding.connect.account", { username: session.username })}</p>
@@ -180,9 +193,9 @@ function ConnectAgentContent() {
                 ) : (
                   <Field>
                     <FieldLabel>{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
-                    <Select value={orgId} onValueChange={v => setOrgId(v ?? "")} disabled={busy}>
+                    <Select value={effectiveOrgId} onValueChange={v => setOrgId(v ?? "")} disabled={busy}>
                       <SelectTrigger aria-label={t("onboarding.apiTokens.orgLabel")}>
-                        <SelectValue placeholder={t("onboarding.connect.chooseOrg")}>{orgOptions.find(o => String(o.id) === orgId)?.name}</SelectValue>
+                        <SelectValue placeholder={t("onboarding.connect.chooseOrg")}>{orgOptions.find(o => String(o.id) === effectiveOrgId)?.name}</SelectValue>
                       </SelectTrigger>
                       <SelectContent><SelectGroup>{orgOptions.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })}</SelectItem>)}</SelectGroup></SelectContent>
                     </Select>

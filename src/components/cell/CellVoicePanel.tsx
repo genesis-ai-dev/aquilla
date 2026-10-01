@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import { WAVE_OVERLAY_CLASS } from "@/components/audio/chip-classes"
+import { TakeTimeReadout } from "@/components/audio/TakeTimeReadout"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -91,13 +92,6 @@ interface CellVoicePanelProps {
   /** The line's voice picker, for the row under the waveform. The host owns
    *  it — it is the Media view gutter's picker, in its field form. */
   voicePicker?: ReactNode
-}
-
-function fmtTime(s: number): string {
-  if (!Number.isFinite(s) || s <= 0) return "0:00"
-  const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
-  return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
@@ -299,11 +293,6 @@ export function CellVoicePanel({
   )
 
   if (hasTake) {
-    // The running time is over the part that plays (the whole clip untrimmed).
-    const effStart = kept.start ?? 0
-    const effEnd = kept.end ?? duration
-    const effDur = Math.max(0, effEnd - effStart)
-    const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
     // The take's voice, when it isn't the line's (Sam, 2026-09-28). Picking a
     // voice only assigns it, so a generated take can outlive its voice; the
     // pill names the voice the take was made in until a take in the line's
@@ -336,12 +325,7 @@ export function CellVoicePanel({
           testId="voice-card-waveform"
         >
           <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
-            <span
-              data-wave-overlay=""
-              className={cn("rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground", WAVE_OVERLAY_CLASS)}
-            >
-              {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
-            </span>
+            <TakeTimeReadout currentTime={currentTime} duration={duration} kept={kept} testId="voice-card-time" />
             {voiceDiffers && (
               <AppTooltip content={takeVoiceTip}>
                 <span

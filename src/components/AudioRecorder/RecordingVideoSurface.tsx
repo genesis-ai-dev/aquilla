@@ -312,7 +312,11 @@ export function RecordingVideoSurface({
     if (followPlaying && followSec != null && Number.isFinite(followSec)) {
       if (video.readyState < HAVE_METADATA) return
       const target = Math.max(0, followSec)
-      if (!followingRef.current || Math.abs(video.currentTime - target) > FOLLOW_TOLERANCE_SEC) {
+      // While the film is still seeking to the last target, leave it: a scrub
+      // moves the take every frame, and seeking a streamed film again before
+      // its last seek lands only piles up range requests it cannot serve —
+      // the next frame after it lands corrects any drift that is left.
+      if (!video.seeking && (!followingRef.current || Math.abs(video.currentTime - target) > FOLLOW_TOLERANCE_SEC)) {
         try { video.currentTime = target } catch { /* not seekable yet */ }
       }
       if (video.paused) {

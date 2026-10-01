@@ -16,8 +16,13 @@ import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
 import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
 import {
   type ActiveAudioController,
+  claimActiveAudio,
   clearActiveAudioIf,
-  setActiveAudio,
+  getActiveAudio,
+  notifyActiveAudioChanged,
+  otherCopyOf,
+  playingElsewhere,
+  subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -33,6 +38,16 @@ export interface AudioError {
   kind: AudioErrorKind
   message: string
 }
+
+/** Move a player's playhead. Safari refuses (throws) before the element knows
+ *  enough of its media to seek; a refused move is simply not made, never an
+ *  uncaught error in the middle of playback. */
+function setPlayhead(a: HTMLMediaElement, t: number): void {
+  try { a.currentTime = t } catch { /* not seekable yet */ }
+}
+
+/** How far inside a trim window's end a seek lands — see `clampToTrim`. */
+export const SEEK_END_GUARD_SEC = 0.05
 
 /** "missing" = the clip's stored audio is permanently gone (404) — unlike
  *  "error" it is not retryable, so UI must not offer a retry affordance. */
@@ -70,17 +85,52 @@ export interface UseCellAudioResult {
   ensureBytes: () => Promise<Uint8Array>
 }
 
+export interface UseCellAudioOptions {
+  /**
+   * What of the playhead this caller shows, as a key: its reported
+   * `currentTime` then moves only when the key changes, not every frame.
+   *
+   * A row that shows only which WORD is being spoken (the karaoke highlight)
+   * passes the word's index. Without it the row re-rendered — with its whole
+   * subtree — on every frame a take played anywhere, since one playback per
+   * take made its hidden player follow the card's (2026-09-30: about 27
+   * renders a second of the playing row; a second-long stall on a slow
+   * device). Seeks, starts and stops still report at once.
+   */
+  timeKey?: (t: number) => unknown
+}
+
 export function useCellAudio(
   project: ProjectRecord,
   cell: CodexCell,
   fileId: string,
+  opts: UseCellAudioOptions = {},
 ): UseCellAudioResult {
   const { session } = useFrontierSession()
   const t = useT()
   const [state, setState] = useState<UseCellAudioResult["state"]>("idle")
   const [error, setError] = useState<AudioError | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
+  const [currentTime, setCurrentTimeState] = useState(0)
+  // See `timeKey`: the per-frame writes go through `publishTime`, which skips
+  // a frame whose key is the one last written; every other write is at once.
+  const timeKeyRef = useRef(opts.timeKey)
+  timeKeyRef.current = opts.timeKey
+  const lastTimeKeyRef = useRef<{ key: unknown } | null>(null)
+  const setCurrentTime = useCallback((t: number) => {
+    const keyOf = timeKeyRef.current
+    lastTimeKeyRef.current = keyOf ? { key: keyOf(t) } : null
+    setCurrentTimeState(t)
+  }, [])
+  const publishTime = useCallback((t: number) => {
+    const keyOf = timeKeyRef.current
+    if (keyOf) {
+      const key = keyOf(t)
+      if (lastTimeKeyRef.current && Object.is(lastTimeKeyRef.current.key, key)) return
+      lastTimeKeyRef.current = { key }
+    }
+    setCurrentTimeState(t)
+  }, [])
   const [duration, setDuration] = useState(0)
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
   const [peaksState, setPeaksState] = useState<PeaksState>("idle")
@@ -115,16 +165,24 @@ export function useCellAudio(
   // current ones.
   const playRef = useRef<() => Promise<void>>(async () => undefined)
   const pauseRef = useRef<() => void>(() => undefined)
+  const seekRef = useRef<(t: number) => void>(() => undefined)
   const coordinatorControllerRef = useRef<ActiveAudioController | null>(null)
+  const clipKeyRef = useRef<string | null>(null)
   if (coordinatorControllerRef.current === null) {
     coordinatorControllerRef.current = {
       isPlaying: () => Boolean(audioRef.current && !audioRef.current.paused),
       play: () => playRef.current(),
       pause: () => pauseRef.current(),
+      clipKey: () => clipKeyRef.current,
+      currentTime: () => audioRef.current?.currentTime ?? 0,
+      seek: (t: number) => seekRef.current(t),
     }
   }
 
   const selectedAudioId = cell.metadata?.selectedAudioId
+  // Which take this is, across every waveform that shows it.
+  const clipKey = selectedAudioId ? `${fileId}|${selectedAudioId}` : null
+  clipKeyRef.current = clipKey
   const attachment = selectedAudioId
     ? cell.metadata?.attachments?.[selectedAudioId]
     : undefined
@@ -161,7 +219,7 @@ export function useCellAudio(
       setPeaks(null)
       setPeaksState("idle")
     }
-  }, [selectedAudioId])
+  }, [selectedAudioId, setCurrentTime])
 
   // Derive "cloud" state: a frontier-audio:// pointer (or a remote http(s)
   // clip) exists but bytes are not yet in memory. Only set when in "idle"
@@ -293,13 +351,13 @@ export function useCellAudio(
     const { start, end } = trimRef.current
     if (end != null && a.currentTime >= end) {
       a.pause()
-      a.currentTime = start ?? 0
+      setPlayhead(a, start ?? 0)
       setCurrentTime(start ?? 0)
       return // onpause → stopTicking
     }
-    setCurrentTime(a.currentTime)
+    publishTime(a.currentTime)
     rafRef.current = requestAnimationFrame(() => tickPlayheadRef.current())
-  }, [])
+  }, [publishTime, setCurrentTime])
   tickPlayheadRef.current = tickPlayhead
 
   const startTicking = useCallback(() => {
@@ -315,7 +373,15 @@ export function useCellAudio(
   }, [])
 
   const play = useCallback(async () => {
-    if (coordinatorControllerRef.current) setActiveAudio(coordinatorControllerRef.current)
+    // The take was last played from another of its copies: resume it THERE,
+    // where it was left, rather than start a second playback from the top.
+    const self = coordinatorControllerRef.current
+    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    if (other && !(audioRef.current && !audioRef.current.paused)) { await other.play(); return }
+    // CLAIM, not just record: whatever else is sounding stops — another take,
+    // or another copy of this one (Sam, 2026-09-29: the Audio view card and
+    // the Recording tab under it played the same take on top of each other).
+    if (coordinatorControllerRef.current) claimActiveAudio(coordinatorControllerRef.current)
     if (audioRef.current) {
       const a = audioRef.current
       const { start, end } = trimRef.current
@@ -324,7 +390,7 @@ export function useCellAudio(
       // the file's natural end: a replay would otherwise restart at 0 and play
       // the trimmed-off head (AQU-1217).
       if (start != null && (a.ended || a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
-        a.currentTime = start
+        setPlayhead(a, start)
       }
       try { await a.play() } catch (e) {
         console.error("[useCellAudio] play() rejected", e)
@@ -379,9 +445,10 @@ export function useCellAudio(
         setError({ kind: "download-failed", message: t("audio.error.streamingFailed") })
         setState("error")
       }
-      audio.onplay = () => { setIsPlaying(true); startTicking() }
-      audio.onpause = () => { setIsPlaying(false); stopTicking() }
-      audio.onended = () => { setIsPlaying(false); stopTicking() }
+      // Each change is announced: the take's other copies mirror it.
+      audio.onplay = () => { setIsPlaying(true); startTicking(); notifyActiveAudioChanged() }
+      audio.onpause = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
+      audio.onended = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
       audio.onloadedmetadata = () => {
         if (Number.isFinite(audio.duration)) setDuration(audio.duration)
         const { start } = trimRef.current
@@ -390,7 +457,7 @@ export function useCellAudio(
         // fire \`ended\` at once, so the take is never heard (play-queue's
         // wireOverlayElement refuses the same seek).
         if (start != null && start > 0 && Number.isFinite(audio.duration)) {
-          audio.currentTime = start
+          setPlayhead(audio, start)
           setCurrentTime(start)
         }
       }
@@ -398,11 +465,11 @@ export function useCellAudio(
         const { start, end } = trimRef.current
         if (end != null && audio.currentTime >= end) {
           audio.pause()
-          audio.currentTime = start ?? 0
+          setPlayhead(audio, start ?? 0)
           setCurrentTime(start ?? 0)
           return
         }
-        setCurrentTime(audio.currentTime)
+        publishTime(audio.currentTime)
       }
       audioRef.current = audio
       return audio
@@ -474,10 +541,14 @@ export function useCellAudio(
       setError(err)
       setState("error")
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t])
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime])
 
   const pause = useCallback(() => {
-    audioRef.current?.pause()
+    const own = audioRef.current
+    if (own && !own.paused) { own.pause(); return }
+    // Sounding from another copy of this take: stop it there.
+    const self = coordinatorControllerRef.current
+    if (self) playingElsewhere(self, clipKeyRef.current)?.pause()
   }, [])
 
   const setVolume = useCallback((v: number) => {
@@ -492,28 +563,56 @@ export function useCellAudio(
     if (a && start != null && Number.isFinite(a.duration)) {
       // Snap the playhead into the new window if it fell outside.
       if (a.currentTime < start || (end != null && a.currentTime > end)) {
-        a.currentTime = start
+        setPlayhead(a, start)
         setCurrentTime(start)
       }
     }
-  }, [])
+  }, [setCurrentTime])
 
+  // A seek lands a hair INSIDE the window's end. Landing exactly on it is
+  // "reached the end" to the tick, which pauses and rewinds — so a drag into
+  // the trimmed-off tail made every pointer move pause, rewind, restart and
+  // seek again (Sam, 2026-09-29: scrubbing while playing froze the app).
   const clampToTrim = (t: number, dur: number): number => {
     const lo = trimRef.current.start ?? 0
     const hi = trimRef.current.end ?? dur
-    return Math.max(lo, Math.min(t, hi))
+    return Math.max(lo, Math.min(t, Math.max(lo, hi - SEEK_END_GUARD_SEC)))
   }
 
+  // A drag reports every pointer move; the element is moved once a frame, to
+  // the latest of them. Moving it more often only queues seeks it cannot keep
+  // up with — on a streamed take each one is a new range request.
+  const pendingSeekRef = useRef<number | null>(null)
+  const seekFrameRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (seekFrameRef.current != null) cancelAnimationFrame(seekFrameRef.current)
+  }, [])
+
   const seek = useCallback((t: number) => {
+    // Scrubbing a copy of the take another copy last played moves THAT one.
+    const self = coordinatorControllerRef.current
+    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    if (other?.seek) { other.seek(t); return }
     const a = audioRef.current
     if (a) {
-      const clamped = clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t)
-      a.currentTime = clamped
-      setCurrentTime(clamped)
-      // Clicking the waveform implies "play from here" — resume if paused
-      // (covers the post-end and post-pause cases where audioRef is set but
-      // playback has stopped).
-      if (a.paused) void play()
+      pendingSeekRef.current = t
+      // The readout follows the pointer at once; the element, next frame.
+      setCurrentTime(clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t))
+      if (seekFrameRef.current != null) return
+      seekFrameRef.current = requestAnimationFrame(() => {
+        seekFrameRef.current = null
+        const target = pendingSeekRef.current
+        pendingSeekRef.current = null
+        const el = audioRef.current
+        if (!el || target == null) return
+        const clamped = clampToTrim(target, Number.isFinite(el.duration) ? el.duration : target)
+        try { el.currentTime = clamped } catch { /* not seekable yet — the next move tries again */ }
+        setCurrentTime(clamped)
+        // Clicking the waveform implies "play from here" — resume if paused
+        // (covers the post-end and post-pause cases where audioRef is set but
+        // playback has stopped).
+        if (el.paused) void playRef.current()
+      })
       return
     }
     // No audio loaded yet — kick off play and let the user-initiated promise
@@ -524,10 +623,10 @@ export function useCellAudio(
       const a2 = audioRef.current
       if (!a2) return
       const clamped = clampToTrim(t, Number.isFinite(a2.duration) ? a2.duration : t)
-      a2.currentTime = clamped
+      try { a2.currentTime = clamped } catch { /* not seekable yet */ }
       setCurrentTime(clamped)
     })()
-  }, [play])
+  }, [play, setCurrentTime])
 
   const requestPeaks = useCallback(async (bins: number, opts?: { force?: boolean }) => {
     if (!attachmentUrl || !selectedAudioId) return
@@ -573,6 +672,48 @@ export function useCellAudio(
   // the latest closures, not the ones captured at registration time.
   playRef.current = play
   pauseRef.current = pause
+  seekRef.current = seek
+
+  // ── One take, one playback ──────────────────────────────────────────────
+  // While another copy of this take is the one last played (the Audio view
+  // card above the Recording tab, the recorder over either), this copy shows
+  // that playback as its own — playing or paused, at that copy's position —
+  // and its button, play and scrub all go there (see play, pause, seek).
+  const [mirrored, setMirrored] = useState<ActiveAudioController | null>(null)
+  const [mirrorPlaying, setMirrorPlaying] = useState(false)
+  const [mirrorTime, setMirrorTimeState] = useState(0)
+  const lastMirrorKeyRef = useRef<{ key: unknown } | null>(null)
+  const setMirrorTime = useCallback((t: number, perFrame = false) => {
+    const keyOf = timeKeyRef.current
+    if (keyOf) {
+      const key = keyOf(t)
+      if (perFrame && lastMirrorKeyRef.current && Object.is(lastMirrorKeyRef.current.key, key)) return
+      lastMirrorKeyRef.current = { key }
+    }
+    setMirrorTimeState(t)
+  }, [])
+  useEffect(() => {
+    const self = coordinatorControllerRef.current
+    if (!self) return
+    const check = () => {
+      const other = otherCopyOf(self, clipKey)
+      setMirrored(other)
+      setMirrorPlaying(Boolean(other?.isPlaying()))
+      if (other?.currentTime) setMirrorTime(other.currentTime())
+    }
+    check()
+    return subscribeActiveAudio(check)
+  }, [clipKey, setMirrorTime])
+  useEffect(() => {
+    if (!mirrorPlaying || !mirrored?.currentTime) return
+    let frame = requestAnimationFrame(function follow() {
+      // Stale once the coordinator has moved on; the check above clears it.
+      if (getActiveAudio() === mirrored) setMirrorTime(mirrored.currentTime?.() ?? 0, true)
+      frame = requestAnimationFrame(follow)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [mirrored, mirrorPlaying, setMirrorTime])
+  const mirroring = mirrored != null
 
   // The element (or the decode) reports the real length, but a waveform
   // served from the peaks cache arrives with neither — and with no length the
@@ -583,7 +724,12 @@ export function useCellAudio(
     : 0
 
   return {
-    state, error, isPlaying, currentTime, duration: duration > 0 ? duration : attachmentDurationSec, peaks, peaksState,
+    state,
+    error,
+    isPlaying: isPlaying || mirrorPlaying,
+    currentTime: mirroring ? mirrorTime : currentTime,
+    duration: duration > 0 ? duration : attachmentDurationSec,
+    peaks, peaksState,
     play, pause, seek, setVolume, setTrim, requestPeaks, ensureBytes,
   }
 }

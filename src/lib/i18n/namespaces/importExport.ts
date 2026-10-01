@@ -338,6 +338,20 @@ export const importExport = defineNamespace({
     "importExport.landing.tm.hint": "TMX",
     "importExport.landing.tm.description": "Import source/target pairs from a TMX memory file.",
 
+    // — AQU-1527: "From another project" — the established-project source link
+    //   (AQU-1525) offered from the Import dialog's landing screen, not only
+    //   from Project Settings → Source & sync. Both unusable cases say what
+    //   would make it usable rather than hiding the tile, because a hidden
+    //   capability is the problem this slice exists to fix.
+    "importExport.landing.linkProject.title": "From another project",
+    "importExport.landing.linkProject.hint": "live link",
+    "importExport.landing.linkProject.description":
+      "Read another Aquilla project's source files here. The link is live, so later upstream edits keep flowing through.",
+    "importExport.landing.linkProject.alreadyLinkedTooltip":
+      "This project already reads its source from another project, and it can only follow one. Manage or detach that link in Project Settings → Source & sync.",
+    "importExport.landing.linkProject.roleTooltip":
+      "Project lead or above required to link a source project.",
+
     // — Re-import collision panel —
     "importExport.collision.intro": plural({
       one: "The following {count} file already exists in this project. Choose what to do with it.",

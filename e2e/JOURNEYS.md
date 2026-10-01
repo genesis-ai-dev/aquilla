@@ -243,6 +243,15 @@ UI chrome that used to be one smoke file per click is covered under
   as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
   is at risk before confirming and the step crosses no second service, so per the rules
   above it stays RTL rather than becoming a smoke journey.
+  The Import dialog's second entry point to the same action (AQU-1527, "From another
+  project" on the landing screen) is RTL in `ImportDialog.linkProject.test.tsx`: the tile
+  routes to the flow, back links nothing, the shared pre-link preview appears on this
+  path too (the flow is one component — `ProjectSettings/LinkSourceFlow.tsx` — so the two
+  entry points cannot diverge), confirming posts the live/consumes-source shape and closes
+  the dialog, and the two unusable cases (already linked, below project lead) are shown
+  disabled with their reason. The cross-layer walk is the SAME still-open item AQU-1525
+  left: one smoke journey covering link-then-assert-mirrored-files serves both entry
+  points, and it is tracked there rather than duplicated here.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

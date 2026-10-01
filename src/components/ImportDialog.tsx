@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, Search, Cloud, CloudDownload, Video,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -120,8 +120,10 @@ import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
+import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
+import { ROLE } from "@/lib/frontier/roles"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
 
 interface ImportDialogProps {
   open: boolean
@@ -174,6 +176,24 @@ interface ImportDialogProps {
    * setting. Absent/false imports front matter (the default).
    */
   excludeFrontMatter?: boolean
+  /**
+   * AQU-1527: the "From another project" source — link this established project
+   * to another project's source (AQU-1525's action) from the place people
+   * actually go to bring material in, instead of only from Project Settings →
+   * Source & sync. Absent means the host cannot offer it (nothing to refresh
+   * afterwards), and the tile is not shown at all.
+   *
+   * `roleLevel` is the caller's level on THIS project — the server's floor is
+   * project_lead(500). `alreadyLinked` is true once the project has an upstream:
+   * a project has one at a time, so the tile is shown disabled rather than
+   * leading to a flow that would be refused. `onLinked` lets the host refresh
+   * the project record; the dialog closes itself.
+   */
+  linkSource?: {
+    roleLevel: number | null
+    alreadyLinked: boolean
+    onLinked: () => void
+  }
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -198,6 +218,7 @@ export function ImportDialog({
   existingFiles,
   patchDcsCursor,
   excludeFrontMatter,
+  linkSource,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -497,6 +518,7 @@ export function ImportDialog({
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
+                  : screen === "linkProject" ? t("importExport.landing.linkProject.title")
                   : t("importExport.landing.ebible.title")}
               </div>
             )}
@@ -508,6 +530,14 @@ export function ImportDialog({
         {screen === "landing" && (
           <ImportLanding
             allowDcs={patchDcsCursor !== undefined}
+            linkProject={
+              linkSource
+                ? {
+                    alreadyLinked: linkSource.alreadyLinked,
+                    canLink: (linkSource.roleLevel ?? 0) >= ROLE.PROJECT_LEAD,
+                  }
+                : null
+            }
             onSelect={(s, selectedPartnerId) => {
               posthog.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
@@ -521,6 +551,27 @@ export function ImportDialog({
               setScreen(s)
             }}
           />
+        )}
+
+        {/* AQU-1527: the same flow the settings card mounts — one component, so
+            the picker, the pre-link preview and the cycle refusal cannot
+            diverge between the two entry points. */}
+        {screen === "linkProject" && linkSource && (
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              {t("projectSettings.linkSource.description")}
+            </p>
+            <LinkSourceFlow
+              projectId={projectId}
+              roleLevel={linkSource.roleLevel}
+              onLinked={() => {
+                // Refresh first, close second: the file list the user is sent
+                // back to is the thing that must already know about the link.
+                linkSource.onLinked()
+                onOpenChange(false)
+              }}
+            />
+          </div>
         )}
 
         {screen === "youtube" && (
@@ -879,6 +930,12 @@ type ImportOption = {
   icon: LucideIcon
   badge?: "beta" | "soon"
   disabled?: boolean
+  /**
+   * Why this option is disabled, when it is disabled for a reason other than
+   * "not built yet" (AQU-1527). Replaces the coming-soon tooltip so a tile that
+   * exists but cannot be used here says what would make it usable.
+   */
+  disabledReasonKey?: MessageKey
   /** Set on a tile contributed by a partner integration; routes to screen "partner". */
   partnerId?: string
 }
@@ -982,9 +1039,11 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
   const { icon: Icon, disabled } = option
   const title = t(option.titleKey)
   const select = () => { if (!disabled && option.id) onSelect(option.id, option.partnerId) }
-  const disabledTooltip = disabled
-    ? t("importExport.landing.comingSoonTooltip", { title })
-    : undefined
+  const disabledTooltip = !disabled
+    ? undefined
+    : option.disabledReasonKey
+      ? t(option.disabledReasonKey)
+      : t("importExport.landing.comingSoonTooltip", { title })
   const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
   const card = (
     <Card
@@ -1034,20 +1093,62 @@ function ImportSection({ label, children }: { label: string; children: ReactNode
   )
 }
 
+/**
+ * AQU-1527: the "From another project" tile, built per render because its state
+ * depends on this project — unlike every other option, which is the same for
+ * everyone.
+ *
+ * It is offered rather than hidden in both unusable cases, because hiding it is
+ * what sent people to the forums in the first place: the capability existed and
+ * nothing on screen said so. Disabled-with-a-reason tells a Contributor who to
+ * ask, and tells a lead on an already-linked project that the thing they are
+ * looking for is in settings (a project has one upstream at a time, so the flow
+ * would only be refused).
+ */
+function linkProjectOption({ alreadyLinked, canLink }: LinkProjectAvailability): ImportOption {
+  const reasonKey: MessageKey | undefined = alreadyLinked
+    ? "importExport.landing.linkProject.alreadyLinkedTooltip"
+    : !canLink
+      ? "importExport.landing.linkProject.roleTooltip"
+      : undefined
+  return {
+    id: "linkProject",
+    titleKey: "importExport.landing.linkProject.title",
+    hintKey: "importExport.landing.linkProject.hint",
+    descriptionKey: "importExport.landing.linkProject.description",
+    icon: Link2,
+    ...(reasonKey ? { disabled: true, disabledReasonKey: reasonKey } : {}),
+  }
+}
+
+interface LinkProjectAvailability {
+  /** The project already has an upstream; it may only have one at a time. */
+  alreadyLinked: boolean
+  /** The caller is project_lead or above on this project. */
+  canLink: boolean
+}
+
 interface ImportLandingProps {
   onSelect: (screen: Screen, partnerId?: string) => void
   /** When false, the Door43 (DCS) option is hidden — its import needs a way to
    *  write the project settings cursor (patchDcsCursor), unavailable e.g. for
    *  unsynced local-only projects. */
   allowDcs: boolean
+  /** AQU-1527: null when the host cannot offer linking at all. */
+  linkProject: LinkProjectAvailability | null
 }
 
-function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject }: ImportLandingProps) {
   const t = useT()
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
   const q = filter.trim().toLowerCase()
+  // AQU-1527: "From another project" sits in the popular tier — it is a first
+  // answer to "bring that material in here", not a specialized format.
+  const popular = linkProject
+    ? [...POPULAR_OPTIONS, linkProjectOption(linkProject)]
+    : POPULAR_OPTIONS
   // Hide DCS when the host can't persist the release cursor.
   const specializedOptions = [...SPECIALIZED_OPTIONS, ...PARTNER_OPTIONS]
   const available = allowDcs
@@ -1062,7 +1163,7 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">{t("importExport.landing.intro")}</p>
       <ImportSection label={t("importExport.landing.popularSection")}>
-        {POPULAR_OPTIONS.map((o) => (
+        {popular.map((o) => (
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>

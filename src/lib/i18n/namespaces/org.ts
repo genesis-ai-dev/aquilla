@@ -1478,6 +1478,14 @@ export const org = defineNamespace({
     // question the grid poses at a glance — how much of this is left — for a
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    "org.projectOverview.plan.unplacedInBook": plural({
+      one: "{count} line has no verse reference, so no chapter shows it. It still counts toward this book.",
+      other: "{count} lines have no verse reference, so no chapter shows them. They still count toward this book.",
+    }),
+    "org.projectOverview.plan.unplacedInFile": plural({
+      one: "{count} line in this file has no verse reference, so no book counts it.",
+      other: "{count} lines in this file have no verse reference, so no book counts them.",
+    }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
     // read: the catalog already spends that string on autopilot.status.complete
@@ -3239,6 +3247,16 @@ export const org = defineNamespace({
       "org.projectOverview.plan.sectionCount": {
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
+      },
+      "org.projectOverview.plan.unplacedInBook": {
+        description:
+          "Note under the inspector's chapter grid, in a file that holds one book. Lines added by hand have no verse reference, so no chapter tile includes them, yet the book's own bars and its 'cells to translate' count do. This says why the two disagree.",
+        placeholders: { count: "Lines with no verse reference — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.unplacedInFile": {
+        description:
+          "Note under the inspector's chapter grid, in a file that holds several books. Lines with no verse reference cannot be assigned to any of them, so no book on the board counts them; the file's own totals still do.",
+        placeholders: { count: "Lines with no verse reference — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chaptersShort": {
         description:

@@ -39,10 +39,41 @@ export function sectionBelongsToUnit(key: string, sectionKey: string): boolean {
   return key === sectionKey || key.startsWith(`${sectionKey} `)
 }
 
+/**
+ * AQU-1493: the file's lines that no chapter holds — a line added in the
+ * editor carries no verse reference — and where the plan counts them.
+ */
+export interface PlanUnplacedLines {
+  count: number
+  /**
+   * True on a file of ONE book: the projection counts them toward that book
+   * (`unitBookKeyExpr`), so they are in this unit's bars without being in any
+   * chapter. False on a file of several, where no book counts them at all.
+   */
+  inUnit: boolean
+}
+
 export interface UsePlanUnitSectionsResult {
   sections: PlanSection[]
+  /** Null on a file-grain unit, which holds every line of its file anyway. */
+  unplaced: PlanUnplacedLines | null
   loading: boolean
   error: boolean
+}
+
+/**
+ * How many of a Scripture file's lines sit in no chapter: the file's own count
+ * less every chapter's. Time buckets are not chapters — a timed line with no
+ * reference has no verse either — so they are left out of the subtraction.
+ */
+export function unplacedLines(
+  fileTotal: number,
+  sections: ReadonlyArray<{ key: string; totalCount: number }>,
+): PlanUnplacedLines {
+  const chapters = sections.filter((s) => !s.key.startsWith(TIME_BUCKET_PREFIX))
+  const placed = chapters.reduce((sum, s) => sum + s.totalCount, 0)
+  const books = new Set(chapters.map((s) => s.key.split(" ")[0]))
+  return { count: Math.max(0, fileTotal - placed), inUnit: books.size === 1 }
 }
 
 const EMPTY: PlanSection[] = []
@@ -56,6 +87,7 @@ export function usePlanUnitSections(opts: {
 }): UsePlanUnitSectionsResult {
   const { projectId, unit, getToken, lane } = opts
   const [sections, setSections] = useState<PlanSection[]>(EMPTY)
+  const [unplaced, setUnplaced] = useState<PlanUnplacedLines | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   // Guards against a slow response for a unit the reader has already left.
@@ -67,6 +99,7 @@ export function usePlanUnitSections(opts: {
   useEffect(() => {
     if (!projectId || !fileId || !getToken) {
       setSections(EMPTY)
+      setUnplaced(null)
       setLoading(false)
       setError(false)
       return
@@ -80,6 +113,7 @@ export function usePlanUnitSections(opts: {
         const body = await getFileProgress(projectId, fileId, () => getToken(), lane)
         if (cancelled || generation.current !== gen) return
         const mine = body.sections.filter((s) => sectionBelongsToUnit(s.key, sectionKey))
+        setUnplaced(sectionKey ? unplacedLines(body.file.totalCount, body.sections) : null)
         // AQU-1278: labels come from the shared classifier, over THIS unit's
         // keys — a bare book code is "1" for a one-chapter book and keeps its
         // code for front matter, and that answer depends on the other keys.
@@ -105,6 +139,7 @@ export function usePlanUnitSections(opts: {
       } catch {
         if (cancelled || generation.current !== gen) return
         setSections(EMPTY)
+        setUnplaced(null)
         setError(true)
         setLoading(false)
       }
@@ -114,5 +149,5 @@ export function usePlanUnitSections(opts: {
     }
   }, [projectId, fileId, sectionKey, lane, getToken])
 
-  return { sections, loading, error }
+  return { sections, unplaced, loading, error }
 }

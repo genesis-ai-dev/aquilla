@@ -292,6 +292,42 @@ describe("progress and navigation", () => {
   })
 })
 
+describe("lines with no verse reference (AQU-1493)", () => {
+  /** A file whose own total exceeds its chapters' by `extra` lines. */
+  const withExtraLines = (sections: ReturnType<typeof section>[], extra: number) => {
+    const placed = sections.reduce((n, x) => n + x.totalCount, 0)
+    vi.mocked(getFileProgress).mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: section("", { totalCount: placed + extra }), sections,
+    } as never)
+    return async () => "tok"
+  }
+
+  it("says a one-book file's added lines count toward the book but sit in no chapter", async () => {
+    // Every chapter reads complete; the book is still three lines short.
+    const getToken = withExtraLines([doneSection("GEN 1"), doneSection("GEN 2")], 3)
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Genesis" }), true, false, getToken)
+    expect(await screen.findByTestId("plan-unplaced-lines")).toHaveTextContent(
+      "3 lines have no verse reference, so no chapter shows them. They still count toward this book.",
+    )
+  })
+
+  it("says no book counts them in a file of several books", async () => {
+    const getToken = withExtraLines([section("GEN 1"), section("EXO 1")], 1)
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
+    expect(await screen.findByTestId("plan-unplaced-lines")).toHaveTextContent(
+      "1 line in this file has no verse reference, so no book counts it.",
+    )
+  })
+
+  it("says nothing when every line has a chapter", async () => {
+    const getToken = withExtraLines([section("GEN 1"), section("GEN 2")], 0)
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Genesis" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
+    expect(screen.queryByTestId("plan-unplaced-lines")).toBeNull()
+  })
+})
+
 describe("the chapter grid (AQU-1278)", () => {
   it("places every tile at its own chapter number and leaves the gap empty", async () => {
     // THE WHOLE POINT OF THE GRID'S PARSER. A section row exists only where

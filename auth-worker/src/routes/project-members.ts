@@ -26,6 +26,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 import { auditMembershipChange } from "../services/admin-audit"
+import { projectElevationDenial } from "../services/elevation-gate"
 
 const projectMembers = new Hono<AuthHonoEnv>()
 
@@ -75,6 +76,8 @@ projectMembers.post(
         403,
       )
     }
+    const unelevated = await projectElevationDenial(c, callerRole)
+    if (unelevated) return unelevated
 
     // AQU-285 (F-B6) target-level cap, mirrored from the sibling
     // DELETE /:projectId/members/:userId (projects.ts): a caller below OWNER

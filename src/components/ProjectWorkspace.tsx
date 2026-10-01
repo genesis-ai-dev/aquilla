@@ -13951,6 +13951,17 @@ export function ProjectWorkspace() {
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
           excludeFrontMatter={project.importExcludeFrontMatter}
+          linkSource={{
+            // AQU-1527: the Import dialog's "From another project" tile runs
+            // AQU-1525's link action. Server floor is project_lead(500); a
+            // project follows one upstream at a time, so an already-linked
+            // project gets the tile disabled rather than a flow that would be
+            // refused. `refresh()` is what makes the mirrored files show up in
+            // the file list the dialog closes back to.
+            roleLevel: serverRoleLevel ?? project.syncRole?.level ?? null,
+            alreadyLinked: Boolean(project.sourceProjectId),
+            onLinked: () => refresh(),
+          }}
           patchDcsCursor={async (cursor) => {
             // Pin the project to the imported Door43 release (spec §8). Server
             // floor is MAINTAINER(600); a below-floor caller gets a blocked

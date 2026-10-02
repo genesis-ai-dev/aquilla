@@ -8,6 +8,7 @@ import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glos
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -48,6 +49,37 @@ export function shouldSelfHealZeroFileLink(args: {
   if (fileCount > 0) return false
   if (alreadyAttemptedProjectId === projectId) return false
   return true
+}
+
+/**
+ * The zero-file self-heal itself, once `shouldSelfHealZeroFileLink` has said
+ * to fire. Pulled out of the effect so its three outcomes can be tested
+ * without mounting the workspace.
+ *
+ * AQU-1544: a failed attempt used to be dropped, leaving a linked project
+ * with an unexplained empty file list for whoever opened it — the person who
+ * linked it, or a teammate later. It is now parked in `link-seed-status`,
+ * which is what puts LinkSeedFailedBanner (and its "Try again") on screen.
+ * And when a link flow has ALREADY parked a failure for this project (the
+ * Import dialog and the create dialog each retry once before giving up), no
+ * further automatic attempt is made: it would only repeat the failure behind
+ * the banner's back.
+ */
+export async function selfHealZeroFileLink(args: {
+  projectId: string
+  jwt: string
+  triggerSync: (jwt: string, projectId: string) => Promise<boolean>
+  refresh: () => void
+}): Promise<"skipped" | "healed" | "failed"> {
+  const { projectId, jwt, triggerSync, refresh } = args
+  if (isLinkSeedFailed(projectId)) return "skipped"
+  const ok = await triggerSync(jwt, projectId)
+  if (ok) {
+    refresh()
+    return "healed"
+  }
+  markLinkSeedFailed(projectId)
+  return "failed"
 }
 
 /**

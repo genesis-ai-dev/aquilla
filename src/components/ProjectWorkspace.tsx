@@ -131,6 +131,7 @@ import {
   shouldPatchSystemPrompt,
   trackDeleteGate,
   shouldSelfHealZeroFileLink,
+  selfHealZeroFileLink,
   shouldApplyCheckResult,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
@@ -301,6 +302,7 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
+import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell, useIsLgUp } from "./AppShell"
@@ -1729,10 +1731,14 @@ export function ProjectWorkspace() {
       alreadyAttemptedProjectId: zeroFileHealAttemptedRef.current,
     })) return
     zeroFileHealAttemptedRef.current = pid
-    void (async () => {
-      const ok = await triggerLinkSync(jwt!, pid!)
-      if (ok) refresh()
-    })()
+    // AQU-1544: a failed heal is no longer quiet — it parks the failure for
+    // LinkSeedFailedBanner below (see selfHealZeroFileLink).
+    void selfHealZeroFileLink({
+      projectId: pid!,
+      jwt: jwt!,
+      triggerSync: triggerLinkSync,
+      refresh,
+    })
   }, [project?.id, project?.sourceLinkMode, projectFiles.length, frontierSession?.jwt, refresh])
 
   // Track the last cell that received an optimistic target edit so
@@ -12607,6 +12613,11 @@ export function ProjectWorkspace() {
             )}
             {/* FRO-296: offline banner — shown when browser reports no connectivity. */}
             <OfflineBanner />
+            {/* AQU-1544: the project's source link is saved but its first
+                mirror sync failed, so the upstream's files are not here.
+                Self-gated on this session's failed mark; `refresh` is what
+                makes the files show up once a retry works. */}
+            {project && <LinkSeedFailedBanner projectId={project.id} onSynced={refresh} />}
             {/* AQU-1340: a failed concepts read compiles to an empty terminology
                 rule set, so term blots and violations silently stop appearing.
                 Say it out loud rather than letting the editor look like a

@@ -25,6 +25,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
 
 const linkProjectSource = vi.fn()
 const triggerLinkSync = vi.fn()
@@ -138,6 +139,7 @@ const tile = () => screen.getByText(TILE).closest("[role=button]")!
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockResolvedValue({
     upstreamName: "English Source",
     fileCount: 3,
@@ -241,6 +243,53 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
     // to know about the mirrored files.
     expect(onLinked).toHaveBeenCalled()
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  // WHY (AQU-1544): the link is saved first and its files are brought in by a
+  // first sync. When that sync failed — and the flow's own retry failed too —
+  // this dialog used to close exactly as on success, leaving "No files
+  // imported yet" with nothing said. It must stay open on a message and a
+  // retry. The host is still told the project is now linked (so this tile
+  // stops offering a second link), which is a refresh, not a close.
+  it("stays open with a message and a retry when the first sync failed", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      previousSourceProjectId: null,
+      seeded: false,
+    })
+    triggerLinkSync.mockResolvedValue(false)
+    await renderDialog()
+    await act(async () => {
+      fireEvent.click(tile())
+    })
+    await user.click(await screen.findByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(screen.getByRole("radio", { name: /^Its Source/i }))
+    await user.click(screen.getByRole("button", { name: "Review what will be added" }))
+    await user.click(await screen.findByRole("button", { name: "Link source project" }))
+
+    expect(
+      await screen.findByText(
+        "The link to the source project was saved, but its files have not arrived here yet. " +
+          "Try again to bring them in.",
+      ),
+    ).toBeTruthy()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(onLinked).toHaveBeenCalledTimes(1)
+
+    // With the cause gone, "Try again" is what finishes the import: refresh
+    // (the files show up behind the dialog), then close.
+    triggerLinkSync.mockResolvedValue(true)
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(onLinked).toHaveBeenCalledTimes(2)
+    expect(linkProjectSource).toHaveBeenCalledTimes(1)
   })
 
   // WHY: a project follows one upstream at a time, so this flow would be

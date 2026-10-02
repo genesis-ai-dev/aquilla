@@ -5,8 +5,9 @@
 // the cycle refusal, the seed self-heal) lives in `LinkSourceFlow` because the
 // Import dialog's "From another project" tile (AQU-1527) reaches the same action
 // and must not grow a second, divergent copy of it. What is left here is this
-// card: the heading, the "why you would" sentence, and the `section-link-source`
-// anchor the settings nav and its search index scroll to.
+// card: the heading, the "why you would" sentence (handed to the flow as its
+// `intro`, so it steps aside once a link is saved), and the
+// `section-link-source` anchor the settings nav and its search index scroll to.
 //
 // This card is the counterpart of SourceLinkSection: exactly one of the two
 // shows, keyed off `sourceProjectId` by ProjectSettings. On success the parent
@@ -37,10 +38,16 @@ export function LinkSourceSection({ projectId, onLinked, roleLevel }: LinkSource
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="text-sm text-muted-foreground">
-          {t("projectSettings.linkSource.description")}
-        </div>
-        <LinkSourceFlow projectId={projectId} onLinked={onLinked} roleLevel={roleLevel} />
+        <LinkSourceFlow
+          projectId={projectId}
+          onLinked={onLinked}
+          roleLevel={roleLevel}
+          intro={
+            <div className="text-sm text-muted-foreground">
+              {t("projectSettings.linkSource.description")}
+            </div>
+          }
+        />
       </CardContent>
     </Card>
   )

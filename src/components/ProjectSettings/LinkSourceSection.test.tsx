@@ -18,6 +18,9 @@
 // Source" (sibling case) or "One of its Targets" (chain case), neither
 // preselected. So `pick()` below answers it, and the cases that are about the
 // question itself live in their own describe at the bottom.
+//
+// AQU-1544 added the end state the flow never had: the link was saved but the
+// upstream's files did not arrive. Those cases are in their own describe too.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
@@ -25,6 +28,7 @@ import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
 import { LinkSourceSection } from "./LinkSourceSection"
 
 const linkProjectSource = vi.fn()
@@ -79,6 +83,12 @@ function renderSection(roleLevel: number | null = 700) {
 }
 
 const linkButton = () => screen.getByRole("button", { name: "Link source project" })
+
+// AQU-1544: the one sentence every entry point shows for a failed first sync.
+const SEED_FAILED =
+  "The link to the source project was saved, but its files have not arrived here yet. " +
+  "Try again to bring them in."
+const tryAgainButton = () => screen.getByRole("button", { name: "Try again" })
 const reviewButton = () => screen.getByRole("button", { name: "Review what will be added" })
 
 const corpusRadio = (which: "source" | "target") =>
@@ -104,6 +114,7 @@ async function pick(
 beforeEach(() => {
   linkProjectSource.mockReset()
   triggerLinkSync.mockReset()
+  resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue({
     upstreamName: "English Source",
@@ -166,12 +177,17 @@ describe("LinkSourceSection", () => {
       previousSourceProjectId: null,
       seeded: false,
     })
-    renderSection(700)
+    triggerLinkSync.mockResolvedValue(true)
+    const { onLinked } = renderSection(700)
 
     await pick(user, "English Source")
     await user.click(linkButton())
 
     await waitFor(() => expect(triggerLinkSync).toHaveBeenCalledWith("tok", PROJECT_ID))
+    // AQU-1544: a self-heal that worked is an ordinary success — the parent is
+    // told and nothing about a failure is shown.
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(SEED_FAILED)).toBeNull()
   })
 
   // WHY: the picker's contents are an access question. Every project the user
@@ -517,5 +533,126 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")
     expect(corpusRadio("target").getAttribute("aria-checked")).toBe("false")
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
+  })
+})
+
+// AQU-1544 — the link was saved, the upstream's files did not arrive.
+//
+// Why these tests exist: saving a link and bringing its files in are two steps.
+// The flow already retried the second one itself when the server said its seed
+// had not run, but it never looked at whether that retry worked, and reported
+// the link as done either way. On a failed first sync the settings card flipped
+// to the linked state and the Import dialog closed, exactly as on success; the
+// only trace was a 502 in the browser console. These cases reproduce that —
+// the link request answers "not seeded" and the retry fails — and pin what the
+// user is shown instead.
+describe("LinkSourceSection — the first sync failed (AQU-1544)", () => {
+  const NOT_SEEDED = {
+    projectId: PROJECT_ID,
+    sourceProjectId: "proj-upstream",
+    mode: "live",
+    consumes: "source",
+    gate: "validated",
+    previousSourceProjectId: null,
+    seeded: false,
+  }
+
+  async function linkWithFailedSync(user: ReturnType<typeof userEvent.setup>) {
+    linkProjectSource.mockResolvedValue(NOT_SEEDED)
+    triggerLinkSync.mockResolvedValue(false)
+    const rendered = renderSection(700)
+    await pick(user, "English Source")
+    await user.click(linkButton())
+    await screen.findByText(SEED_FAILED)
+    return rendered
+  }
+
+  // WHY: the step that used to pass silently. The success callback is what
+  // closes the Import dialog and flips the settings card, so it must not fire
+  // while the files are missing — and the user must be told, in a plain
+  // sentence with a way to retry, not left with an unexplained empty list.
+  it("says the link was saved but the files have not arrived, offers a retry, and does not report success", async () => {
+    const user = userEvent.setup()
+    const { onLinked } = await linkWithFailedSync(user)
+
+    expect(screen.getByRole("alert").textContent).toContain(SEED_FAILED)
+    expect(tryAgainButton()).toBeTruthy()
+    expect(onLinked).not.toHaveBeenCalled()
+    // One retry by the flow itself, before it gives up and says so.
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+    // The project IS linked now, so the picker is gone: offering to pick an
+    // upstream again would be offering a second link.
+    expect(screen.queryByRole("combobox", { name: "Source project" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Link source project" })).toBeNull()
+    // Nor does the card go on saying the project "owns its own source" and
+    // inviting a link, directly above a message that the link was saved.
+    expect(screen.queryByText(/This project owns its own source/)).toBeNull()
+    // Parked for the page behind the flow (workspace banner).
+    expect(isLinkSeedFailed(PROJECT_ID)).toBe(true)
+  })
+
+  // WHY: "a plain sentence a translator can act on". The server's refusal text
+  // and the HTTP status are exactly what must not reach the screen.
+  it("shows no status code or raw server error", async () => {
+    const user = userEvent.setup()
+    await linkWithFailedSync(user)
+
+    const text = screen.getByRole("alert").textContent ?? ""
+    expect(text).not.toMatch(/\b[45]\d\d\b/)
+    expect(text).not.toMatch(/gateway|link sync failed|mirror sync/i)
+  })
+
+  // WHY: retrying must be safe to do twice. A second failure leaves the link
+  // saved, the message up and the button live — and says the attempt failed,
+  // because a notice that sits unchanged reads as a button that did nothing.
+  it("keeps the message and the retry when trying again fails too", async () => {
+    const user = userEvent.setup()
+    const { onLinked } = await linkWithFailedSync(user)
+
+    await user.click(tryAgainButton())
+
+    await screen.findByText(/That attempt did not bring them in either/)
+    expect(screen.getByText(SEED_FAILED)).toBeTruthy()
+    expect(tryAgainButton().hasAttribute("disabled")).toBe(false)
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+    expect(triggerLinkSync).toHaveBeenLastCalledWith("tok", PROJECT_ID)
+    expect(onLinked).not.toHaveBeenCalled()
+    // Retrying re-runs the sync only. It never links a second time and never
+    // unlinks.
+    expect(linkProjectSource).toHaveBeenCalledTimes(1)
+    expect(isLinkSeedFailed(PROJECT_ID)).toBe(true)
+  })
+
+  // WHY: the way out. Once the sync works the flow finishes exactly as a link
+  // that seeded first time does — the parent refreshes (that is what makes the
+  // files appear without a reload) and the message is gone.
+  it("finishes as a normal link once trying again works", async () => {
+    const user = userEvent.setup()
+    const { onLinked } = await linkWithFailedSync(user)
+
+    triggerLinkSync.mockResolvedValue(true)
+    await user.click(tryAgainButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(SEED_FAILED)).toBeNull()
+    expect(linkProjectSource).toHaveBeenCalledTimes(1)
+    expect(isLinkSeedFailed(PROJECT_ID)).toBe(false)
+  })
+
+  // WHY: the regression guard for the common case. A link whose first sync
+  // succeeds server-side must behave exactly as before — no message, no extra
+  // sync, success reported.
+  it("shows nothing and retries nothing when the server seeded the link itself", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({ ...NOT_SEEDED, seeded: true })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(triggerLinkSync).not.toHaveBeenCalled()
+    expect(screen.queryByText(SEED_FAILED)).toBeNull()
+    expect(isLinkSeedFailed(PROJECT_ID)).toBe(false)
   })
 })

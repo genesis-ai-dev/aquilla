@@ -627,6 +627,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1544: a live link that has never brought anything through.
+    "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
+    "projectSettings.sourceLink.notSyncedNote":
+      "Nothing has come through this link yet, so the source project's files are " +
+      "not in this project. Sync now to bring them in.",
+    "projectSettings.sourceLink.syncNowButton": "Sync now",
+    "projectSettings.sourceLink.syncingButton": "Syncing…",
+    "projectSettings.sourceLink.syncFailedNote":
+      "Couldn't bring in the source project's files. The link is still saved, so " +
+      "you can try again in a moment.",
+    "projectSettings.sourceLink.syncNothingYetNote":
+      "The source project has nothing to bring in yet. Its files will arrive here " +
+      "as it gains them.",
     "projectSettings.sourceLink.cloneNote": "This is a one-time snapshot — upstream changes do not propagate here.",
     "projectSettings.sourceLink.irreversibleTitle": "Detaching is irreversible",
     "projectSettings.sourceLink.irreversibleDescription":
@@ -685,6 +698,15 @@ export const projectSettings = defineNamespace({
       "Couldn't load that project's file list, so we can't say what the link will " +
       "add. Nothing has been linked.",
     "projectSettings.linkSource.previewRetryButton": "Try again",
+    // ── AQU-1544: the link was saved but its first sync failed. One sentence
+    // and one action, shown wherever the user started the link.
+    "projectSettings.linkSource.seedFailedMessage":
+      "The link to the source project was saved, but its files have not arrived " +
+      "here yet. Try again to bring them in.",
+    "projectSettings.linkSource.seedRetryFailedNote":
+      "That attempt did not bring them in either. The link is still saved, so you " +
+      "can try again in a moment.",
+    "projectSettings.linkSource.seedRetryingButton": "Trying again…",
     "projectSettings.linkSource.clashWarningHeading": plural({
       one: "This project already has a file with the same name:",
       other: "This project already has files with these names:",
@@ -1652,8 +1674,63 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.linkSource.previewRetryButton": {
         description:
-          "Button beside previewLoadError that re-reads the upstream's file list. Not " +
-          "a page reload and not the link itself.",
+          "Retry button with two homes in the link flow. Beside previewLoadError it " +
+          "re-reads the upstream's file list; beside seedFailedMessage it re-runs the " +
+          "sync that brings the linked project's files in. In both it repeats the " +
+          "step that just failed — never a page reload, and never the link itself.",
+      },
+      "projectSettings.linkSource.seedFailedMessage": {
+        description:
+          "Shown after a link was saved but the first sync that copies the source " +
+          "project's files in failed. Appears in the Import dialog, on the settings " +
+          "card and as a banner on the project page, next to a \"Try again\" button. " +
+          "Three facts in order: the link exists, the files are missing, retrying is " +
+          "the fix. Plain language — no error code and no technical cause.",
+      },
+      "projectSettings.linkSource.seedRetryFailedNote": {
+        description:
+          "Added under seedFailedMessage when the user pressed \"Try again\" and that " +
+          "failed as well. \"Them\" is the source project's files from the sentence " +
+          "above. Reassures that the link itself was not lost and the retry is still " +
+          "there.",
+      },
+      "projectSettings.linkSource.seedRetryingButton": {
+        description:
+          "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
+          "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.notSyncedBadge": {
+        description:
+          "Badge on the Source link settings card, in the row with \"Live\", for a " +
+          "link that has never brought any content through. Replaces the cursor " +
+          "badge. A state, not an error — keep it as short as the other badges.",
+      },
+      "projectSettings.sourceLink.notSyncedNote": {
+        description:
+          "Explains the \"Not synced yet\" badge on the Source link settings card and " +
+          "points at the \"Sync now\" button beside it. The link exists; what is " +
+          "missing is the source project's files.",
+      },
+      "projectSettings.sourceLink.syncNowButton": {
+        description:
+          "Button on the Source link settings card that runs the sync bringing the " +
+          "linked source project's files into this project. Shown only while the link " +
+          "has never synced.",
+      },
+      "projectSettings.sourceLink.syncingButton": {
+        description: "Label of the \"Sync now\" button while that sync is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.syncFailedNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" failed. Says the files did not " +
+          "come in, that the link was not lost, and that the button can be pressed " +
+          "again. No error code and no technical cause.",
+      },
+      "projectSettings.sourceLink.syncNothingYetNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" worked but the source project is " +
+          "empty, so there was nothing to copy. Reassuring, not an error: files will " +
+          "appear once the source project has some.",
       },
       "projectSettings.linkSource.clashWarningHeading": {
         description:

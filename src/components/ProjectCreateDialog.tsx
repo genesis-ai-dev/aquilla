@@ -38,6 +38,7 @@ import {
   PROJECT_SETTINGS_VERSION_INITIAL,
 } from "@/lib/sync/project-settings"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { isFieldInvalid } from "@/lib/forms/field-state"
@@ -363,7 +364,14 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               consumes: linkConsumes,
             })
             if (linkResult.seeded === false && linkMode === "live") {
-              await triggerLinkSync(jwt, project.id)
+              // AQU-1544: the retry's answer used to be dropped, so a failed
+              // first sync opened an empty project with nothing said. The
+              // project exists and is linked either way, so creation still
+              // completes and the dialog still closes (AQU-1519) — the failure
+              // is parked for the project page the user lands on, which shows
+              // it with a "Try again" (LinkSeedFailedBanner).
+              const synced = await triggerLinkSync(jwt, project.id)
+              if (!synced) markLinkSeedFailed(project.id)
             }
           }
         } catch (err) {

@@ -560,6 +560,35 @@ describe("bulkUploadSource", () => {
       }],
     })
   })
+
+  it("sends a caption rows promotion with one receipt across retries and no reveal id", async () => {
+    vi.useFakeTimers()
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      if (bodies.length === 1) return new Response("temporary", { status: 503 })
+      return Response.json({ accepted: 3, fileId: "video" })
+    }) as typeof fetch
+
+    const publishing = publishStagedImport({
+      projectId: "p1",
+      fileId: "video",
+      captionPromotion: { contentFileId: "staged-captions" },
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await publishing
+
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0]).toMatchObject({
+      projectId: "p1", fileId: "video", cells: [], complete: true,
+      captionPromotion: { contentFileId: "staged-captions", genesisEventId: expect.any(String) },
+    })
+    // The server refuses a promotion mixed with a reveal: nothing is revealed.
+    expect(bodies[0]).not.toHaveProperty("publishEventId")
+  })
 })
 
 describe("reconcileSourceImport", () => {

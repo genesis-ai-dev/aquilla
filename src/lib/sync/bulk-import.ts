@@ -15,7 +15,7 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
 import { v7 as uuidv7 } from "uuid"
-import type { ImportedTrackPublication } from "../../../shared/timeline-import"
+import type { CaptionRowsPromotion, ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
   sourceArtifactDescriptor,
   type SourceArtifactFormat,
@@ -173,6 +173,11 @@ export interface PublishStagedImportArgs {
   /** Parent-scoped publication of a separate hidden caption file. */
   trackPublication?: Omit<ImportedTrackPublication, "eventId">
     & Partial<Pick<ImportedTrackPublication, "eventId">>
+  /** AQU-1566: copy a staged caption file (or an attached caption track) into
+   *  this linked video's own rows. Its re-genesis id is the receipt, so no
+   *  reveal id is sent with it. */
+  captionPromotion?: Omit<CaptionRowsPromotion, "genesisEventId">
+    & Partial<Pick<CaptionRowsPromotion, "genesisEventId">>
   /** Stable uploaded clip reference; the player resolves its signed URL. */
   coreMediaUrl?: string
   /** Preview-owned picture receipt survives caller retries. */
@@ -340,7 +345,10 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     fileId: args.fileId,
     cells: [],
     complete: true,
-    publishEventId: args.publishEventId ?? uuidv7(),
+    ...(args.captionPromotion ? {
+      captionPromotion: { ...args.captionPromotion,
+        genesisEventId: args.captionPromotion.genesisEventId ?? uuidv7() },
+    } : { publishEventId: args.publishEventId ?? uuidv7() }),
     ...(args.coreMediaUrl ? {
       video: { id: args.videoEventId ?? uuidv7(), coreMediaUrl: args.coreMediaUrl },
     } : {}),

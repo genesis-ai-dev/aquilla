@@ -11,15 +11,34 @@ import { describe, expect, it } from 'vitest'
 import { makeTestDb } from './helpers/pg-test-db'
 import { fullProgressRecomputeStmts } from '../events/progress-projection'
 
-const MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '../../../db/postgres/migrations/0095_derive_missing_book_rows.sql',
-  ),
-  'utf8',
-)
+const migration = (name: string) =>
+  readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../db/postgres/migrations', name),
+    'utf8',
+  )
+const MIGRATION = migration('0095_derive_missing_book_rows.sql')
+const LANE_KEY_MIGRATION = migration('0114_lane_id_primary_keys.sql')
 
 const PROJECT = 'project-derive'
+
+/**
+ * Run 0095 against the table it was written for. It is frozen SQL that every
+ * live branch applied while file_section_progress was still keyed by
+ * target_lang; 0114 (AQU-1420) re-keyed the table by lane_id afterwards, and
+ * the harness builds today's schema. So put the old key back, run 0095, then
+ * the real 0114 on top, in the order `neon:apply` ran them. lane_id did not
+ * exist yet when 0095 shipped; the harness's lane-fill trigger stands in for
+ * the lane backfill that filled it later.
+ */
+async function applyAsShipped(t: Awaited<ReturnType<typeof makeTestDb>>) {
+  await t.pg.exec(`
+    ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
+    ALTER TABLE file_section_progress
+      ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang);
+  `)
+  await t.pg.exec(MIGRATION)
+  await t.pg.exec(LANE_KEY_MIGRATION)
+}
 
 function source(fileId: string, cellId: string, canonicalRef: string | null, over: Record<string, unknown> = {}) {
   return {
@@ -98,7 +117,7 @@ describe('0095 derives the book rows an old projection never wrote', () => {
     await t.pg.exec(`DELETE FROM file_section_progress WHERE scope = 'book'`)
     expect(await bookRows(t)).toEqual([])
 
-    await t.pg.exec(MIGRATION)
+    await applyAsShipped(t)
 
     // AQU-490: the two audio histograms are deliberately NOT part of this
     // parity claim, and cannot be. 0096 adds those columns and runs AFTER this
@@ -130,8 +149,8 @@ describe('0095 derives the book rows an old projection never wrote', () => {
   it('is idempotent, and leaves a file that already has book rows alone', async () => {
     const t = await bible()
     const before = byKey(await bookRows(t))
-    await t.pg.exec(MIGRATION)
-    await t.pg.exec(MIGRATION)
+    await applyAsShipped(t)
+    await applyAsShipped(t)
     expect(byKey(await bookRows(t))).toEqual(before)
   })
 
@@ -156,7 +175,7 @@ describe('0095 derives the book rows an old projection never wrote', () => {
     expect(sections.map((r) => r.section_key).sort()).toEqual(['GEN', 'LUK', 't:000000000000'])
     expect(await bookRows(t)).toEqual([])
 
-    await t.pg.exec(MIGRATION)
+    await applyAsShipped(t)
 
     expect(await bookRows(t)).toEqual([])
   })
@@ -166,7 +185,7 @@ describe('0095 derives the book rows an old projection never wrote', () => {
     const projected = await bookRows(t)
     await t.pg.exec(`DELETE FROM file_section_progress WHERE scope = 'book'`)
     await t.pg.exec(`UPDATE files SET deleted_at = 1 WHERE id = 'bible'`)
-    await t.pg.exec(MIGRATION)
+    await applyAsShipped(t)
     expect(await bookRows(t)).toEqual([])
     expect(projected.length).toBe(4)
   })

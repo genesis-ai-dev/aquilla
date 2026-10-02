@@ -66,6 +66,14 @@ describe("changed-file E2E impact selection", () => {
       )
     }
   })
+  it("maps flexible YouTube sources and empty-picture readiness to import coverage", () => {
+    for (const file of ["src/lib/import/youtube-captions.ts",
+      "src/lib/import/youtube-caption-commit.ts",
+      "src/components/import/YouTubeImportPanel.tsx", "src/lib/editor/cell-area-state.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file)
+        .toContain("e2e/specs/editor/import-and-edit.smoke.spec.ts")
+    }
+  })
   it("keeps comment coverage when its no-hover entry point changes", () => {
     expect(selectAffectedE2E(["src/components/CellActionRail.tsx"], specs).specs).toContain(
       "e2e/specs/editor/comments.smoke.spec.ts",

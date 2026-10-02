@@ -132,7 +132,9 @@ function countWords(text: string): number {
  * AQU-1358: read the upstream file a target copy was mirrored from, as
  * recorded by `withUpstreamFileId`. Returns null for legacy rows written
  * before the marker existed, and for meta that is absent, malformed, or holds
- * a non-string/empty value — callers treat null as "fall back to name".
+ * a non-string/empty value — callers then fall back to the deterministic
+ * live-mirror id (`deterministicDownstreamFileId`), never to the display name
+ * (AQU-1547).
  */
 export function readUpstreamFileId(meta: string | null): string | null {
   if (!meta) return null
@@ -169,6 +171,49 @@ export function withUpstreamFileId(meta: string | null, upstreamFileId: string):
     }
   }
   return JSON.stringify({ ...parsed, upstreamFileId })
+}
+
+/**
+ * MIRROR of sync-worker/src/events/link-sync.ts's `deterministicUuid`. Built
+ * on this module's existing `contentHash`, which is already the same djb2
+ * primitive sync-worker hashes with (event-projection.ts) — the parity test
+ * below is what holds all of it together.
+ */
+function deterministicUuid(key: string): string {
+  const h1 = contentHash(key)
+  const h2 = contentHash(`${key}\0salt2`)
+  const h3 = contentHash(`${h1}${h2}`)
+  const h4 = contentHash(`${h2}${h1}`)
+  const hex = (h1 + h2 + h3 + h4).slice(0, 32).padEnd(32, "0")
+  return (
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-` +
+    `${"89ab"[parseInt(hex[16] ?? "0", 16) % 4]}${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+  )
+}
+
+/**
+ * AQU-1547: the downstream `files.id` a LIVE link's mirror gives an upstream
+ * file — a MIRROR of sync-worker/src/events/link-sync.ts's
+ * `deterministicDownstreamFileId`.
+ *
+ * Duplicated rather than imported because the two workers are separate
+ * packages with their own lockfiles (the repo's established idiom for a
+ * cross-worker contract — cf. the role-policy mirror). The parity test
+ * imports BOTH and asserts they agree, so drift fails CI rather than silently
+ * un-matching every mirrored file.
+ *
+ * Why the snapshot needs it: mirrored rows carry no `meta.upstreamFileId`
+ * marker (the mirror passes the UPSTREAM's meta through verbatim), so before
+ * this they were only findable by display name — and a name lookup cannot
+ * tell a mirrored copy from a file the project imported itself. Their id, by
+ * contrast, is a pure function of (downstream project, upstream file), which
+ * a locally imported file's random UUID can never collide with.
+ */
+export function deterministicDownstreamFileId(
+  downstreamProjectId: string,
+  upstreamFileId: string,
+): string {
+  return deterministicUuid(`file\0${downstreamProjectId}\0${upstreamFileId}`)
 }
 
 export interface SourceLinkProject {
@@ -318,12 +363,30 @@ export async function emitLinkSourceEvent(
  * duplicate file.
  *
  * AQU-1358: the match is keyed on the UPSTREAM FILE ID, recorded in the
- * target copy's `meta.upstreamFileId` the first time it is written, and falls
- * back to (project_id, name) only for rows created before that marker existed.
- * Keying on name alone is what minted duplicates: rename a file upstream and
- * the name lookup misses, so the next snapshot created a SECOND target row
- * beside the one it should have renamed. Upstream id is stable across renames,
- * so the re-run now renames in place and stays a no-op for untouched files.
+ * target copy's `meta.upstreamFileId` the first time it is written. Keying on
+ * name alone is what minted duplicates: rename a file upstream and the name
+ * lookup misses, so the next snapshot created a SECOND target row beside the
+ * one it should have renamed. Upstream id is stable across renames, so the
+ * re-run renames in place and stays a no-op for untouched files.
+ *
+ * AQU-1547: the match NEVER falls back to the display name, and never
+ * considers a deleted row. A name is not an identity — it cannot distinguish
+ * the copy this link brought in from a file the project imported itself years
+ * earlier, and picking the latter overwrote real translated work with the
+ * upstream's source (an established project linked under AQU-1525/1526 is
+ * explicitly allowed to hold a file sharing an upstream file's name). The two
+ * keys below are both identities:
+ *
+ *   1. `meta.upstreamFileId` — written by this function on every copy it makes.
+ *   2. `deterministicDownstreamFileId` — the id a LIVE link's mirror gives a
+ *      mirrored row, which carries no marker because the mirror passes the
+ *      upstream's own meta through verbatim.
+ *
+ * Neither can name-collide with a locally imported file. When neither matches
+ * (no mirror ever ran, or a pre-AQU-1358 legacy copy) the upstream file is
+ * copied to a NEW row: a duplicate file the lead can delete is recoverable,
+ * silently overwriting their source text and stranding its translations is
+ * not.
  *
  * Best-effort: returns an empty map on any failure (matches
  * `snapshotSourceCells`'s defensive posture — missing/legacy schema must not
@@ -369,20 +432,23 @@ export async function snapshotSourceFiles(
   // than with `meta::jsonb ->> …` in SQL — `files.meta` is TEXT, so a single
   // malformed legacy blob would make the cast throw and (inside this
   // best-effort loop) silently drop that file from the snapshot.
+  //
+  // AQU-1547: `deleted_at IS NULL` — a file in Recently deleted is not a
+  // snapshot target. Writing to one edited work the lead had already set aside
+  // and handed it back changed on restore, and a tombstoned row is never the
+  // "project's current copy" of anything.
   const byUpstreamId = new Map<string, string>()
-  const byName = new Map<string, string>()
+  const liveFileIds = new Set<string>()
   try {
     const existingRows = await env.AQUILLA_PG.prepare(
-      `SELECT id, name, meta FROM files WHERE project_id = ?`,
+      `SELECT id, meta FROM files WHERE project_id = ? AND deleted_at IS NULL`,
     )
       .bind(args.targetProjectId)
-      .all<{ id: string; name: string; meta: string | null }>()
+      .all<{ id: string; meta: string | null }>()
     for (const row of existingRows.results ?? []) {
+      liveFileIds.add(row.id)
       const upstreamId = readUpstreamFileId(row.meta)
       if (upstreamId != null) byUpstreamId.set(upstreamId, row.id)
-      // Legacy rows only — a row that already carries the marker must never be
-      // reachable by name, or a rename would match the WRONG row.
-      else if (!byName.has(row.name)) byName.set(row.name, row.id)
     }
   } catch (err) {
     console.warn("snapshotSourceFiles: existing-file scan failed:", err)
@@ -390,9 +456,12 @@ export async function snapshotSourceFiles(
 
   for (const file of files) {
     try {
-      // Upstream id first (survives renames), name only as the legacy
-      // fallback for target rows written before the marker existed.
-      const existingId = byUpstreamId.get(file.id) ?? byName.get(file.name)
+      // AQU-1547: identity only — the marker this function writes, else the
+      // live mirror's deterministic id if such a row is actually present. No
+      // name fallback: see the doc comment above.
+      const mirroredId = deterministicDownstreamFileId(args.targetProjectId, file.id)
+      const existingId =
+        byUpstreamId.get(file.id) ?? (liveFileIds.has(mirroredId) ? mirroredId : undefined)
 
       const targetFileId = existingId ?? crypto.randomUUID()
       const eventId = makeEventId()
@@ -427,10 +496,10 @@ export async function snapshotSourceFiles(
           targetMeta,
         )
         .run()
-      // Claim the row for this upstream file so a later upstream file sharing
-      // the old name can't also match it via the legacy name fallback.
+      // Claim the row for this upstream file so a second upstream file can
+      // never be mapped onto it within this same run.
       byUpstreamId.set(file.id, targetFileId)
-      if (byName.get(file.name) === targetFileId) byName.delete(file.name)
+      liveFileIds.add(targetFileId)
       fileIdMap.set(file.id, targetFileId)
     } catch (err) {
       console.warn(`snapshotSourceFiles: insert failed for ${file.id}:`, err)

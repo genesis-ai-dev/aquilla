@@ -27,6 +27,7 @@ import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
+import { isElevationRequiredError } from "@/lib/frontier/elevation"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -418,14 +419,22 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     }
     setBusy(true)
     try {
-      const serverInvite = await createServerInvite(
-        session.jwt,
-        projectId,
-        inviteRole,
-        undefined,
-        trimmedEmail || undefined,
-        expiresInDays
-      )
+      let serverInvite: Awaited<ReturnType<typeof createServerInvite>>
+      try {
+        serverInvite = await createServerInvite(
+          session.jwt,
+          projectId,
+          inviteRole,
+          undefined,
+          trimmedEmail || undefined,
+          expiresInDays
+        )
+      } catch (err) {
+        // AQU-1541: the step-up dialog is already open; say why, not "no permission".
+        if (!isElevationRequiredError(err)) throw err
+        setServerError(err.message)
+        return
+      }
       if (!serverInvite) {
         setServerError(t("projectSettings.share.createInviteFailed"))
         return
@@ -619,6 +628,10 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
     try {
       const list = await listProjectInvites(jwt, projectId)
       setInvites(list)
+    } catch (err) {
+      // AQU-1541: the step-up dialog is already open; keep the list hidden.
+      if (!isElevationRequiredError(err)) throw err
+      setInvites(null)
     } finally {
       setLoading(false)
     }
@@ -635,6 +648,10 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
       setRevokeTarget(null)
       setRevokeConfirm(false)
       onRevoked()
+    } catch (err) {
+      // AQU-1541: nothing was revoked. Leave the confirm open so the admin can
+      // revoke again after entering the code in the step-up dialog.
+      if (!isElevationRequiredError(err)) throw err
     } finally {
       setRevoking(false)
     }

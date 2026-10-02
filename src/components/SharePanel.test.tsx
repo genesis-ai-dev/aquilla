@@ -5,7 +5,7 @@
 // (that's covered by MembersPanel's own concerns / manual QA).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SharePanel } from "./SharePanel"
 import type { MembersPanelScopeConfig } from "./MembersPanel"
 
@@ -307,5 +307,28 @@ describe("SharePanel — eligible org-member suggestions", () => {
     })
     const { listOrgMembers } = await import("@/lib/frontier/orgs")
     expect(vi.mocked(listOrgMembers)).toHaveBeenCalledWith("test-jwt", 9)
+  })
+})
+
+// AQU-1541: an un-elevated platform admin creating an invite gets the step-up
+// dialog; the panel's own line must say why, not "no permission or offline".
+describe("SharePanel — invite create needs the admin code", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMembers = leadMembers
+  })
+
+  it("shows the admin-code message instead of the generic failure", async () => {
+    const { createServerInvite } = await import("@/lib/sync/invites")
+    const { UserError } = await import("@/lib/errors/user-error")
+    vi.mocked(createServerInvite).mockRejectedValue(
+      new UserError(403, JSON.stringify({ error: "elevation required" })),
+    )
+    renderPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Invite link" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Create invite link" }))
+
+    expect(await screen.findByText("Verify with your admin code, then try again.")).toBeInTheDocument()
+    expect(screen.queryByText(/couldn't create invite/i)).not.toBeInTheDocument()
   })
 })

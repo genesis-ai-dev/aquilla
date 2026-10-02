@@ -33,9 +33,9 @@ describe("the full ISO 639-3 catalog", () => {
     expect(catalog.length).toBeGreaterThan(LANGUAGES.length * 40)
   })
 
-  it("is memoized — a second load is the same array, and peek sees it", () => {
+  it("is memoized — a second load is the same array, and peek sees it", async () => {
     expect(peekFullLanguageCatalog()).toBe(catalog)
-    expect(loadFullLanguageCatalog()).resolves.toBe(catalog)
+    await expect(loadFullLanguageCatalog()).resolves.toBe(catalog)
   })
 
   it("has unique codes and display names", () => {

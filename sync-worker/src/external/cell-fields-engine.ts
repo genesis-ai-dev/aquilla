@@ -26,6 +26,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, rejectedWarnings } from './rejected-warnings'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -403,9 +404,7 @@ export async function commitCellFields(
   await stampProvenance(db, provenance, appliedIds)
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,

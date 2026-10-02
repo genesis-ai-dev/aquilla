@@ -45,6 +45,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, rejectedWarnings } from './rejected-warnings'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -913,9 +914,7 @@ export async function commitStructure(
   await stampProvenance(db, provenance, appliedIds)
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId, cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents(events)))
   // A structural plan is one indivisible edit: a partially applied chain is a
   // broken document, so a rejection keeps the row in 'committing' and a retry
   // re-posts the same ids until every event lands.

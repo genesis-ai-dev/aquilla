@@ -28,6 +28,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { emitEventsTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
@@ -814,12 +815,16 @@ export async function commitEmitEvents(
     }
   }
 
+  // AQU-1571: a refusal names the file and line the agent sent, so it can tell
+  // which validation (say, its own edit) was refused. Comment and term events
+  // were routed under the project sentinel and read back blank.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -827,10 +832,7 @@ export async function commitEmitEvents(
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings, ...rejectedWarnings(rejected, where)]
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,

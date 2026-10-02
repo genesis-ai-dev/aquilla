@@ -61,6 +61,7 @@ import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { linkMediaTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { locateEvents, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
@@ -638,9 +639,7 @@ export async function commitChangesetCore(
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
   for (const eid of [...staleFromPerimeter, ...staleSource]) {
     warnings.push({ code: 'stale_pin', fileId: '', cellId: '', message: `event ${eid} landed stale` })
   }
@@ -1018,9 +1017,7 @@ export async function applyPlanImport(
   }
 
   const warnings: ChangesetWarning[] = [...(opts.baseWarnings ?? [])]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents(allEvents)))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -1457,9 +1454,7 @@ async function commitLinkMedia(
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,

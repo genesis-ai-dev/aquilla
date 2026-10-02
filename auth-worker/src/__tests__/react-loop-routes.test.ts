@@ -111,13 +111,17 @@ afterEach(async () => {
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
+/** AQU-1050: the react watcher skips a project that never opted into
+ *  Autopilot, so every fixture here is opted in unless the case under test
+ *  overrides it. The opt-out case is asserted in
+ *  contextual-release-gate.test.ts. */
 async function setSettings(settings: Record<string, unknown>): Promise<void> {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_settings (project_id, settings, version, updated_by)
      VALUES (?, ?, 1, 1)
      ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
   )
-    .bind(PROJECT, JSON.stringify(settings))
+    .bind(PROJECT, JSON.stringify({ autopilotEnabled: true, ...settings }))
     .run()
 }
 

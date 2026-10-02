@@ -10,6 +10,11 @@
 //   - assignment.create  : INSERT the assignments row, resolve the
 //                           book/chapter/cell scope into assignment_cells from
 //                           the live `cells` projection, then set cells_total.
+//                           A chapter is resolved with the plan board's own
+//                           chapter keys (AQU-1493, db/shared/plan-keys.ts),
+//                           so a person given "JON 2" gets the chapter's
+//                           headings and the lines already added in it,
+//                           exactly the cells the board counts in JON 2.
 //   - assignment.reassign : UPDATE assignee_user_id.
 //   - assignment.unassign : set unassigned_at (soft close; row kept for audit).
 //
@@ -22,6 +27,11 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
 import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
+import {
+  inheritedKeysSql,
+  oneScriptureFileSql,
+  unitSectionKeyExpr,
+} from '../../../../db/shared/plan-keys'
 import type { DispatchResult } from './types'
 
 /** Cell ids per INSERT for a 'cells' scope — keeps one statement's parameter
@@ -93,12 +103,33 @@ export function handleAssignmentEvent(
     )
 
     // 2. Resolve each scope entry -> source cells from the live cells
-    //    projection. One INSERT...SELECT per entry, or per chunk for a
-    //    'cells' scope. The cells projection hard-deletes on *.cell.delete
-    //    (no deleted_at column), so a plain side='source' filter is the live
-    //    set. Chapter scope narrows by canonical_ref (e.g. "GEN 1" -> LIKE
-    //    'GEN 1:%', which excludes "GEN 11:1" because the ':' anchors the
-    //    chapter boundary).
+    //    projection. The cells projection hard-deletes on *.cell.delete (no
+    //    deleted_at column), so a plain side='source' filter is the live set.
+    //    A whole-file entry is one INSERT...SELECT of every source cell; a
+    //    'cells' entry is one per chunk of ids.
+    //
+    //    AQU-1493: a chapter entry takes the cells the plan board counts in
+    //    that chapter, by the board's own key (`unitSectionKeyExpr`): a cell's
+    //    chapter from its reference, or for a line with no reference the
+    //    chapter `inheritedKeysSql` gives it. Matching on `canonical_ref LIKE
+    //    'JON 2:%'` alone missed every line added in the editor (the walk's
+    //    FAIL: Carol's JON 2 row read "Nothing left" while chapter 2 still had
+    //    a blank added line) and would miss every heading of an imported
+    //    Bible, which now counts in the chapter it opens. Equality on the key
+    //    also keeps "GEN 1" out of "GEN 11" without the LIKE's colon trick.
+    //
+    //    The walk costs a pass over the file's unreferenced lines, so chapter
+    //    entries are grouped by file and resolved in ONE statement per file:
+    //    an assignment can pick 50 chapters of one book, and 50 walks inside
+    //    the write transaction would be 50 times the work for the same keys.
+    //    Chapters are expanded into placeholders rather than bound as an
+    //    array, which the shim does not promise to pass through.
+    //
+    //    Resolution happens once, here: an assignment is a snapshot of what a
+    //    person was given, so a line added later does not join it, and
+    //    existing assignments are not rewritten. Rebuild skips assignment.*
+    //    events, so replay never re-resolves an old one under this rule.
+    const chaptersByFile = new Map<string, Set<string>>()
     for (const entry of p.scope) {
       if (entry.cellIds) {
         // AQU-1628: an explicit line set ('cells' scope — the editor's current
@@ -122,16 +153,11 @@ export function handleAssignmentEvent(
           )
         }
       } else if (entry.chapter) {
-        stmts.push(
-          db
-            .prepare(
-              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
-               SELECT ?, file_id, cell_id FROM cells
-               WHERE project_id = ? AND file_id = ? AND side = 'source' AND canonical_ref LIKE ?
-               ON CONFLICT DO NOTHING`,
-            )
-            .bind(p.assignmentId, event.projectId, entry.fileId, `${entry.chapter}:%`),
-        )
+        const chapters = chaptersByFile.get(entry.fileId) ?? new Set<string>()
+        // Trimmed like the board's key: the picker offers the raw text before
+        // the verse colon (getFileChapters), the board trims it.
+        chapters.add(entry.chapter.trim())
+        chaptersByFile.set(entry.fileId, chapters)
       } else {
         stmts.push(
           db
@@ -144,6 +170,29 @@ export function handleAssignmentEvent(
             .bind(p.assignmentId, event.projectId, entry.fileId),
         )
       }
+    }
+    for (const [fileId, chapterSet] of chaptersByFile) {
+      const chapters = [...chapterSet]
+      stmts.push(
+        db
+          .prepare(
+            `WITH inherited_keys AS (
+               ${inheritedKeysSql(oneScriptureFileSql())}
+             )
+             INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+             SELECT ?, c.file_id, c.cell_id
+               FROM cells c
+               LEFT JOIN inherited_keys ik ON ik.cell_id = c.cell_id
+              WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'
+                AND ${unitSectionKeyExpr('c', 'ik')} IN (${chapters.map(() => '?').join(', ')})
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            event.projectId, fileId, // inherited_keys (oneScriptureFileSql)
+            p.assignmentId, event.projectId, fileId,
+            ...chapters,
+          ),
+      )
     }
 
     // 3. Stamp the resolved denominator.

@@ -924,8 +924,10 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
  * Distinct chapters present in a file, derived from the source cells'
  * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
  * chapter dropdown so a manager picks a real chapter instead of typing a
- * canonical-ref prefix — and the value feeds the resolver's LIKE 'GEN 1:%'
- * directly. Natural-sorted (book code, then chapter number) so "GEN 2"
+ * canonical-ref prefix — and the value is the chapter key the resolver
+ * (sync-worker assignment-events.ts) matches against the plan board's own
+ * keys, so the person gets the chapter's headings and added lines too
+ * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
  * precedes "GEN 10".
  */
 export async function getFileChapters(

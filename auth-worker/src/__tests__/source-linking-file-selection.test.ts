@@ -18,7 +18,7 @@
 //      the Source link card can say "N of M files" after a reload.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { parseLinkFileIds } from "../services/source-linking"
@@ -194,6 +194,108 @@ describe("POST /:projectId/link-source — followed-file selection (AQU-1559)", 
       env,
     )
 
+    expect(await downstreamFileNames()).toEqual(["LUK.usfm", "MAT.usfm", "MRK.usfm"])
+  })
+})
+
+// AQU-1559 — a database that predates migration 0127. A per-PR preview deploys
+// this worker against the shared development database with no migration applied,
+// and production applies migrations separately from the deploy, so the window is
+// real in both. The new capability may be unavailable there; nothing that worked
+// before this slice may break.
+describe("source links on a database without source_link_file_ids (AQU-1559)", () => {
+  // The suite's database is reset between tests by DATA, not by schema, so the
+  // column is dropped per test and put back afterwards — otherwise the first case
+  // here would leave every later test running against a half-migrated table.
+  async function dropTheColumn(): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      "ALTER TABLE projects DROP COLUMN IF EXISTS source_link_file_ids",
+    ).run()
+  }
+
+  afterEach(async () => {
+    await env.AQUILLA_PG.prepare(
+      "ALTER TABLE projects ADD COLUMN IF NOT EXISTS source_link_file_ids TEXT",
+    ).run()
+  })
+
+  // WHY: the regression a QA walk caught. `GET /api/v2/projects/:id` is the read
+  // behind every project open, so selecting the new column alongside the project
+  // row made an un-migrated database 500 the whole app — not merely withhold a
+  // badge. The field reads as "no selection", which is exactly what a
+  // whole-project link means.
+  it("still serves the project read, withholding the selection", async () => {
+    await linkRequest({ sourceProjectId: UP, mode: "live", consumes: "source" })
+    await dropTheColumn()
+
+    const res = await app.request(
+      `/api/v2/projects/${DOWN}`,
+      { headers: authHeader(await jwtFor("lead")) },
+      env,
+    )
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      sourceProjectId: string | null
+      sourceLinkFileIds: string[] | null
+      sourceLinkUpstreamFileCount: number | null
+    }
+    expect(body.sourceProjectId).toBe(UP)
+    expect(body.sourceLinkFileIds).toBeNull()
+    expect(body.sourceLinkUpstreamFileCount).toBeNull()
+  })
+
+  // WHY: linking a whole project never needed the column, so it must not start
+  // failing because of it — the route falls back to the pre-slice statement.
+  it("still links a whole project", async () => {
+    await dropTheColumn()
+
+    const res = await linkRequest({ sourceProjectId: UP, mode: "live", consumes: "source" })
+
+    expect(res.status).toBe(200)
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_project_id, source_link_mode FROM projects WHERE id = ?",
+    )
+      .bind(DOWN)
+      .first<{ source_project_id: string; source_link_mode: string }>()
+    expect(row?.source_project_id).toBe(UP)
+    expect(row?.source_link_mode).toBe("live")
+  })
+
+  // WHY: a subset link genuinely cannot be stored there, and quietly saving a
+  // whole-project link instead would hand the project every file the lead just
+  // declined. Refusing is the honest answer, and it leaves the project unlinked.
+  it("refuses a subset link rather than silently linking everything", async () => {
+    await dropTheColumn()
+
+    const res = await linkRequest({
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "source",
+      fileIds: [MAT, MRK],
+    })
+
+    expect(res.status).toBe(500)
+    const row = await env.AQUILLA_PG.prepare("SELECT source_project_id FROM projects WHERE id = ?")
+      .bind(DOWN)
+      .first<{ source_project_id: string | null }>()
+    expect(row?.source_project_id).toBeNull()
+  })
+
+  // WHY: detach is how a team gets out of a link, so it is the last thing that
+  // may break on an un-migrated database. With no selection to read it copies the
+  // whole upstream — the pre-slice behaviour.
+  it("still detaches, copying the whole upstream", async () => {
+    await linkRequest({ sourceProjectId: UP, mode: "live", consumes: "source" })
+    await dropTheColumn()
+
+    const res = await app.request(
+      `/api/v2/projects/${DOWN}/detach-source`,
+      { method: "POST", headers: authHeader(await jwtFor("lead")) },
+      env,
+    )
+
+    expect(res.status).toBe(200)
     expect(await downstreamFileNames()).toEqual(["LUK.usfm", "MAT.usfm", "MRK.usfm"])
   })
 })

@@ -221,10 +221,6 @@ export interface SourceLinkProject {
   name: string
   source_project_id: string | null
   archived_at: string | null
-  /** AQU-1559: the link's file selection as stored — a JSON array of UPSTREAM
-   *  file ids, or null for a whole-project link. Parse with
-   *  `parseLinkFileIds`; never read raw. */
-  source_link_file_ids?: string | null
 }
 
 /**
@@ -245,6 +241,39 @@ export interface SourceLinkProject {
  * working link from syncing — including the detach snapshot, which would then
  * copy nothing and strand the project with no source at all.
  */
+/**
+ * AQU-1559: this link's followed-file selection, read in a statement of its own.
+ *
+ * Isolated deliberately — `projects.source_link_file_ids` arrives with migration
+ * 0127, and this worker is deployed independently of the migration being applied
+ * (a per-PR preview runs new code against the shared development database, which
+ * has not had it applied at all). Selecting the column alongside anything else
+ * would make a database that predates it fail the whole statement: the project
+ * read behind every project open, or the detach that makes a project
+ * self-contained. Both worked before this slice and must keep working.
+ *
+ * `null` on a missing column is the same answer as a NULL value — this link
+ * follows the whole upstream project — so an un-migrated deployment simply does
+ * not offer the new capability, rather than breaking the old one. Same posture as
+ * `hiddenSourceCellKeys` for `cells.hidden_at` (AQU-1453).
+ */
+export async function loadLinkFileIds(
+  env: Env,
+  projectId: string,
+): Promise<string[] | null> {
+  if (!env.AQUILLA_PG) return null
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_file_ids FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_file_ids: string | null }>()
+    return parseLinkFileIds(row?.source_link_file_ids ?? null)
+  } catch {
+    return null
+  }
+}
+
 export function parseLinkFileIds(raw: string | null | undefined): string[] | null {
   if (!raw) return null
   let parsed: unknown
@@ -273,7 +302,7 @@ export async function loadProjectWithSource(
   projectId: string,
 ): Promise<SourceLinkProject | null> {
   return env.AQUILLA_PG.prepare(
-    `SELECT id, name, source_project_id, archived_at, source_link_file_ids
+    `SELECT id, name, source_project_id, archived_at
        FROM projects WHERE id = ?`,
   )
     .bind(projectId)

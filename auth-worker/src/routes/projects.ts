@@ -94,7 +94,7 @@ import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
-import { parseLinkFileIds } from "../services/source-linking"
+import { loadLinkFileIds } from "../services/source-linking"
 import { createProjectShared } from "../../../db/shared/projects"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
@@ -710,7 +710,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
             p.source_project_id, p.source_link_mode, p.source_link_consumes,
-            p.source_link_gate, p.source_link_cursor, p.source_link_file_ids,
+            p.source_link_gate, p.source_link_cursor,
             p.pm_user_id, pmu.username AS pm_username,
             u.username AS archived_by_username
        FROM projects p
@@ -732,7 +732,6 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       source_link_consumes: string | null
       source_link_gate: string | null
       source_link_cursor: number | string | null
-      source_link_file_ids: string | null
       pm_user_id: number | null
       pm_username: string | null
     }>()
@@ -747,7 +746,15 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   // reads as "N of M files". Null means the link follows the whole project, and
   // the card says so without needing a count, so the extra query is skipped for
   // every link made before this slice (and for every whole-project one since).
-  const sourceLinkFileIds = parseLinkFileIds(row.source_link_file_ids)
+  //
+  // Read in its own statement (`loadLinkFileIds`) rather than alongside the
+  // project row above: `source_link_file_ids` arrives with migration 0127, and a
+  // database that predates it would otherwise fail THIS select — the read behind
+  // every project open — rather than just withholding the new field. Only asked
+  // at all for a project that has an upstream.
+  const sourceLinkFileIds = row.source_project_id
+    ? await loadLinkFileIds(c.env, projectId)
+    : null
   let sourceLinkUpstreamFileCount: number | null = null
   if (sourceLinkFileIds && row.source_project_id) {
     const countRow = await c.env.AQUILLA_PG.prepare(

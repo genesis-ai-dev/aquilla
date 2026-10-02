@@ -137,6 +137,32 @@ async function cursorAdvanceCount(t: TestDb): Promise<number> {
   return Number(row.rows[0]?.n ?? 0)
 }
 
+describe("mirrorSync — a database without source_link_file_ids (AQU-1559)", () => {
+  // WHY: this worker is deployed independently of migration 0127 being applied —
+  // a per-PR preview runs new code against the shared development database, and
+  // production applies migrations as their own step. Selecting the new column in
+  // `loadLink` alongside the rest of the link row would make every mirror sync
+  // fail there, freezing links that were working. The selection reads as "the
+  // whole project" instead, which is what every pre-slice link means anyway.
+  it("mirrors the whole upstream rather than failing the sync", async () => {
+    const t = await makeTestDb()
+    try {
+      seq = 0
+      await seedProjects(t)
+      await link(t, null)
+      await t.pg.query(`ALTER TABLE projects DROP COLUMN source_link_file_ids`)
+
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+
+      expect(result.ranSync).toBe(true)
+      expect(result.filesMirrored).toBe(3)
+      expect(await downstreamFileNames(t)).toEqual(["LUK.usfm", "MAT.usfm", "MRK.usfm"])
+    } finally {
+      await t.close()
+    }
+  })
+})
+
 describe("mirrorSync — a link that follows a subset of the upstream's files (AQU-1559)", () => {
   // WHY: the slice itself. Two of three files picked means two files and two
   // cells, and the third's content must not be anywhere in this project.

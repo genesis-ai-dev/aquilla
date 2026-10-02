@@ -170,14 +170,32 @@ export interface LinkRow {
 }
 
 export async function loadLink(db: AquillaDb, downstreamProjectId: string): Promise<LinkRow | null> {
-  return db
+  const link = await db
     .prepare(
       `SELECT id, source_project_id, source_link_mode, source_link_consumes,
-              source_link_gate, source_link_cursor, source_link_file_ids
+              source_link_gate, source_link_cursor
        FROM projects WHERE id = ?`,
     )
     .bind(downstreamProjectId)
     .first<LinkRow>()
+  if (!link) return null
+  // AQU-1559: the followed-file selection is read in a statement of its own, and
+  // a failure degrades to "follows the whole project" — the behaviour of every
+  // link that predates this slice. `projects.source_link_file_ids` arrives with
+  // migration 0127 and this worker is deployed independently of it being applied,
+  // so selecting it above would make a database that predates the column fail
+  // EVERY mirror sync, freezing links that were working. Withholding one new
+  // capability is recoverable; that is not.
+  try {
+    const row = await db
+      .prepare('SELECT source_link_file_ids FROM projects WHERE id = ?')
+      .bind(downstreamProjectId)
+      .first<{ source_link_file_ids: string | null }>()
+    link.source_link_file_ids = row?.source_link_file_ids ?? null
+  } catch {
+    link.source_link_file_ids = null
+  }
+  return link
 }
 
 /**

@@ -28,7 +28,7 @@ import {
   emitLinkSourceEvent,
   listDownstreamProjects,
   loadProjectWithSource,
-  parseLinkFileIds,
+  loadLinkFileIds,
   snapshotSourceCells,
   triggerLinkSeedSync,
 } from "../services/source-linking"
@@ -160,8 +160,34 @@ sourceLinking.post(
         .bind(sourceProjectId, mode, consumes, gate, followedFileIdsJson, projectId)
         .run()
     } catch (err) {
-      console.error("link-source UPDATE failed:", err)
-      return c.json({ error: "link failed" }, 500)
+      // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
+      // worker can be deployed before it is applied (a per-PR preview runs new
+      // code against the shared development database). A whole-project link does
+      // not need the column at all, so it falls back to the pre-slice statement
+      // rather than failing a link that worked before this slice. A link that
+      // asked to follow a subset genuinely cannot be honoured there, and saying
+      // so is better than silently saving a whole-project link instead.
+      if (followedFileIdsJson !== null) {
+        console.error("link-source UPDATE failed:", err)
+        return c.json({ error: "link failed" }, 500)
+      }
+      try {
+        await c.env.AQUILLA_PG.prepare(
+          `UPDATE projects
+              SET source_project_id    = ?,
+                  source_link_mode     = ?,
+                  source_link_consumes = ?,
+                  source_link_gate     = ?,
+                  source_link_cursor   = 0,
+                  updated_at           = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+        )
+          .bind(sourceProjectId, mode, consumes, gate, projectId)
+          .run()
+      } catch (retryErr) {
+        console.error("link-source UPDATE failed:", retryErr)
+        return c.json({ error: "link failed" }, 500)
+      }
     }
 
     // Emit the durable event. 1A's projector consumes this kind.
@@ -247,8 +273,10 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   const upstreamId = project.source_project_id
   // AQU-1559: read BEFORE the UPDATE below clears it — the snapshot that makes
   // this project self-contained must copy exactly the files the link followed.
-  // A whole-project link parses to null and copies everything, as it always has.
-  const followedFileIds = parseLinkFileIds(project.source_link_file_ids)
+  // A whole-project link reads as null and copies everything, as it always has,
+  // and so does a database that predates migration 0127 (see `loadLinkFileIds`):
+  // detach kept working before this slice and must keep working.
+  const followedFileIds = await loadLinkFileIds(c.env, projectId)
 
   try {
     // AQU-476: clear link metadata too — detach makes the project fully
@@ -268,8 +296,26 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    console.error("detach-source UPDATE failed:", err)
-    return c.json({ error: "detach failed" }, 500)
+    // AQU-1559: a database that predates migration 0127 has nothing to clear in
+    // that one column, and detach is not the operation to break over it — it
+    // worked before this slice. Retry without it.
+    try {
+      await c.env.AQUILLA_PG.prepare(
+        `UPDATE projects
+            SET source_project_id    = NULL,
+                source_link_mode     = NULL,
+                source_link_consumes = NULL,
+                source_link_gate     = NULL,
+                source_link_cursor   = 0,
+                updated_at           = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+      )
+        .bind(projectId)
+        .run()
+    } catch (retryErr) {
+      console.error("detach-source UPDATE failed:", err, retryErr)
+      return c.json({ error: "detach failed" }, 500)
+    }
   }
 
   // 1) Durable link-source event with null payload.

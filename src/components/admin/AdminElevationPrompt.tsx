@@ -16,7 +16,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
  * admin changed membership somewhere they do not belong, and the auth-worker
  * answered 403 "elevation required"). Reuses AdminElevationGate for the emailed
  * code. After a successful verify it only confirms: it does not replay the
- * failed request, so the admin repeats the change by hand.
+ * failed request, so the copy tells the admin to repeat the change by hand.
  *
  * Renders nothing and makes no request until the signal fires, so ordinary
  * users never touch the admin endpoints.
@@ -40,7 +40,10 @@ export function AdminElevationPrompt() {
         <DialogTitle className="sr-only">Admin verification</DialogTitle>
         {verified ? (
           <div className="space-y-4 py-2 text-center">
-            <p className="text-sm">Verified. Try again.</p>
+            <h2 className="font-heading text-lg font-medium">Verified</h2>
+            <p className="text-sm text-muted-foreground">
+              Your change wasn't saved yet. Close this and make it again.
+            </p>
             <Button type="button" onClick={close}>
               Close
             </Button>

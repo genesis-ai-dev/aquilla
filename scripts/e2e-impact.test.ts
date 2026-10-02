@@ -33,6 +33,7 @@ describe("changed-file E2E impact selection", () => {
       "src/lib/sync/bulk-import.ts", "sync-worker/src/events/import-route.ts",
       "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
       "sync-worker/src/events/import-track-publication.ts",
+      "sync-worker/src/events/import-caption-promotion.ts",
       "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
       "src/lib/audio/script-alignment.ts",
       "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
@@ -61,7 +62,8 @@ describe("changed-file E2E impact selection", () => {
   })
   it("maps imported video producers and picture resolution to the import journey", () => {
     for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
-      "sync-worker/src/events/import-route.ts"]) {
+      "sync-worker/src/events/import-route.ts",
+      "sync-worker/src/events/import-caption-promotion.ts"]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",
       )

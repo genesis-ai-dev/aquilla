@@ -8,7 +8,7 @@ const CORE_SENTINELS = [
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // AQU-1479: captions, media bytes, and staged attachments publish together.
-    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication)|shared\/timeline-import)/i,
+    source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication|caption-promotion)|shared\/timeline-import)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
   },
   {
@@ -113,7 +113,9 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
-    source: /^(?:src\/hooks\/useMediaPictureUrl\.|src\/lib\/sync\/bulk-import\.|sync-worker\/src\/events\/import-route\.)/,
+    // AQU-1566: captions becoming a linked video's rows is walked by the
+    // import-and-edit smoke (link video only, then Attach captions).
+    source: /^(?:src\/hooks\/useMediaPictureUrl\.|src\/lib\/sync\/bulk-import\.|sync-worker\/src\/events\/(?:import-route|import-caption-promotion)\.)/,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {

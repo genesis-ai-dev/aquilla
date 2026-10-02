@@ -48,7 +48,7 @@ not a micro-spec farm.
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob after cold import setup on a throttled renderer | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
 | Collab | Same-parent commits held behind a request barrier on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
-| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
+| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, a quick Tab / Shift+Tab re-edit of an empty or translated verse while its first save is still being written to the outbox (AQU-1578), and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
 | Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
@@ -268,6 +268,16 @@ UI chrome that used to be one smoke file per click is covered under
   It stays out of smoke for the reason the rules give: it is a message and a retry on a
   failure path, nothing is lost that was not already missing, and reproducing it needs
   the sync service to be made to fail, which the local e2e stack has no switch for.
+  The page BEHIND Project Settings listing a new link's files without a reload (AQU-1570)
+  is RTL too. Settings is a route modal over the still-mounted workspace or overview,
+  each with its own `useProject`; the link flow, "Try again" and a "Sync now" that brought
+  content in announce the change (`lib/sync/project-record-changed.ts`) and every
+  `useProject` for the project re-resolves. Pinned where it escaped, in the composition:
+  `LinkSourceSection.pageBehind.test.tsx` renders the real flow beside a real `useProject`
+  consumer (files listed after a link and after a retry that works; nothing re-read when
+  the first sync failed), with the hook's own contract in `useProject.test.tsx` and Sync
+  now's in `SourceLinkSection.test.tsx`. It is a stale read with nothing lost, so it stays
+  out of smoke; the AQU-1525 smoke walk above would cover it once it exists.
   A link to a LARGE upstream seeding at all (AQU-1543: statement size; AQU-1563: the
   first sync folding the whole history at once ran the ProjectSync Durable Object out
   of its 128 MB) is worker-tested against real Postgres. `link-sync-large-upstream.test.ts`
@@ -312,6 +322,22 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
 - AQU-1187 scripture-catalog per-book import: an eBible / Hello AO selection spanning several books emits one source file per book, each carrying `bookCode`, so the files group into OT/NT and order canonically; a single-book selection stays one file and only gains its code. Covered at the import-contract level in `src/lib/import.scripture-books.test.ts` (asserts the real `file.create` bodies, per-book originals, and the re-import collision key) plus `group-by-corpus.test.ts`. The existing `import-ebible-persists-reload.smoke.spec.ts` fixture is a three-verse Genesis corpus, i.e. the single-book path, and stays valid unchanged. The multi-book variant needs a corpus long enough to cross a book boundary (~1.5k lines, generated from the bundled vref list) — worth adding to that spec when a runnable stack is at hand; it was not added blind.
+- Linked-video empty table (AQU-1565): a time-ordered file whose media is a LINKED
+  video — a YouTube "Link video only" import (AQU-1556) — has no rows of its own, and
+  the editor's empty table used to fall through to the prompt for a file with no media
+  at all ("No media on this file yet", plus a direct-media-URL field that rejects a
+  watch page). What it says instead, what it offers, and what it withholds are covered
+  in RTL through the real EditorTable branch (`EditorTable.mediaEmptyState.test.tsx`):
+  the linked-video copy with no attach-media prompt and no URL field, the Open Media
+  view action and its absence when the table already renders under the timeline, the
+  attached caption tracks being NAMED rather than reported absent (their cues live in
+  their own content files, so the host file's row count stays at zero), a viewer
+  getting the sentence and nothing to click, and the regression guard that a file with
+  no linked video keeps the ordinary prompt, direct-URL field included. The decision
+  itself is `lib/editor/linked-video-empty-state.test.ts`. No smoke, per the rules: it
+  is an empty state in a single component, nothing is lost if it breaks, and the
+  picture-only import journey it follows is already walked by
+  `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),
@@ -352,6 +378,21 @@ UI chrome that used to be one smoke file per click is covered under
   `source.cell.mirror` events it received. No smoke: the downstream rows are
   already there, nothing is lost, and a regression offers work the upstream
   parked rather than destroying it.
+- An upstream delete reaches a linked project as a tombstone, and only as one
+  (AQU-1567). Like curation above it is a server contract with no UI of its own
+  in the consuming project, so it is pinned in
+  `sync-worker/src/__tests__/link-sync-tombstone-chain.test.ts` against real
+  Postgres: in `A → B → C` the cell A deleted is tombstoned in C with its text
+  kept, for a consumes-source and a consumes-target C, and a hide or a new
+  translation of it in B does not make it live in C again; an upstream restoring
+  the cell with its ORIGINAL text clears the tombstone, on one link and down a
+  chain; and a cell the downstream never held gets no row at all — create and
+  delete in one window, in different windows of one run, or as an empty
+  tombstone already sitting in B — while a later re-create still arrives and a
+  replayed window mirrors nothing. `link-sync-windowed.test.ts` pins that
+  one-event windows end in the same state. No smoke: the walk needs three
+  projects and two links, and crosses no layer the worker test does not already
+  run for real.
 - In-app feedback (AQU-1028, moved to the Help menu by AQU-1548): the Help ("?") menu's **Feedback** item opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `HelpMenu.test.tsx` for the entry point, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 - A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 

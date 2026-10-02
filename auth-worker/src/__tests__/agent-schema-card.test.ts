@@ -291,9 +291,13 @@ describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
     expect(AGENT_REQUIRED_ROLE["source.cell.commit"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["assignment.create"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["file.delete"]).toBe(500)
+    // AQU-1569: a reorder relayouts the sidebar for every member of the
+    // project, so it carries the project-lead floor rather than the
+    // contributor one its file.rename neighbour sits at.
+    expect(AGENT_REQUIRED_ROLE["file.reorder"]).toBe(500)
   })
 
-  it("covers all 28 event kinds from sync-worker/src/events/types.ts", () => {
-    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(28)
+  it("covers all 29 event kinds from sync-worker/src/events/types.ts", () => {
+    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(29)
   })
 })

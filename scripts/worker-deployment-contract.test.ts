@@ -280,6 +280,18 @@ describe("worker deployment environment contract", () => {
     },
   )
 
+  // Wrangler would inherit the top-level [observability] block, but each deployed
+  // env declares its own so a top-level edit can't switch Workers Logs off.
+  it.each(
+    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml"]
+      .flatMap((file) => ["production", "development"].map((profile) => [file, profile])),
+  )("keeps Workers Logs enabled in %s [env.%s]", (file, profile) => {
+    const config = readRepoFile(...file.split("/"))
+    const observability = tomlBlock(config, `[env.${profile}.observability]`)
+
+    expect(observability).toContain("enabled = true")
+  })
+
   it.each([
     ["production", "production", "https://api.aquilla.app/identity"],
     ["development", "development", "https://api.dev.aquilla.app/identity"],
@@ -669,6 +681,9 @@ describe("worker deployment environment contract", () => {
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
     expect(build).toContain("pnpm exec tsc -b")
+    // esbuild bundles the Workers without type-checking them.
+    expect(build).toContain("pnpm --dir auth-worker run type-check")
+    expect(build).toContain("pnpm --dir sync-worker run type-check")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
     const hook = readRepoFile(".husky", "pre-push")
@@ -832,11 +847,17 @@ describe("worker deployment environment contract", () => {
 
   it("installs Chromium before running IDML browser conformance in CI", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
-    const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
+    const installBrowser = workflow.indexOf("uses: ./.github/actions/playwright-chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+
+    // The shared action caches the browser and installs Chromium's system
+    // libraries only when it cannot start without them (apt is the slow step).
+    const action = readRepoFile(".github", "actions", "playwright-chromium", "action.yml")
+    expect(action).toContain("pnpm exec playwright install chromium")
+    expect(action).toContain("pnpm exec playwright install-deps chromium")
   })
 })
 

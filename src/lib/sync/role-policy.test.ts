@@ -128,6 +128,17 @@ describe("role-policy (client mirror)", () => {
     expect(canPerform("file.corpus.set", ROLE.REVIEWER)).toBe(false)
   })
 
+  // AQU-1569: deliberately a rung ABOVE its file.corpus.set neighbour. Moving
+  // one file into a folder is that file's business; reordering a group rewrites
+  // the sidebar every member of the project reads. The client mirror has to
+  // agree with sync-worker/src/events/role-policy.ts or the drag handle shows
+  // for people whose drop the server will refuse.
+  it("keeps a hand-placed file order at the project-setup floor", () => {
+    expect(requiredRoleFor("file.reorder")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("file.reorder", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("file.reorder", ROLE.CONTRIBUTOR)).toBe(false)
+  })
+
   // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
   //
   // The client's own process settles the film, the cue pairings and the

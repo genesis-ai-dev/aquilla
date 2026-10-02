@@ -6,7 +6,7 @@
  * stats, and the term page never disagree about what a term matches.
  */
 
-import type { Concept, TermMatchingSettings, TermMatchOptions } from "./types"
+import type { ConceptMatchInput, TermMatchingSettings, TermMatchOptions } from "./model"
 
 export const DEFAULT_MAX_AFFIXES = 2
 
@@ -30,7 +30,7 @@ export function hasCombiningMarks(s: string): boolean {
 }
 
 export function resolveMatchOptions(
-  concept: Pick<Concept, "sourceTerm" | "match">,
+  concept: Pick<ConceptMatchInput, "sourceTerm" | "match">,
   project?: TermMatchingSettings,
 ): ResolvedMatchOptions {
   const prefixes = (project?.prefixes ?? []).filter((p) => p.length > 0)

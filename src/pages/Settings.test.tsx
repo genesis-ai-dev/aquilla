@@ -136,7 +136,12 @@ describe("Org Settings", () => {
 
     renderSettings("/orgs/1/settings/knowledge")
     expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument()
-    expect(screen.getAllByText(/every project in this organization/i)).toHaveLength(1)
+    // The page header carries the description; the surface hides its own copy
+    // (showTitle={false}), so it appears once. Let the document list settle
+    // first — its empty state also says "every project in this organization",
+    // and this assertion used to pass only by running before that render.
+    expect(await screen.findByText("No knowledge documents yet")).toBeInTheDocument()
+    expect(screen.getAllByText(/^Add reference documents that every project/i)).toHaveLength(1)
   })
 
   it("shows the org name and an owner can rename it on blur", async () => {

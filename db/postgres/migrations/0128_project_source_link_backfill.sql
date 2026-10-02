@@ -1,0 +1,34 @@
+-- Migration 0128 (AQU-1560): upstream files being added to an existing link.
+--
+-- AQU-1559 (0127) let a link follow a fixed list of the upstream's files, but
+-- only ever the list it was made with. AQU-1560 lets a Project Lead add more of
+-- the upstream's files to that list later, from Project Settings → Source &
+-- sync, without detaching and re-linking.
+--
+-- A file added late cannot arrive from the link's cursor onward: the mirror has
+-- already folded past most of its history, deliberately skipping it because the
+-- file was not followed then. It has to be brought in WHOLE — its upstream
+-- history replayed from the beginning up to the cursor, restricted to that file
+-- — before it joins the forward sync like any other followed file.
+--
+-- This column holds that pending work. NULL = nothing being added (every row
+-- today). Otherwise a JSON object:
+--
+--   { "fileIds": ["<upstream file id>", …], "doneSeq": <upstream server_seq> }
+--
+-- `fileIds` are UPSTREAM file ids, like `source_link_file_ids`. `doneSeq` is how
+-- far the replay has got, so a replay interrupted between windows resumes
+-- rather than restarting. The mirror sync (sync-worker events/link-sync.ts)
+-- runs the replay before its forward fold, inside the downstream's single-
+-- flighted ProjectSync, and only when it reaches the cursor moves the files
+-- into `source_link_file_ids` and clears this column — in one statement. Until
+-- then the files are not part of the link: an interrupted add leaves the link
+-- following exactly what it followed before, and no half-filled file in the
+-- project's file list (the replay holds back each file's row until its last
+-- window).
+--
+-- TEXT holding JSON, parsed in JS, for the same reasons as 0127: a malformed
+-- blob degrades to "nothing pending" instead of throwing mid-sync.
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS source_link_backfill TEXT;

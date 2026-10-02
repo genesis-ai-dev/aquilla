@@ -15,6 +15,23 @@
 // state (read-only — creation/mode are set at link time, not editable here).
 // Detach itself is unchanged.
 //
+// AQU-1559: the card also says how much of the upstream this link follows —
+// "N of M files" for a link made with only some of them picked, "All files" for
+// one made with everything checked. The two are different products, not a
+// cosmetic difference: a whole-project link keeps receiving the files the
+// upstream gains later, a fixed-list one does not, and after a reload the card is
+// the only place that distinction is visible.
+//
+// AQU-1560: a live link also offers "Choose files" to Project Leads — the
+// upstream's file list, to add more of them (ChooseLinkedFilesDialog). Not on a
+// clone, which never syncs, nor on a legacy link with no recorded mode, which
+// the sync engine does not mirror.
+//
+// AQU-1562: the same dialog is where a followed file is UNCHECKED to stop this
+// project following it, keeping it as the project's own copy. That is why the
+// card's scope badge can now fall as well as rise, and why it reads "N of M
+// files" on a link that was made as a whole-project one.
+//
 // AQU-1544: a live link whose cursor is still 0 has never brought anything
 // through. Until this slice it rendered exactly like a healthy one ("Live",
 // "cursor: 0"), so a link whose first sync failed was indistinguishable from
@@ -40,8 +57,10 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { runLinkSync } from "@/lib/sync/archive"
+import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { clearLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
+import { ChooseLinkedFilesDialog } from "./ChooseLinkedFilesDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -56,11 +75,24 @@ export interface SourceLinkSectionProps {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: the upstream file ids this link follows, or null/undefined for a
+   *  whole-project link — which is every link made before that slice, and what
+   *  an older server that omits the field means too. */
+  sourceLinkFileIds?: string[] | null
+  /** AQU-1559: how many files the upstream holds, for the "N of M" the subset
+   *  badge states. Null/undefined when the server did not send it (a
+   *  whole-project link needs no total), and the badge then states the count
+   *  alone rather than inventing a denominator. */
+  sourceLinkUpstreamFileCount?: number | null
   /** Called after successful detach so the parent can refresh the project record. */
   onDetached: () => void
   /** AQU-1544: called after a "Sync now" that worked, so the parent can
    *  refresh the project record and pick up the advanced cursor. */
   onSynced?: () => void
+  /** AQU-1560/AQU-1562: called once the changes confirmed in "Choose files"
+   *  are in — files added, or files stopped — so the parent can refresh the
+   *  project record (the scope badge, the file list). */
+  onFilesAdded?: () => void
   /** The caller's resolved role level on this project. */
   roleLevel: number | null
 }
@@ -75,8 +107,11 @@ export function SourceLinkSection({
   sourceLinkConsumes,
   sourceLinkGate,
   sourceLinkCursor,
+  sourceLinkFileIds,
+  sourceLinkUpstreamFileCount,
   onDetached,
   onSynced,
+  onFilesAdded,
   roleLevel,
 }: SourceLinkSectionProps) {
   const t = useT()
@@ -85,6 +120,7 @@ export function SourceLinkSection({
   const [confirmInput, setConfirmInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chooseFilesOpen, setChooseFilesOpen] = useState(false)
 
   // AQU-1544: "idle" until the user presses Sync now. "empty" is a sync that
   // worked and had nothing to bring, which on a never-synced link means the
@@ -100,6 +136,14 @@ export function SourceLinkSection({
   // promise something it cannot do.
   const neverSynced = sourceLinkMode === "live" && (sourceLinkCursor ?? 0) === 0
 
+  // AQU-1559: a non-empty list is a link pinned to those upstream files;
+  // null/absent/empty is the whole project. `?? followedCount` keeps the badge
+  // honest on a server that sends the list without a total — "2 of 2 files" is
+  // wrong only if the upstream has more, and saying "All files" there would be a
+  // stronger claim than the data supports.
+  const followedCount = sourceLinkFileIds?.length ?? 0
+  const followsSubset = followedCount > 0
+
   async function handleSyncNow() {
     if (!session?.jwt || syncState === "syncing") return
     setSyncState("syncing")
@@ -110,6 +154,9 @@ export function SourceLinkSection({
       return
     }
     clearLinkSeedFailed(projectId)
+    // AQU-1570: content came through, so the page behind this dialog has files
+    // to show, not only this card's record.
+    if (outcome.ranSync) announceProjectRecordChanged(projectId)
     // Content came through: the refreshed record carries a cursor above 0 and
     // this whole block unmounts. Nothing came through: the upstream is empty,
     // which is said rather than left looking like an unanswered press.
@@ -195,6 +242,14 @@ export function SourceLinkSection({
                 })}
               </Badge>
             )}
+            <Badge variant="outline">
+              {followsSubset
+                ? t("projectSettings.sourceLink.scopeSomeFiles", {
+                    count: followedCount,
+                    total: sourceLinkUpstreamFileCount ?? followedCount,
+                  })
+                : t("projectSettings.sourceLink.scopeAllFiles")}
+            </Badge>
             {sourceLinkMode !== "clone" && !neverSynced && (
               <Badge variant="outline">{t("projectSettings.sourceLink.cursorLabel", { value: sourceLinkCursor ?? 0 })}</Badge>
             )}
@@ -251,7 +306,19 @@ export function SourceLinkSection({
               {t("projectSettings.sourceLink.roleGateNote")}
             </p>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {/* AQU-1560: same role floor as detach (project_lead), and shown
+                disabled below it the same way — the server refuses it too. */}
+            {sourceLinkMode === "live" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canDetach || !session}
+                onClick={() => setChooseFilesOpen(true)}
+              >
+                {t("projectSettings.sourceLink.chooseFilesButton")}
+              </Button>
+            )}
             <Button
               variant="destructive"
               size="sm"
@@ -267,6 +334,17 @@ export function SourceLinkSection({
           </div>
         </CardContent>
       </Card>
+
+      {sourceLinkMode === "live" && canDetach && (
+        <ChooseLinkedFilesDialog
+          projectId={projectId}
+          sourceProjectId={sourceProjectId}
+          followedFileIds={sourceLinkFileIds}
+          open={chooseFilesOpen}
+          onOpenChange={setChooseFilesOpen}
+          onApplied={() => onFilesAdded?.()}
+        />
+      )}
 
       <Dialog
         open={dialogOpen}

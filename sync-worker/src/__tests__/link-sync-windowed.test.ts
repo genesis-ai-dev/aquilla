@@ -39,6 +39,7 @@ import { handleLinkSyncRequest, syncUntilCaughtUp } from "../events/link-sync-ro
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { AquillaStatement } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb, type TestDbOptions } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 import { makeTestToken } from "./helpers/auth"
 
 const UPSTREAM = "proj-upstream-windowed"
@@ -83,10 +84,11 @@ async function emitUpstream(
     [UPSTREAM],
   )
   const seq = Number(row.rows[0]?.next_seq ?? 1)
+  const parentId = await headParentFor(t, UPSTREAM, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, 'lead', $6, $7, $7, $7)`,
-    [id, UPSTREAM, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq],
+     VALUES ($1, 1, $2, $3, $4, $8, $5, 'lead', $6, $7, $7, $7)`,
+    [id, UPSTREAM, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -94,7 +96,7 @@ async function emitUpstream(
     projectId: UPSTREAM,
     fileId: args.fileId,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind: kind as PersistedEvent["kind"],
     author: "lead",
     payload: args.payload,
@@ -159,10 +161,10 @@ async function filesOf(t: TestDb, project = DOWNSTREAM): Promise<FileSummary[]> 
 /**
  * What a downstream SHOWS for every mirrored cell, keyed by file NAME (each
  * downstream has its own deterministic file ids). A tombstoned row is reported
- * only as tombstoned: a delete that lands in a later window stamps the
- * existing row and keeps its last text, while a create+delete folded together
- * writes an empty tombstone — neither text is ever shown. Bookkeeping that is
- * allowed to differ by design (event ids, upstream_seq, timestamps) is left out.
+ * only as tombstoned: it keeps whatever text it last mirrored, and that text is
+ * never shown. (A cell created and deleted within one run leaves no row at all,
+ * however the run is windowed — AQU-1567.) Bookkeeping that is allowed to
+ * differ by design (event ids, upstream_seq, timestamps) is left out.
  */
 async function visibleState(t: TestDb, project: string): Promise<Record<string, unknown>[]> {
   const r = await t.pg.query<Record<string, unknown>>(
@@ -197,7 +199,7 @@ function trackDeltaReads(): { reads: DeltaRead[]; opts: TestDbOptions } {
     reads,
     opts: {
       onStatement: (sql, params) => {
-        if (/SELECT id, file_id, cell_id, kind, payload, server_seq\s+FROM events/.test(sql)) {
+        if (/SELECT id, file_id, cell_id, parent_id, kind, payload, server_seq\s+FROM events/.test(sql)) {
           reads.push({ since: Number(params[1]), until: Number(params[2]) })
         }
       },
@@ -401,12 +403,11 @@ describe("mirrorSync — windows change nothing the downstream ends up with (AQU
       expect(await visibleState(t, DOWNSTREAM)).toEqual(await visibleState(t, REFERENCE))
       expect(await filesOf(t, DOWNSTREAM)).toEqual(await filesOf(t, REFERENCE))
       // And the reference is what the history says, so equal is not "equally
-      // wrong". (Live cells only: `cell_count` also leaves out the two parked
-      // cells but, today, still counts the mirrored tombstones — the same on
-      // both sides, and not this ticket's.)
-      expect((await filesOf(t, REFERENCE)).map(({ name, cells }) => ({ name, cells }))).toEqual([
-        { name: "ACT-REV (2026)", cells: 6 },
-        { name: "ISA-MAL", cells: 2 },
+      // wrong". `cells` is every live row; `cell_count` also leaves out the two
+      // parked cells, and neither counts the mirrored tombstones.
+      expect(await filesOf(t, REFERENCE)).toEqual([
+        { name: "ACT-REV (2026)", cells: 6, cell_count: 4 },
+        { name: "ISA-MAL", cells: 2, cell_count: 2 },
       ])
       const byId = new Map((await visibleState(t, REFERENCE)).map((r) => [r.cell_id, r]))
       expect(byId.get("intro")).toMatchObject({
@@ -417,7 +418,11 @@ describe("mirrorSync — windows change nothing the downstream ends up with (AQU
       })
       expect(byId.get(`${FILE_A}-c1`)).toMatchObject({ value: "Note 1, revised", hidden: false })
       expect(byId.get(`${FILE_A}-c2`)).toMatchObject({ hidden: true })
-      expect(byId.get(`${FILE_A}-c3`)).toMatchObject({ tombstoned: true })
+      // AQU-1567: created and deleted before the downstream's first sync, so
+      // the downstream never held it — no row, not an empty tombstone. The
+      // equality above pins that one-event windows agree.
+      expect(byId.has(`${FILE_A}-c3`)).toBe(false)
+      expect(byId.has(`${FILE_B}-c2`)).toBe(false)
       expect(byId.get(`${FILE_A}-c4`)).toMatchObject({ hidden: false })
       expect(byId.get(`${FILE_A}-c5`)).toMatchObject({ value: "Note 5, revised while parked", hidden: true })
       expect(await cursorOf(t, DOWNSTREAM)).toBe(head)

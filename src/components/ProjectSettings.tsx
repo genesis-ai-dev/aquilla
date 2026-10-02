@@ -1763,8 +1763,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             sourceLinkConsumes={project.sourceLinkConsumes}
             sourceLinkGate={project.sourceLinkGate}
             sourceLinkCursor={project.sourceLinkCursor}
+            sourceLinkFileIds={project.sourceLinkFileIds}
+            sourceLinkUpstreamFileCount={project.sourceLinkUpstreamFileCount}
             onDetached={refresh}
             onSynced={refresh}
+            onFilesAdded={refresh}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}

@@ -66,7 +66,7 @@ import {
   encodeProjectDirectoryCursor,
   getCommentFloors,
   attachGroupProject,
-  getEffectiveOrgRole,
+  getOrgMemberRole,
   getMemberProgressViewMinRole,
   DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
   DEFAULT_ROSTER_VIEW_MIN_ROLE,
@@ -78,7 +78,7 @@ import {
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
-import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
@@ -94,6 +94,7 @@ import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
+import { loadLinkFileIds } from "../services/source-linking"
 import { createProjectShared } from "../../../db/shared/projects"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
@@ -124,6 +125,11 @@ interface FileProjection {
   hasScriptureContent?: boolean
   /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
   corpusMarker?: string
+  /** AQU-1569: hand-placed position within the file's sidebar group, from
+   *  files.meta.sortIndex. Fractional on purpose; absent until someone
+   *  reorders that group, which is what keeps an untouched project sorting
+   *  exactly as it did before the feature existed. */
+  sortIndex?: number
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -209,6 +215,7 @@ export async function loadFilesByProject(
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
     let corpusMarker: string | undefined
+    let sortIndex: number | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
@@ -234,6 +241,7 @@ export async function loadFilesByProject(
           }
           corpusMarker?: unknown
           parserVersion?: unknown
+          sortIndex?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -242,6 +250,10 @@ export async function loadFilesByProject(
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
+        // AQU-1569: only a finite number is a position. A string / NaN /
+        // Infinity in the blob reads as "never reordered" rather than being
+        // forwarded for the client's comparator to choke on.
+        if (typeof m.sortIndex === "number" && Number.isFinite(m.sortIndex)) sortIndex = m.sortIndex
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
         // `scale` is the only required field: a drift measured from the words
@@ -286,6 +298,9 @@ export async function loadFilesByProject(
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(corpusMarker ? { corpusMarker } : {}),
+      // Not a truthiness check: 0 is a perfectly ordinary position (it is what
+      // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
+      ...(sortIndex !== undefined ? { sortIndex } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),
@@ -380,14 +395,24 @@ projects.post(
       // Creating into a specific org is an org-level function: require the
       // caller's org role >= maintainer (see spec Risk 3) OR, AQU-1352 D4,
       // a team role >= project lead on EVERY selected team (at least one).
-      const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
+      // AQU-1540: both checks use genuine roles. A platform admin who passes
+      // neither needs an active elevation, like the team routes (AQU-1322).
+      const orgRole = await getOrgMemberRole(c.env, body.orgId, user.id)
       const teamRoles = await loadTeamsInOrg(c.env, body.orgId, teamIds, user.id)
       if (teamRoles.size !== teamIds.length) {
         return c.json({ error: "every team must belong to this org" }, 400)
       }
       const leadsEveryTeam = teamRoles.size > 0 &&
         [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
-      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsEveryTeam) {
+      const genuinelyAllowed = (orgRole != null && orgRole >= ROLE.MAINTAINER) || leadsEveryTeam
+      if (!genuinelyAllowed && isPlatformAdminEmail(c.env, user.email)) {
+        if (!(await hasActiveElevation(c))) {
+          return c.json(
+            { error: "elevation required to create a project in an org with platform-admin access" },
+            403,
+          )
+        }
+      } else if (!genuinelyAllowed) {
         // Name the org only for a member: a non-member must not learn it (spec §3.9 rule 4).
         const org = orgRole == null
           ? null
@@ -436,6 +461,27 @@ projects.post(
     if (orgId != null) {
       for (const teamId of teamIds) {
         await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
+      }
+    }
+
+    // AQU-1540: audit a platform admin's create into a named org (no-op for
+    // everyone else). Personal-org creates are the admin's own and stay unlogged.
+    if (body.orgId != null && orgId != null) {
+      await auditMembershipChange(c.env, user, {
+        action: "project.create",
+        where: { scope: "org", orgId },
+        projectId: body.id,
+        roleBefore: null,
+        roleAfter: ROLE.OWNER,
+      })
+      for (const teamId of teamIds) {
+        await auditMembershipChange(c.env, user, {
+          action: "team.project.attach",
+          where: { scope: "team", orgId, groupId: teamId },
+          projectId: body.id,
+          roleBefore: null,
+          roleAfter: TEAM_ATTACH_DEFAULT_ROLE,
+        })
       }
     }
 
@@ -740,6 +786,30 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const filesByProject = await loadFilesByProject(c.env, [projectId])
   const files = filesByProject.get(projectId) ?? []
 
+  // AQU-1559: a link that follows a fixed list of the upstream's files, and how
+  // many files the upstream currently has — the two numbers the Source link card
+  // reads as "N of M files". Null means the link follows the whole project, and
+  // the card says so without needing a count, so the extra query is skipped for
+  // every link made before this slice (and for every whole-project one since).
+  //
+  // Read in its own statement (`loadLinkFileIds`) rather than alongside the
+  // project row above: `source_link_file_ids` arrives with migration 0127, and a
+  // database that predates it would otherwise fail THIS select — the read behind
+  // every project open — rather than just withholding the new field. Only asked
+  // at all for a project that has an upstream.
+  const sourceLinkFileIds = row.source_project_id
+    ? await loadLinkFileIds(c.env, projectId)
+    : null
+  let sourceLinkUpstreamFileCount: number | null = null
+  if (sourceLinkFileIds && row.source_project_id) {
+    const countRow = await c.env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*) AS n FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+    )
+      .bind(row.source_project_id)
+      .first<{ n: number | string }>()
+    sourceLinkUpstreamFileCount = countRow?.n != null ? Number(countRow.n) : null
+  }
+
   // AQU-822: the org's effective termbase-edit floor travels with the project
   // so the client can gate the terminology UI (and its settings write) without
   // a second org-settings round trip. Server-authoritative either way — the
@@ -794,6 +864,10 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     sourceLinkConsumes: row.source_link_consumes,
     sourceLinkGate: row.source_link_gate,
     sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
+    // AQU-1559: null = this link follows the whole upstream project (the
+    // pre-slice behaviour); a list = it follows exactly those upstream files.
+    sourceLinkFileIds,
+    sourceLinkUpstreamFileCount,
     // AQU-507: designated PM (null = unassigned).
     pm:
       row.pm_user_id != null && row.pm_username != null

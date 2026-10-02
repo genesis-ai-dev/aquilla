@@ -23,11 +23,37 @@
 import { fetchProject } from "./projects-read"
 import type { ProjectFileSummary } from "./projects-read-types"
 
+/**
+ * AQU-1559: one row of the confirm step's file list — an upstream file the lead
+ * can leave checked or uncheck.
+ *
+ * `id` is the UPSTREAM file id, which is what the link request carries and what
+ * the mirror matches on: the selection has to follow the file itself, so that
+ * renaming a picked file upstream keeps it linked and the new name still comes
+ * through. `clashes` is this row's own answer to the same-name question the
+ * warning asks, so the warning can list only the clashing files still checked.
+ */
+export interface LinkSourcePreviewFile {
+  id: string
+  name: string
+  clashes: boolean
+}
+
 export interface LinkSourcePreview {
   /** The upstream project's display name, as the server knows it. */
   upstreamName: string
   /**
-   * How many files the link will add. Every non-deleted upstream file mirrors:
+   * AQU-1559: every file in the upstream, in the upstream's own order — the
+   * rows of the confirm step's checkbox list. Empty for an upstream with no
+   * files, which is a linkable situation with no list to show.
+   */
+  files: LinkSourcePreviewFile[]
+  /**
+   * How many files the upstream holds — `files.length`, and so the M of the
+   * "N of M files" the link ends up following. AQU-1559 made this the ceiling
+   * rather than the promise: the sentence the confirm step prints counts the
+   * files still CHECKED, which starts equal to this and falls as the lead
+   * unchecks. Every non-deleted upstream file mirrors:
    * `file.create` is itself a lane-relevant kind for a `consumes: 'source'`
    * link (sync-worker `events/link-sync.ts` → `LANE_KINDS_SOURCE`), so even an
    * upstream file with no source cells yet arrives. This is therefore the
@@ -64,19 +90,31 @@ export interface LinkSourcePreview {
  * names, not rows.
  */
 export function buildLinkSourcePreview(
-  upstream: { name: string; files: readonly Pick<ProjectFileSummary, "name">[] },
+  upstream: { name: string; files: readonly Pick<ProjectFileSummary, "id" | "name">[] },
   existingFiles: readonly Pick<ProjectFileSummary, "name">[],
 ): LinkSourcePreview {
   const existing = new Set(existingFiles.map((f) => f.name.toLowerCase()))
   const clashingNames: string[] = []
   const seen = new Set<string>()
+  // AQU-1559: one row per upstream file, each carrying its own clash answer.
+  // `clashingNames` stays the de-duplicated name list the warning prints — two
+  // upstream files spelled the same way are two rows to check but one line of
+  // warning — so both derive from this single pass.
+  const files: LinkSourcePreviewFile[] = []
   for (const file of upstream.files) {
     const key = file.name.toLowerCase()
-    if (!existing.has(key) || seen.has(key)) continue
+    const clashes = existing.has(key)
+    files.push({ id: file.id, name: file.name, clashes })
+    if (!clashes || seen.has(key)) continue
     seen.add(key)
     clashingNames.push(file.name)
   }
-  return { upstreamName: upstream.name, fileCount: upstream.files.length, clashingNames }
+  return {
+    upstreamName: upstream.name,
+    files,
+    fileCount: upstream.files.length,
+    clashingNames,
+  }
 }
 
 /**
@@ -99,4 +137,28 @@ export async function loadLinkSourcePreview(
     fetchProject(projectId, jwt, apiUrl),
   ])
   return buildLinkSourcePreview(upstream, self.files)
+}
+
+/**
+ * AQU-1561: the upstream's files alone, for a project that does not exist yet.
+ *
+ * Create New Project asks the same "which of these files?" question as the link
+ * flow above, but one read short of it: the project being created has no files,
+ * so there is nothing to clash with and nothing to compare against. Reusing
+ * `buildLinkSourcePreview` with an empty existing-file list is what keeps the
+ * two answers the same shape — every row comes back `clashes: false`, and the
+ * shared list component renders no clash badges for it — rather than the create
+ * dialog growing its own notion of an upstream file row.
+ *
+ * Throws what `fetchProject` throws. The caller shows the failure and offers a
+ * retry rather than rendering an empty list, which would read as "an upstream
+ * with no files" — a different situation, and one that still creates.
+ */
+export async function loadUpstreamFileChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<LinkSourcePreviewFile[]> {
+  const upstream = await fetchProject(upstreamProjectId, jwt, apiUrl)
+  return buildLinkSourcePreview(upstream, []).files
 }

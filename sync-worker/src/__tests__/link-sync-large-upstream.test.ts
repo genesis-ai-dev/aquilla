@@ -294,7 +294,13 @@ describe("mirrorSync — statement size does not grow with the upstream (AQU-154
       if (consumes === "target") await seedTargetCommits(t, FILE_A, cells)
 
       tracker.reset() // measure the sync, not the seeding
-      const result = await mirrorSync(t.db, DOWNSTREAM)
+      // Windows of 1,100 events, so that EVERY run spans more than one window
+      // and runs every statement shape a sync has: AQU-1567's look ahead
+      // (deletedByHead) only reads on a window that is not the run's last, and
+      // under the default 2,000 a 1,200-cell run is one window while a
+      // 2,400-cell one is two. A window still holds more cells than one lookup
+      // chunk and more events than one INSERT, so both bounds are exercised.
+      const result = await mirrorSync(t.db, DOWNSTREAM, { windowEvents: 1_100 })
       expect(result).toMatchObject({ ranSync: true, cellsMirrored: cells, filesMirrored: 1 })
       expect((await downstreamFiles(t))[0]).toMatchObject({ name: "Matthew", cells })
       return { ...tracker.sizes }
@@ -348,7 +354,13 @@ describe("mirrorSync — statement size does not grow with the upstream (AQU-154
         [DOWNSTREAM],
       )
       expect(blank.rows).toHaveLength(0)
-      expect(tracker.sizes).toEqual(firstSync)
+      // No statement bigger than the first sync's chunked ones. Not `toEqual`:
+      // the first sync also replays its creates' chains (AQU-1574 — two
+      // leading binds per chunk, so one value more than this window's lookups),
+      // and a window of hides has no chain event to replay.
+      expect(tracker.sizes.eventsInsert).toBe(firstSync.eventsInsert)
+      expect(tracker.sizes.cellKeyLookup).toBeGreaterThan(0)
+      expect(tracker.sizes.cellKeyLookup).toBeLessThanOrEqual(firstSync.cellKeyLookup)
     } finally {
       await t.close()
     }

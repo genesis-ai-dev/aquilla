@@ -508,12 +508,14 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   // These tests are about chain-slot arbitration, not about who may restructure
   // a file — but each seeds a `source.cell.create`, which AQU-1068 gates on the
   // project having opted in. Opt them in so the gate stays out of the way of
-  // what they actually assert.
+  // what they actually assert. The `es` lane has its row, as a registered lane
+  // does in production (AQU-1532: a cell write to a lane with no row is a 422).
   const makeChainDb = () =>
     makeTestDb({
       project_settings: [
         { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
       ],
+      lanes: [{ id: 'eslane01', project_id: 'proj-a', role: 'target', name: 'Spanish', legacy_tag: 'es' }],
     })
 
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {

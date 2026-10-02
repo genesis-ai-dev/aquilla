@@ -613,6 +613,9 @@ export function ProjectOverview() {
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
+  // AQU-1570: re-read when the project's file SET changes, not only its first
+  // file — files a source link brings in usually land after the existing ones.
+  const fileSetKey = project?.files.map((f) => f.id).join("\u0000") ?? ""
   useEffect(() => {
     if (!jwt || !id || !firstFileId) { setFiles([]); return }
     let cancelled = false
@@ -621,7 +624,7 @@ export function ProjectOverview() {
       .then((rows) => { if (!cancelled) setFiles(rows) })
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
-  }, [jwt, id, firstFileId, project?.name])
+  }, [jwt, id, firstFileId, fileSetKey, project?.name])
 
   // AQU-498: token minter for MemberActivityPanel — same project-scoped
   // sync-token mint used for the per-file rollups above (verifyTokenForProject

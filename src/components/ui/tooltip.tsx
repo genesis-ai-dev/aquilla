@@ -9,8 +9,6 @@ import { cn } from "@/lib/utils"
 type TooltipSide = "top" | "bottom" | "left" | "right"
 type TooltipAlign = NonNullable<TooltipPrimitive.Positioner.Props["align"]>
 
-const DEFAULT_TOOLTIP_DELAY = 600
-
 function TooltipProvider({
   delay = 0,
   ...props
@@ -78,7 +76,7 @@ function AppTooltip({
   content,
   side = "bottom",
   align = "center",
-  delay = DEFAULT_TOOLTIP_DELAY,
+  delay,
   disabled = false,
   className,
   disabledTriggerClassName,
@@ -87,6 +85,9 @@ function AppTooltip({
   content: ReactNode
   side?: TooltipSide
   align?: TooltipAlign
+  /** Per-tooltip open delay. Leave unset to inherit the provider's: Base UI
+   *  ≥1.8 lets a trigger's own delay win over its provider's (base-ui#5444),
+   *  so a default here would silently override App.tsx's provider. */
   delay?: number
   disabled?: boolean
   className?: string

@@ -1875,7 +1875,7 @@ function ParatextChoice({
   const [error, setError] = useState<string | null>(null)
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [query, setQuery] = useState("")
-  // Books the user unchecked in the preview (uppercase bookIds → skipKeys).
+  // Books left unchecked in the preview (uppercase bookIds → skipKeys).
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [expandedBook, setExpandedBook] = useState<string | null>(null)
 
@@ -1886,7 +1886,12 @@ function ParatextChoice({
   useEffect(() => {
     let cancelled = false
     prepareParatextProject(entries, { excludeFrontMatter })
-      .then((p) => { if (!cancelled) setPlan(p) })
+      .then((p) => {
+        if (cancelled) return
+        setPlan(p)
+        // Opt-in: every book starts unchecked; the user picks what to bring in.
+        setExcluded(new Set(p.books.map((b) => b.book.bookId.toUpperCase())))
+      })
       .catch((err) => {
         if (cancelled) return
         posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
@@ -2130,6 +2135,19 @@ function ParatextChoice({
             : t("importExport.paratext.readingProject")}
         </p>
       </div>
+      {plan && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline hover:text-foreground"
+            onClick={() =>
+              setExcluded(excluded.size === 0 ? new Set(plan.books.map((b) => b.book.bookId.toUpperCase())) : new Set())
+            }
+          >
+            {excluded.size === 0 ? t("importExport.review.deselectAll") : t("common.selectAll")}
+          </button>
+        </div>
+      )}
       {plan && (
         // Native overflow scroll: ScrollArea's size-full viewport can't resolve
         // against a max-h-only root, so long book lists paint past the border.
@@ -2599,7 +2617,8 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
   const [books, setBooks] = useState<HelloaoBook[] | null>(null)
   const [booksErr, setBooksErr] = useState<string | null>(null)
   const [checkedBooks, setCheckedBooks] = useState<Set<string>>(new Set())
-  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT">("all")
+  // "custom" = no preset highlighted (the opt-in default, or after Deselect all).
+  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT" | "custom">("custom")
 
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
@@ -2646,23 +2665,23 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     setBooks(null)
     setBooksErr(null)
     setCheckedBooks(new Set())
-    setBookPreset("all")
+    setBookPreset("custom")
     fetchHelloaoBooks(tr.id)
       .then((list) => {
+        // Opt-in: nothing is checked until the user picks books or a preset.
         setBooks(list)
-        // Default: everything selected (whole bible).
-        setCheckedBooks(new Set(list.map((b) => b.id)))
-        setBookPreset("all")
       })
       .catch((err) => {
         setBooksErr(err instanceof Error ? err.message : String(err))
       })
   }
 
-  function applyPreset(preset: "all" | "OT" | "NT") {
+  function applyPreset(preset: "all" | "OT" | "NT" | "custom") {
     if (!books) return
     setBookPreset(preset)
-    if (preset === "all") {
+    if (preset === "custom") {
+      setCheckedBooks(new Set())
+    } else if (preset === "all") {
       setCheckedBooks(new Set(books.map((b) => b.id)))
     } else {
       setCheckedBooks(new Set(books.filter((b) => getTestament(b.id) === preset).map((b) => b.id)))
@@ -2758,6 +2777,14 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
               <span className="ml-auto text-xs text-muted-foreground">
                 {t("importExport.helloao.booksSelected", { checked: checkedBooks.size, total: books.length })}
               </span>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+                disabled={importing || checkedBooks.size === 0}
+                onClick={() => applyPreset("custom")}
+              >
+                {t("importExport.review.deselectAll")}
+              </button>
             </div>
 
             <ScrollArea className="h-64 rounded-md border">

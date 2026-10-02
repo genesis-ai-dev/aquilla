@@ -125,6 +125,38 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1561: which of the upstream's files the new project brings in.
+    // Same question the Source & sync link flow asks, so the list itself reuses
+    // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
+    // sentences around it differ, because a clone's one-time copy and a live
+    // link's ongoing follow are different promises.
+    "projectSettings.create.upstreamFilesLabel": "Files to bring in",
+    "projectSettings.create.upstreamFilesLoading": "Loading that project's files…",
+    "projectSettings.create.upstreamFilesLoadError":
+      "Couldn't load that project's file list, so we can't say which files would " +
+      "be brought in. Nothing has been created.",
+    "projectSettings.create.upstreamFilesRetryButton": "Try again",
+    "projectSettings.create.upstreamFilesNoneSelected":
+      "Pick at least one file to bring in.",
+    "projectSettings.create.upstreamFilesEmptyUpstream":
+      "That project has no files yet, so none will be brought in now.",
+    "projectSettings.create.upstreamFilesCount": plural({
+      one: "{count} file will be brought into the new project.",
+      other: "{count} files will be brought into the new project.",
+    }),
+    // The live case follows the upstream from here on, so whether the link is
+    // whole-project or a fixed list decides what arrives LATER too.
+    "projectSettings.create.upstreamFilesLiveAllNote":
+      "The new project will follow the whole source project, so files it adds " +
+      "later will arrive too.",
+    "projectSettings.create.upstreamFilesLiveSubsetNote":
+      "The new project will follow only the files you picked. Files the source " +
+      "project adds later will not arrive on their own.",
+    // A clone never syncs again, so there is no "later" to describe — only what
+    // the one snapshot copies.
+    "projectSettings.create.upstreamFilesCloneNote":
+      "A copy is taken once, of the files you picked. The new project does not " +
+      "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
@@ -627,6 +659,102 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1559: how much of the upstream this link follows. A subset link is
+    // pinned to the files it was made with; a whole-project one keeps picking up
+    // the files the upstream gains.
+    "projectSettings.sourceLink.scopeAllFiles": "All files",
+    "projectSettings.sourceLink.scopeSomeFiles": plural(
+      {
+        one: "{count} of {total} file",
+        other: "{count} of {total} files",
+      },
+      "total",
+    ),
+    // AQU-1560: "Choose files" — add more of the upstream's files to a live
+    // link that follows a fixed list, without detaching and re-linking.
+    // Already-linked files are shown checked and locked (unlinking one is a
+    // later slice). The dialog reuses the link flow's count sentence, scope
+    // notes and same-name warning, so the two read the same.
+    "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
+    "projectSettings.sourceLink.chooseFilesDescription":
+      "Files this link follows are checked. Check more of the source project's " +
+      "files to add them here: each arrives with its complete source, and " +
+      "receives the source project's changes from then on. Uncheck one to stop " +
+      "following it and keep it as this project's own copy.",
+    "projectSettings.sourceLink.chooseFilesLoading": "Loading the source project's files…",
+    "projectSettings.sourceLink.chooseFilesLoadError":
+      "Couldn't load the source project's file list. Nothing has been changed.",
+    "projectSettings.sourceLink.chooseFilesLinkedBadge": "already linked",
+    "projectSettings.sourceLink.chooseFilesAllLinked":
+      "This link follows every file in the source project, and files it adds " +
+      "later arrive here on their own. There is nothing to add — uncheck a file " +
+      "to stop following it.",
+    "projectSettings.sourceLink.chooseFilesNoneChecked":
+      "Check a file above to add it to this link, or uncheck one to stop " +
+      "following it.",
+    "projectSettings.sourceLink.chooseFilesAddButton": "Add files",
+    "projectSettings.sourceLink.chooseFilesAddingButton": "Adding files…",
+    "projectSettings.sourceLink.chooseFilesIncomplete":
+      "The files didn't finish arriving, so they haven't been added to the link " +
+      "yet. Try again to finish bringing them in.",
+    // AQU-1562: unchecking a file the link follows stops this project following
+    // that one file — a per-file detach. The file stays, with everything on it;
+    // only the flow of upstream changes ends. Checking a stopped file again
+    // resumes it in the same file, which is a different promise from adding a
+    // file this project never had, so the two are worded apart. Every one of
+    // these sentences is in the confirm step, before anything changes.
+    "projectSettings.sourceLink.chooseFilesStoppedBadge": "stopped following",
+    "projectSettings.sourceLink.chooseFilesReviewButton": "Review changes",
+    "projectSettings.sourceLink.chooseFilesConfirmTitle": "Confirm these changes to the link",
+    "projectSettings.sourceLink.chooseFilesApplyingButton": "Saving the link…",
+    "projectSettings.sourceLink.chooseFilesStopHeading": plural({
+      one: "Stop following this file:",
+      other: "Stop following these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopBody": plural({
+      one:
+        "It stays in this project with the source text it has now, and its " +
+        "translations, validations and comments are untouched. It will no longer " +
+        "receive the source project's changes.",
+      other:
+        "They stay in this project with the source text they have now, and their " +
+        "translations, validations and comments are untouched. They will no longer " +
+        "receive the source project's changes.",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopOthersNote":
+      "Every other file this link follows keeps syncing as before.",
+    "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning":
+      "This link follows the whole source project. Stopping a file pins it to the " +
+      "remaining files, so files the source project adds later will no longer " +
+      "arrive here on their own.",
+    "projectSettings.sourceLink.chooseFilesKeepOneError":
+      "At least one file must stay linked. To stop following the source project " +
+      "altogether, use \u201cDetach from source\u201d.",
+    "projectSettings.sourceLink.chooseFilesResumeHeading": plural({
+      one: "Follow this file again:",
+      other: "Follow these files again:",
+    }),
+    "projectSettings.sourceLink.chooseFilesResumeBody": plural({
+      one:
+        "Its source text will be replaced with the source project's current text. " +
+        "Its translations, validations and comments stay.",
+      other:
+        "Their source text will be replaced with the source project's current " +
+        "text. Their translations, validations and comments stay.",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddHeading": plural({
+      one: "Add this file:",
+      other: "Add these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddBody": plural({
+      one:
+        "It arrives with its complete source text, and receives the source " +
+        "project's changes from then on.",
+      other:
+        "They arrive with their complete source text, and receive the source " +
+        "project's changes from then on.",
+    }),
     // AQU-1544: a live link that has never brought anything through.
     "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
     "projectSettings.sourceLink.notSyncedNote":
@@ -691,6 +819,19 @@ export const projectSettings = defineNamespace({
       one: "{count} source file will be added to this project.",
       other: "{count} source files will be added to this project.",
     }),
+    // ── AQU-1559: the confirm step's file list. Every file arrives checked,
+    // so the stock outcome is the whole-project link; unchecking any of them
+    // pins the link to the rest.
+    "projectSettings.linkSource.selectAllFiles": "All files",
+    "projectSettings.linkSource.fileClashBadge": "same name here",
+    "projectSettings.linkSource.previewNoneSelected":
+      "Pick at least one file to link.",
+    "projectSettings.linkSource.scopeAllNote":
+      "This link follows the whole project, so files the source project adds " +
+      "later will arrive here too.",
+    "projectSettings.linkSource.scopeSubsetNote":
+      "This link follows only the files you picked. Files the source project " +
+      "adds later will not arrive here on their own.",
     "projectSettings.linkSource.previewEmptyUpstream":
       "That project has no source files yet, so nothing will be added now. Files " +
       "will arrive here as the upstream gains them.",
@@ -1112,6 +1253,13 @@ export const projectSettings = defineNamespace({
           "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
           "snapshot copy, not a live link.",
       },
+      "projectSettings.create.upstreamFilesCount": {
+        description:
+          "Sentence under the file list in the Create New Project dialog, saying how many of the upstream project's files the new project will bring in.",
+        placeholders: {
+          count: "How many files are checked (data, a plain integer), e.g. '3'.",
+        },
+      },
       "projectSettings.create.cloneIntro": {
         description:
           "Explanatory line under the Self Contained shape radio: offers an optional " +
@@ -1454,6 +1602,15 @@ export const projectSettings = defineNamespace({
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
         },
       },
+      "projectSettings.sourceLink.scopeSomeFiles": {
+        description:
+          "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
+        placeholders: {
+          count: "How many of the upstream's files this link follows (data, a plain integer), e.g. '2'.",
+          total:
+            "How many files the upstream project has in total (data, a plain integer), e.g. '3'. The plural form is chosen from THIS number.",
+        },
+      },
       "projectSettings.sourceLink.cursorLabel": {
         description: "Small badge on the Source link card naming the link's current sync cursor position, for a live (non-clone) link.",
         placeholders: {
@@ -1698,6 +1855,117 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesButton": {
+        description:
+          "Button on the Source link card (Project Settings) that opens a list of the " +
+          "upstream project's files, to add more of them to this project's link. A " +
+          "verb phrase: 'choose' as in pick.",
+      },
+      "projectSettings.sourceLink.chooseFilesTitle": {
+        description:
+          "Title of the dialog listing the upstream project's files with checkboxes. " +
+          "Files already linked are checked and cannot be unchecked; the rest can be " +
+          "checked to add them.",
+      },
+      "projectSettings.sourceLink.chooseFilesLinkedBadge": {
+        description:
+          "Small label beside a file in that list that this project already receives " +
+          "from the upstream, explaining why its checkbox is checked and locked.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddButton": {
+        description:
+          "The dialog's confirm button: brings the checked files into this project. " +
+          "The sentence above it states how many.",
+      },
+      // AQU-1562: the confirm step shown before a link's file choice changes.
+      // Each heading introduces a bulleted list of file names; the body beneath
+      // it is the promise made about exactly those files. Headings and bodies
+      // are paired, so a translator should read each pair together.
+      "projectSettings.sourceLink.chooseFilesStopHeading": {
+        description:
+          "Heading over the list of files that will STOP being followed, in the confirm " +
+          "step of \"Choose files\" (Project Settings → Source link). Ends in a colon: the " +
+          "file names follow immediately beneath it. The number is never printed — it only " +
+          "chooses the form, so a language with more plural categories needs each of them.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopBody": {
+        description:
+          "Under the stop list: what stopping does to those files. The reassurance is the " +
+          "point — before this existed, the only ways to stop following a file were to " +
+          "delete it (losing its translations) or to detach the whole project. Say plainly " +
+          "that the file stays with everything on it and only stops receiving changes.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopOthersNote": {
+        description:
+          "One more sentence under the stop list: the link's OTHER files are unaffected. " +
+          "Stopping is per file, and a lead stopping one book needs to know the rest keeps " +
+          "arriving.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning": {
+        description:
+          "Warning in the same confirm, shown only when the link currently follows the whole " +
+          "source project. Stopping one file turns it into a fixed list of the rest, so files " +
+          "the source project adds later stop arriving on their own — a consequence nobody " +
+          "asked for, hence stating it before it happens. \"Pins\" as in fixes/locks to.",
+      },
+      "projectSettings.sourceLink.chooseFilesKeepOneError": {
+        description:
+          "Shown in place of the confirm when every followed file has been unchecked. A link " +
+          "following no files could never bring anything in; stopping everything is the " +
+          "separate \"Detach from source\" action on the same card, which the sentence names " +
+          "in quotes — translate that name the same way it is translated on the button.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeHeading": {
+        description:
+          "Heading over the list of previously-stopped files that will be followed AGAIN. " +
+          "Distinct from the add heading below because the file is already in the project: " +
+          "this resumes it rather than bringing a new one in. Ends in a colon; names follow.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeBody": {
+        description:
+          "Under the resume list: the one thing resuming costs. The file's source text is " +
+          "replaced with the source project's current text — the lead may have been editing " +
+          "it in the meantime — while the translations on it are kept. Both halves matter.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddHeading": {
+        description:
+          "Heading over the list of files being added that this project never held. Ends in " +
+          "a colon; names follow. Kept apart from the resume heading above, which promises " +
+          "something different.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddBody": {
+        description:
+          "Under the add list: an added file arrives with its WHOLE current source, not only " +
+          "the changes made from now on, and follows the source project afterwards like any " +
+          "other linked file.",
+      },
+      "projectSettings.sourceLink.chooseFilesStoppedBadge": {
+        description:
+          "Small label beside a file in the \"Choose files\" list that this project stopped " +
+          "following: it is here with its translations but no longer receives the source " +
+          "project's changes. Explains why its checkbox is clear when the file is plainly in " +
+          "the project, and warns that checking it replaces its source text.",
+      },
+      "projectSettings.sourceLink.chooseFilesReviewButton": {
+        description:
+          "The \"Choose files\" dialog's primary button when the lead has stopped or resumed a " +
+          "file: it opens the confirm step rather than acting, since those carry promises the " +
+          "checkboxes do not. A verb phrase.",
+      },
+      "projectSettings.sourceLink.chooseFilesConfirmTitle": {
+        description: "Title of that confirm step, replacing the file-list dialog's own title.",
+      },
+      "projectSettings.sourceLink.chooseFilesApplyingButton": {
+        description:
+          "Label of the confirm step's button while the changes are being saved; the button is " +
+          "disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesIncomplete": {
+        description:
+          "Error under the list when the files could not all be brought in. Nothing " +
+          "is half-added: the files are not in the project yet, and pressing the " +
+          "button again resumes.",
       },
       "projectSettings.sourceLink.notSyncedBadge": {
         description:

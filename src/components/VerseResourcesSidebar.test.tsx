@@ -20,6 +20,20 @@ vi.mock("@/lib/aquifer/passage-resources", async () => {
   }
 })
 
+// The TaBiThA section (#950) fetches its own brief beside the Aquifer lookups
+// this file exercises; TabithaBriefSection.test.tsx covers it. Left real it
+// reaches production identity, which the AQU-1277 guard rejects.
+vi.mock("@/lib/tabitha/verse-brief", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/tabitha/verse-brief")>()),
+  loadVerseBrief: vi.fn(async () => ({
+    available: false,
+    lwcText: "",
+    notes: [],
+    translatorNotes: [],
+    culturalBackground: [],
+  })),
+}))
+
 const loadEntities = vi.mocked(loadPassageEntities)
 const loadDetail = vi.mocked(loadEntityDetail)
 

@@ -65,6 +65,14 @@ export interface ProjectStateResponse {
   sourceLinkGate?: "head" | "validated" | null
   /** AQU-476/478: max upstream server_seq this project has mirrored so far. */
   sourceLinkCursor?: number | null
+  /** AQU-1559: the upstream file ids this link follows, or null for a
+   *  whole-project link (every link made before that slice). Absent on an older
+   *  server, which the Source link card reads the same way as null. */
+  sourceLinkFileIds?: string[] | null
+  /** AQU-1559: how many files the upstream currently holds — the M of
+   *  "N of M files". Only sent for a fixed-list link; null otherwise, since a
+   *  whole-project link is stated without a count. */
+  sourceLinkUpstreamFileCount?: number | null
   role: { level: number; name: string; source: string }
   /** AQU-507: designated Project Manager (null = unassigned; absent = older
    *  server). Distinct from the member roster / permission ladder. */
@@ -172,6 +180,15 @@ export async function linkProjectSource(
     mode: "clone" | "live"
     consumes?: "source" | "target"
     gate?: "head" | "validated"
+    /**
+     * AQU-1559: the UPSTREAM file ids this link should follow. Omit to follow
+     * the whole project — every file it has now and every one it gains later,
+     * which is what every link did before that slice. A list makes the link a
+     * fixed one: only those files mirror in, and later upstream files do not
+     * arrive on their own. Never send an empty array: the server 400s it,
+     * because "follow no files" is a mistake rather than a link.
+     */
+    fileIds?: string[]
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {
@@ -192,6 +209,144 @@ export async function linkProjectSource(
     throw new UserError(res.status, await res.text().catch(() => ""), "project")
   }
   return (await res.json()) as LinkProjectSourceResult
+}
+
+export interface AddLinkedSourceFilesResult {
+  /** The upstream file ids this request added — the requested ones the link
+   *  did not already follow and the upstream still has. Empty = nothing new. */
+  added: string[]
+  /** The link's selection afterwards. null = it follows the whole project,
+   *  which is what adding the last unlinked file makes it. */
+  fileIds: string[] | null
+  /** false = the addition is recorded but the files have not all arrived yet.
+   *  Nothing is half-added meanwhile (the files are not part of the link until
+   *  they are complete), and calling again with the same files resumes. */
+  complete: boolean
+}
+
+/**
+ * AQU-1560: add more of the upstream's files to this project's live link,
+ * without detaching and re-linking. Each file arrives with its complete
+ * current source, not only changes made from now on — the server replays its
+ * upstream history before the file joins the link, and answers once that has
+ * run. project_lead(500)+ on this project, server-enforced. Throws `UserError`
+ * on non-2xx.
+ */
+export async function addLinkedSourceFiles(
+  jwt: string,
+  projectId: string,
+  /** UPSTREAM file ids, as the link-source preview lists them. Non-empty. */
+  fileIds: string[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<AddLinkedSourceFilesResult> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ fileIds }),
+    },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  return (await res.json()) as AddLinkedSourceFilesResult
+}
+
+export interface LinkedSourceFileState {
+  /** The upstream file ids this link follows. null = the whole project. */
+  fileIds: string[] | null
+  /**
+   * Upstream file ids this project holds as a STOPPED copy — files the link
+   * once followed and no longer does, still here with the source text they had
+   * when they were stopped and every translation on them. Always empty on a
+   * whole-project link, which has stopped nothing.
+   *
+   * Why the client needs it: a stopped file and a file this project never had
+   * both read as an unchecked row, but checking them does different things —
+   * following a stopped file again REPLACES its source text with the upstream's
+   * current text, where checking a never-had file only brings one in. The
+   * confirm has to say which.
+   */
+  stoppedFileIds: string[]
+}
+
+/**
+ * AQU-1562: what this project's live link follows, and which of the upstream's
+ * other files are here as stopped copies. project_lead(500)+, server-enforced.
+ * Throws `UserError` on non-2xx.
+ */
+export async function loadLinkedSourceFileState(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LinkedSourceFileState> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  const body = (await res.json()) as Partial<LinkedSourceFileState>
+  return {
+    fileIds: Array.isArray(body.fileIds) ? body.fileIds : null,
+    // An older server that does not answer this reads as "nothing stopped",
+    // which is what every link looked like before this slice.
+    stoppedFileIds: Array.isArray(body.stoppedFileIds) ? body.stoppedFileIds : [],
+  }
+}
+
+export interface StopLinkedSourceFilesResult {
+  /** The upstream file ids this request stopped — the requested ones the link
+   *  was actually following. Empty = nothing was being followed, so a no-op. */
+  stopped: string[]
+  /** The link's selection afterwards. Never null: stopping every file is
+   *  refused, so a link that was following the whole project comes back as the
+   *  fixed list of the rest (AQU-1559's rule). */
+  fileIds: string[] | null
+  /** Whether the link followed the whole project before this call — i.e.
+   *  whether it has just become a fixed list. */
+  wasWholeProject: boolean
+}
+
+/**
+ * AQU-1562: stop this project following some of the upstream's files, keeping
+ * them as the project's own copies.
+ *
+ * Nothing is deleted or moved: each file stays with the source text it has now
+ * and every translation, validation and comment on it, and only stops receiving
+ * upstream changes. Other followed files are unaffected. At least one file must
+ * stay linked — stopping all of them is "Detach from source", and the server
+ * answers 409 rather than leaving a link that can never sync.
+ *
+ * project_lead(500)+, server-enforced. Throws `UserError` on non-2xx.
+ */
+export async function stopLinkedSourceFiles(
+  jwt: string,
+  projectId: string,
+  /** UPSTREAM file ids, as the link-source preview lists them. Non-empty. */
+  fileIds: string[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<StopLinkedSourceFilesResult> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files/stop`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ fileIds }),
+    },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  return (await res.json()) as StopLinkedSourceFilesResult
 }
 
 /**

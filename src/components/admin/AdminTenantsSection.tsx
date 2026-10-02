@@ -24,12 +24,15 @@ export function AdminTenantsSection({
   teams,
   onOpenOrg,
   onOpenOrgPath,
+  onOpenInvites,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
   onOpenOrg: (orgId: number) => void
   /** Open an org subpage such as "/members" or "/access". */
   onOpenOrgPath: (orgId: number, subpath: string) => void
+  /** Open the admin invites tab with this org pre-selected. */
+  onOpenInvites?: (orgId: number) => void
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -134,6 +137,10 @@ export function AdminTenantsSection({
             e.stopPropagation()
             onOpenOrgPath(orgId, subpath)
           }
+          const openInvites = (e: MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation()
+            onOpenInvites?.(orgId)
+          }
           const linkClass = "text-xs text-primary hover:underline"
           return (
             <div className="flex justify-end gap-3 whitespace-nowrap">
@@ -143,12 +150,17 @@ export function AdminTenantsSection({
               <button type="button" className={linkClass} onClick={open("/access")}>
                 People &amp; access
               </button>
+              {onOpenInvites && (
+                <button type="button" className={linkClass} onClick={openInvites}>
+                  Invites &amp; links
+                </button>
+              )}
             </div>
           )
         },
       },
     ],
-    [teamCountByOrg, onOpenOrgPath],
+    [teamCountByOrg, onOpenOrgPath, onOpenInvites],
   )
 
   return (

@@ -95,6 +95,11 @@ describe('hot query plan shapes (PGlite)', () => {
     expect(plan).toContain('Index Only Scan using cells_pkey')
     expect(plan).toMatch(/Group Key: (\w+\.)?cell_id/)
     expect(plan).not.toContain('Sort')
+    // The cells it leaves out — hidden, and deleted by a live link's upstream —
+    // are collected through their partial indexes, not by walking every source
+    // row of the file on each recompute.
+    expect(plan).toContain('idx_cells_hidden')
+    expect(plan).toContain('idx_cells_tombstoned')
   })
 
 })

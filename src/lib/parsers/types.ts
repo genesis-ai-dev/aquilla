@@ -703,6 +703,11 @@ export interface ProjectRecord {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: which of the upstream's files the link follows — null/absent =
+   *  the whole project — and the upstream's current file count, for the
+   *  "N of M files" the Source link card states. */
+  sourceLinkFileIds?: string[] | null
+  sourceLinkUpstreamFileCount?: number | null
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every
@@ -771,6 +776,19 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /**
+   * AQU-1569: hand-placed position within this file's sidebar corpus group,
+   * from files.meta.sortIndex (set via the `file.reorder` event). Fractional
+   * on purpose — see `src/lib/sidebar/file-sort-index.ts`.
+   *
+   * Absent means "nobody has reordered this group", which is the state of
+   * every file until a Project Lead drags one, and the reason an untouched
+   * project's sidebar is unchanged by this feature. Consume it only through
+   * `groupByCorpus` / the helpers in `file-sort-index.ts`, never by sorting on
+   * it directly: an unplaced file has to sort AFTER a placed one, which a bare
+   * numeric sort on an `undefined` cannot express.
+   */
+  sortIndex?: number
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string

@@ -103,8 +103,10 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The build installs auth/sync dependencies and runs `tsc -b`. The deploy command
-runs `scripts/cloudflare-stack-preview.mjs` using the root Wrangler version:
+The build installs auth/sync dependencies, runs `tsc -b`, and runs each
+Worker's `type-check`, since wrangler's esbuild bundle does not type-check. The
+deploy command runs `scripts/cloudflare-stack-preview.mjs` using the root
+Wrangler version:
 
 1. Create/update auth and sync previews with the same branch-derived name.
 2. Read their actual URLs from Wrangler's structured output.

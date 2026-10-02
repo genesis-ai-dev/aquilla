@@ -89,6 +89,61 @@ describe("buildLinkSourcePreview", () => {
   })
 })
 
+// AQU-1559 — the rows the confirm step renders as checkboxes. The count and
+// the warning become functions of what is checked, so the preview has to hand
+// over the files themselves, each carrying its own identity and its own answer
+// to the clash question.
+describe("buildLinkSourcePreview — file rows (AQU-1559)", () => {
+  // WHY: the selection travels to the server as UPSTREAM FILE IDS, not names.
+  // Ids survive a rename upstream (which is the acceptance criterion: a renamed
+  // picked file stays linked and the new name comes through); names do not. The
+  // rows also keep the upstream's own order, because that is the order the lead
+  // sees in the upstream project.
+  it("returns one row per upstream file, in order, keyed by upstream file id", () => {
+    const preview = buildLinkSourcePreview(
+      { name: "Upstream", files: [file("MAT"), file("MRK"), file("LUK")] },
+      [],
+    )
+
+    expect(preview.files).toEqual([
+      { id: "f-MAT", name: "MAT", clashes: false },
+      { id: "f-MRK", name: "MRK", clashes: false },
+      { id: "f-LUK", name: "LUK", clashes: false },
+    ])
+  })
+
+  // WHY: the warning has to follow the selection — unchecking a clashing file
+  // takes it out of the warning, because a file that is not coming cannot
+  // collide with anything. That is only possible if the clash is answered per
+  // ROW rather than once for the whole upstream.
+  it("marks each clashing row, case-insensitively, while the name list stays deduplicated", () => {
+    const preview = buildLinkSourcePreview(
+      {
+        name: "Upstream",
+        files: [file("MAT"), file("MRK"), { ...file("MRK"), id: "f-dup" }],
+      },
+      [file("mrk")],
+    )
+
+    expect(preview.files.map((f) => [f.id, f.clashes])).toEqual([
+      ["f-MAT", false],
+      ["f-MRK", true],
+      ["f-dup", true],
+    ])
+    // Two rows to uncheck, one line of warning.
+    expect(preview.clashingNames).toEqual(["MRK"])
+  })
+
+  // WHY: an empty upstream is linkable and shows no list. Returning `[]` rather
+  // than omitting the field keeps the caller's "no rows ⇒ no list, link allowed"
+  // test one check rather than two.
+  it("returns no rows for an upstream with no files", () => {
+    const preview = buildLinkSourcePreview({ name: "Fresh Project", files: [] }, [file("MRK")])
+
+    expect(preview.files).toEqual([])
+  })
+})
+
 describe("loadLinkSourcePreview", () => {
   // WHY: the clash compares like with like only if both file lists come from
   // the same endpoint. This pins that it reads the upstream AND this project,
@@ -105,6 +160,10 @@ describe("loadLinkSourcePreview", () => {
 
     expect(preview).toEqual({
       upstreamName: "English Source",
+      files: [
+        { id: "f-MAT", name: "MAT", clashes: false },
+        { id: "f-MRK", name: "MRK", clashes: true },
+      ],
       fileCount: 2,
       clashingNames: ["MRK"],
     })

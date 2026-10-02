@@ -66,6 +66,31 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
 
 const PROJECT_ID = "proj-established"
 
+// AQU-1559: the preview now carries one ROW per upstream file — the confirm
+// step's checkbox list — and the count the step prints follows what is still
+// checked. Built from names here so the cases that predate the list read exactly
+// as they did, with every file checked on arrival.
+function previewOf(upstreamName: string, names: string[], clashing: string[] = []) {
+  const clash = new Set(clashing.map((n) => n.toLowerCase()))
+  const files = names.map((name) => ({
+    id: `up-${name}`,
+    name,
+    clashes: clash.has(name.toLowerCase()),
+  }))
+  return {
+    upstreamName,
+    files,
+    fileCount: files.length,
+    clashingNames: files.filter((f) => f.clashes).map((f) => f.name),
+  }
+}
+
+const UPSTREAM_FILES = ["MAT", "MRK", "LUK"]
+// A clashing row's checkbox carries its "same name here" marker in its
+// accessible name, so match on the file name's start rather than the whole.
+const fileCheckbox = (name: string) =>
+  screen.getByRole("checkbox", { name: new RegExp(`^${name}\\b`) })
+
 function summary(id: string, name: string, extra: Partial<CloudProjectSummary> = {}): CloudProjectSummary {
   // Viewer-level role: the picker must still offer it — viewer access to the
   // upstream is exactly what the server requires.
@@ -116,11 +141,7 @@ beforeEach(() => {
   triggerLinkSync.mockReset()
   resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockReset()
-  loadLinkSourcePreview.mockResolvedValue({
-    upstreamName: "English Source",
-    fileCount: 3,
-    clashingNames: [],
-  })
+  loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
   navigationError = null
   navigationProjects = [
     summary("proj-upstream", "English Source"),
@@ -282,11 +303,9 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // not "refuse".
   it("names the same-named files before linking and still allows the link", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: ["MRK"],
-    })
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
     linkProjectSource.mockResolvedValue({
       projectId: PROJECT_ID,
       sourceProjectId: "proj-upstream",
@@ -320,11 +339,7 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // nothing to collide, the step is the count and nothing else.
   it("shows only the count when no upstream name matches", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: [],
-    })
+    loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
     renderSection(700)
 
     await pick(user, "English Source")
@@ -340,11 +355,7 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // so this state gets its own sentence and keeps the confirm action live.
   it("says nothing will be added yet for an empty upstream, and still links", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "Fresh Project",
-      fileCount: 0,
-      clashingNames: [],
-    })
+    loadLinkSourcePreview.mockResolvedValue(previewOf("Fresh Project", []))
     renderSection(700)
 
     await pick(user, "English Source")
@@ -371,11 +382,9 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
     expect(linkButton().hasAttribute("disabled")).toBe(true)
     expect(linkProjectSource).not.toHaveBeenCalled()
 
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: ["MRK"],
-    })
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
     await user.click(screen.getByRole("button", { name: "Try again" }))
 
     expect(
@@ -654,5 +663,224 @@ describe("LinkSourceSection — the first sync failed (AQU-1544)", () => {
     expect(triggerLinkSync).not.toHaveBeenCalled()
     expect(screen.queryByText(SEED_FAILED)).toBeNull()
     expect(isLinkSeedFailed(PROJECT_ID)).toBe(false)
+  })
+})
+
+// AQU-1559 — picking WHICH of the upstream's files to follow. The confirm step
+// used to state a count and offer no choice, so a team that wanted one book out
+// of a whole Bible got all 66 and had to delete the rest by hand — and the link
+// kept bringing the upstream's later files in as well. These tests pin the list,
+// that everything the step already said now follows the selection, and that the
+// request distinguishes the two outcomes: all files checked = follow the whole
+// project (unchanged), anything unchecked = follow exactly this list.
+describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
+  // WHY: the default has to stay the behaviour every existing link has. Arriving
+  // all-checked is what makes the stock press of "Link source project" the same
+  // whole-project link as before, with the list there for the lead who wants
+  // less.
+  it("lists every upstream file checked, with the count equal to the list", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+
+    expect(await screen.findByText("Link to English Source?")).toBeTruthy()
+    for (const name of UPSTREAM_FILES) {
+      expect((fileCheckbox(name) as HTMLElement).getAttribute("aria-checked")).toBe("true")
+    }
+    expect(screen.getByText("3 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(/follows the whole project, so files the source project adds later/i),
+    ).toBeTruthy()
+  })
+
+  // WHY: the count is the promise the link keeps, so it has to be the number of
+  // files still checked rather than the size of the upstream — and it has to say
+  // out loud that a subset link stops following what the upstream gains later,
+  // because the checkboxes alone cannot show that.
+  it("follows the selection in the count and in what the link will keep receiving", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(/only the files you picked.*will not arrive here on their own/i),
+    ).toBeTruthy()
+  })
+
+  // WHY: an upstream can hold 66 files or more, so flipping them one at a time
+  // is not a workflow. One control does all of them, both ways.
+  it("checks and unchecks every file with one control", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    const all = await screen.findByRole("checkbox", { name: "All files" })
+
+    await user.click(all)
+    for (const name of UPSTREAM_FILES) {
+      expect(fileCheckbox(name).getAttribute("aria-checked")).toBe("false")
+    }
+
+    await user.click(all)
+    for (const name of UPSTREAM_FILES) {
+      expect(fileCheckbox(name).getAttribute("aria-checked")).toBe("true")
+    }
+  })
+
+  // WHY: a link that follows no files is a mistake rather than a link — it could
+  // never sync anything — so the step says what is missing and the action is
+  // unavailable until a file is picked.
+  it("refuses a link with nothing checked and says a file must be picked", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "All files" }))
+
+    expect(screen.getByText("Pick at least one file to link.")).toBeTruthy()
+    expect(screen.queryByText(/source files will be added/i)).toBeNull()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(linkButton())
+    expect(linkProjectSource).not.toHaveBeenCalled()
+  })
+
+  // WHY: the two outcomes are different products. A subset has to reach the
+  // server as the picked UPSTREAM file ids — ids, so the selection survives a
+  // rename upstream — and nothing else may travel with it.
+  it("posts the picked upstream file ids for a subset link", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: ["up-MAT", "up-MRK"],
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      fileIds: ["up-MAT", "up-MRK"],
+    })
+  })
+
+  // WHY: the regression guard on the unchanged half. Every file left checked
+  // must post NO file list at all — that absence is what keeps the link
+  // following the whole project, so a file the upstream gains later still
+  // arrives. Sending the full list instead would silently pin the link.
+  it("sends no file list when every file is left checked", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: null,
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+    })
+  })
+
+  // WHY: an empty upstream has nothing to pick, so it must not fall into the
+  // "nothing checked" refusal — it is a legitimate whole-project link whose
+  // files arrive as the upstream gains them.
+  it("links an empty upstream with no list and no file ids", async () => {
+    const user = userEvent.setup()
+    loadLinkSourcePreview.mockResolvedValue(previewOf("Fresh Project", []))
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: null,
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+
+    expect(await screen.findByText(/no source files yet, so nothing will be added now/i)).toBeTruthy()
+    expect(screen.queryByRole("checkbox", { name: "All files" })).toBeNull()
+    expect(screen.queryByText("Pick at least one file to link.")).toBeNull()
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+
+    await user.click(linkButton())
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+    })
+  })
+
+  // WHY: the same-name warning is about what is COMING. Unchecking the clashing
+  // file takes it out of the warning, and with no checked clash left the warning
+  // goes entirely — otherwise the step would warn about a duplicate it is no
+  // longer going to create.
+  it("warns only about clashing files that are still checked", async () => {
+    const user = userEvent.setup()
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
+    renderSection(700)
+
+    await pick(user, "English Source")
+
+    const warning = await screen.findByRole("alert")
+    expect(warning.textContent).toContain("MRK")
+
+    await user.click(fileCheckbox("MRK"))
+
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+  })
+
+  // WHY: backing out must forget the pick, not carry it into the next review —
+  // the next upstream's files are different files, and a half-remembered
+  // selection would link the wrong set.
+  it("starts from all-checked again after cancelling back to the picker", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(reviewButton())
+
+    expect(
+      await screen.findByText("3 source files will be added to this project."),
+    ).toBeTruthy()
+    expect(linkProjectSource).not.toHaveBeenCalled()
   })
 })

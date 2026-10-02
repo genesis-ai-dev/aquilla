@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useForm } from "@tanstack/react-form"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
 import { Info, Plus, X } from "lucide-react"
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
+import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -39,6 +40,11 @@ import {
 } from "@/lib/sync/project-settings"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
+import {
+  loadUpstreamFileChoices,
+  type LinkSourcePreviewFile,
+} from "@/lib/sync/link-source-preview"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { isFieldInvalid } from "@/lib/forms/field-state"
@@ -276,6 +282,33 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     [linkableProjects],
   )
 
+  // ── AQU-1561: which of the chosen upstream's files this create brings in ──
+  //
+  // Null until the list lands (and again whenever the upstream changes), which
+  // is what tells the "loading" sentence from the empty-upstream one: an
+  // upstream with no files is `[]`, and that still creates. `filesFailed` is the
+  // third state — the read failed, so the dialog cannot say what would be
+  // brought in and refuses to guess; `filesAttempt` is bumped by "Try again" so
+  // the effect re-runs for the same upstream.
+  const [upstreamFiles, setUpstreamFiles] = useState<LinkSourcePreviewFile[] | null>(null)
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
+  const [filesFailed, setFilesFailed] = useState(false)
+  const [filesAttempt, setFilesAttempt] = useState(0)
+  const fileChoices = useMemo(() => upstreamFiles ?? [], [upstreamFiles])
+  const { selectedCount, allSelected, nothingSelected } = useMemo(
+    () => summarizeFileSelection(fileChoices, selectedFileIds),
+    [fileChoices, selectedFileIds],
+  )
+
+  const toggleFile = useCallback((fileId: string) => {
+    setSelectedFileIds((current) => {
+      const next = new Set(current)
+      if (next.has(fileId)) next.delete(fileId)
+      else next.add(fileId)
+      return next
+    })
+  }, [])
+
   const form = useForm({
     defaultValues: {
       name: "",
@@ -327,6 +360,24 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         const willLink = !!upstreamId
         const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
         const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
+        // AQU-1561: guarded as well as disabled — nothing may create a project
+        // whose link follows no files, or one whose file list was never read.
+        // Nothing has been created at this point, so returning is clean.
+        if (willLink && (nothingSelected || filesFailed)) {
+          setSubmitError(
+            filesFailed
+              ? t("projectSettings.create.upstreamFilesLoadError")
+              : t("projectSettings.create.upstreamFilesNoneSelected"),
+          )
+          return
+        }
+        // Every file checked means "bring in all of it": the request omits the
+        // list entirely, so a live link follows the whole upstream (including
+        // files it gains later) exactly as before this slice, and a clone copies
+        // everything. A subset sends the picked upstream file ids, which pins a
+        // live link to them and narrows a clone's one snapshot to them.
+        const pickedFileIds =
+          allSelected || fileChoices.length === 0 ? undefined : [...selectedFileIds]
 
         try {
           await createCloudProject(jwt, {
@@ -362,6 +413,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               sourceProjectId: upstreamId,
               mode: linkMode,
               consumes: linkConsumes,
+              ...(pickedFileIds ? { fileIds: pickedFileIds } : {}),
             })
             if (linkResult.seeded === false && linkMode === "live") {
               // AQU-1544: the retry's answer used to be dropped, so a failed
@@ -388,7 +440,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           target_language: project.targetLanguage,
           extra_target_languages: extrasToApply.length,
           ...(willLink
-            ? { link_mode: linkMode, link_consumes: linkConsumes, upstream_project_id: upstreamId }
+            ? {
+                link_mode: linkMode,
+                link_consumes: linkConsumes,
+                upstream_project_id: upstreamId,
+                // AQU-1561: whether this create took the whole upstream or a
+                // pick of it, and how big the pick was.
+                link_file_scope: pickedFileIds ? "subset" : "all",
+                link_file_count: pickedFileIds ? pickedFileIds.length : fileChoices.length,
+              }
             : {}),
         })
         onCreated(project)
@@ -419,6 +479,52 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       }
     },
   })
+
+  // AQU-1561: the upstream whose files are on offer. Read off the form rather
+  // than mirrored in state, so clearing the picker, switching shape and
+  // `form.reset()` on close all reach this one place.
+  const chosenUpstreamId = useStore(form.store, (state) =>
+    state.values.upstreamProjectId.trim(),
+  )
+
+  useEffect(() => {
+    // No upstream, no question to ask — and the stale answer must go with it, so
+    // a cleared picker cannot leave a previous upstream's files armed.
+    if (!open || !chosenUpstreamId || !session?.jwt) {
+      setUpstreamFiles(null)
+      setSelectedFileIds(new Set())
+      setFilesFailed(false)
+      return
+    }
+    let cancelled = false
+    // Dropped before the read, not after it: the list belongs to the upstream
+    // being loaded, and the dialog must not show the previous one's files
+    // checked while this one is in flight.
+    setUpstreamFiles(null)
+    setSelectedFileIds(new Set())
+    setFilesFailed(false)
+    void loadUpstreamFileChoices(session.jwt, chosenUpstreamId)
+      .then((files) => {
+        if (cancelled) return
+        setUpstreamFiles(files)
+        // Everything checked, every time the upstream changes — "bring in all of
+        // it" is the behaviour this dialog had before the slice, so it stays the
+        // default, and a fresh upstream never inherits the last one's picks.
+        setSelectedFileIds(new Set(files.map((f) => f.id)))
+      })
+      .catch(() => {
+        if (!cancelled) setFilesFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, chosenUpstreamId, session?.jwt, filesAttempt])
+
+  // AQU-1561: the two states that make a create-with-upstream impossible —
+  // nothing checked (a project that brings in no files is a mistake, not a
+  // choice) and a file list that could not be read (the dialog would be
+  // guessing). Both are stated on screen beside the control they disable.
+  const fileSelectionBlocks = !!chosenUpstreamId && (nothingSelected || filesFailed)
 
   useEffect(() => {
     if (open) return
@@ -756,6 +862,86 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           }}
                         />
 
+                        {/* AQU-1561: which of the upstream's files to bring
+                            in. Same list and same check-all control the Source
+                            & sync link flow shows (UpstreamFileChoiceList) —
+                            only the sentences differ, because a clone copies
+                            once and a live link keeps following. Shown for both
+                            shapes: a clone has no second chance to adjust, so
+                            the choice has to be here. */}
+                        {upstreamProjectId.trim() ? (
+                          <Field data-testid="create-upstream-files">
+                            <FieldLabel>{t("projectSettings.create.upstreamFilesLabel")}</FieldLabel>
+                            {filesFailed ? (
+                              // Said, with a way out — never an empty list,
+                              // which would read as "that project has no files"
+                              // and is a different, creatable situation.
+                              <div className="space-y-2">
+                                <p className="text-sm text-destructive" role="alert">
+                                  {t("projectSettings.create.upstreamFilesLoadError")}
+                                </p>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={locked}
+                                  onClick={() => {
+                                    setFilesFailed(false)
+                                    setFilesAttempt((n) => n + 1)
+                                  }}
+                                >
+                                  {t("projectSettings.create.upstreamFilesRetryButton")}
+                                </Button>
+                              </div>
+                            ) : upstreamFiles == null ? (
+                              <p className="text-sm text-muted-foreground">
+                                {t("projectSettings.create.upstreamFilesLoading")}
+                              </p>
+                            ) : fileChoices.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">
+                                {t("projectSettings.create.upstreamFilesEmptyUpstream")}
+                              </p>
+                            ) : (
+                              <>
+                                <UpstreamFileChoiceList
+                                  files={fileChoices}
+                                  selectedFileIds={selectedFileIds}
+                                  onToggleFile={toggleFile}
+                                  onToggleAll={(checked) =>
+                                    setSelectedFileIds(
+                                      checked ? new Set(fileChoices.map((f) => f.id)) : new Set(),
+                                    )
+                                  }
+                                  disabled={locked}
+                                />
+                                <p
+                                  className="text-sm"
+                                  role={nothingSelected ? "alert" : undefined}
+                                >
+                                  {nothingSelected
+                                    ? t("projectSettings.create.upstreamFilesNoneSelected")
+                                    : t("projectSettings.create.upstreamFilesCount", {
+                                        count: selectedCount,
+                                      })}
+                                </p>
+                                {/* What the checkboxes alone do not show: a live
+                                    link keeps following the upstream, so whether
+                                    it follows the whole project decides what
+                                    arrives later too; a clone has no later. */}
+                                {!nothingSelected && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {shape !== "linked-target"
+                                      ? t("projectSettings.create.upstreamFilesCloneNote")
+                                      : allSelected
+                                        ? t("projectSettings.create.upstreamFilesLiveAllNote")
+                                        : t("projectSettings.create.upstreamFilesLiveSubsetNote")}
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </Field>
+                        ) : null}
+
                         {showCorpusChoice ? (
                           <form.Field
                             name="linkConsumes"
@@ -904,7 +1090,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   // `locked`, not just `isSubmitting`: the mirror case is a lane
                   // add in flight, which must block Create too (AQU-1519). And no
                   // destination, no create (AQU-1352).
-                  disabled={isSubmitting || locked || !destination}
+                  // AQU-1561: `fileSelectionBlocks` — an upstream is chosen
+                  // but nothing is checked, or its file list could not be read.
+                  // The sentence by the list is what this refers to.
+                  disabled={isSubmitting || locked || !destination || fileSelectionBlocks}
                   className="h-9 w-full shrink-0"
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}

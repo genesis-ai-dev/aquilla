@@ -15,6 +15,7 @@ import {
   isLinkSeedFailed,
   subscribeLinkSeedStatus,
 } from "@/lib/sync/link-seed-status"
+import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 
 export function useLinkSeedFailed(projectId: string | null | undefined): boolean {
   return useSyncExternalStore(subscribeLinkSeedStatus, () =>
@@ -51,6 +52,10 @@ export function useLinkSeedRetry(projectId: string, onSynced: () => void): LinkS
       const ok = await triggerLinkSync(jwt, projectId)
       if (ok) {
         clearLinkSeedFailed(projectId)
+        // AQU-1570: every page showing the project, not only this host —
+        // the retry may be pressed inside Project Settings, over the page
+        // whose file list the files just arrived in.
+        announceProjectRecordChanged(projectId)
         setRetryFailed(false)
         onSynced()
       } else {

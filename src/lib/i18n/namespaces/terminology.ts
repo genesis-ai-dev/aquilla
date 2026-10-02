@@ -381,7 +381,10 @@ export const terminology = defineNamespace({
     "terminology.termDetail.verdictNa": "n/a",
     "terminology.termDetail.verdictEnforced": "enforced",
     "terminology.termDetail.verdictInfringed": "infringed",
-    "terminology.termDetail.noOccurrences": "No occurrences found in the loaded cells.",
+    "terminology.termDetail.noOccurrences": "No occurrences of this term in the project.",
+    "terminology.termDetail.loadMore": "Load more occurrences",
+    "terminology.termDetail.atLeastCount": "At least {count} occurrences",
+    "terminology.termDetail.scanSuggestions": "Look through the project for suggested renderings",
     "terminology.termDetail.columnRef": "Ref",
     "terminology.termDetail.loadingExamples": "Loading examples…",
     "terminology.termDetail.addRenderingPlaceholder": "Add rendering…",
@@ -462,10 +465,12 @@ export const terminology = defineNamespace({
       },
     ),
     "terminology.violations.description":
-      "Terminology infractions derived on read over the loaded project cells, grouped " +
-      "by concept. Missing-approved = the source bears the concept but the target has " +
-      "no approved rendering. Forbidden-present = a forbidden rendering appears in the " +
-      "target.",
+      "Terminology infractions for this project, grouped by concept. Missing-approved " +
+      "= the source bears the concept but the target has no approved rendering. " +
+      "Forbidden-present = a forbidden rendering appears in the target.",
+    "terminology.violations.truncated":
+      "This list stopped before the end of the project.",
+    "terminology.editor.suggestFailed": "Could not look through the project. Try again.",
     "terminology.violations.emptyTitle": "No terminology violations.",
     "terminology.violations.emptyDescriptionPre": "Only",
     "terminology.violations.emptyDescriptionPost":
@@ -1004,6 +1009,13 @@ export const terminology = defineNamespace({
           "Stat line on the term detail header: how many occurrences violate the " +
           "concept's approved/forbidden renderings; {count} is that count.",
         placeholders: { count: "Number of occurrences that violate the concept's renderings." },
+      },
+      "terminology.termDetail.atLeastCount": {
+        description:
+          "Stat line on the term detail header, shown in place of the exact occurrence " +
+          "count when the server scan stopped before the end of the project; {count} is " +
+          "the occurrences found so far, so the real total is that or more.",
+        placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
       },
       "terminology.reviewQueue.approveAria": {
         description:

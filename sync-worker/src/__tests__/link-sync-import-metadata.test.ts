@@ -23,6 +23,7 @@ import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { AquillaStatement } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 
 const UPSTREAM = "proj-meta-upstream"
 const DOWNSTREAM = "proj-meta-downstream"
@@ -73,10 +74,11 @@ async function emitUpstream(
     [UPSTREAM],
   )
   const seq = Number(seqRow.rows[0]?.next_seq ?? 1)
+  const parentId = await headParentFor(t, UPSTREAM, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, 'lead', $6, 1, $7, $8)`,
-    [id, UPSTREAM, args.fileId ?? null, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, seq],
+     VALUES ($1, 1, $2, $3, $4, $9, $5, 'lead', $6, 1, $7, $8)`,
+    [id, UPSTREAM, args.fileId ?? null, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -84,7 +86,7 @@ async function emitUpstream(
     projectId: UPSTREAM,
     fileId: args.fileId ?? null,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind,
     author: "lead",
     payload: args.payload,

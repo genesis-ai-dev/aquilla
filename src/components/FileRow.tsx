@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { createMenuHandle } from "@/components/ui/menu-parts"
-import { FileActionMenu } from "./FileActionMenu"
+import { FileActionMenu, type FileReorderActions } from "./FileActionMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
@@ -59,6 +59,9 @@ interface FileRowProps {
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
   onApplySuggestion?: () => void
+  /** AQU-1569: Move up / Move down for this row. Omit below Project Lead —
+   *  the drag handle is withheld from those roles too. */
+  reorder?: FileReorderActions
 }
 
 export function FileRow(props: FileRowProps) {
@@ -66,7 +69,7 @@ export function FileRow(props: FileRowProps) {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
     onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
-    onApplySuggestion, unassigned = false,
+    onApplySuggestion, unassigned = false, reorder,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -112,6 +115,7 @@ export function FileRow(props: FileRowProps) {
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onDelete={onDelete}
+      reorder={reorder}
     />
   )
 

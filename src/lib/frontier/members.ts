@@ -387,6 +387,7 @@ export async function createRemoteProject(
       ...(orgId != null ? { orgId } : {}),
     }),
   });
+  await throwIfElevationRequired(res, "project");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");

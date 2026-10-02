@@ -9,6 +9,7 @@ import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
+import { throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 export interface CloudFileSummary {
   id: string
@@ -142,6 +143,8 @@ export async function createCloudProject(
     },
     body: JSON.stringify(body),
   })
+  // AQU-1540: a platform admin creating into an org they don't belong to needs the code.
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new UserError(res.status, body, "project")

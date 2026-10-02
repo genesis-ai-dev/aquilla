@@ -66,7 +66,7 @@ import {
   encodeProjectDirectoryCursor,
   getCommentFloors,
   attachGroupProject,
-  getEffectiveOrgRole,
+  getOrgMemberRole,
   getMemberProgressViewMinRole,
   DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
   DEFAULT_ROSTER_VIEW_MIN_ROLE,
@@ -78,7 +78,7 @@ import {
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
-import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
@@ -381,14 +381,24 @@ projects.post(
       // Creating into a specific org is an org-level function: require the
       // caller's org role >= maintainer (see spec Risk 3) OR, AQU-1352 D4,
       // a team role >= project lead on EVERY selected team (at least one).
-      const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
+      // AQU-1540: both checks use genuine roles. A platform admin who passes
+      // neither needs an active elevation, like the team routes (AQU-1322).
+      const orgRole = await getOrgMemberRole(c.env, body.orgId, user.id)
       const teamRoles = await loadTeamsInOrg(c.env, body.orgId, teamIds, user.id)
       if (teamRoles.size !== teamIds.length) {
         return c.json({ error: "every team must belong to this org" }, 400)
       }
       const leadsEveryTeam = teamRoles.size > 0 &&
         [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
-      if ((orgRole == null || orgRole < ROLE.MAINTAINER) && !leadsEveryTeam) {
+      const genuinelyAllowed = (orgRole != null && orgRole >= ROLE.MAINTAINER) || leadsEveryTeam
+      if (!genuinelyAllowed && isPlatformAdminEmail(c.env, user.email)) {
+        if (!(await hasActiveElevation(c))) {
+          return c.json(
+            { error: "elevation required to create a project in an org with platform-admin access" },
+            403,
+          )
+        }
+      } else if (!genuinelyAllowed) {
         // Name the org only for a member: a non-member must not learn it (spec §3.9 rule 4).
         const org = orgRole == null
           ? null
@@ -437,6 +447,27 @@ projects.post(
     if (orgId != null) {
       for (const teamId of teamIds) {
         await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
+      }
+    }
+
+    // AQU-1540: audit a platform admin's create into a named org (no-op for
+    // everyone else). Personal-org creates are the admin's own and stay unlogged.
+    if (body.orgId != null && orgId != null) {
+      await auditMembershipChange(c.env, user, {
+        action: "project.create",
+        where: { scope: "org", orgId },
+        projectId: body.id,
+        roleBefore: null,
+        roleAfter: ROLE.OWNER,
+      })
+      for (const teamId of teamIds) {
+        await auditMembershipChange(c.env, user, {
+          action: "team.project.attach",
+          where: { scope: "team", orgId, groupId: teamId },
+          projectId: body.id,
+          roleBefore: null,
+          roleAfter: TEAM_ATTACH_DEFAULT_ROLE,
+        })
       }
     }
 

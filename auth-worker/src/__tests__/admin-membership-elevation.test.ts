@@ -424,3 +424,59 @@ describe("GET /:orgId/project-invites", () => {
     expect(await denied.json()).toEqual({ error: "only org owners can list pending invites" })
   })
 })
+
+// AQU-1540: project create into a named org (and its teamIds attach) follows the
+// same rule: genuine org or team roles first, admin power only while elevated.
+describe("POST /api/v2/projects into an org", () => {
+  const create = (as: string, body: Record<string, unknown>, jwt?: string) =>
+    call(as, "POST", "/api/v2/projects", { id: "new-1", name: "New", ...body }, jwt)
+  const projectRow = () =>
+    env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = 'new-1'").first<{ org_id: number }>()
+  const teamGrant = () =>
+    env.AQUILLA_PG.prepare("SELECT role_level FROM group_project_grants WHERE project_id = 'new-1'").first()
+
+  it("un-elevated admin outside the org is refused, with or without teamIds; nothing is written", async () => {
+    for (const body of [{ orgId: 1 }, { orgId: 1, teamIds: [10] }]) {
+      const res = await create("root", body)
+      expect(res.status).toBe(403)
+      expect(((await res.json()) as { error: string }).error).toMatch(/^elevation required/)
+    }
+    expect(await projectRow()).toBeNull()
+    expect(await teamGrant()).toBeNull()
+    expect(await auditRows()).toEqual([])
+  })
+
+  it("elevated admin creates and attaches, with a project.create and a team.project.attach row", async () => {
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const res = await create("root", { orgId: 1, teamIds: [10] }, jwt)
+    expect(res.status).toBe(200)
+    expect((await projectRow())?.org_id).toBe(1)
+    expect(await teamGrant()).not.toBeNull()
+
+    const rows = await auditRows()
+    expect(rows.map((r) => r.action)).toEqual(["project.create", "team.project.attach"])
+    expect(rows.every((r) => r.user_id === ROOT_ID)).toBe(true)
+    expect(JSON.parse(rows[0].detail)).toMatchObject({ scope: "org", orgId: 1, projectId: "new-1", roleAfter: 700 })
+    expect(JSON.parse(rows[1].detail)).toMatchObject({ scope: "team", orgId: 1, groupId: 10, projectId: "new-1" })
+  })
+
+  it("admin who is a genuine org Maintainer creates without elevation (still audited)", async () => {
+    const res = await create("root", { orgId: 2, teamIds: [20] })
+    expect(res.status).toBe(200)
+    expect((await auditRows()).map((r) => r.action)).toEqual(["project.create", "team.project.attach"])
+  })
+
+  it("non-admins are unchanged: Maintainer and team lead create, outsider gets the original 403", async () => {
+    expect((await create("mara", { orgId: 1 })).status).toBe(200)
+    await sql("DELETE FROM projects WHERE id = 'new-1'")
+    expect((await create("carol", { orgId: 1, teamIds: [10] })).status).toBe(200)
+    await sql("DELETE FROM group_project_grants WHERE project_id = 'new-1'")
+    await sql("DELETE FROM projects WHERE id = 'new-1'")
+
+    const res = await create("outsider", { orgId: 1 })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error: string }).error).not.toMatch(/elevation/)
+    expect(await auditRows()).toEqual([])
+  })
+})

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
+import { copyFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
@@ -120,7 +120,10 @@ describe("record-github-deployment.mjs as a command", () => {
   // which never matches a percent-encoded path, so the script exited 0 having
   // recorded nothing.
   it("runs its main code from a path with a space in it", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "record deployment "))
+    // realpath: on macOS tmpdir() is under /var, a symlink to /private/var.
+    // Node resolves the main module through it, so argv[1] and import.meta.url
+    // disagree for a reason that has nothing to do with the space.
+    const dir = mkdtempSync(path.join(realpathSync(tmpdir()), "record deployment "))
     try {
       const script = path.join(dir, "record-github-deployment.mjs")
       copyFileSync(path.join(import.meta.dirname, "record-github-deployment.mjs"), script)

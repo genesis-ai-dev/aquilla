@@ -19,6 +19,18 @@ export interface TranslationDestination extends GroupableFile {
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 
+/** The formats the translation review (FileTargetImportPanel) reads. */
+export const FILE_TARGET_EXTENSIONS = ["usfm", "sfm", "usf", "csv", "tsv", "xlsx", "vtt", "srt", "sbv"] as const
+
+/** The same, as an `<input accept>` list. */
+export const FILE_TARGET_ACCEPT = FILE_TARGET_EXTENSIONS.map((ext) => `.${ext}`).join(",")
+
+/** True when the translation review can read this file. */
+export function isFileTargetFileName(fileName: string): boolean {
+  const dot = fileName.lastIndexOf(".")
+  return dot >= 0 && (FILE_TARGET_EXTENSIONS as readonly string[]).includes(fileName.slice(dot + 1).toLowerCase())
+}
+
 export function isUsfmFileName(fileName: string): boolean {
   const dot = fileName.lastIndexOf(".")
   return dot >= 0 && USFM_EXTENSIONS.has(fileName.slice(dot + 1).toLowerCase())

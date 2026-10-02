@@ -96,6 +96,13 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import {
+  EMPTY_UPLOAD_HEADER,
+  hasLanguageHeader,
+  uploadHeaderText,
+  type TranslationCheckUpload,
+} from "@/lib/import/translation-signals"
 
 interface CollisionResolution {
   skipKeys: ReadonlySet<string>
@@ -111,6 +118,7 @@ import {
   IMPORT_COLLISION_DETECTED,
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
+  IMPORT_TRANSLATION_CHECK,
 } from "@/lib/event-names"
 import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
@@ -133,12 +141,26 @@ import {
   type ImportFileGate,
   type ImportFileGateState,
 } from "@/lib/import/import-file-gate"
-import type { TranslationDestination } from "@/lib/import/translation-destination"
+import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
+import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
+import {
+  translationCheckLayout,
+  translationCheckSignal,
+  translationSignals,
+  type TranslationCheckChoice,
+  type TranslationCheckLayout,
+  type TranslationSignal,
+} from "@/lib/import/translation-signals"
+import { LANGUAGES, type LanguageEntry } from "@/lib/languages/catalog"
+import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
 type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
   // AQU-1365: a translation's destination file is opening in the editor, then
   // its review (FileTargetImportPanel) runs.
   | "translationOpening" | "translationReview"
+  // AQU-1365: a source upload looks like a translation; asked before any cell
+  // is created.
+  | "translationCheck"
 
 /**
  * AQU-1365: what the host gives the "A translation" path. The cell store only
@@ -174,9 +196,40 @@ interface TranslationRun {
   fileId: string
   key: string
   autoPicked: boolean
+  /** Where it started, for telemetry: the translation screen, the source
+   *  path's check, or the review's "Import into X instead". */
+  entry: TranslationEntry
+}
+
+type TranslationEntry = "translation" | "translation-check" | "review-switch"
+
+/** AQU-1365: a source upload waiting on "Is this a translation?". */
+interface PendingTranslationCheck {
+  layout: TranslationCheckLayout
+  signals: TranslationSignal[]
+  uploads: UploadForTranslationCheck[]
+  fileCount: number
+  resume: (choice: TranslationCheckResume) => Promise<void>
+  returnScreen: "upload" | "gdrive"
 }
 
 const NO_TRANSLATION_FILES: TranslationDestination[] = []
+
+/** AQU-1365: the dialog title over "Is this a translation?". */
+function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCheckLayout): string {
+  switch (layout.kind) {
+    case "sameBook":
+      return t("importExport.translationCheck.sameBookTitle", { book: layout.book.file.name })
+    case "sameBookAmbiguous":
+      return t("importExport.translationCheck.sameBookTitle", { book: layout.bookName })
+    case "multiBook":
+      return t("importExport.translationCheck.multiBookTitle")
+    case "language":
+      return t("importExport.translationCheck.languageTitle")
+    case "many":
+      return t("importExport.translationCheck.manyTitle")
+  }
+}
 
 interface ImportDialogProps {
   open: boolean
@@ -302,6 +355,7 @@ export function ImportDialog({
   // Where the title's back arrow leads inside the review, as the panel reports it.
   const [translationBack, setTranslationBack] = useState<FileTargetPanelBack | null>(null)
   const [translationNotice, setTranslationNotice] = useState<string | null>(null)
+  const [translationCheck, setTranslationCheck] = useState<PendingTranslationCheck | null>(null)
   const translationRunCount = useRef(0)
   const translationFiles = translation?.files ?? NO_TRANSLATION_FILES
   const translationDisabledReason = translation
@@ -330,6 +384,7 @@ export function ImportDialog({
       setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
       setTranslationBack(null)
       setTranslationNotice(null)
+      setTranslationCheck(null)
     }
   }
   // Which partner integration the "partner" screen is showing. Null everywhere else.
@@ -600,17 +655,22 @@ export function ImportDialog({
   // the open file, the editor opens it behind the dialog, and the review waits
   // until every one of its lines has loaded: it matches against the lines it
   // is handed when it mounts.
-  function startTranslation(file: File, fileId: string, { autoPicked }: TranslationStartOptions) {
+  function startTranslation(
+    file: File,
+    fileId: string,
+    { autoPicked }: TranslationStartOptions,
+    entry: TranslationEntry = "translation",
+  ) {
     if (!translation) return
     translationRunCount.current += 1
     setTranslationFileId(fileId)
     setHeldTranslationFile(null)
     setTranslationNotice(null)
     setTranslationBack(null)
-    setTranslationRun({ file, fileId, key: `${fileId}:${translationRunCount.current}`, autoPicked })
+    setTranslationRun({ file, fileId, key: `${fileId}:${translationRunCount.current}`, autoPicked, entry })
     posthog.capture(IMPORT_STARTED, {
       import_type: "file-target",
-      entry: "translation",
+      entry,
       auto_picked: autoPicked,
       project_id: projectId,
     })
@@ -629,6 +689,114 @@ export function ImportDialog({
     )
     setOpening(first)
     setScreen(first.state === "ready" ? "translationReview" : "translationOpening")
+  }
+
+  // AQU-1365: the source path's "Is this a translation?" check. Runs after
+  // the uploads are parsed and before the preview, so nothing exists yet.
+  // Resolves false (carry on as before) when nothing looks like one.
+  function translationCheckFor(returnScreen: "upload" | "gdrive") {
+    if (!translation) return undefined
+    const host = translation
+    return async (
+      uploads: UploadForTranslationCheck[],
+      resume: (choice: TranslationCheckResume) => Promise<void>,
+      fileCount: number,
+    ): Promise<boolean> => {
+      const open = uploads.filter((upload) => !upload.resolved)
+      if (open.length === 0 || translationFiles.length === 0) return false
+      // The full language catalog knows a project's "Siberian Tatar" is `sty`.
+      // It is loaded only when a header could name a language, and a failed
+      // load falls back to the bundled list rather than skipping the check.
+      const namesLanguage = host.targetLanguages.length > 0
+        && open.some((upload) => upload.header.fields.length > 0 || upload.header.notes.length > 0)
+      let catalog: readonly LanguageEntry[] = []
+      if (namesLanguage) {
+        catalog = peekFullLanguageCatalog() ?? await loadFullLanguageCatalog().catch(() => LANGUAGES)
+      }
+      const signals = translationSignals({
+        uploads: open,
+        existingFiles: translationFiles,
+        sourceLanguage,
+        targetLanguages: host.targetLanguages,
+        catalog,
+      })
+      if (signals.length === 0) return false
+      setTranslationCheck({
+        layout: translationCheckLayout(signals, fileCount),
+        signals,
+        uploads,
+        fileCount,
+        resume,
+        returnScreen,
+      })
+      setScreen("translationCheck")
+      return true
+    }
+  }
+
+  function answerTranslationCheck(choice: TranslationCheckChoice) {
+    const check = translationCheck
+    if (!check) return
+    posthog.capture(IMPORT_TRANSLATION_CHECK, {
+      signal: translationCheckSignal(check.signals),
+      file_count: check.fileCount,
+      flagged_count: check.signals.length,
+      choice,
+      project_id: projectId,
+    })
+    const { layout } = check
+    const flaggedFile = layout.kind === "many"
+      ? undefined
+      : check.uploads.find((upload) => upload.fileKey === layout.signal.fileKey)?.file
+    switch (choice) {
+      case "back":
+        setTranslationCheck(null)
+        setScreen(check.returnScreen)
+        return
+      case "translation":
+        // "Put it into Jonah as its translation": the same File goes to the
+        // review, so nothing is dropped twice. Choosing Jonah here is the
+        // person's own choice, as if they had picked it.
+        if (layout.kind !== "sameBook" || !flaggedFile) return
+        setTranslationCheck(null)
+        setIntent("translation")
+        setTranslationTouched(true)
+        startTranslation(flaggedFile, layout.book.file.id, { autoPicked: false }, "translation-check")
+        return
+      case "choose-file":
+        if (!flaggedFile) return
+        setTranslationCheck(null)
+        setIntent("translation")
+        setTranslationRun(null)
+        setTranslationNotice(null)
+        setHeldTranslationFile(flaggedFile)
+        setScreen("landing")
+        return
+      case "update":
+        // The collision screen's "Update existing": re-import in place by
+        // book code, which keeps the file's translations.
+        if (layout.kind !== "sameBook") return
+        void check.resume({ reimportFileIds: new Map([[layout.book.bookCode, layout.book.file.id]]) })
+        return
+      case "leave-out": {
+        const flagged = new Set(check.signals.map((signal) => signal.fileKey))
+        void check.resume({
+          leaveOut: new Set(check.uploads.filter((upload) => flagged.has(upload.fileKey)).map((upload) => upload.file)),
+        })
+        return
+      }
+      case "separate":
+      case "import-all":
+        void check.resume({})
+        return
+    }
+  }
+
+  // AQU-1365: the review's "Import into Ruth instead" offers a file only when
+  // exactly one holds the book.
+  function translationFileForBook(bookCode: string) {
+    const matches = filesForBook(translationFiles, bookCode)
+    return matches.length === 1 ? { id: matches[0].id, name: matches[0].name } : undefined
   }
 
   // Stable on purpose: the review reports its back arrow from an effect keyed
@@ -691,6 +859,14 @@ export function ImportDialog({
               t("importExport.dialog.titleResult")
             ) : screen === "collision" ? (
               t("importExport.dialog.titleCollision")
+            ) : screen === "translationCheck" && translationCheck ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => answerTranslationCheck("back")}
+                  label={t("importExport.dialog.backToFileSelection")}
+                />
+                <span className="min-w-0">{translationCheckTitle(t, translationCheck.layout)}</span>
+              </div>
             ) : screen === "translationOpening" || screen === "translationReview" ? (
               <div className="flex min-w-0 items-center gap-2">
                 {screen === "translationReview" && translationBack ? (
@@ -912,6 +1088,7 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            onTranslationCheck={translationCheckFor("upload")}
           />
         )}
 
@@ -953,6 +1130,7 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
 
@@ -1156,6 +1334,15 @@ export function ImportDialog({
           />
         )}
 
+        {screen === "translationCheck" && translationCheck && (
+          <TranslationCheckPanel
+            layout={translationCheck.layout}
+            fileCount={translationCheck.fileCount}
+            canImportTranslation={translation?.disabledReason === null}
+            onChoose={answerTranslationCheck}
+          />
+        )}
+
         {/* AQU-287: collision guard — shown when re-importing into an existing project */}
         {screen === "collision" && collisionState && (
           <CollisionPanel
@@ -1209,11 +1396,16 @@ export function ImportDialog({
               excludeFrontMatter={excludeFrontMatter}
               initialFile={translationRun.file}
               onBackToFileChoice={backToTranslationChooser}
+              fileForBook={translationFileForBook}
+              onUseFile={(fileId) => {
+                setTranslationTouched(true)
+                startTranslation(translationRun.file, fileId, { autoPicked: false }, "review-switch")
+              }}
               onBackChange={setTranslationBack}
               onImported={(committedCount) => {
                 posthog.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target",
-                  entry: "translation",
+                  entry: translationRun.entry,
                   auto_picked: translationRun.autoPicked,
                   file_count: committedCount,
                   project_id: projectId,
@@ -1223,7 +1415,7 @@ export function ImportDialog({
               onError={(message, phase) => {
                 posthog.capture(IMPORT_FAILED, {
                   import_type: "file-target",
-                  entry: "translation",
+                  entry: translationRun.entry,
                   phase,
                   project_id: projectId,
                   error: message,
@@ -1579,6 +1771,75 @@ interface UploadPanelProps {
   /** AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
    *  reusing this panel's preview/collision/commit machinery unchanged. */
   variant?: "upload" | "gdrive"
+  /**
+   * AQU-1365: after parsing and before the preview, the parent checks the
+   * text uploads for a translation of a file already here. Resolves true when
+   * it took over (it shows its question and later calls `resume`), false to
+   * carry on to the preview as before.
+   */
+  onTranslationCheck?: (
+    uploads: UploadForTranslationCheck[],
+    resume: (choice: TranslationCheckResume) => Promise<void>,
+    /** Every file in the batch, flagged or not, media included. */
+    fileCount: number,
+  ) => Promise<boolean>
+}
+
+/** AQU-1365: one parsed text upload, as the translation check sees it. */
+export interface UploadForTranslationCheck extends TranslationCheckUpload {
+  file: File
+  /** True when the person already answered about it on the collision screen. */
+  resolved: boolean
+}
+
+/** AQU-1365: how the import continues after the translation check. */
+export interface TranslationCheckResume {
+  /** Uploads to leave out of this import. */
+  leaveOut?: ReadonlySet<File>
+  /** Extra in-place re-imports ("Update Jonah's source text"): book code → file id. */
+  reimportFileIds?: ReadonlyMap<string, string>
+}
+
+/** AQU-1365: the bytes a header can name its language in (USFM `\id`/`\rem`,
+ *  the WebVTT header). Read separately from the parse, which keeps no text. */
+const TRANSLATION_HEADER_BYTES = 8192
+
+async function uploadsForTranslationCheck(
+  files: readonly File[],
+  preparedByFile: ReadonlyMap<File, PreparedImportFile>,
+  answered: { names: ReadonlySet<string>; reimportFileIds?: ReadonlyMap<string, string> },
+): Promise<UploadForTranslationCheck[]> {
+  const uploads: UploadForTranslationCheck[] = []
+  for (const file of files) {
+    const prepared = preparedByFile.get(file)
+    if (!prepared) continue
+    const bookIds = [...new Set(prepared.results
+      .map((result) => result.bookCode?.trim().toUpperCase())
+      .filter((code): code is string => Boolean(code)))]
+    let header = EMPTY_UPLOAD_HEADER
+    if (hasLanguageHeader(file.name)) {
+      try {
+        const head = await file.slice(0, TRANSLATION_HEADER_BYTES).arrayBuffer()
+        header = uploadHeaderText(file.name, decodeImportText(head, file.name))
+      } catch {
+        // Unreadable here means it parsed some other way: no header to check.
+      }
+    }
+    // The keys the collision screen's choices and the re-import are keyed by
+    // (see `emitParsedFile`): lowercased names, uppercased book codes.
+    const importKeys = [...new Set([
+      file.name.trim().toLowerCase(),
+      ...prepared.results.flatMap((result) => [
+        result.name.trim().toLowerCase(),
+        ...(result.originalName ? [result.originalName.trim().toLowerCase()] : []),
+      ]),
+      ...bookIds,
+    ])]
+    const resolved = answered.names.has(file.name.trim().toLowerCase())
+      || importKeys.some((key) => answered.reimportFileIds?.has(key))
+    uploads.push({ fileKey: file.name, fileName: file.name, bookIds, header, importKeys, file, resolved })
+  }
+  return uploads
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -1611,7 +1872,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload" }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload", onTranslationCheck }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -1667,7 +1928,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             // Filter out skipped files and proceed with the rest.
             const filtered = list.filter((f) => !resolution.skipKeys.has(f.name.trim().toLowerCase()))
             if (filtered.length === 0) return
-            await doImportFiles(filtered, resolution.reimportFileIds)
+            // AQU-1365: whatever was chosen for a colliding file (update or
+            // duplicate) was the person's answer; the translation check
+            // doesn't ask about it again.
+            await doImportFiles(
+              filtered,
+              resolution.reimportFileIds,
+              new Set(collisions.map((collision) => collision.name.trim().toLowerCase())),
+            )
           })
           return
         }
@@ -1687,7 +1955,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * Media with companion or embedded captions shows an editable cue preview.
    */
   const doImportFiles = useCallback(
-    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
+    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>, answeredNames?: ReadonlySet<string>) => {
       const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
       if (spreadsheets.length > 0) {
         if (list.length !== 1) {
@@ -1802,30 +2070,51 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         if (reviewed === null) return
-        const remainingResults = reviewed.files.flatMap(file => preparedByFile.get(file)?.results ?? [])
-        if (remainingResults.length === 0 && mediaFiles.length > 0) {
-          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
-          return
+        const toPreview = async (files: File[], fileIds: ReadonlyMap<string, string> | undefined) => {
+          const remainingResults = files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+          if (remainingResults.length === 0 && mediaFiles.length > 0) {
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
+            return
+          }
+
+          // Hand off to parent to show the preview screen.
+          // The commit closure does the actual upload.
+          onPreview(remainingResults, async (options) => {
+            if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
+              for (const [file, prepared] of preparedByFile) {
+                preparedByFile.set(file, {
+                  ...prepared,
+                  results: prepared.results.map((result) => ({
+                    ...result,
+                    strings: result.epubMembers
+                      ? filterEpubStrings(result.strings, options.skipMemberPaths!)
+                      : result.strings,
+                  })),
+                })
+              }
+            }
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
+          })
         }
 
-        // Hand off to parent to show the preview screen.
-        // The commit closure does the actual upload.
-        onPreview(remainingResults, async (options) => {
-          if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
-            for (const [file, prepared] of preparedByFile) {
-              preparedByFile.set(file, {
-                ...prepared,
-                results: prepared.results.map((result) => ({
-                  ...result,
-                  strings: result.epubMembers
-                    ? filterEpubStrings(result.strings, options.skipMemberPaths!)
-                    : result.strings,
-                })),
-              })
-            }
-          }
-          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
-        })
+        // AQU-1365: before any cell exists, ask about an upload that looks
+        // like a translation of a file already here (its book is here, or it
+        // says it's in the target language). The parent shows the question
+        // and resumes with the person's answer.
+        if (onTranslationCheck) {
+          const textUploads = reviewed.files.filter(file => !mediaFiles.includes(file))
+          const uploads = await uploadsForTranslationCheck(textUploads, preparedByFile, {
+            names: answeredNames ?? new Set(),
+            reimportFileIds,
+          })
+          const tookOver = uploads.length > 0 && await onTranslationCheck(uploads, async ({ leaveOut, reimportFileIds: extra }) => {
+            const files = leaveOut?.size ? reviewed.files.filter(file => !leaveOut.has(file)) : reviewed.files
+            const fileIds = extra?.size ? new Map([...(reimportFileIds ?? []), ...extra]) : reimportFileIds
+            await toPreview(files, fileIds)
+          }, reviewed.files.length)
+          if (tookOver) return
+        }
+        await toPreview(reviewed.files, reimportFileIds)
         return
       }
 
@@ -1833,7 +2122,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, onTranslationCheck, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */

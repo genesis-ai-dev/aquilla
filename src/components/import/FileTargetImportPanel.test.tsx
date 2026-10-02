@@ -920,6 +920,30 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     expect(screen.getByText("This file is for Exodus 1; the open file is Genesis 1.")).toHaveClass("text-amber-600")
   })
 
+  // AQU-1365: the person chose this file themselves (auto-pick never
+  // overrides that), so going to the right one is offered, not done.
+  it("offers the file that holds the other book, when exactly one does", async () => {
+    const onUseFile = vi.fn()
+    const fileForBook = vi.fn((book: string) => (book === "EXO" ? { id: "file-exo", name: "Exodus" } : undefined))
+    renderPanel({ fileForBook, onUseFile })
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(fileForBook).toHaveBeenCalledWith("EXO")
+    const note = screen.getByText(/This file is for Exodus 1/)
+    expect(note).toHaveTextContent("This file is for Exodus 1; the open file is Genesis 1. Import into Exodus instead")
+    fireEvent.click(within(note).getByRole("button", { name: "Import into Exodus instead" }))
+    expect(onUseFile).toHaveBeenCalledWith("file-exo")
+  })
+
+  it("offers no other file when none or several hold the book", async () => {
+    const fileForBook = vi.fn(() => undefined)
+    renderPanel({ fileForBook, onUseFile: vi.fn() })
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/This file is for Exodus 1/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /instead/ })).not.toBeInTheDocument()
+  })
+
   it("says nothing of the kind for the right file — a clean import reviews exactly as before", async () => {
     renderPanel()
     await selectFile(makeFile(USFM_FIXTURE))

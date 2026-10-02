@@ -19,22 +19,16 @@ import { useState } from "react"
 import { ChevronDown, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox"
-import { FILE_TARGET_ACCEPT } from "@/components/import/FileTargetImportPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
+  FILE_TARGET_ACCEPT,
+  isFileTargetFileName,
   isUsfmFileName,
   pickTranslationDestination,
   usfmBookIds,
   type TranslationDestination,
 } from "@/lib/import/translation-destination"
-
-const ACCEPTED_EXTENSIONS = new Set(FILE_TARGET_ACCEPT.split(",").map((ext) => ext.slice(1)))
-
-function isAcceptedFileName(fileName: string): boolean {
-  const dot = fileName.lastIndexOf(".")
-  return dot >= 0 && ACCEPTED_EXTENSIONS.has(fileName.slice(dot + 1).toLowerCase())
-}
 
 export interface TranslationStartOptions {
   /** True when the upload's own book chose the file, not the person. */
@@ -86,7 +80,7 @@ export function TranslationChooser({
       return
     }
     const file = list[0]
-    if (!isAcceptedFileName(file.name)) {
+    if (!isFileTargetFileName(file.name)) {
       setError(t("importExport.fileTarget.unsupportedFileType"))
       return
     }

@@ -56,6 +56,7 @@ import {
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
 import { targetSheetRows } from "@/lib/import/target-sheet-rows"
+import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
@@ -103,10 +104,12 @@ export interface FileTargetImportPanelProps {
   /** AQU-1365: where Back from the first step after the drop leads, when the
    *  host chose the file. Replaces the panel's own return to its drop step. */
   onBackToFileChoice?: () => void
+  /** AQU-1365: the project file holding `bookCode`, when exactly one does.
+   *  With `onUseFile`, a file meant for another book offers to go there. */
+  fileForBook?: (bookCode: string) => { id: string; name: string } | undefined
+  /** AQU-1365: re-run this same upload against another file. */
+  onUseFile?: (fileId: string) => void
 }
-
-/** The files this panel reads, as an `<input accept>` list. */
-export const FILE_TARGET_ACCEPT = ".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
 
 export interface FileTargetPanelBack {
   /** Accessible name for the arrow: where it goes. */
@@ -522,6 +525,8 @@ export function FileTargetImportPanel({
   onBackChange,
   initialFile,
   onBackToFileChoice,
+  fileForBook,
+  onUseFile,
 }: FileTargetImportPanelProps) {
   const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
@@ -988,6 +993,12 @@ export function FileTargetImportPanel({
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
     const { matched, orphans, uncovered, timebase, looseFit, elsewhere, skippedCues = 0 } = matchResult
+    // AQU-1365: a file for one other book that exactly one project file
+    // holds can go there instead. The person picked this file themselves
+    // (auto-pick never overrides a choice), so it is offered, not done.
+    const elsewhereBooks = elsewhere ? [...new Set(elsewhere.incoming.map((span) => span.bookCode))] : []
+    const otherFile = elsewhereBooks.length === 1 && onUseFile ? fileForBook?.(elsewhereBooks[0]) : undefined
+    const switchTo = otherFile && otherFile.id !== cells[0]?.fileId ? otherFile : undefined
     const conflicts = matched.filter((m) => m.hasConflict)
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // "To check": the rows left unticked for a reason a person has to settle —
@@ -1207,6 +1218,21 @@ export function FileTargetImportPanel({
                 : t("importExport.review.elsewhereNoReferences", {
                     incoming: formatChapterSpans(elsewhere.incoming, locale),
                   })}
+              {switchTo && onUseFile && (
+                <>
+                  {" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    disabled={applying}
+                    onClick={() => onUseFile(switchTo.id)}
+                  >
+                    {t("importExport.review.useOtherFile", { fileName: switchTo.name })}
+                  </Button>
+                </>
+              )}
             </p>
           )}
           {offsetLabel && subtitleRows && (

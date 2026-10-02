@@ -41,7 +41,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
 import { applyEBibleTargetImport } from "@/lib/import"
 import posthog from "@/lib/posthog"
-import { IMPORT_SUCCEEDED } from "@/lib/event-names"
+import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 
 function cellsFor(fileId: string, book: string, verses: number): FileTargetCellRef[] {
@@ -234,6 +234,27 @@ describe("AQU-1365: importing a translation", () => {
     expect(translation.openFile).not.toHaveBeenCalled()
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+  })
+
+  it("offers the file the upload is for after the person picked another, and switches with the same upload", async () => {
+    const { translation, rerenderWith } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Jonah")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const note = screen.getByText(/This file is for Ruth 1/)
+    expect(note).toHaveTextContent("This file is for Ruth 1; the open file is Jonah 1.")
+    fireEvent.click(within(note).getByRole("button", { name: "Import into Ruth instead" }))
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
+      import_type: "file-target", entry: "review-switch", auto_picked: false,
+    }))
+    rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS })
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.queryByText(/This file is for/)).not.toBeInTheDocument()
   })
 
   it("holds an upload until a file is chosen, and starts it only on Continue", async () => {

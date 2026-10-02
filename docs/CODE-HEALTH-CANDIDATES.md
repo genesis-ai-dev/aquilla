@@ -909,3 +909,222 @@ exception in `duplicate-exceptions.ts` is still the only one that stops collidin
     `ECONNREFUSED 127.0.0.1:3000` before the tagging logic runs. Expect these 6 in any
     sandboxed baseline; do **not** log them as a trunk regression, and do not treat
     `scripts/tag-release.*` as frozen on their account alone.
+
+## 2026-10-02 — dead-code run: three zero-importer orphans left by superseded features
+
+**Done this run** (theme 1, dead-code deletion; 3 files, 117 lines, no test file touched):
+deleted `src/lib/store/voice-recency.ts` (79), `src/lib/agent/synchronized-scroll.ts` (32)
+and `src/components/agent/prompt-hints.ts` (6). All three are orphan debris from features
+their callers dropped, not scaffolding added ahead of a caller — the clone is shallow, so
+`git log --follow` is useless here, but three grafted historical trees still carry the
+callers, which is what makes the supersession provable:
+
+- `src/components/agent/prompt-hints.ts` (`AGENT_PROMPT_HINTS`) — `AgentDockView.tsx:35`
+  imported it and rotated through the four hints on a timer (`:106`, rendered at `:294`
+  behind `agent.emptyState.tryAsking`). `AgentDockView.tsx:39,236` now renders
+  `AgentEmptyState`, which prints one static `agent.emptyState.promptHint` line instead.
+  **Orphans one i18n key**: `agent.emptyState.tryAsking` is now referenced by nothing but
+  the catalog itself — see the freeze note below.
+- `src/lib/agent/synchronized-scroll.ts` (`readCellScrollAnchor`/`applyCellScrollAnchor`) —
+  `AgentWorkbench.tsx` imported both (line 30 of the last tree that still had it) for a
+  `synchronizeScroll` callback that
+  mirrored the scroll position between the source and target panes by cell anchor. That
+  two-pane model is gone; the workbench now hosts `WorkingSetPanel` and has no scroll
+  handler at all (`grep -n "scrollTop\|onScroll\|anchor" AgentWorkbench.tsx` is empty).
+- `src/lib/store/voice-recency.ts` (`useVoiceRecency`/`touchVoice`) — `CellVoicePanel.tsx:24`
+  imported both to sort the voice combobox most-recently-used-first (`:386`, `:402-409`).
+  AQU-768 replaced that with an explicit cast assignment: the panel resolves the line's voice
+  from the saved cast (`CellVoicePanel.tsx:161-173`) and the picker itself is a host-owned
+  `voicePicker?: ReactNode`, filled by `CastGutterVoice` at `EditorTable.tsx:7223`. Nothing
+  reimplements recency under another key — a repo-wide `recency|mostRecent|MRU` grep over
+  `src/lib/store` and `src/lib/audio` returns only this file and an unrelated comment in
+  `bytes-cache.ts`. The `frontier:voice-recency:*` localStorage keys this wrote are
+  client-owned and simply go unread (no migration needed, nothing durable lost).
+
+**Zero-importer proof**: a repo-wide `grep -rIn` for all five export names plus the three
+module stems over everything but `node_modules`/`.git`/`dist` returns only the definitions
+themselves. No sibling `*.test.ts` exists for any of the three (so no frozen test blocks the
+deletion), none of them appears in `eslint-suppressions.json`, and none produced a lint
+diagnostic at baseline — so lint output is byte-identical apart from the files being gone.
+
+### Related sweep, intentionally not taken: 41 more zero-caller exports inside live modules
+
+The same pass ran a whole-`src` export-usage scan (every `export function`/`export const`
+name, counted with `grep -rhow` across `src`, `e2e`, `scripts`, all four worker packages,
+`parity`, `packages`, `shared`, `smart-tests`, `tools`). Besides the five exports deleted
+above it found 41 more names with exactly one occurrence repo-wide — their own definition.
+**None is a whole-module orphan**; each sits in a module with other live exports, so each is
+a surgical function deletion needing its own supersession story:
+
+`ThemeToggle` (`src/branding/ThemeMode.tsx` — branding, frozen zone),
+`cachedTagsForNode`/`getCachedPassageTags` (`src/lib/understanding/passage-tag-store.ts`),
+`getAdminAgentSession`/`getAdminAgentSessions` (`src/lib/frontier/admin.ts`),
+`inspectIdmlInWorker` (`src/lib/idml/idml-worker-client.ts`),
+`screenshotSurface` (`src/lib/i18n/screenshots.ts`),
+`sectionProgressToVerseRollup` (`src/lib/progress/canonical-rollup.ts`),
+`wavMsForBytes` (`src/lib/audio/recording-limits.ts`),
+`formatWordCount` (`src/lib/billing/plans.ts`),
+`selectionSize` (`src/lib/audio/selection.ts`),
+`useCellStoreViews` (`src/hooks/useActiveCellStore.ts` — **trap zone**, see CLAUDE.md's
+`readAtVersion()` note; do not touch),
+`migrateComment` (`src/lib/codex-editor/merge/comments.ts`),
+`detachProjectSource` (`src/lib/sync/cloud-projects.ts`),
+`emitSourceCellReorder` (`src/lib/sync/events-emit.ts` — **frozen**, event contract),
+`fetchCommentsForCell` (`src/lib/sync/comments-read.ts`),
+`deleteCellsCache` (`src/lib/sync/cells-cache.ts`),
+`footnoteRawLeafText`, `sourceLocationFromLocator`, `getCurrentBatchRunId`, `ttsProviderModel`,
+plus the prefs getters (`getQueueTargetSlots`, `getQueueTimingMode`,
+`getRecordingAutoAdvance`, `getShowHiddenCells`, `isSectionCollapsed`), the feature-flag
+hooks (`useAiSectionMilestonesEnabled`, `useMeaningUnitDraftingEnabled`,
+`usePassageTagsEnabled`, `useAnyGeminiKeyError`, `useEgressPrefs`,
+`useVirtualClockDuration`), the `*ForTests` resets (`resetPericopeIndexForTests`,
+`resetShowHiddenCellsCacheForTests`) and the constants (`BRAND_DATA_IDS`,
+`CONTEXT_SCHEMA_VERSION`, `DOCX_PARITY_FILE_NAME`, `INWORLD_LANGUAGE_OTHER`,
+`INWORLD_TTS_MODEL_STANDARD`, `KNOWN_MARKER_BASES`, `PARATEXT_PTXPRINT_MEMBER_NAMES`).
+
+- **Why deferred**: three different shapes hide in that list and only a per-symbol read tells
+  them apart — (a) genuinely superseded code, (b) a paired API whose other half is live
+  (`getShowHiddenCells` next to a live setter) where deleting the reader leaves a
+  write-only store, and (c) deliberate forward-compat (`useSubscribedConcepts.ts` above is
+  the standing precedent: looks dead, is not). A `*ForTests` reset with zero occurrences is
+  a fourth shape — if a test did call it the symbol would be frozen, and if none does the
+  export is dead but its sibling may still be load-bearing. Working the list properly is one
+  theme per cluster, not one run.
+- **Proof needed**: per symbol — a repo-wide grep for the name *and* for a dynamic/string
+  form of it, the git-history check for a dropped caller (the grafted-tree trick above),
+  and `pnpm build` + the owning module's own test file left untouched. Take the three
+  feature-flag hooks as one cluster first: they are the most likely to be real debris and
+  they share a single supersession question (did the flag ship or get dropped?).
+
+### UNFROZEN at last: `context.test.ts` is green, so the i18n orphan-key sweep can run
+
+**This is the headline for the next run.** `src/lib/i18n/context.test.ts` passed at this run's
+baseline — the `onboarding.connect.{account,agent,confirm}` context/placeholder gap that had
+blocked it since 2026-09-21 is fixed on `dev`. That ends the freeze on
+`src/lib/i18n/namespaces/*.ts` that stopped the queued orphan-key sweep four runs in a row
+(2026-09-21, -23, -25, -28 entries above). Strike the "still frozen" language in all four.
+
+Two corrections to the 2026-09-21 entry's scope before anyone picks it up:
+
+- It says "the repo has only 6 locale files (`ar`, `ms`, `my`, `th`, `zh-Hans`, `zh-Hant`)".
+  `src/lib/i18n/messages/` now holds **9** — `fr`, `id` and `ru` were added since. So the
+  sweep it scoped at 9 files is now **12**, *over* this routine's ≤8-file budget even with
+  `context.test.ts` green.
+- The queue has grown again: `agent.emptyState.tryAsking`, orphaned by this run's
+  `prompt-hints.ts` deletion, joins the `rules.*` / `audio.recordingModal.*` / `onboarding`
+  keys. Per the 2026-09-18 convention the key was left in place rather than deleted on its
+  own, and its `── AgentDockView ──`-adjacent neighbours (`agent.emptyState.promptHint` is
+  **live** at `AgentEmptyState.tsx:100`) must survive.
+
+Recommended split so it fits a single run's budget: one run for the `rules.*` prefixes
+(`namespaces/rules.ts` + `duplicate-exceptions.ts` + the locale lines + `source-hashes.json`),
+a second for `onboarding` + `audio.recordingModal.*` + `agent.emptyState.tryAsking`. The
+2026-09-21 entry's verification work (the `rules.createDialog.descriptionLabel` duplicate
+exception is the only one that stops colliding; `rules.loadingLabel` must be lifted out of
+the `── RulesPage.tsx ──` section because `ProjectSettings/RulesSection.tsx:129` still uses
+it) still holds and should be re-simulated, not re-derived.
+
+### Baseline recorded 2026-10-02 (`origin/dev` `260428b3`) — much redder than 2026-09-28
+
+- **`pnpm build`** — green.
+- **`pnpm lint`** — exit 2, **125 errors**, 968 warnings (was 129/918 on 2026-09-28). Same
+  composition: the `i18n/no-unkeyed-string` billing-surface block dominates
+  (`OrgSettingsBilling.tsx`, `BillingOffers.tsx`, `BillingPlanReview.tsx`,
+  `BillingChangeReview.tsx`, `BillingWorkspaceSummary.tsx`, `BillingSelection.tsx`), plus
+  `preserve-caught-error` in the workers. Stale `eslint-suppressions.json` entries still
+  reported.
+- **`pnpm test`** — exit 1, **19 files / 27 tests** failing (was 3 files / 8 tests). 1514
+  files / 17127 tests pass. The carried-over failures are **gone** — `i18n/context.test.ts`,
+  `scripts/cloudflare-preview-comment.test.mjs` and `scripts/tag-release.test.ts` all pass
+  now — but a new and much larger cluster has appeared, and **most of it looks like one root
+  cause, not nineteen**: portal/popup-timing failures across unrelated surfaces
+  (`ui/tooltip`, `ui/date-tooltip`, `ui/context-menu`, `ui/multi-select-combobox`,
+  `AccountSwitcher`, `AddConceptDialog`, `CommentsPage`, `LanguagesSection` (5),
+  `ValidationSettingsSection.namedUsers`, `VerseResourcesSidebar` (2), `Settings`,
+  `ImportCharactersDialog`, `TimelineEditor` (2)). That is the same family as the
+  `ArchivedProjects.test.tsx` flake logged above and issue
+  [#410](https://github.com/genesis-ai-dev/aquilla/issues/410), but far wider — it smells
+  like a `@base-ui/react` or happy-dom version move rather than 14 independent regressions.
+  Plus four that are not portal-shaped: `scripts/rls-coverage.test.ts`,
+  `scripts/worker-deployment-contract.test.ts` ("installs Chromium before running IDML
+  browser conformance in CI"), `src/lib/languages/full-catalog.test.ts` (memoization),
+  `src/lib/milestone-navigation.aiSections.test.ts` (2), and two collection errors
+  (`org/BillingPlanReview.test.tsx`, `src/lib/import/timeline-text.contract.test.js`).
+  **Out of scope for this routine** (pre-existing, and turning a red suite green is not
+  behaviour-preserving) but worth a human's eyes — 27 red tests on trunk is a lot of cover
+  for a real regression to hide under. None of the 19 files is near the three deleted
+  modules, so none of them froze this run.
+
+### Container setup for the gates (addendum to the 2026-09-25 recipe)
+
+Two deltas from that entry, for the next run in a Claude-Code-on-the-web container:
+
+- **`pnpm i` fails at `onnxruntime-node`'s postinstall** (`ECONNRESET` — the proxy cuts off
+  its native-binary download), and the abort leaves `node_modules/.bin` unlinked, so nothing
+  runs. Workaround that needs no repo change: drop `onnxruntime-node` from
+  `pnpm-workspace.yaml`'s `onlyBuiltDependencies`, `pnpm i`, then restore the file. It is a
+  transitive dep and the root suite never loads it.
+- **Docker has no daemon here**, so the `aquilla-dev-pg` container route is unavailable —
+  but `scripts/e2e-up.ts` falls back to a local `psql` (`:422`), so the local-cluster recipe
+  works: `pg_ctlcluster 16 main start`, `CREATE ROLE aquilla LOGIN SUPERUSER PASSWORD
+  'aquilla'`, `export E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres`.
+- **Playwright's pinned Chromium is now revision 1243** (`@playwright/test` 1.63.0); the
+  image still ships 1194. Same symlink trick as the 2026-09-25 entry, with the revision
+  bumped — and note `npm install` in `auth-worker/`/`sync-worker/` **rewrites their
+  `package-lock.json`**, a frozen path for this routine. Check `git status` and revert both
+  before committing.
+
+### Gate-comparison trap: baseline `pnpm lint` before `pnpm build` and the outputs drift
+
+Running lint and build concurrently to save wall-clock made this run's final lint report
+**970 warnings against the baseline's 968** with a byte-identical error list (125 both
+times). The two extra warnings are `Unused eslint-disable directive … 'no-control-regex'` at
+`packages/idml-roundtrip/dist/engine.js:1705` and `dist/legacy.js:83` — gitignored build
+output that did not exist yet when the baseline lint walked that directory, and that the
+build then produced. `npx eslint packages/idml-roundtrip/dist/{engine,legacy}.js` reproduces
+both on their own, with no diff in `packages/` at all.
+
+That is a live reproduction of the **ESLint `globalIgnores(['dist', '.claude'])` doesn't
+reach nested `packages/*/dist`** candidate logged above — still unfixed, and now with a
+concrete symptom: it makes `pnpm lint` output depend on whether anyone has built the
+workspace packages recently. For this routine the practical rule is **build first, then
+baseline lint** (or compare error lists rather than totals), otherwise every run burns time
+chasing two phantom warnings.
+
+### Smoke baseline 2026-10-02: 8 of 96 red, and all 8 are independent of the diff
+
+`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec` (the ledger's one-shard container recipe) came
+back **88 passed / 8 failed**. Because this routine's whole proof is green-to-green, the 8 were
+A/B'd rather than argued about: the three deleted modules were restored from `HEAD~1`, the four
+affected spec files re-run, and the **same 8 tests failed — same files, same lines, same
+titles, same assertions**. The deletion is not involved in any of them.
+
+Pre-existing failures, grouped by what they actually are:
+
+- **Six are media decode, and look like the browser substitution, not the product**:
+  `import-and-edit.smoke.spec.ts:138` ("imported video keeps its authenticated picture"),
+  `:294` × 3 (the YouTube srt/vtt/sbv caption exports), and
+  `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). Five of the six die on
+  the same assertion — `expect.poll(() => Number.isFinite(video.duration) && video.duration > 0)`
+  timing out at 30s (`import-and-edit.smoke.spec.ts:317-319`) — i.e. Chromium never decodes
+  the fixture at all. The caption fixtures are inline strings in the spec, so no network is
+  involved. The suspect is the revision symlink this container needs: `@playwright/test`
+  1.63.0 pins Chromium 1243 and the image ships 1194, so the suite runs an older
+  `chrome-headless-shell` whose media pipeline is not the pinned one. **Do not read these as
+  an import regression without first reproducing on a machine with the real rev-1243 build.**
+- **`projects/project-trash.smoke.spec.ts:18`** — a genuine test-side bug, reproducible and
+  nothing to do with media: `getByRole("heading", { name: archiveName })` at line 32 hits a
+  strict-mode violation because the "Created <name> in Personal" success toast is still
+  mounted and its `<h2 data-slot="toast-title">` also matches the accessible name. The
+  locator needs `exact: true` or a scope that excludes the toast region. Out of scope here
+  (this routine never modifies test files) — worth a one-line fix by someone who can.
+- **`agent/agent-connection.smoke.spec.ts:43`** (AQU-1529) — `getByRole("checkbox", { name:
+  "All current organizations", exact: true })` never appears on the OAuth consent page
+  (`AgentConnectionPage.ts:21`, 30s timeout). Not media, not obviously environmental.
+  The one of the eight most worth a human's eyes.
+
+**For the next run**: 88/96 is the expected smoke baseline in this container until the
+Chromium revision gap is closed, so budget one A/B pass rather than treating smoke red as a
+blocker — and kill stray `wrangler dev`/`workerd serve` processes between shard runs, because
+a leftover one holding `:9788` makes the next boot die with `[sync] timed out waiting for
+:9788`, which reads like a backend failure and is not one.

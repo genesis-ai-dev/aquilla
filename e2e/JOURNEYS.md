@@ -268,6 +268,16 @@ UI chrome that used to be one smoke file per click is covered under
   It stays out of smoke for the reason the rules give: it is a message and a retry on a
   failure path, nothing is lost that was not already missing, and reproducing it needs
   the sync service to be made to fail, which the local e2e stack has no switch for.
+  The page BEHIND Project Settings listing a new link's files without a reload (AQU-1570)
+  is RTL too. Settings is a route modal over the still-mounted workspace or overview,
+  each with its own `useProject`; the link flow, "Try again" and a "Sync now" that brought
+  content in announce the change (`lib/sync/project-record-changed.ts`) and every
+  `useProject` for the project re-resolves. Pinned where it escaped, in the composition:
+  `LinkSourceSection.pageBehind.test.tsx` renders the real flow beside a real `useProject`
+  consumer (files listed after a link and after a retry that works; nothing re-read when
+  the first sync failed), with the hook's own contract in `useProject.test.tsx` and Sync
+  now's in `SourceLinkSection.test.tsx`. It is a stale read with nothing lost, so it stays
+  out of smoke; the AQU-1525 smoke walk above would cover it once it exists.
   A link to a LARGE upstream seeding at all (AQU-1543: statement size; AQU-1563: the
   first sync folding the whole history at once ran the ProjectSync Durable Object out
   of its 128 MB) is worker-tested against real Postgres. `link-sync-large-upstream.test.ts`

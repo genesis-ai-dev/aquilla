@@ -78,6 +78,11 @@ export function MondayLinkedView({
             {t("projectSettings.monday.linkedBoardPrefix")}{" "}
             <span className="font-medium">{link.boardName ?? link.boardId}</span>
           </p>
+          {(link.boardUrl ?? structure?.url) && (
+            <a href={link.boardUrl ?? structure?.url ?? undefined} target="_blank" rel="noopener noreferrer" className="underline">
+              Open board in Monday
+            </a>
+          )}
           <p className="text-xs text-muted-foreground">
             {t("projectSettings.monday.oneItemPerLabel", {
               granularity: link.config.itemGranularity === "file" ? "file" : "project",

@@ -48,17 +48,34 @@ vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
 // observed per render — a DOM probe after `waitFor` samples one moment and
 // only lands inside the window on a slow enough machine. The wrapper
 // delegates, so the other specs in this file see the real table.
-const { tableRenders } = vi.hoisted(() => ({
+const { tableRenders, committedDom } = vi.hoisted(() => ({
   tableRenders: [] as { loading: boolean; rows: number }[],
+  committedDom: [] as { skeleton: boolean; noAssignmentsCopy: boolean }[],
 }))
 
 vi.mock("@/components/ui/data-table", async (importActual) => {
   const actual = await importActual<typeof import("@/components/ui/data-table")>()
+  const { useLayoutEffect } = await import("react")
   const Real = actual.DataTable
   return {
     ...actual,
     DataTable: (props: Parameters<typeof Real>[0]) => {
       tableRenders.push({ loading: Boolean(props.loading), rows: props.data.length })
+      // AQU-1257: sample the COMMITTED DOM after every commit of this table
+      // rather than once, after an `await`. A layout effect runs synchronously
+      // after each commit, so no one-render window can slip between samples —
+      // whereas a `getBy…` placed after `await findBy…`/`waitFor` observes
+      // whichever commit happens to be current when the microtask queue drains,
+      // which is what let scheduling and machine speed decide the result.
+      useLayoutEffect(() => {
+        committedDom.push({
+          skeleton:
+            document.querySelector('[role="status"][aria-label="Loading assignments"]') != null,
+          noAssignmentsCopy: (document.body.textContent ?? "").includes(
+            "You have no open assignments.",
+          ),
+        })
+      })
       return <Real {...props} />
     },
   }
@@ -72,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockClear()
   tableRenders.length = 0
+  committedDom.length = 0
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -98,11 +116,14 @@ describe("AssignedToMe", () => {
     // search box instead and then probing the skeleton synchronously made
     // this order-dependent — the table mounts one commit before the
     // skeleton did, so a full-suite run could observe the gap.
+    // AQU-1257: the search box and the pulse markup are part of that same
+    // asserted state, so they are awaited with it instead of trailing it as
+    // bare synchronous probes that only the awaited node was holding up.
     await waitFor(() => {
       expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+      expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument()
+      expect(document.querySelector(".animate-pulse")).toBeTruthy()
     })
-    expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument()
-    expect(document.querySelector(".animate-pulse")).toBeTruthy()
   })
 
   // AQU-1173 regression guard — the root cause behind the flake above.
@@ -132,23 +153,44 @@ describe("AssignedToMe", () => {
   // The org resolves asynchronously here (listMyOrgs is a promise), which is the
   // window the bug lived in; the assignments read never settles, so the ONLY
   // correct state for the whole test is "loading".
+  //
+  // AQU-1257: that window is one render wide, so it used to be chased with
+  // `await screen.findByPlaceholderText(…)` followed by synchronous probes of
+  // the skeleton and the empty copy — a wait on one element guarding
+  // assertions about others. That sampled a single moment: on an unlucky
+  // schedule it read a commit the regression had not reached yet (a spurious
+  // failure), and on a fast one it skipped past the bad commit entirely (a
+  // spurious pass). The committed DOM is now recorded on every commit of the
+  // table, so the bad render cannot hide between samples.
   it("never paints an empty state while the active org's assignments are unresolved", async () => {
     mockGetMy.mockImplementation(() => new Promise(() => {}))
     renderInbox()
 
-    // The table only mounts once an org is active, so this resolves exactly at
-    // the render the stale flag used to corrupt.
-    await screen.findByPlaceholderText("Search assignments…")
-    expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
-    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
-
-    // And it stays loading — nothing resolved it, so nothing may dismiss it.
+    // The table only mounts once an org is active and its fetch effect runs
+    // after the table's own layout effect, so the request having been issued
+    // means every render up to and including the corruptible one is recorded.
     // A fixed wait would only prove the machine was slow; poll the mock instead.
     await waitFor(() => expect(mockGetMy).toHaveBeenCalledWith("jwt", 1))
+
+    expect(committedDom.length).toBeGreaterThan(0)
+    expect(
+      committedDom.filter((dom) => !dom.skeleton || dom.noAssignmentsCopy),
+    ).toEqual([])
+
+    // And it stays loading — nothing resolved it, so nothing may dismiss it.
+    // This last pair is a probe of a state that is now lasting rather than one
+    // render wide, so reading it once is sound.
     expect(screen.getByRole("status", { name: "Loading assignments" })).toBeInTheDocument()
     expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
   })
 
+  // AQU-1257 audit of the remaining `waitFor`-then-probe pairs in this file:
+  // the specs below wait on one node and then probe others, but every value
+  // they probe is painted by the same commit as the awaited one — the rows,
+  // the lane labels and the deadline all come from the single `setResult` the
+  // inbox makes after `Promise.all([assignments, portfolio])`, and nothing is
+  // pending afterwards to move them. They assert a settled state, not a
+  // one-render window, so a single read of it is sound and no change is needed.
   it("aggregates the caller's open assignments across projects with progress", async () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.

@@ -137,6 +137,28 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
     expect(unitsOf("erin")).toEqual(["f1:EXO"])
   })
 
+  it("puts a person holding a book's opening heading on that book (AQU-1493)", async () => {
+    // The heading between GEN 2:1 and EXO 1:1 introduces Exodus, so it counts
+    // in EXO 1 and whoever holds it is on Exodus, not Genesis.
+    await seed()
+    const db = testEnv.AQUILLA_PG
+    await seedUser(5, "dana")
+    await db.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id, type) VALUES
+        ('pa','f1','hb','source','s','e-pa',1,NULL,'g3','heading')`,
+    ).run()
+    await db.prepare(
+      "UPDATE cells SET anchor_cell_id = 'hb' WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'x1' AND side = 'source'",
+    ).run()
+    await db.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
+        ('as-dana', 'pa', 5, 'cells', 'heading', '', 1, NULL, 1, 2000, NULL, NULL)`,
+    ).run()
+    await db.prepare("INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-dana','f1','hb')").run()
+    const rows = await getProjectUnitAssignees(testEnv, "pa")
+    expect(rows.filter((r) => r.username === "dana").map((r) => `${r.fileId}:${r.sectionKey}`)).toEqual(["f1:EXO"])
+  })
+
   it("drops a person whose whole assignment is structural, under the exclude policy", async () => {
     // dana holds only GEN's chapter heading. With the org excluding
     // structural cells, that heading counts for nothing — so dana must not

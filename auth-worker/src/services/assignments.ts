@@ -381,8 +381,9 @@ export async function getUnitAssignments(
   // A book unit filters by book key; a file-grain unit ('') does not filter at
   // all. Built as a fragment so the bind only exists when the predicate does.
   // AQU-1493: by the key the projection COUNTS a cell toward, so a line added
-  // with no reference is a person's share of the book (and chapter) of the
-  // line above it here exactly as it is a cell of that book's bar above.
+  // with no reference is a person's share of the book (and chapter) it is
+  // counted in — the line above it, or for a heading the verse below it —
+  // here exactly as it is a cell of that book's bar above.
   const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("c", "ik")}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
@@ -423,7 +424,8 @@ export async function getUnitAssignments(
        ${AUDIO_CTE_SQL}
      ), inherited_keys AS (
        -- AQU-1493: where a line with no reference is counted — the chapter of
-       -- the line above it — so the chapter breakdown below matches the grid.
+       -- the line above it, or a heading's verse below it — so the chapter
+       -- breakdown below matches the grid.
        ${inheritedKeysSql(oneScriptureFileSql())}
      )
      SELECT a.assignment_id    AS assignment_id,
@@ -991,9 +993,10 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
         WHERE p.id = ?
      ), units AS (${planUnitsSql("f.project_id = ?")}
      ), inherited_keys AS (
-       -- AQU-1493: a line with no reference counts toward the book of the line
-       -- above it (unitBookKeyExpr), so its assignee belongs on that book's
-       -- row. Walked only in files that have book units AND a live assigned
+       -- AQU-1493: a line with no reference counts toward the book it is
+       -- counted in (unitBookKeyExpr: the line above it's, or for a heading the
+       -- verse below it's, so a book's opening heading is that book's), so its
+       -- assignee belongs on that book's row. Walked only in files that have book units AND a live assigned
        -- line with no reference — normally none, so a board load pays nothing.
        ${inheritedKeysSql(`SELECT DISTINCT xc.project_id, xc.file_id
                              FROM assignments xa

@@ -62,39 +62,93 @@ export const HAS_BOOKS_CTE_SQL = `SELECT EXISTS (
 
 /**
  * AQU-1493: where each line with no verse reference of its own is counted —
- * the chapter of the line above it, or the front matter of the file's first
- * book at the top (see `inheritedKeysSql`). A CTE, so each statement walks the
- * file once; it binds (projectId, fileId) in its place, and `paired` and
- * friends LEFT JOIN it as `ik`.
+ * a line added in the editor in the chapter of the line above it (front matter
+ * of the file's first book at the top), a heading in the chapter of the verse
+ * below it (see `inheritedKeysSql`). A CTE, so each statement walks the file
+ * once; it binds (projectId, fileId) in its place, and `paired` and friends
+ * LEFT JOIN it as `ik`.
  */
 const INHERITED_KEYS_CTE_SQL = inheritedKeysSql(oneScriptureFileSql())
-
-/**
- * AQU-1493: the files whose progress rows were projected before lines with no
- * reference were counted in a chapter — `scripts/neon-backfill-progress.ts
- * --unreferenced-lines` re-projects exactly these. A Scripture file (it has
- * book rows) whose chapters, time buckets aside, hold fewer lines than its own
- * file row. Every visible line of such a file now lands in a chapter or its
- * front matter, so once re-projected the two agree and the file is not
- * selected again. Reads progress rows only; selects (project_id, id).
- */
-export const UNREFERENCED_LINES_STALE_FILES_SQL = `SELECT f.project_id, f.file_id AS id
-             FROM file_section_progress f
-            WHERE f.scope = 'file' AND f.section_key = '' AND f.target_lang = ''
-              AND EXISTS (
-                SELECT 1 FROM file_section_progress b
-                 WHERE b.project_id = f.project_id AND b.file_id = f.file_id AND b.scope = 'book'
-              )
-              AND f.total_count > COALESCE((
-                SELECT SUM(c.total_count) FROM file_section_progress c
-                 WHERE c.project_id = f.project_id AND c.file_id = f.file_id
-                   AND c.scope = 'section' AND c.target_lang = ''
-                   AND c.section_key NOT LIKE 't:%'
-              ), 0)`
 
 /** The section / book a source cell `alias` counts toward on the plan. */
 const UNIT_SECTION_KEY = (alias: string) => unitSectionKeyExpr(alias, 'ik')
 const UNIT_BOOK_KEY = (alias: string) => unitBookKeyExpr(alias, 'ik')
+
+/**
+ * AQU-1493: the files whose chapter rows do not hold what the projection
+ * counts in them now — `scripts/neon-backfill-progress.ts --unreferenced-lines`
+ * re-projects exactly these. Selects (project_id, id); binds nothing; starts
+ * with WITH, so a caller combining it with another query must parenthesise it.
+ *
+ * SELF-CHECKING rather than a test of some symptom, because the rule moved
+ * twice and each move strands a different shape of row:
+ * - production's rows from before AQU-1493 count a line with no reference in
+ *   the file and in NO chapter;
+ * - rows projected by this PR's first rule count a heading in the chapter
+ *   ABOVE it, and a file's top heading on a front-matter row.
+ * The first shape could be spotted from progress rows alone (chapters summing
+ * to less than the file); the second cannot — the sums agree. So this
+ * recomputes, for each candidate file, the per-chapter totals the projection
+ * would write (lane '', the default lane every file has; the same key, the
+ * same visibility and tombstone filters, the same walk, built from the very
+ * fragments `paired` uses) and compares them with the stored chapter rows. A
+ * file is selected when any chapter disagrees, or exists on one side only.
+ *
+ * Totals alone are enough: lines only ever move FORWARD between neighbouring
+ * chapters (a heading from the chapter above to the one below), so if no
+ * chapter's total moved, the first chapter (and the front-matter row before
+ * it) gained or lost nothing, hence passed nothing on, and so on down the
+ * file — nothing moved at all.
+ *
+ * Converges: a file the backfill has just re-projected agrees by construction
+ * and is never selected again, so the dev stack can run it on every boot.
+ * Candidates are Scripture files (a book row, and a verse-shaped reference —
+ * the projection's own walk gate) holding at least one line with no
+ * reference; only their cells are read, once each.
+ */
+export const UNREFERENCED_LINES_STALE_FILES_SQL = `WITH candidates AS MATERIALIZED (
+             SELECT DISTINCT b.project_id, b.file_id
+               FROM file_section_progress b
+              WHERE b.scope = 'book' AND b.target_lang = ''
+                AND EXISTS (
+                  SELECT 1 FROM cells u
+                   WHERE u.project_id = b.project_id AND u.file_id = b.file_id AND u.side = 'source'
+                     AND TRIM(SPLIT_PART(COALESCE(u.canonical_ref, ''), ':', 1)) = ''
+                )
+                AND EXISTS (
+                  SELECT 1 FROM cells v
+                   WHERE v.project_id = b.project_id AND v.file_id = b.file_id AND v.side = 'source'
+                     AND COALESCE(v.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
+                )
+           ), ik AS (
+             ${inheritedKeysSql('SELECT project_id, file_id FROM candidates')}
+           ), expected AS (
+             SELECT project_id, file_id, section_key, COUNT(*)::integer AS total_count
+               FROM (
+                 SELECT s.project_id, s.file_id, ${UNIT_SECTION_KEY('s')} AS section_key
+                   FROM candidates c
+                   JOIN cells s ON s.project_id = c.project_id AND s.file_id = c.file_id
+                               AND s.side = 'source'
+                   LEFT JOIN ik
+                     ON ik.project_id = s.project_id AND ik.file_id = s.file_id AND ik.cell_id = s.cell_id
+                  WHERE ${visibleSourceSql('s')}
+                    AND ${liveSourceSql('s')}
+               ) keyed
+              WHERE section_key <> '' AND section_key NOT LIKE 't:%'
+              GROUP BY project_id, file_id, section_key
+           ), stored AS (
+             SELECT p.project_id, p.file_id, p.section_key, p.total_count
+               FROM file_section_progress p
+               JOIN candidates c ON c.project_id = p.project_id AND c.file_id = p.file_id
+              WHERE p.scope = 'section' AND p.target_lang = '' AND p.section_key NOT LIKE 't:%'
+           )
+           SELECT DISTINCT COALESCE(e.project_id, st.project_id) AS project_id,
+                  COALESCE(e.file_id, st.file_id) AS id
+             FROM expected e
+             FULL JOIN stored st
+               ON st.project_id = e.project_id AND st.file_id = e.file_id
+              AND st.section_key = e.section_key
+            WHERE e.total_count IS DISTINCT FROM st.total_count`
 
 /**
  * The per-cell audio facts each statement's `paired` CTE takes from the CTE

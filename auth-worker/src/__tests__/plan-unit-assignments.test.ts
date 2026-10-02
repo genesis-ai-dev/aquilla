@@ -402,6 +402,25 @@ describe("lines added with no reference (AQU-1493)", () => {
     expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2]])
   })
 
+  it("counts a chapter's opening heading in that chapter, not the one above", async () => {
+    // A heading with no reference counts with the verse BELOW it — the one it
+    // introduces — so anna's GEN 2 holds "The Seventh Day" and 2:1.
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id, type) VALUES
+        ('pa','f1','hg2','source','s','e-pa',1,NULL,'g2','heading')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE cells SET anchor_cell_id = 'hg2' WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'g3' AND side = 'source'",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','hg2')",
+    ).run()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(anna.assignmentId).toBe("as-anna")
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2], ["GEN 2", 2]])
+  })
+
   it("follows the line above in a file of several books", async () => {
     await seedAddedLines()
     const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", "")

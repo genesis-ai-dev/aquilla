@@ -350,9 +350,11 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    // AQU-1493: --unreferenced-lines catches Scripture files projected before
-    // added lines counted in the chapter above them. Reads progress rows only
-    // and selects nothing once they agree, so it costs nothing on later boots.
+    // AQU-1493: --unreferenced-lines catches Scripture files whose chapter rows
+    // predate where lines with no reference count now (added lines with the
+    // line above, headings with the verse below). It reads the cells of files
+    // holding such a line once, and selects nothing once rows and cells agree,
+    // so later boots pay a read and no rewrite.
     ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books", "--unreferenced-lines"],
     {
       cwd: REPO_ROOT,

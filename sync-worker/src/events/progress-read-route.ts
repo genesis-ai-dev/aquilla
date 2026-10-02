@@ -123,8 +123,9 @@ export interface SectionProgressDetailResponse {
     audioValidated: boolean
     /**
      * AQU-1493: a line with no verse reference of its own, listed in the
-     * chapter it is counted with — the chapter of the line above it (see
-     * inheritedKeysSql). Its `ref` is ''. Absent on every other verse.
+     * chapter it is counted with — the chapter of the line above it, or for a
+     * heading the verse below it (see inheritedKeysSql). Its `ref` is ''.
+     * Absent on every other verse.
      */
     unnumbered?: boolean
   }>
@@ -427,7 +428,7 @@ interface FirstOpenRow {
   cues_unsigned?: number | string
   // AQU-1493: where a line with no reference is counted, and where it sits.
   inherited_key?: string | null
-  after_ref?: string | null
+  place_ref?: string | null
   inherited_depth?: number | string | null
 }
 
@@ -436,21 +437,23 @@ interface FirstOpenRow {
  * statement. Binds (projectId, fileId) ahead of everything else.
  */
 const INHERITED_KEYS_WITH = `WITH inherited_keys AS (${inheritedKeysSql(oneScriptureFileSql())})`
-const INHERITED_COLUMNS = `ik.section_key AS inherited_key, ik.after_ref AS after_ref, ik.depth AS inherited_depth`
+const INHERITED_COLUMNS = `ik.section_key AS inherited_key, ik.place_ref AS place_ref, ik.depth AS inherited_depth`
 
 /**
  * AQU-1493: a row's place in a Scripture file. A referenced line sorts by its
- * own reference; a line with none sits right after the line it hangs below
- * (that line's reference, then its depth in the run) — "the line above it" —
- * and one at the top of the file, counted as front matter, before everything.
+ * own reference; a line with none by the reference it is placed against and
+ * its signed depth from it (see `inheritedKeysSql`): a line counted with the
+ * line above sits that many lines after it, a heading counted with the verse
+ * below that many lines BEFORE it, so "The Seventh Day" lists right before
+ * 2:1. One at the top of the file, counted as front matter, sorts first.
  */
 function compareInFileOrder(
-  a: { canonical_ref: string | null; after_ref?: string | null; inherited_depth?: number | string | null },
-  b: { canonical_ref: string | null; after_ref?: string | null; inherited_depth?: number | string | null },
+  a: { canonical_ref: string | null; place_ref?: string | null; inherited_depth?: number | string | null },
+  b: { canonical_ref: string | null; place_ref?: string | null; inherited_depth?: number | string | null },
 ): number {
   const key = (r: typeof a) => r.canonical_ref
     ? { ref: r.canonical_ref, depth: 0 }
-    : { ref: r.after_ref ?? '', depth: Number(r.inherited_depth ?? 0) }
+    : { ref: r.place_ref ?? '', depth: Number(r.inherited_depth ?? 0) }
   const ka = key(a)
   const kb = key(b)
   if (ka.ref !== kb.ref) {
@@ -595,9 +598,10 @@ export async function readFirstOpenCell(
        LEFT JOIN inherited_keys ik ON ik.cell_id = s.cell_id
       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
         ${unit
-          // AQU-1493: a line with no reference belongs to the book of the line
-          // above it, as the projection counts it (`unitBookKeyExpr`). Without
-          // this the board said "3 cells to translate" and its link found none.
+          // AQU-1493: a line with no reference belongs to the book it is counted
+          // in (the line above it's; a heading's, the verse below it's), as the
+          // projection counts it (`unitBookKeyExpr`). Without this the board
+          // said "3 cells to translate" and its link found none.
           ? `AND (${key} = ? OR ${key} LIKE ? OR SPLIT_PART(ik.section_key, ' ', 1) = ?)`
           : ''}
         ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
@@ -759,7 +763,7 @@ export async function handleProgressReadRequest(
         cell_id: string
         canonical_ref: string | null
         inherited_key: string | null
-        after_ref: string | null
+        place_ref: string | null
         inherited_depth: number | string | null
         target_value: string
         endorsement_count: number | string

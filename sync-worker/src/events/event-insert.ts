@@ -222,3 +222,26 @@ ON CONFLICT (id) DO NOTHING`,
     )
     .bind(...binds)
 }
+
+/**
+ * Rows per statement for writers whose row count is not bounded by a request
+ * (AQU-1543). postgres.js refuses a statement with 65,534 or more bound values
+ * and an events row binds 12, so ONE multi-row INSERT tops out at 5,461 events
+ * — a ceiling a server-authored batch (the mirror sync seeding a linked project
+ * from its upstream's whole history) crosses on any Bible-sized project. 1,000
+ * rows is the same budget the import route uses: an order of magnitude under
+ * the ceiling, with SQL text that stays small.
+ */
+export const EVENT_INSERT_BULK_ROWS = 1000
+
+/** `buildBulkEventInsertStmt` for ANY number of rows: the same rows, in order,
+ *  split across as many bounded statements as it takes. Append them all to one
+ *  write — the rows land exactly as a single statement would have landed them. */
+export function buildBulkEventInsertStmts(db: AquillaDb, rows: SeqEventInsertRow[]): AquillaStatement[] {
+  if (rows.length === 0) throw new Error('buildBulkEventInsertStmts: empty rows')
+  const stmts: AquillaStatement[] = []
+  for (let i = 0; i < rows.length; i += EVENT_INSERT_BULK_ROWS) {
+    stmts.push(buildBulkEventInsertStmt(db, rows.slice(i, i + EVENT_INSERT_BULK_ROWS)))
+  }
+  return stmts
+}

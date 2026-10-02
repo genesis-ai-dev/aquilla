@@ -16,7 +16,10 @@
 //      upstream-deleted → tombstone mirror; else → content mirror.
 //   6. Batch all mirror events through the canonical events INSERT +
 //      buildEventProjectionStmts (front-door — same projection code the live
-//      HTTP path uses), respecting BATCH_LIMIT.
+//      HTTP path uses), respecting BATCH_LIMIT. No statement on this path may
+//      grow with the window (AQU-1543): the events INSERT and every per-cell
+//      lookup are split into bounded statements, because the first sync of a
+//      new link has the upstream's whole history in its window.
 //   7. Cursor = GREATEST(cursor, head); emit link.cursor.advance only when
 //      the fold produced at least one cell/file mirror.
 //
@@ -40,13 +43,57 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmt, buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 
 const BATCH_LIMIT = 100
 const MIRROR_AUTHOR = 'link-sync'
 const MIRROR_SCHEMA_VERSION = 1
+
+/**
+ * AQU-1543: cell keys per `(file_id, cell_id) IN (…)` lookup — 2 bound values
+ * each. Every such read in this module is keyed by the cells one sync window
+ * touched, and the first sync of a new link touches the upstream's every cell,
+ * so a single list grows with the upstream until postgres.js refuses the
+ * statement (65,534 bound values). Bounded chunks make the number of
+ * statements grow instead; 1,000 keys keeps each one small and its SQL text
+ * short, the same reasoning as the import route's rows-per-INSERT.
+ */
+const CELL_KEY_LOOKUP_ROWS = 1000
+
+interface CellKey {
+  fileId: string
+  cellId: string
+}
+
+/**
+ * Run one `(file_id, cell_id) IN (…)` read over ANY number of cell keys, as a
+ * series of bounded statements whose rows are concatenated.
+ *
+ * `sqlFor` receives the placeholder list for one chunk and returns the full
+ * statement; `leadingBinds` are the values bound before the keys (the project
+ * id, in every caller). Chunks cannot overlap, so no row is returned twice.
+ */
+async function selectByCellKeys<Row>(
+  db: AquillaDb,
+  cellKeys: readonly CellKey[],
+  leadingBinds: readonly unknown[],
+  sqlFor: (placeholders: string) => string,
+): Promise<Row[]> {
+  const rows: Row[] = []
+  for (let i = 0; i < cellKeys.length; i += CELL_KEY_LOOKUP_ROWS) {
+    const chunk = cellKeys.slice(i, i + CELL_KEY_LOOKUP_ROWS)
+    const binds: unknown[] = [...leadingBinds]
+    for (const k of chunk) binds.push(k.fileId, k.cellId)
+    const { results } = await db
+      .prepare(sqlFor(chunk.map(() => '(?, ?)').join(', ')))
+      .bind(...binds)
+      .all<Row>()
+    for (const r of results) rows.push(r)
+  }
+  return rows
+}
 
 /** Lane-relevant kinds for `consumes: 'source'` links (slice 1). Comments,
  *  audio attaches, back-translations, and validations never mirror — a probe
@@ -393,30 +440,28 @@ async function loadDelta(
     (v) => !cells.has(`${v.fileId}\0${v.cellId}`),
   )
   if (pending.length > 0) {
-    const placeholders = pending.map(() => '(?, ?)').join(', ')
-    const binds: unknown[] = [upstreamProjectId]
-    for (const v of pending) binds.push(v.fileId, v.cellId)
-    const { results: liveRows } = await db
-      .prepare(
+    const liveRows = await selectByCellKeys<{
+      file_id: string
+      cell_id: string
+      value: string | null
+      value_html: string | null
+      type: string | null
+      canonical_ref: string | null
+      anchor_cell_id: string | null
+      start_ms: number | string | null
+      end_ms: number | string | null
+      metadata: Record<string, unknown> | null
+    }>(
+      db,
+      pending,
+      [upstreamProjectId],
+      (placeholders) =>
         `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
                 start_ms, end_ms, metadata
            FROM cells
           WHERE project_id = ? AND side = 'source' AND target_lang = ''
             AND (file_id, cell_id) IN (${placeholders})`,
-      )
-      .bind(...binds)
-      .all<{
-        file_id: string
-        cell_id: string
-        value: string | null
-        value_html: string | null
-        type: string | null
-        canonical_ref: string | null
-        anchor_cell_id: string | null
-        start_ms: number | string | null
-        end_ms: number | string | null
-        metadata: Record<string, unknown> | null
-      }>()
+    )
     const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
     for (const v of pending) {
       const key = `${v.fileId}\0${v.cellId}`
@@ -586,17 +631,14 @@ async function loadUpstreamTargetCurrentState(
   cellKeys: readonly { fileId: string; cellId: string }[],
 ): Promise<Map<string, { eventId: string; value: string; valueHtml: string | null; validated: boolean }>> {
   const state = new Map<string, { eventId: string; value: string; valueHtml: string | null; validated: boolean }>()
-  if (cellKeys.length === 0) return state
-  const placeholders = cellKeys.map(() => '(?, ?)').join(', ')
-  const binds: unknown[] = [upstreamProjectId]
-  for (const k of cellKeys) binds.push(k.fileId, k.cellId)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{ file_id: string; cell_id: string; event_id: string; value: string; value_html: string | null; validated: number | boolean }>(
+    db,
+    cellKeys,
+    [upstreamProjectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, event_id, value, value_html, validated FROM cells
        WHERE project_id = ? AND side = 'target' AND target_lang = '' AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(...binds)
-    .all<{ file_id: string; cell_id: string; event_id: string; value: string; value_html: string | null; validated: number | boolean }>()
+  )
   for (const r of results) {
     state.set(`${r.file_id}\0${r.cell_id}`, {
       eventId: r.event_id,
@@ -638,31 +680,28 @@ async function loadUpstreamSourceStructure(
     cameraState: string | null
     metadata: Record<string, unknown> | null
   }>()
-  if (cellKeys.length === 0) return out
-  const placeholders = cellKeys.map(() => '(?, ?)').join(', ')
-  const binds: unknown[] = [upstreamProjectId]
-  for (const k of cellKeys) binds.push(k.fileId, k.cellId)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{
+    file_id: string
+    cell_id: string
+    type: string | null
+    canonical_ref: string | null
+    anchor_cell_id: string | null
+    start_ms: number | string | null
+    end_ms: number | string | null
+    sequence_index: number | string | null
+    transcription: string | null
+    camera_state: string | null
+    metadata: Record<string, unknown> | null
+  }>(
+    db,
+    cellKeys,
+    [upstreamProjectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, type, canonical_ref, anchor_cell_id, start_ms, end_ms,
               sequence_index, transcription, camera_state, metadata
        FROM cells
        WHERE project_id = ? AND side = 'source' AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      type: string | null
-      canonical_ref: string | null
-      anchor_cell_id: string | null
-      start_ms: number | string | null
-      end_ms: number | string | null
-      sequence_index: number | string | null
-      transcription: string | null
-      camera_state: string | null
-      metadata: Record<string, unknown> | null
-    }>()
+  )
   for (const r of results) {
     out.set(`${r.file_id}\0${r.cell_id}`, {
       type: r.type,
@@ -885,23 +924,20 @@ async function loadLocalMirrorState(
   cellKeys: readonly { fileId: string; cellId: string }[],
 ): Promise<Map<string, LocalMirrorState>> {
   const state = new Map<string, LocalMirrorState>()
-  if (cellKeys.length === 0) return state
-  const placeholders = cellKeys.map(() => '(?, ?)').join(', ')
-  const binds: unknown[] = [downstreamProjectId]
-  for (const k of cellKeys) binds.push(k.fileId, k.cellId)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{
+    file_id: string
+    cell_id: string
+    content_hash: string | null
+    upstream_seq: number | string | null
+    hidden_at: number | string | null
+  }>(
+    db,
+    cellKeys,
+    [downstreamProjectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, content_hash, upstream_seq, hidden_at FROM cells
        WHERE project_id = ? AND side = 'source' AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      content_hash: string | null
-      upstream_seq: number | string | null
-      hidden_at: number | string | null
-    }>()
+  )
   for (const r of results) {
     state.set(`${r.file_id}\0${r.cell_id}`, {
       contentHash: r.content_hash,
@@ -1210,7 +1246,12 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     persistedForProjection[i].serverSeq = baseSeq + i
   }
 
-  const allStmts: AquillaStatement[] = [buildBulkEventInsertStmt(db, eventRows)]
+  // AQU-1543: one mirror event per file and cell in the window, and the first
+  // sync of a new link has the upstream's whole history in its window. A single
+  // INSERT for all of them is what failed every sync of an upstream past ~5,460
+  // cells, so the rows go out in bounded statements instead — same rows, same
+  // order, same `ON CONFLICT (id) DO NOTHING` replay safety.
+  const allStmts: AquillaStatement[] = buildBulkEventInsertStmts(db, eventRows)
   for (const event of persistedForProjection) {
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
@@ -1250,7 +1291,7 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
 
   // Batch in BATCH_LIMIT-sized chunks (same convention as route.ts/rebuild.ts).
   for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
-    await db.batch(allStmts.slice(i, i + BATCH_LIMIT))
+    await runMirrorBatch(db, allStmts.slice(i, i + BATCH_LIMIT))
   }
 
   // Recompute file counters for touched files, set-based (rebuild.ts style —
@@ -1283,6 +1324,28 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     toSeq: head,
     skippedHashEqual,
   }
+}
+
+/**
+ * One atomic batch of mirror statements, pipelined where the executor can.
+ *
+ * AQU-1543: a sync writes one projection statement per mirrored cell, so a
+ * large upstream means thousands of them. `batch()` awaits them one at a time,
+ * a round trip or two each — the shim documents ~21 statements/s for that
+ * through Hyperdrive (see `batchPipelined` in db/shim/postgres.ts), at which
+ * rate a New Testament's worth of cells outlasts PENDING_ALLOC_TTL_MS, the
+ * bound every write batch is meant to finish inside. `batchPipelined` keeps
+ * the order and the all-or-nothing transaction of `batch()` and sends each
+ * batch in a handful of round trips; the import and migration writers make
+ * the same choice for the same reason. Executors without it (test doubles)
+ * fall back to `batch()`.
+ */
+async function runMirrorBatch(db: AquillaDb, stmts: AquillaStatement[]): Promise<void> {
+  if (db.batchPipelined) {
+    await db.batchPipelined(stmts)
+    return
+  }
+  await db.batch(stmts)
 }
 
 function pushMirrorEvent(

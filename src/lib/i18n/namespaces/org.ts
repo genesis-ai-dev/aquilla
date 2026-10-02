@@ -1275,6 +1275,8 @@ export const org = defineNamespace({
     "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
     // Role chip on guest-org rows in the switcher (not a ladder role).
     "org.switcher.guestRole": "Guest",
+    // Tag on the caller's own personal workspace row (pinned first; replaces the Owner role).
+    "org.switcher.personalWorkspace": "Personal",
     // Platform-admin chip on viaPlatformAdmin rows → org.orgSidebar.admin (identical text)
     // "All projects" → org.switcher.allProjects (identical text)
     // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)

@@ -8,8 +8,12 @@
 // saw that as duplicate files downstream.
 //
 // The target copy now records `meta.upstreamFileId` on first write and matches
-// on it thereafter, with the name lookup kept only as a fallback for rows
-// written before the marker existed.
+// on it thereafter.
+//
+// AQU-1547 then removed the name fallback entirely: a name cannot tell the copy
+// a link brought in from a file the project imported itself, and adopting the
+// latter overwrote real translated work. See
+// source-linking-detach-own-files.test.ts.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
@@ -94,11 +98,15 @@ describe("snapshotSourceFiles — stable upstream identity (AQU-1358)", () => {
     expect(c.get("up-lev")).toBe(a.get("up-lev"))
   })
 
-  it("adopts a legacy target row that predates the upstreamFileId marker", async () => {
+  it("AQU-1547: leaves an unmarked same-named row alone and copies to a new one", async () => {
     await seedProject(UPSTREAM, "Upstream")
     await seedProject(TARGET, "Target")
     await seedUpstreamFile("up-num", "Numbers")
-    // A target row as an older snapshot would have written it: no marker.
+    // An unmarked target row sharing the upstream file's name. This used to be
+    // ADOPTED — the name was read as "a legacy copy of this upstream file". It
+    // is just as likely to be the project's own import (AQU-1526 allows the
+    // collision outright), and overwriting that destroyed translated work, so
+    // identity is now required: no marker, no deterministic mirror id, no match.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO files (id, project_id, name, kind, event_id, created_at, updated_at, meta)
        VALUES ('legacy-num', ?, 'Numbers', 'codex', 'e-legacy', 1000, 1000, '{}')`,
@@ -112,10 +120,14 @@ describe("snapshotSourceFiles — stable upstream identity (AQU-1358)", () => {
       authorUsername: "tester",
     })
 
-    expect(map.get("up-num")).toBe("legacy-num") // adopted, not duplicated
+    expect(map.get("up-num")).not.toBe("legacy-num")
     const after = await targetFiles()
-    expect(after).toHaveLength(1)
-    expect(readUpstreamFileId(after[0]?.meta ?? null)).toBe("up-num") // now marked
+    expect(after).toHaveLength(2)
+    // The pre-existing row is untouched; the fresh copy carries the marker.
+    const legacy = after.find((f) => f.id === "legacy-num")
+    expect(readUpstreamFileId(legacy?.meta ?? null)).toBeNull()
+    const fresh = after.find((f) => f.id !== "legacy-num")
+    expect(readUpstreamFileId(fresh?.meta ?? null)).toBe("up-num")
   })
 })
 

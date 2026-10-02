@@ -310,6 +310,20 @@ export function deterministicDownstreamFileId(downstreamProjectId: string, upstr
   return deterministicUuid(`file\0${downstreamProjectId}\0${upstreamFileId}`)
 }
 
+/** `files.meta` as a plain object. TEXT column, so a malformed or non-object
+ *  legacy blob degrades to `{}` rather than throwing mid-sync and failing the
+ *  whole mirror batch over one bad row (AQU-1547). */
+function parseMetaObject(meta: string | null): Record<string, unknown> {
+  if (!meta) return {}
+  try {
+    const parsed = JSON.parse(meta) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
 /** Fold upstream lane events (server_seq > cursor) to latest-per-cell state,
  *  plus the set of new file ids seen. A seq window, not per-event work. */
 async function loadDelta(
@@ -1114,10 +1128,21 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
         downstreamProjectId,
         renamed ? `file:${f.id}:name:${contentHash(f.name)}` : `file:${f.id}`,
       )
+      // AQU-1547: stamp which upstream file this row mirrors. The upstream's
+      // own meta is passed through verbatim (language/orderedBy etc.), which
+      // left mirrored rows with no record of their provenance — so a later
+      // detach snapshot could only find "the project's copy" by display name,
+      // and a name cannot tell a mirrored copy from a file the project
+      // imported itself. `upstreamFileId` is written LAST so an inherited
+      // value (the upstream itself being a clone) cannot shadow the real one.
+      // Matches the key auth-worker's `withUpstreamFileId` writes on clone
+      // copies; auth-worker's `deterministicDownstreamFileId` still covers
+      // rows mirrored before this stamp existed.
+      const upstreamMeta = parseMetaObject(f.meta)
       const payload: EventPayloads['file.mirror'] = {
         fileId: downstreamFileId,
         name: f.name,
-        meta: f.meta ? (JSON.parse(f.meta) as Record<string, unknown>) : undefined,
+        meta: { ...upstreamMeta, upstreamFileId: f.id },
         upstream: { projectId: upstreamProjectId, eventId: f.id, seq: head },
       }
       eventRows.push({

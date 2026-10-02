@@ -317,6 +317,19 @@ UI chrome that used to be one smoke file per click is covered under
   and the dialog's per-format note, and
   `sync-worker/src/__tests__/usfm-export-plan.test.ts` for the server-side USFM
   plan against real Postgres.
+- Upstream curation reaches a linked project (AQU-1453, AQU-1546). A hide or a
+  show on an upstream source cell travels down every live link, and it is a
+  server contract end to end — the fold, the mirror payload and the projection —
+  with no UI of its own in the consuming project (a linked project does not offer
+  hide/show on mirrored source cells). So the coverage stays where the failure is:
+  `sync-worker/src/__tests__/link-sync-visibility.test.ts` against real Postgres.
+  AQU-1546 adds the two orders of events that lost the state while the
+  hide-last order worked — hide then edit, on a first sync and on an established
+  link — and a three-project `A → B → C` chain, where the middle project's hidden
+  cells were never hidden by anyone in it and the state exists only on the
+  `source.cell.mirror` events it received. No smoke: the downstream rows are
+  already there, nothing is lost, and a regression offers work the upstream
+  parked rather than destroying it.
 - In-app feedback (AQU-1028): the shell's Feedback button opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 - A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 

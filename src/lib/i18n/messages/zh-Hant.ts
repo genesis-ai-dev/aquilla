@@ -135,7 +135,7 @@ export const zh_Hant: Catalog = {
   "nav.help.docs": "說明文件",
   "nav.help.discord": "Discord 伺服器",
   "nav.help.contactSupport": "聯絡支援團隊",
-  "nav.help.report": "回報",
+  "nav.feedback.buttonLabel": "意見回饋",
   "nav.dock.filesTab": "檔案",
   "nav.dock.agentTab": "代理程式",
   "nav.dock.agentUnread": "{count} 則未讀",

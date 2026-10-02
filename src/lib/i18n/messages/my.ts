@@ -135,7 +135,7 @@ export const my: Catalog = {
   "nav.help.docs": "အကူအညီ",
   "nav.help.discord": "Discord ဆာဗာ",
   "nav.help.contactSupport": "အကူအညီအဖွဲ့ကို ဆက်သွယ်ရန်",
-  "nav.help.report": "တိုင်ကြားရန်",
+  "nav.feedback.buttonLabel": "အကြံပြုချက်",
   "nav.dock.filesTab": "ဖိုင်များ",
   "nav.dock.agentTab": "အေးဂျင့်",
   "nav.dock.agentUnread": "မဖတ်ရသေး {count} ခု",

@@ -152,7 +152,7 @@ export const ms: Catalog = {
   "nav.help.docs": "Bantuan",
   "nav.help.discord": "Pelayan Discord",
   "nav.help.contactSupport": "Hubungi sokongan",
-  "nav.help.report": "Lapor",
+  "nav.feedback.buttonLabel": "Maklum balas",
   "nav.dock.filesTab": "Senarai fail",
   "nav.dock.agentTab": "Ejen",
   "nav.dock.agentUnread": "{count} belum dibaca",

@@ -155,7 +155,7 @@ export const id: Catalog = {
   "nav.help.docs": "Bantuan",
   "nav.help.discord": "Server Discord",
   "nav.help.contactSupport": "Hubungi dukungan",
-  "nav.help.report": "Laporkan",
+  "nav.feedback.buttonLabel": "Masukan",
   "nav.dock.filesTab": "File",
   "nav.dock.agentTab": "Agen",
   "nav.dock.agentUnread": "{count} belum dibaca",

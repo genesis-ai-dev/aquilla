@@ -137,7 +137,7 @@ export const ru: Catalog = {
   "nav.help.docs": "Справка",
   "nav.help.discord": "Сервер Discord",
   "nav.help.contactSupport": "Связаться с поддержкой",
-  "nav.help.report": "Сообщить о проблеме",
+  "nav.feedback.buttonLabel": "Отзыв",
   "nav.dock.filesTab": "Файлы",
   "nav.dock.agentTab": "Агент",
   "nav.dock.agentUnread": "{count} непрочитанных",

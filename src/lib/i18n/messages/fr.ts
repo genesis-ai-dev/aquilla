@@ -132,7 +132,7 @@ export const fr: Catalog = {
   "nav.help.docs": "Aide",
   "nav.help.discord": "Serveur Discord",
   "nav.help.contactSupport": "Contacter le support",
-  "nav.help.report": "Signaler",
+  "nav.feedback.buttonLabel": "Avis",
   "nav.dock.filesTab": "Fichiers",
   "nav.dock.agentUnread": "{count} non lu(s)",
   "nav.dock.expandSidebar": "Développer la barre latérale",

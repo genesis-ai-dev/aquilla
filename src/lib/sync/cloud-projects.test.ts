@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
+  createCloudProject,
   fetchAccessibleProjects,
   fetchOrgDeletedFiles,
   listProjectsPage,
@@ -11,6 +12,7 @@ import {
   type CloudProjectSummary,
 } from "./cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
+import { clearElevationRequired, isElevationRequired } from "@/lib/errors/elevation-required-signal"
 
 const API = "https://api.example.test"
 const originalFetch = global.fetch
@@ -462,5 +464,26 @@ describe("fetchOrgDeletedFiles", () => {
   it("returns [] when the request fails", async () => {
     global.fetch = mockFetch(403, { error: "not an org member" }) as unknown as typeof fetch
     await expect(fetchOrgDeletedFiles("jwt", 7, API)).resolves.toEqual([])
+  })
+})
+
+// AQU-1540: create into an org the admin doesn't belong to raises the step-up prompt.
+describe("createCloudProject on an elevation-required 403", () => {
+  afterEach(() => {
+    global.fetch = originalFetch
+    clearElevationRequired()
+  })
+
+  it("throws a UserError and raises the step-up signal", async () => {
+    global.fetch = mockFetch(403, { error: "elevation required to create a project in an org with platform-admin access" }) as unknown as typeof fetch
+    const err = await createCloudProject("jwt", { id: "p", name: "P", orgId: 1 }, API).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UserError)
+    expect(isElevationRequired()).toBe(true)
+  })
+
+  it("an ordinary 403 still throws without the step-up signal", async () => {
+    global.fetch = mockFetch(403, { error: "org role >= maintainer required" }) as unknown as typeof fetch
+    await expect(createCloudProject("jwt", { id: "p", name: "P", orgId: 1 }, API)).rejects.toBeInstanceOf(UserError)
+    expect(isElevationRequired()).toBe(false)
   })
 })

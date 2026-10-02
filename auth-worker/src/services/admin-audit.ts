@@ -16,6 +16,7 @@
 //   org.invite.create | org.invite.revoke
 //   project.invite.create | project.invite.revoke
 //   project.access_link.create | project.access_link.revoke
+//   project.create (org scope; projectId names the new project, AQU-1540)
 //
 // Invites have no user target: the row records the invite's role and email,
 // never its token. Access links target the bound user and never log the token
@@ -52,6 +53,7 @@ export type MembershipAuditAction =
   | "project.invite.revoke"
   | "project.access_link.create"
   | "project.access_link.revoke"
+  | "project.create"
 
 type MembershipScope =
   | { scope: "org"; orgId: number }

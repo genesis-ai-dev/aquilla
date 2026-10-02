@@ -148,8 +148,9 @@ routes = ["api.aquilla.app/sync/*"]
 [env.production.build]
 command = "bash ../scripts/verify-deploy-branch.sh release"
 
-# Observability is NOT inherited from the top-level block by named envs —
-# without this, production has Workers Logs disabled and 4xx/5xx are invisible.
+# Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
+# named envs, and `versions deploy` syncs the resolved value. It is declared per
+# env anyway so a top-level edit can't change what production logs.
 [env.production.observability]
 enabled = true
 
@@ -223,6 +224,11 @@ name = "EMAIL"
 name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
+
+# See [env.production.observability] — declared per env so a top-level edit
+# can't change what dev logs.
+[env.development.observability]
+enabled = true
 
 [env.development.version_metadata]
 binding = "CF_VERSION_METADATA"

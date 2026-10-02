@@ -324,6 +324,137 @@ describe('cell.validate — allowSelfValidation=false enforcement', () => {
   })
 })
 
+// ── AQU-1571: the self-validation check against a hostile client ──────────
+//
+// Three ways past FRO-189's check, each proven before it was closed: an edit
+// and its own vote in ONE request (the last editor is read before the batch),
+// a vote cast on an edit id before committing under it (event ids are the
+// client's to choose), and a cell translated in two lanes (the last editor
+// was read per cell, so one lane was judged by the other's editor).
+
+function makeCommitEvent(
+  id: string, author: string, value: string, targetLang?: string,
+): RawEvent<'target.cell.commit'> {
+  return {
+    id, schemaVersion: 1, kind: 'target.cell.commit',
+    projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1',
+    parentId: 'evt-cell-v-seed', author,
+    payload: { value, ...(targetLang ? { targetLang } : {}) },
+    clientTs: 150,
+  }
+}
+
+function makeValidateOf(
+  id: string, author: string, editEventId: string, targetLang?: string,
+): RawEvent<'cell.validate'> {
+  return {
+    ...makeValidateEvent(id, author),
+    parentId: null,
+    payload: { editEventId, ...(targetLang ? { targetLang } : {}) },
+  }
+}
+
+async function targetRow(db: AquillaDb, lane = '') {
+  return db
+    .prepare(
+      `SELECT event_id, last_editor, validated FROM cells
+        WHERE project_id = 'proj-v' AND cell_id = 'cell-v1' AND side = 'target' AND target_lang = ?`,
+    )
+    .bind(lane)
+    .first<{ event_id: string; last_editor: string; validated: number }>()
+}
+
+describe('cell.validate — self-validation against a hostile client (AQU-1571)', () => {
+  it('refuses a vote on an edit made in the SAME request', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidation: false })
+
+    const res = await handleEventsWriteRequest(
+      await makeRequest(
+        [makeCommitEvent('evt-bob-edit', 'bob', 'bob text'), makeValidateOf('evt-bob-vote', 'bob', 'evt-bob-edit')],
+        await makeToken(400, 'bob'),
+      ),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    expect(body.accepted.map((a: { id: string }) => a.id)).toEqual(['evt-bob-edit'])
+    expect(body.rejected).toEqual([
+      { id: 'evt-bob-vote', status: 403, reason: 'self-validation is not allowed on this project' },
+    ])
+    expect((await targetRow(db))?.validated).toBe(0)
+  })
+
+  it('refuses a vote on an edit the server has never seen, so it cannot count when committed later', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidation: false, validationCount: 2 })
+
+    const early = await post(db, makeValidateOf('evt-pre-vote', 'bob', 'evt-future-edit'), await makeToken(400, 'bob'))
+    expect(early.rejected).toEqual([
+      {
+        id: 'evt-pre-vote',
+        status: 403,
+        reason: 'validating an edit before it is saved is not allowed on this project',
+      },
+    ])
+
+    // Before AQU-1571 bob's early vote sat pinned to this id, and carol's vote
+    // recounted it: two validators, one of them the author.
+    await postEvent(db, makeCommitEvent('evt-future-edit', 'bob', 'bob text'), await makeToken(400, 'bob'))
+    await postEvent(db, makeValidateOf('evt-carol-vote', 'carol', 'evt-future-edit'), await makeToken(300, 'carol'))
+    expect((await targetRow(db))?.validated).toBe(0)
+  })
+
+  it('judges the lane being validated by THAT lane’s editor', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidation: false })
+    await postEvent(db, makeCommitEvent('evt-bob-es', 'bob', 'hola', 'es'), await makeToken(400, 'bob'))
+
+    const bobToken = await makeToken(400, 'bob')
+    // alice's default-lane work: bob is somebody else there.
+    const other = await post(db, makeValidateOf('evt-vote-default', 'bob', 'evt-cell-v-seed'), bobToken)
+    expect(other.rejected).toEqual([])
+    // bob's own Spanish: refused.
+    const own = await post(db, makeValidateOf('evt-vote-es', 'bob', 'evt-bob-es', 'es'), bobToken)
+    expect(own.rejected).toEqual([
+      { id: 'evt-vote-es', status: 403, reason: 'self-validation is not allowed on this project' },
+    ])
+  })
+
+  // The "seen" test must not refuse the ordinary case on data that predates
+  // the event log: a head the projection holds is an edit the server knows,
+  // whether or not its event row exists.
+  it('still accepts a vote on the current head when its event row is missing', async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: 'file-v', project_id: 'proj-v', name: 'F', event_id: 'evt-file-legacy' }],
+      cells: [
+        {
+          project_id: 'proj-v', file_id: 'file-v', cell_id: 'cell-v1', side: 'target',
+          value: 'legacy text', event_id: 'evt-legacy-head', last_editor: 'alice', last_edit_at: 1,
+        },
+      ],
+    })
+    await setProjectSettings(db, { allowSelfValidation: false })
+
+    const body = await post(db, makeValidateOf('evt-vote-legacy', 'bob', 'evt-legacy-head'), await makeToken(300, 'bob'))
+    expect(body.rejected).toEqual([])
+    expect((await targetRow(db))?.validated).toBe(1)
+  })
+
+  it('still lets somebody else validate an edit that has just landed', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidation: false })
+    await postEvent(db, makeCommitEvent('evt-bob-edit2', 'bob', 'bob text'), await makeToken(400, 'bob'))
+
+    const body = await post(db, makeValidateOf('evt-carol-vote2', 'carol', 'evt-bob-edit2'), await makeToken(300, 'carol'))
+    expect(body.rejected).toEqual([])
+    expect((await targetRow(db))?.validated).toBe(1)
+  })
+})
+
 // ── Combined settings ─────────────────────────────────────────────────────
 
 describe('cell.validate — combined settings', () => {

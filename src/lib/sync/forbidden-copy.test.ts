@@ -42,6 +42,11 @@ describe("forbiddenReasonCopy", () => {
       /self-validation was off for this project at the time/i,
     )
   })
+  it("maps a vote on an unsaved edit (AQU-1571)", () => {
+    expect(forbiddenReasonCopy("validating an edit before it is saved is not allowed on this project")).toBe(
+      "the translation hadn't been saved yet, so who wrote it couldn't be checked",
+    )
+  })
   it("maps a role-floor refusal", () => {
     expect(forbiddenReasonCopy("role too low to validate (project requires project_lead or above)")).toMatch(
       /role wasn't allowed to validate/i,

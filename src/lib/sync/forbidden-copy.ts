@@ -5,7 +5,8 @@
 //     scope for …`, `file '…' not in scope for …`, `role too low for …`
 //   - sync-worker/src/events/route.ts (FRO-189): `role too low to validate …`,
 //     `user '…' is not in the project's validator allowlist`,
-//     `self-validation is not allowed on this project`
+//     `self-validation is not allowed on this project`,
+//     `validating an edit before it is saved is not allowed …` (AQU-1571)
 //   - sync-worker/src/events/route.ts (AQU-490 / AQU-1571, recordings):
 //     `role too low to validate audio …`, `… audio validator allowlist`,
 //     `validating your own recording is not allowed on this project`,
@@ -34,6 +35,9 @@ export function forbiddenReasonCopy(reason: string): string {
   }
   if (r.includes("self-validation is not allowed")) {
     return "validating your own translation wasn't allowed (self-validation was off for this project at the time)"
+  }
+  if (r.includes("edit before it is saved")) {
+    return "the translation hadn't been saved yet, so who wrote it couldn't be checked"
   }
   // AQU-1571: the recording refusals used to reach the banner as the raw,
   // present-tense server string. They say "recording" because the translation

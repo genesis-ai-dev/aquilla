@@ -510,6 +510,11 @@ async function prefetchCommentAuthors(
   return authors
 }
 
+/** A target cell in one lane — `cellKeyOf` plus the lane's tag ('' = default). */
+function laneCellKeyOf(projectId: string, fileId: string, cellId: string, lane: string): string {
+  return `${cellKeyOf(projectId, fileId, cellId)}\0${lane}`
+}
+
 /**
  * `last_editor` of each target cell in `cells`, in ONE SELECT. Backs the
  * FRO-189 self-validation check (cell.validate with allowSelfValidation
@@ -517,13 +522,21 @@ async function prefetchCommentAuthors(
  * cell.validate candidate regardless of the project's allowSelfValidation
  * setting — a superset read is cheap and the setting isn't known until the
  * per-event loop reads readProjectSettings (memoized separately).
+ *
+ * AQU-1571: keyed per LANE. Every lane is its own target row, and keying by
+ * cell alone kept whichever row the database returned last — so on a cell
+ * translated in two lanes, validating one lane was judged against the other
+ * lane's editor: a reviewer refused for somebody else's work, or let through
+ * on their own, depending on row order. `heads` is every target head of these
+ * cells, which the check treats as an edit the server knows.
  */
 async function prefetchLastEditors(
   db: AquillaDb,
   cells: readonly CellKey[],
-): Promise<Map<string, string | null>> {
+): Promise<{ editors: Map<string, string | null>; heads: Set<string> }> {
   const editors = new Map<string, string | null>()
-  if (cells.length === 0) return editors
+  const heads = new Set<string>()
+  if (cells.length === 0) return { editors, heads }
 
   const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
   const binds: unknown[] = []
@@ -531,16 +544,20 @@ async function prefetchLastEditors(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, last_editor FROM cells
+      `SELECT project_id, file_id, cell_id, target_lang, event_id, last_editor FROM cells
        WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
-    .all<{ project_id: string; file_id: string; cell_id: string; last_editor: string | null }>()
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      target_lang: string | null; event_id: string | null; last_editor: string | null
+    }>()
 
   for (const r of results) {
-    editors.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.last_editor)
+    editors.set(laneCellKeyOf(r.project_id, r.file_id, r.cell_id, r.target_lang ?? ''), r.last_editor)
+    if (r.event_id) heads.add(r.event_id)
   }
-  return editors
+  return { editors, heads }
 }
 
 interface TakeKey extends CellKey {
@@ -771,6 +788,8 @@ export async function handleEventsWriteRequest(
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
+  /** The edits this request's cell.validate events name (AQU-1571). */
+  const validateEditIds = new Set<string>()
   const validateTakes = new Map<string, TakeKey>()
   /** Takes this request attaches (see the cell.audio.attach note below). */
   const batchAttachedTakes = new Set<string>()
@@ -813,6 +832,8 @@ export async function handleEventsWriteRequest(
     // setting, which isn't known until the per-event loop below.
     if (e.kind === 'cell.validate') {
       validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+      const editEventId = (e.payload as { editEventId?: unknown } | undefined)?.editEventId
+      if (typeof editEventId === 'string' && editEventId) validateEditIds.add(editEventId)
     }
     // AQU-490: the audio twin (see prefetchTakeRecorders), gathered on the
     // same terms — before the project's allowSelfValidationAudio setting is
@@ -849,8 +870,8 @@ export async function handleEventsWriteRequest(
     }
   }
   const [
-    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors,
-    takeRecorders,
+    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, validateTargets,
+    takeRecorders, knownEditIds,
   ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
@@ -859,6 +880,7 @@ export async function handleEventsWriteRequest(
       prefetchCommentAuthors(db, foreignComments),
       prefetchLastEditors(db, [...validateCells.values()]),
       prefetchTakeRecorders(db, [...validateTakes.values()]),
+      readExistingEventIds(db, validateEditIds),
     ])
 
   // PERF-2: project_settings is read at most once per (request, project) —
@@ -1261,6 +1283,8 @@ export async function handleEventsWriteRequest(
     //   1. validationRoleFloor — reject if caller's role < configured floor
     //   2. validationNamedUsers — reject if caller is not in the allowlist
     //   3. allowSelfValidation=false — reject if caller is the cell's last editor
+    //      in the validated lane, or made the edit in this same request; and
+    //      reject a vote on an edit the server has never seen (AQU-1571)
     //   4. (FRO-279) validationCount — read for the projection's threshold recompute
     // For cell.unvalidate events:
     //   The FRO-189 role/named/self checks do NOT apply (unvalidation is always
@@ -1326,10 +1350,41 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const lastEditor = lastEditors.get(
-            cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+          const p = rawEvent.payload as { editEventId?: unknown; targetLang?: unknown } | undefined
+          const lane = typeof p?.targetLang === 'string' ? p.targetLang : ''
+          const editEventId = typeof p?.editEventId === 'string' ? p.editEventId : undefined
+          // AQU-1571: the last editor was read BEFORE this request, so an edit
+          // made in the same request as its own vote went unseen — commit and
+          // validate in one post and the gate compared against the previous
+          // editor. Every event in one request is authorized against the same
+          // bearer token, so an edit this request introduces is the caller's.
+          // (An id already stored is a retry, and its row says who made it.)
+          const editedHere =
+            editEventId !== undefined && candidateIds.has(editEventId) && !existingIds.has(editEventId)
+          // AQU-1571: and a vote is stored pinned to its edit id whether or
+          // not that edit exists, while event ids are the client's to choose.
+          // Voting on an id first and committing under it afterwards made the
+          // vote count for its own author. The edit must be one the server has
+          // seen — any stored event, or a target head the projection holds
+          // (data older than the event log has heads without rows) — or one
+          // this request makes. A malformed payload is left to the handler.
+          if (
+            editEventId !== undefined &&
+            !editedHere &&
+            !knownEditIds.has(editEventId) &&
+            !validateTargets.heads.has(editEventId)
+          ) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `validating an edit before it is saved is not allowed on this project`,
+            })
+            continue
+          }
+          const lastEditor = validateTargets.editors.get(
+            laneCellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, lane),
           )
-          if (lastEditor === callerUsername) {
+          if (editedHere || lastEditor === callerUsername) {
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,

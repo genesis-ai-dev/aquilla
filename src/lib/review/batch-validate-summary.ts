@@ -369,8 +369,16 @@ export function batchValidateConfirmDescription(
     typeof cap === "number" && cap > 0
       ? t("nav.workspaceActions.batchValidate.capNote", { cap })
       : ""
+  // Untouched AI drafts reach the run only when the org allows them in bulk,
+  // and then "human-authored or human-edited" would misdescribe them.
+  const includesDrafts = summary.validatable.some((cell) => cell.aiDrafted === true)
   return (
-    t("nav.workspaceActions.batchValidate.willValidate", { count: summary.validatable.length })
+    t(
+      includesDrafts
+        ? "nav.workspaceActions.batchValidate.willValidateWithDrafts"
+        : "nav.workspaceActions.batchValidate.willValidate",
+      { count: summary.validatable.length },
+    )
     + skippedClause
     + capNote
   )

@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest"
 import {
   BATCH_VALIDATE_SKIP_REASONS,
+  batchValidateConfirmDescription,
   batchValidateSkipClauses,
   batchValidateSkipReason,
   batchValidateToast,
@@ -257,6 +258,16 @@ describe("summarizeBatchValidate — when the org allows AI drafts in bulk", () 
     expect(on.skips.aiDraft).toBe(0)
     expect(on.skips.needsTranslation).toBe(1)
     expect(on.outcome).toBe("partial")
+  })
+
+  it("does not call the drafts it will sign off human-authored", () => {
+    const cells = [cell({ id: "a", aiDrafted: true }), cell({ id: "b" })]
+    const on = batchValidateConfirmDescription(summarizeBatchValidate(cells, { ...base, allowAiDrafts: true }), t, joinList)
+    expect(on).toContain("nav.workspaceActions.batchValidate.willValidateWithDrafts")
+    // Without a draft in the run, the usual wording stands.
+    const humanOnly = batchValidateConfirmDescription(summarizeBatchValidate([cell({ id: "b" })], { ...base, allowAiDrafts: true }), t, joinList)
+    expect(humanOnly).toContain("nav.workspaceActions.batchValidate.willValidate")
+    expect(humanOnly).not.toContain("WithDrafts")
   })
 
   it("still names a draft this user already signed off as theirs", () => {

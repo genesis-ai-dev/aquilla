@@ -3,6 +3,8 @@ import {
   archiveProjectRemote,
   unarchiveProjectRemote,
   fetchProjectState,
+  runLinkSync,
+  triggerLinkSync,
 } from "./archive"
 
 const API = "https://api.example"
@@ -136,5 +138,88 @@ describe("fetchProjectState", () => {
       async () => new Response("no", { status: 404 })
     ) as typeof fetch
     expect(await fetchProjectState("p1", "jwt", API)).toBeNull()
+  })
+})
+
+// AQU-1544: the client-side mirror-sync trigger. Its answer is what decides
+// whether a link flow reports success or says the source files have not
+// arrived, so the three ways it can come back are pinned here — against the
+// real response shape the sync-worker's /link/sync route sends
+// (`{ projectId, ranSync, cellsMirrored, … }`), not a hand-made boolean.
+describe("runLinkSync / triggerLinkSync", () => {
+  const originalFetch = globalThis.fetch
+  afterEach(() => { globalThis.fetch = originalFetch })
+
+  /** sync-token mint succeeds; the /link/sync call answers `syncResponse`. */
+  function stubFetch(syncResponse: () => Response | Promise<Response>) {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.endsWith("/api/v2/sync-token")) {
+        return new Response(JSON.stringify({ token: "sync-tok" }), { status: 200 })
+      }
+      return syncResponse()
+    }) as typeof fetch
+    return calls
+  }
+
+  it("reports content arriving when the sync ran", async () => {
+    const calls = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            projectId: "p1", ranSync: true, cellsMirrored: 5543, filesMirrored: 3,
+            fromSeq: 0, toSeq: 11102, skippedHashEqual: 0,
+          }),
+          { status: 200 },
+        ),
+    )
+
+    expect(await runLinkSync("jwt", "p1", API)).toEqual({ ok: true, ranSync: true })
+    expect(await triggerLinkSync("jwt", "p1", API)).toBe(true)
+    // Project-scoped token, then the sync itself with THAT token.
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ projectId: "p1", fileId: "__project__" })
+    expect(calls[1]!.url).toMatch(/\/api\/v1\/projects\/p1\/link\/sync$/)
+    expect((calls[1]!.init?.headers as Record<string, string>).Authorization).toBe("Bearer sync-tok")
+  })
+
+  it("reports a sync that worked but had nothing to bring (empty upstream) as ok, not ran", async () => {
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            projectId: "p1", ranSync: false, cellsMirrored: 0, filesMirrored: 0,
+            fromSeq: 0, toSeq: 0, skippedHashEqual: 0,
+          }),
+          { status: 200 },
+        ),
+    )
+
+    expect(await runLinkSync("jwt", "p1", API)).toEqual({ ok: true, ranSync: false })
+    expect(await triggerLinkSync("jwt", "p1", API)).toBe(true)
+  })
+
+  // The exact failure AQU-1544 was found through: the route answers 502 with a
+  // plain-text body when the mirror sync throws.
+  it("reports failure on a 502 from the sync service", async () => {
+    stubFetch(() => new Response("link sync failed: mirror sync failed", { status: 502 }))
+
+    expect(await runLinkSync("jwt", "p1", API)).toEqual({ ok: false })
+    expect(await triggerLinkSync("jwt", "p1", API)).toBe(false)
+  })
+
+  it("reports failure, without throwing, when the sync service is unreachable", async () => {
+    stubFetch(() => {
+      throw new TypeError("Failed to fetch")
+    })
+
+    expect(await runLinkSync("jwt", "p1", API)).toEqual({ ok: false })
+  })
+
+  it("reports failure when the sync token cannot be minted", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("forbidden", { status: 403 })) as typeof fetch
+
+    expect(await runLinkSync("jwt", "p1", API)).toEqual({ ok: false })
   })
 })

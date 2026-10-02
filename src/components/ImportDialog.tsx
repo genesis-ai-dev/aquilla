@@ -187,7 +187,9 @@ interface ImportDialogProps {
    * project_lead(500). `alreadyLinked` is true once the project has an upstream:
    * a project has one at a time, so the tile is shown disabled rather than
    * leading to a flow that would be refused. `onLinked` lets the host refresh
-   * the project record; the dialog closes itself.
+   * the project record; the dialog closes itself — except when the link was
+   * saved but its files did not arrive (AQU-1544), where the host is refreshed
+   * and the dialog stays open on the retry.
    */
   linkSource?: {
     roleLevel: number | null
@@ -558,18 +560,26 @@ export function ImportDialog({
             diverge between the two entry points. */}
         {screen === "linkProject" && linkSource && (
           <div className="space-y-3 py-1">
-            <p className="text-sm text-muted-foreground">
-              {t("projectSettings.linkSource.description")}
-            </p>
             <LinkSourceFlow
               projectId={projectId}
               roleLevel={linkSource.roleLevel}
+              intro={
+                <p className="text-sm text-muted-foreground">
+                  {t("projectSettings.linkSource.description")}
+                </p>
+              }
               onLinked={() => {
                 // Refresh first, close second: the file list the user is sent
                 // back to is the thing that must already know about the link.
                 linkSource.onLinked()
                 onOpenChange(false)
               }}
+              // AQU-1544: the link is saved but its files did not arrive. The
+              // host still has to learn the project is linked (or this tile
+              // would offer to link it again), but the dialog stays open on
+              // the flow's "try again" — closing here is the silent success
+              // this slice removes.
+              onLinkSavedWithoutFiles={() => linkSource.onLinked()}
             />
           </div>
         )}

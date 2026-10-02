@@ -1764,6 +1764,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             sourceLinkGate={project.sourceLinkGate}
             sourceLinkCursor={project.sourceLinkCursor}
             onDetached={refresh}
+            onSynced={refresh}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}

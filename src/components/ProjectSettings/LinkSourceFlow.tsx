@@ -54,14 +54,24 @@
 // that first says what the link will bring in: the upstream's name, how many
 // files arrive, and any upstream file whose name collides with one already here.
 // The warning does not block; confirming still links.
+//
+// AQU-1544: saving the link and bringing the files in are two steps, and only
+// the first is the link request. When the server reports its seed did not run
+// the flow retries once itself; until this slice it then ignored whether that
+// retry worked and reported success either way, so a failed first sync closed
+// the Import dialog and flipped the settings card exactly as a good one does.
+// Now a failed retry is its own end state: the flow shows that the link is
+// saved, that the files have not arrived, and a "Try again" — and `onLinked`
+// does not fire until the files are actually in.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
+import { LinkSeedFailedNotice } from "@/components/LinkSeedFailedNotice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { ROLE } from "@/lib/frontier/roles"
@@ -70,6 +80,7 @@ import {
   loadLinkSourcePreview,
   type LinkSourcePreview,
 } from "@/lib/sync/link-source-preview"
+import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -83,13 +94,38 @@ type LinkConsumes = "" | "source" | "target"
 
 export interface LinkSourceFlowProps {
   projectId: string
-  /** Called after a successful link so the host can refresh the project record. */
+  /**
+   * Called once the link is saved AND the upstream's files are in, so the host
+   * can refresh the project record. AQU-1544: not called while the first sync
+   * is still failing — the flow keeps the screen and offers a retry instead.
+   */
   onLinked: () => void
+  /**
+   * AQU-1544: the link is saved but its first sync failed. For a host that
+   * outlives the flow and tracks whether the project is linked (the workspace
+   * behind the Import dialog), so it stops offering to link a project that
+   * already is. The flow is NOT finished — do not close on this.
+   */
+  onLinkSavedWithoutFiles?: () => void
+  /**
+   * The host's "why you would link" sentence, shown above every step that
+   * still offers to link. It is passed in rather than rendered by the host so
+   * the flow can drop it once the link is saved (AQU-1544): "this project owns
+   * its own source — link it" directly above "the link was saved" contradicts
+   * itself.
+   */
+  intro?: ReactNode
   /** The caller's resolved role level on this project. */
   roleLevel: number | null
 }
 
-export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlowProps) {
+export function LinkSourceFlow({
+  projectId,
+  onLinked,
+  onLinkSavedWithoutFiles,
+  intro,
+  roleLevel,
+}: LinkSourceFlowProps) {
   const t = useT()
   const { session } = useFrontierSession()
   // project_lead is the floor the link route enforces, so it is also what
@@ -111,6 +147,11 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
   const [consumes, setConsumes] = useState<LinkConsumes>("")
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // AQU-1544: the link request succeeded but neither the server's seed nor
+  // this flow's own retry brought the files in. Terminal for the picker — the
+  // project is linked now, so offering to pick again would be wrong — and
+  // cleared only by a retry that works.
+  const [seedFailed, setSeedFailed] = useState(false)
 
   // AQU-1526: the id under review in the confirm step. Separate from `chosen`
   // so backing out of the confirm step returns to the picker with the pick
@@ -187,11 +228,22 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
       // AQU-476/QA-BUG-1: the server seeds inside the same call; `false` means
       // that trigger did not run, so self-heal before the user sees an empty
       // file list. Same fallback ProjectCreateDialog does.
-      if (result.seeded === false) await triggerLinkSync(jwt, projectId)
+      // AQU-1544: and when the self-heal fails too, say so. The link is saved
+      // server-side at this point, so this is not the catch below's "still
+      // unlinked, pick again" — it is "linked, files missing, try again".
+      const seeded = result.seeded !== false || (await triggerLinkSync(jwt, projectId))
       setChosen("")
       setConsumes("")
       setReviewing(null)
       setPreview(null)
+      if (!seeded) {
+        // Parked for the page behind this flow too: an Import dialog dismissed
+        // from here must not leave the workspace looking healthy.
+        markLinkSeedFailed(projectId)
+        setSeedFailed(true)
+        onLinkSavedWithoutFiles?.()
+        return
+      }
       onLinked()
     } catch (err) {
       const facing = toUserFacingError(err, "project")
@@ -211,9 +263,25 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
 
   if (!canLink) {
     return (
-      <p className="text-xs text-muted-foreground">
-        {t("projectSettings.linkSource.roleGateNote")}
-      </p>
+      <>
+        {intro}
+        <p className="text-xs text-muted-foreground">
+          {t("projectSettings.linkSource.roleGateNote")}
+        </p>
+      </>
+    )
+  }
+
+  if (seedFailed) {
+    // ── AQU-1544: linked, but the upstream's files are not here ──
+    return (
+      <LinkSeedFailedNotice
+        projectId={projectId}
+        onSynced={() => {
+          setSeedFailed(false)
+          onLinked()
+        }}
+      />
     )
   }
 
@@ -221,6 +289,7 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
     // ── AQU-1526 confirm step: what the link will add, before it does ──
     return (
       <>
+        {intro}
         <p className="text-sm font-medium">
           {t("projectSettings.linkSource.previewTitle", {
             upstream: preview?.upstreamName || reviewingName,
@@ -326,6 +395,7 @@ export function LinkSourceFlow({ projectId, onLinked, roleLevel }: LinkSourceFlo
 
   return (
     <>
+      {intro}
       <Field>
         <FieldLabel htmlFor="link-source-project">
           {t("projectSettings.linkSource.pickerLabel")}

@@ -252,6 +252,21 @@ UI chrome that used to be one smoke file per click is covered under
   disabled with their reason. The cross-layer walk is the SAME still-open item AQU-1525
   left: one smoke journey covering link-then-assert-mirrored-files serves both entry
   points, and it is tracked there rather than duplicated here.
+  A link whose FIRST MIRROR SYNC FAILED (AQU-1544) is RTL/unit as well. The link is saved
+  and then filled by that sync; when it failed, every entry point used to carry on as if
+  it had worked. What the user is shown instead — the link was saved, the source files
+  have not arrived, "Try again" — is pinned per entry point: the shared flow in
+  `LinkSourceSection.test.tsx` (the success callback does not fire; a retry that fails
+  keeps the message and the action; one that works finishes as a normal link), the Import
+  dialog staying open in `ImportDialog.linkProject.test.tsx`, and Create New Project →
+  Linked target in `ProjectCreateDialog.linked.test.tsx`, where the dialog's real output
+  is passed through the real landing banner (`LinkSeedFailedNotice.test.tsx` covers the
+  banner alone). The workspace's zero-file self-heal no longer failing quietly is in
+  `ProjectWorkspace.selfheal.test.ts`, and Project Settings telling a never-synced link
+  ("Not synced yet" / "Sync now") from a healthy one in `SourceLinkSection.test.tsx`.
+  It stays out of smoke for the reason the rules give: it is a message and a retry on a
+  failure path, nothing is lost that was not already missing, and reproducing it needs
+  the sync service to be made to fail, which the local e2e stack has no switch for.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

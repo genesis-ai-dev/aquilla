@@ -25,6 +25,7 @@ import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
+import { LinkSeedFailedBanner } from "@/components/LinkSeedFailedNotice"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
@@ -1493,6 +1494,14 @@ export function ProjectOverview() {
               onReactivate={handleToggleLifecycle}
               busy={lifecycleBusy}
             />
+          )}
+          {/* AQU-1544: this is where Create New Project → Linked target lands.
+              When the new project's first mirror sync failed the dialog has
+              parked that, and this says so with a retry instead of presenting
+              an unexplained empty project. Self-gated; renders nothing
+              otherwise. */}
+          {status === "ready" && project && (
+            <LinkSeedFailedBanner projectId={project.id} onSynced={refresh} />
           )}
           <div className="p-6">
             {status !== "ready" ? (

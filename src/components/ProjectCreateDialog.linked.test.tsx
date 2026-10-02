@@ -7,8 +7,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { useState } from "react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
 import { pickComboboxOption } from "@/test-utils/combobox"
+import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
 
 // AQU-1352: the destination picker fetches create-targets on open; submit waits
 // for it, so resolve to Personal (the server always lists it).
@@ -87,6 +90,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     mockLinkProjectSource.mockClear()
     mockTriggerLinkSync.mockClear()
     mockPatchProjectSettings.mockClear()
+    mockTriggerLinkSync.mockResolvedValue(true)
+    resetLinkSeedStatusForTests()
     mockLinkProjectSource.mockResolvedValue({
       projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
       gate: "validated", previousSourceProjectId: null, seeded: true,
@@ -232,6 +237,95 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     const linkOrder = mockLinkProjectSource.mock.invocationCallOrder[0]!
     const healOrder = mockTriggerLinkSync.mock.invocationCallOrder[0]!
     expect(linkOrder).toBeLessThan(healOrder)
+  })
+
+  // AQU-1544. The self-heal above used to be awaited and its answer dropped,
+  // so when it failed too the dialog opened the new project — linked, empty,
+  // and with nothing said. Creation still completes (the project exists and is
+  // linked; AQU-1519 says a successful create always closes the dialog), so the
+  // message has to reach the page the user lands on. `Landing` stands in for
+  // that page the way ProjectOverview mounts it: the dialog's real output — the
+  // created project's id and the failure it parked — goes through the real
+  // banner, rather than each being asserted against a hand-made stand-in.
+  describe("when the first mirror sync failed (AQU-1544)", () => {
+    const SEED_FAILED =
+      "The link to the source project was saved, but its files have not arrived here yet. " +
+      "Try again to bring them in."
+
+    function Landing({ onSynced }: { onSynced: () => void }) {
+      const [createdId, setCreatedId] = useState<string | null>(null)
+      return (
+        <>
+          <ProjectCreateDialog onCreated={(project) => setCreatedId(project.id)} />
+          {createdId && <LinkSeedFailedBanner projectId={createdId} onSynced={onSynced} />}
+        </>
+      )
+    }
+
+    async function createLinkedTarget() {
+      fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+      fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+      fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+      fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
+      fireEvent.click(screen.getByText("Advanced: project shape"))
+      fireEvent.click(screen.getByText(/Linked target/i))
+      await pickComboboxOption(/Upstream project/i, /English Source/i)
+      fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
+      fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    }
+
+    it("lands on a message with a retry instead of an unexplained empty project", async () => {
+      mockLinkProjectSource.mockResolvedValueOnce({
+        projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+        gate: "validated", previousSourceProjectId: null, seeded: false,
+      })
+      mockTriggerLinkSync.mockResolvedValue(false)
+      const onSynced = vi.fn()
+
+      render(<Landing onSynced={onSynced} />)
+      await createLinkedTarget()
+
+      expect(await screen.findByText(SEED_FAILED)).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+      // The project was still created and linked — this is a warning about a
+      // project that exists, not a failed create.
+      expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
+      const createdId = mockTriggerLinkSync.mock.calls[0]![1]
+      expect(isLinkSeedFailed(createdId)).toBe(true)
+
+      // A retry that fails leaves the message and the action where they were.
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+      await screen.findByText(/That attempt did not bring them in either/)
+      expect(screen.getByText(SEED_FAILED)).toBeTruthy()
+      expect(onSynced).not.toHaveBeenCalled()
+
+      // A retry that works tells the page to refresh and clears the message.
+      mockTriggerLinkSync.mockResolvedValue(true)
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+      await waitFor(() => expect(onSynced).toHaveBeenCalledTimes(1))
+      expect(screen.queryByText(SEED_FAILED)).toBeNull()
+      expect(mockTriggerLinkSync).toHaveBeenLastCalledWith("tok", createdId)
+      // Never a second link, whatever the retries did.
+      expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
+    })
+
+    it("shows nothing when the client-side self-heal worked", async () => {
+      mockLinkProjectSource.mockResolvedValueOnce({
+        projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+        gate: "validated", previousSourceProjectId: null, seeded: false,
+      })
+      mockTriggerLinkSync.mockResolvedValue(true)
+
+      render(<Landing onSynced={vi.fn()} />)
+      await createLinkedTarget()
+
+      await waitFor(() => expect(mockTriggerLinkSync).toHaveBeenCalledTimes(1))
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /Create & Link/i })).toBeNull(),
+      )
+      expect(screen.queryByText(SEED_FAILED)).toBeNull()
+      expect(isLinkSeedFailed(mockTriggerLinkSync.mock.calls[0]![1])).toBe(false)
+    })
   })
 
   it("shows validation when upstream project is missing for linked-target", async () => {

@@ -52,6 +52,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { runLinkSync } from "@/lib/sync/archive"
+import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { clearLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { ChooseLinkedFilesDialog } from "./ChooseLinkedFilesDialog"
@@ -147,6 +148,9 @@ export function SourceLinkSection({
       return
     }
     clearLinkSeedFailed(projectId)
+    // AQU-1570: content came through, so the page behind this dialog has files
+    // to show, not only this card's record.
+    if (outcome.ranSync) announceProjectRecordChanged(projectId)
     // Content came through: the refreshed record carries a cursor above 0 and
     // this whole block unmounts. Nothing came through: the upstream is empty,
     // which is said rather than left looking like an unanswered press.

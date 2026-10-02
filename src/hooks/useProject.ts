@@ -22,6 +22,7 @@ import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
+import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -274,6 +275,24 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     const cleanup = refresh()
     return cleanup
   }, [refresh])
+
+  // AQU-1570: another surface in this tab changed the project on the server —
+  // typically Project Settings, a route modal over this page, linking a source
+  // project whose files have just arrived. Re-resolve, or the page behind the
+  // dialog keeps its old file list until a reload. A newer announcement
+  // supersedes an older one still in flight, as a newer effect run would.
+  useEffect(() => {
+    let cancelInFlight: (() => void) | null = null
+    const unsubscribe = subscribeProjectRecordChanged((changedId) => {
+      if (changedId !== projectId) return
+      cancelInFlight?.()
+      cancelInFlight = refresh()
+    })
+    return () => {
+      unsubscribe()
+      cancelInFlight?.()
+    }
+  }, [projectId, refresh])
 
   // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
   // completionSettings, aiProviderChosen) are written by Project settings /

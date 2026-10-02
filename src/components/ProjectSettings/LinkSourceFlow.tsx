@@ -96,6 +96,7 @@ import {
   type LinkSourcePreview,
 } from "@/lib/sync/link-source-preview"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -316,6 +317,10 @@ export function LinkSourceFlow({
         onLinkSavedWithoutFiles?.()
         return
       }
+      // AQU-1570: `onLinked` refreshes the HOST's copy of the project. The page
+      // behind Project Settings holds its own, and it is the one showing the
+      // file list the upstream's files just landed in.
+      announceProjectRecordChanged(projectId)
       onLinked()
     } catch (err) {
       const facing = toUserFacingError(err, "project")

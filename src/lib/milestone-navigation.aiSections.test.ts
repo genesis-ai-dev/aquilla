@@ -119,6 +119,14 @@ describe("AI section overlay", () => {
     ])
   })
 
+  it("lets the stretch keep its inherited story when the scorer has no answers", () => {
+    // AQU-1164: with nothing to re-cut, the persisted `part` cells inherit the
+    // story before them instead of swapping the header to "Part 1".
+    setAiSectionMilestonesEnabled(true)
+    const mixed = partStructured((index) => `tail ${index}`)
+    expect(labels(mixed, () => undefined)).toEqual(["story:Cover"])
+  })
+
   it("scores the app-invented stretch with the seams that belong to it", () => {
     setAiSectionMilestonesEnabled(true)
     const mixed = partStructured((index) => (

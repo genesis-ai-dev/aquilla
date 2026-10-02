@@ -280,6 +280,18 @@ describe("worker deployment environment contract", () => {
     },
   )
 
+  // Wrangler would inherit the top-level [observability] block, but each deployed
+  // env declares its own so a top-level edit can't switch Workers Logs off.
+  it.each(
+    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml"]
+      .flatMap((file) => ["production", "development"].map((profile) => [file, profile])),
+  )("keeps Workers Logs enabled in %s [env.%s]", (file, profile) => {
+    const config = readRepoFile(...file.split("/"))
+    const observability = tomlBlock(config, `[env.${profile}.observability]`)
+
+    expect(observability).toContain("enabled = true")
+  })
+
   it.each([
     ["production", "production", "https://api.aquilla.app/identity"],
     ["development", "development", "https://api.dev.aquilla.app/identity"],

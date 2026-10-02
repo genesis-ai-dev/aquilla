@@ -22,6 +22,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
+import { projectElevationDenial } from "../services/elevation-gate"
+import { auditMembershipChange } from "../services/admin-audit"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -114,6 +116,8 @@ invites.post(
           403,
         )
       }
+      const unelevated = await projectElevationDenial(c, resolved)
+      if (unelevated) return unelevated
     }
 
     const token = crypto.randomUUID().replace(/-/g, "")
@@ -136,6 +140,12 @@ invites.post(
         console.error(`[invites/multi] insert failed for ${pid}:`, err)
         return c.json({ error: "Failed to create multi-project invite" }, 500)
       }
+      await auditMembershipChange(c.env, user, {
+        action: "project.invite.create",
+        where: { scope: "project", projectId: pid },
+        roleBefore: null,
+        roleAfter: grantedRole,
+      })
     }
 
     return c.json({

@@ -11,6 +11,7 @@ import {
   orgSettingsPath,
   parseOrgPath,
   projectEditorPath,
+  projectOverviewPath,
   projectSettingsPath,
   resumeOrgPath,
   safeReturnPath,
@@ -18,6 +19,7 @@ import {
   withEditorReturn,
   withSettingsReturn,
   ORG_STORAGE_KEY,
+  fileIdFromEditorPath,
 } from "./org-paths"
 
 describe("orgKeyFromParam", () => {
@@ -145,5 +147,40 @@ describe("projectEditorPath", () => {
   it("treats null/undefined fileId as the editor root", () => {
     expect(projectEditorPath("abc", null)).toBe("/project/abc/editor")
     expect(projectEditorPath("abc", undefined)).toBe("/project/abc/editor")
+  })
+})
+
+describe("projectOverviewPath", () => {
+  // AQU-1535: the overview lives at `/projects/:id` (plural). A bare
+  // `/project/:id` is a redirect, never a destination to build by hand.
+  it("builds the plural overview URL", () => {
+    expect(projectOverviewPath("abc")).toBe("/projects/abc")
+  })
+})
+
+describe("fileIdFromEditorPath", () => {
+  it("reads the fileId out of an editor file path", () => {
+    expect(fileIdFromEditorPath("/project/abc/editor/file/GEN.sfm", "abc")).toBe("GEN.sfm")
+  })
+
+  it("decodes a percent-encoded fileId", () => {
+    expect(fileIdFromEditorPath("/project/abc/editor/file/Acts%201.txt", "abc")).toBe("Acts 1.txt")
+  })
+
+  it("ignores a query string or hash on the path", () => {
+    expect(fileIdFromEditorPath("/project/abc/editor/file/f1?cellId=c2", "abc")).toBe("f1")
+    expect(fileIdFromEditorPath("/project/abc/editor/file/f1#top", "abc")).toBe("f1")
+  })
+
+  it("returns null for the bare editor path", () => {
+    expect(fileIdFromEditorPath("/project/abc/editor", "abc")).toBeNull()
+    expect(fileIdFromEditorPath("/project/abc/editor/file/", "abc")).toBeNull()
+  })
+
+  it("returns null for another project, another surface, or nothing", () => {
+    expect(fileIdFromEditorPath("/project/xyz/editor/file/f1", "abc")).toBeNull()
+    expect(fileIdFromEditorPath("/project/abc/agent", "abc")).toBeNull()
+    expect(fileIdFromEditorPath(null, "abc")).toBeNull()
+    expect(fileIdFromEditorPath(undefined, "abc")).toBeNull()
   })
 })

@@ -195,6 +195,8 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 STRIPE_PUBLISHABLE_KEY = "pk_test_51U47kG7SR91OrWMSCDdwkoCVTexlfzvqLy7ftUUbeM0CDTlH61PsnxEkocohJZNt1cRFGrzOKtP3CUfesJSabn5H00D9YwLoPi"
 STRIPE_PRICE_FIELD = "price_1U487L7SR91OrWMSAwgtPRxU"
 STRIPE_PRICE_ADDON = "price_1U487M7SR91OrWMStnLewx15"
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
@@ -208,6 +210,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
   "api.aquilla.app/identity/*",
   "api.aquilla.app/chat/*",
+  # RFC 8414 discovery for the MCP OAuth issuer (api.aquilla.app/identity): the
+  # spec's path-issuer location sits at the host root. Only this one prefix.
+  "api.aquilla.app/.well-known/oauth-authorization-server/*",
 ]
 
 [env.production.build]
@@ -261,6 +266,9 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
+# MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
+# AUTH_WORKER_URL, which its protected-resource metadata names.
+MCP_OAUTH_ISSUER = "https://api.aquilla.app/identity"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
 # AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
@@ -305,6 +313,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
   "api.dev.aquilla.app/identity/*",
   "api.dev.aquilla.app/chat/*",
+  # RFC 8414 discovery for the MCP OAuth issuer (api.dev.aquilla.app/identity): the
+  # spec's path-issuer location sits at the host root. Only this one prefix.
+  "api.dev.aquilla.app/.well-known/oauth-authorization-server/*",
 ]
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
@@ -357,6 +368,9 @@ EMAIL_REPLY_TO = "support@aquilla.app"
 # deploys to omit it.
 DISCORD_INVITE_URL = "https://discord.gg/T2EndwXe4W"
 BASE_URL = "https://dev.aquilla.app"
+# MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
+# AUTH_WORKER_URL, which its protected-resource metadata names.
+MCP_OAUTH_ISSUER = "https://api.dev.aquilla.app/identity"
 # Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
 # requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
 # two vars cannot enable anything on production even if copied there.
@@ -391,6 +405,8 @@ MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
 MONDAY_REDIRECT_URI = "https://dev.aquilla.app/oauth/callback"
 # Stripe Field Plan: same as production — leave unset until prices + secrets
 # are provisioned on this Worker. Local/e2e use the top-level test catalog.
+# AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
+ACCESS_GRANTS_RESOLVER = "shadow"
 
 [env.e2e]
 name = "aquilla-identity-e2e"

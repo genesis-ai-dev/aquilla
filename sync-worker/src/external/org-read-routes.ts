@@ -19,6 +19,7 @@
 // PII: ids, names, and the caller's own role level. No member lists or emails —
 // see orgs-list.ts.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { externalError } from "./errors"
 import { listOrgsForCredential } from "./orgs-list"
 import { listProjectsForCredential } from "./projects-list"
@@ -42,7 +43,7 @@ export async function assertOrgInCredentialScope(
   cred: ApiCredentialContext,
   orgId: string,
 ): Promise<Response | null> {
-  if (cred.orgId !== null && cred.orgId !== orgId) {
+  if (!credentialAllowsOrganization(cred, orgId)) {
     return externalError("scope_denied", "credential is not scoped to this org", 403)
   }
   if (cred.projectId !== null) {

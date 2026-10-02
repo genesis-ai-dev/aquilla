@@ -22,10 +22,11 @@ Reviewed September 9, 2026:
   authenticate the agent's identity or eliminate social engineering.
 
 This implementation provides the RFC 8628 device grant for the existing Aquilla
-Agent API and MCP bearer transport. It does **not** claim to implement the full
-MCP OAuth discovery/authorization-code profile. Agents follow the public
-`/api/v2/agent-connect` instructions; MCP clients requiring automatic OAuth
-registration and PKCE discovery still need a separate integration.
+Agent API and MCP bearer transport. Agents follow the public
+`/api/v2/agent-connect` instructions. MCP hosts that run the MCP OAuth
+discovery/authorization-code profile themselves (ChatGPT plugins, Claude,
+Codex) use the separate authorization-code + PKCE grant described in
+`docs/CHATGPT-PLUGIN.md`; both grants mint the same kind of credential.
 
 ## User journey
 

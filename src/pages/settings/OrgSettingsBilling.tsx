@@ -8,7 +8,7 @@ import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { SettingsBlock, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -163,7 +163,7 @@ export function OrgSettingsBilling() {
             ) : null}
           </SettingsGroup>
 
-          <Button variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
+          <Button className="self-start" variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
           <BillingWorkspaceDetails data={workspace} />
           {!paid && jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
           <SettingsGroup label="Plans and covered access">
@@ -186,7 +186,7 @@ export function OrgSettingsBilling() {
             />
           </SettingsGroup>
           <SettingsGroup label="AI usage">
-            <div data-testid="billing-usage" className="flex flex-col gap-3 text-sm text-muted-foreground">
+            <SettingsBlock data-testid="billing-usage" className="flex flex-col gap-3 text-sm text-muted-foreground">
               <p>Collaborators share your organization’s AI allowance across its projects.</p>
               {paid ? <>
                 <p>AI capacity resets every seven days from your plan’s activation, with no rollover. Monthly or annual billing does not change this schedule.</p>
@@ -195,7 +195,7 @@ export function OrgSettingsBilling() {
               <p>Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.</p>
               <p>Self-service allowance purchases are not available. Contact us if your organization needs more capacity.</p>
               <a href="mailto:support@aquilla.app?subject=Organization%20AI%20capacity" className="underline">Discuss AI capacity</a>
-            </div>
+            </SettingsBlock>
           </SettingsGroup>
         </div>
       )}

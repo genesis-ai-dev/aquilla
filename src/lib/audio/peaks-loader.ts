@@ -35,6 +35,15 @@ import { peaksCacheGet, peaksCachePut } from "./peaks-cache"
  */
 export const WAVEFORM_BINS = 320
 
+/**
+ * Whether a project's media strategy lets a waveform fetch its audio on sight.
+ * "lazy" and "eager" do; "stream" and "manual" wait to be asked, so a list of
+ * takes on those projects draws its rectangles without an outline.
+ */
+export function autoLoadsPeaks(strategy: string | null | undefined): boolean {
+  return strategy === "lazy" || strategy === "eager" || strategy == null
+}
+
 /** Resolves a per-file sync token; `audioSyncTokenFetcherForSession` builds one. */
 export type SyncTokenFetcher = (projectId: string, fileId: string) => Promise<string | null>
 

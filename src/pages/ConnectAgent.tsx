@@ -1,26 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
-import { Building2, Folder } from "lucide-react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { AgentAccessFields, useAgentAccess } from "@/components/agent-access/AgentAccessFields"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { ROLE } from "@/lib/frontier/roles"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { buildApprovedMessage, connectionRequest, type AgentConnectionRequest } from "@/lib/sync/agent-connect"
 import { AUTH_BASE } from "@/lib/frontier/auth"
-
-type Mode = "ask" | "act"
-type ScopeKind = "project" | "org"
 
 export function ConnectAgent() {
   const { session } = useFrontierSession()
@@ -37,11 +31,9 @@ function ConnectAgentContent() {
   const [request, setRequest] = useState<AgentConnectionRequest | null>(null)
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
-  // The human is the authority: the agent's requested mode is only the default.
-  const [mode, setMode] = useState<Mode>("ask")
-  const [scopeKind, setScopeKind] = useState<ScopeKind>("project")
-  const [orgId, setOrgId] = useState("")
-  const [projectId, setProjectId] = useState("")
+  const pinnedProjectId = request?.requestedProjectId ?? null
+  const access = useAgentAccess(projects, orgs, pinnedProjectId)
+  const { setMode, setScopeKind, setProjectId, setOrgId } = access
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
@@ -52,32 +44,7 @@ function ConnectAgentContent() {
   useEffect(() => {
     setRequest(null); setOrgs([]); setProjects([]); setProjectId(""); setOrgId("")
     setConfirmed(false); setResult(null)
-  }, [jwt])
-  // A requested project is PINNED: the human may approve exactly that project
-  // or deny. Widening it to a whole org would grant more than was reviewed.
-  const pinnedProjectId = request?.requestedProjectId ?? null
-  const floor = mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR
-  const projectOptions = useMemo(
-    () => projects.filter(p => p.role.level >= floor && (!pinnedProjectId || p.id === pinnedProjectId)),
-    [projects, floor, pinnedProjectId],
-  )
-  const orgOptions = useMemo(
-    () => (pinnedProjectId ? [] : orgs.filter(o => o.role.level >= floor)),
-    [orgs, floor, pinnedProjectId],
-  )
-  // Clear a selection the mode change just made ineligible, so the button can
-  // never submit a scope the server will refuse.
-  useEffect(() => {
-    if (projectId && !projectOptions.some(p => p.id === projectId)) setProjectId("")
-  }, [projectId, projectOptions])
-  useEffect(() => {
-    if (orgId && !orgOptions.some(o => String(o.id) === orgId)) setOrgId("")
-  }, [orgId, orgOptions])
-  // With exactly one eligible org there is nothing to choose: default to it.
-  const effectiveOrgId = orgId || (orgOptions.length === 1 ? String(orgOptions[0].id) : "")
-  const scopeChosen = scopeKind === "project"
-    ? projectOptions.some(p => p.id === projectId)
-    : orgOptions.some(o => String(o.id) === effectiveOrgId)
+  }, [jwt, setProjectId, setOrgId])
   async function review() {
     if (!jwt || inFlight.current) return
     inFlight.current = true; setBusy(true); setError(false)
@@ -96,11 +63,7 @@ function ConnectAgentContent() {
     inFlight.current = true; setBusy(true); setError(false)
     try {
       await connectionRequest(jwt, "decision", { user_code: code.toUpperCase().trim(), approve,
-        ...(approve ? {
-          mode,
-          ...(scopeKind === "project" ? { project_id: projectId } : { org_id: effectiveOrgId }),
-          code_confirmed: confirmed,
-        } : {}) })
+        ...(approve ? { mode: access.mode, ...access.scopeBody, code_confirmed: confirmed } : {}) })
       setResult(approve ? "approved" : "denied")
     } catch { setError(true) }
     finally { setBusy(false); inFlight.current = false }
@@ -131,84 +94,14 @@ function ConnectAgentContent() {
             <p>{t("onboarding.connect.agent", { name: request.agentName })}</p>
             <p className="text-sm text-muted-foreground">{t("onboarding.connect.unverified")}</p>
             <FieldGroup>
-              <Field>
-                <FieldLabel>{t("common.modeLabel")}</FieldLabel>
-                <RadioGroup value={mode} onValueChange={v => setMode(v === "act" ? "act" : "ask")} disabled={busy}>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="connect-mode-ask" value="ask" />
-                    <FieldLabel htmlFor="connect-mode-ask" className="font-normal">
-                      <strong>{t("onboarding.apiTokens.modeAskLabel")}</strong> — {t("onboarding.connect.ask")}
-                    </FieldLabel>
-                  </Field>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="connect-mode-act" value="act" />
-                    <FieldLabel htmlFor="connect-mode-act" className="font-normal">
-                      <strong>{t("onboarding.apiTokens.modeActLabel")}</strong> — {t("onboarding.connect.act")}
-                    </FieldLabel>
-                  </Field>
-                </RadioGroup>
-                {mode !== request.mode && <FieldDescription>{t("onboarding.connect.modeChanged", { requested: request.mode })}</FieldDescription>}
-              </Field>
-              {pinnedProjectId ? (
-                <Field>
-                  <FieldLabel>{t("onboarding.connect.project")}</FieldLabel>
-                  <p className="flex items-center gap-1.5 text-sm">
-                    <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                    {projectOptions[0]?.name ?? pinnedProjectId}
-                  </p>
-                  <FieldDescription>{t("onboarding.connect.pinned")}</FieldDescription>
-                </Field>
-              ) : <>
-                <Field>
-                  <FieldLabel>{t("onboarding.connect.scope")}</FieldLabel>
-                  <RadioGroup value={scopeKind} onValueChange={v => setScopeKind(v === "org" ? "org" : "project")} disabled={busy}>
-                    <Field orientation="horizontal">
-                      <RadioGroupItem id="connect-scope-project" value="project" />
-                      <FieldLabel htmlFor="connect-scope-project" className="font-normal">
-                        <Folder className="me-1 inline size-3.5 align-[-2px] text-muted-foreground" aria-hidden />
-                        {t("onboarding.connect.scopeProject")}
-                      </FieldLabel>
-                    </Field>
-                    <Field orientation="horizontal">
-                      <RadioGroupItem id="connect-scope-org" value="org" />
-                      <FieldLabel htmlFor="connect-scope-org" className="font-normal">
-                        <Building2 className="me-1 inline size-3.5 align-[-2px] text-muted-foreground" aria-hidden />
-                        {t("onboarding.connect.scopeOrg")}
-                      </FieldLabel>
-                    </Field>
-                  </RadioGroup>
-                  <FieldDescription>{t("onboarding.connect.scopeHint")}</FieldDescription>
-                </Field>
-                {scopeKind === "project" ? (
-                  <Field>
-                    <FieldLabel>{t("onboarding.connect.project")}</FieldLabel>
-                    <Select value={projectId} onValueChange={v => setProjectId(v ?? "")} disabled={busy}>
-                      <SelectTrigger aria-label={t("onboarding.connect.project")}>
-                        <SelectValue placeholder={t("onboarding.connect.choose")}>{projectOptions.find(p => p.id === projectId)?.name}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent><SelectGroup>{projectOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectGroup></SelectContent>
-                    </Select>
-                    {!projectOptions.length && <p role="status">{t("onboarding.connect.noProjects")}</p>}
-                  </Field>
-                ) : (
-                  <Field>
-                    <FieldLabel>{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
-                    <Select value={effectiveOrgId} onValueChange={v => setOrgId(v ?? "")} disabled={busy}>
-                      <SelectTrigger aria-label={t("onboarding.apiTokens.orgLabel")}>
-                        <SelectValue placeholder={t("onboarding.connect.chooseOrg")}>{orgOptions.find(o => String(o.id) === effectiveOrgId)?.name}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent><SelectGroup>{orgOptions.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })}</SelectItem>)}</SelectGroup></SelectContent>
-                    </Select>
-                    {!orgOptions.length && <p role="status">{t("onboarding.connect.noOrgs")}</p>}
-                  </Field>
-                )}
-              </>}
+              <AgentAccessFields access={access} requestedMode={request.mode} pinnedProjectId={pinnedProjectId} busy={busy}
+                askHint={t("onboarding.connect.ask")} actHint={t("onboarding.connect.act")} />
               <p className="text-sm text-muted-foreground">{t("onboarding.connect.expiry")}</p>
               <Field orientation="horizontal"><Checkbox id="confirm-code" checked={confirmed} onCheckedChange={v => setConfirmed(v === true)} />
                 <FieldLabel htmlFor="confirm-code">{t("onboarding.connect.confirm", { code })}</FieldLabel></Field>
             </FieldGroup>
             <div className="flex gap-2">
-              <Button disabled={busy || !confirmed || !scopeChosen} onClick={() => void decide(true)}>{t("onboarding.connect.approve")}</Button>
+              <Button disabled={busy || !confirmed || !access.scopeChosen} onClick={() => void decide(true)}>{t("onboarding.connect.approve")}</Button>
               <Button variant="outline" disabled={busy} onClick={() => void decide(false)}>{t("onboarding.connect.deny")}</Button>
             </div>
           </>}

@@ -37,6 +37,7 @@ type Detail = {
   target: { userId: number; username: string | null }
   scope: "org" | "project"
   orgId: number | null
+  groupId: number | null
   projectId: string | null
   roleBefore: number | null
   roleAfter: number | null
@@ -75,6 +76,7 @@ describe("org membership by a platform admin", () => {
       target: { userId: ALICE_ID, username: "alice" },
       scope: "org",
       orgId: 1,
+      groupId: null,
       projectId: null,
       roleBefore: null,
       roleAfter: 200,
@@ -156,6 +158,7 @@ describe("project membership by a platform admin", () => {
       target: { userId: ALICE_ID, username: "alice" },
       scope: "project",
       orgId: null,
+      groupId: null,
       projectId: "proj-a",
       roleBefore: null,
       roleAfter: 300,

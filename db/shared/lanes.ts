@@ -16,6 +16,7 @@
 
 import {
   BLANK_LANE_PLACEHOLDER,
+  codeForLanguageLabel,
   planLanesForProject,
   SOURCE_LANE_PLACEHOLDER,
   type ProjectLaneInputs,
@@ -251,6 +252,33 @@ export async function insertTargetLane(
     )
     .bind(lane.id, projectId, lane.name, lane.langCode, lane.legacyTag, position)
     .run()
+}
+
+/**
+ * Statement that makes sure a project has a target lane for `tag` — for a
+ * server-side writer about to put rows under a tag the project may not have
+ * yet (AQU-1550: the sibling merge), which has to splice the lane into the
+ * same batch as the rows that point at it.
+ *
+ * The lane is what {@link ensureProjectLaneStmts} makes of a tag found in the
+ * data: named after the tag, with a language code when the tag is a known
+ * language. Its position follows the rows already on the project, as
+ * {@link insertTargetLane} does. An existing lane for the tag — including one
+ * a maintainer has renamed or archived — is left exactly as it is.
+ */
+export function ensureTargetLaneStmt(
+  db: AquillaDb,
+  projectId: string,
+  tag: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       SELECT ?, ?, 'target', ?, ?, ?, COALESCE(MAX(position), -1) + 1
+         FROM lanes WHERE project_id = ?
+       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+    )
+    .bind(newLaneId(), projectId, tag, codeForLanguageLabel(tag), tag, projectId)
 }
 
 export type ArchiveLaneResult =

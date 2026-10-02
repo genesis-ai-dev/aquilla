@@ -10,8 +10,8 @@
 //     display fragment, never enough to reconstruct the secret.
 //
 // Live role/membership is re-resolved on every call by the route/command layer
-// (see db/shared/project-roles.ts). This module only answers "is this token a
-// live, unexpired, unrevoked credential, and whose is it?".
+// (see db/shared/project-roles.ts). This module validates token lifetime and
+// revocation, and intersects OAuth organization grants with current membership.
 
 import type { AquillaDb } from "../shim/postgres"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "./rate-limit"
@@ -67,6 +67,8 @@ export interface ApiCredentialContext {
    */
   access: ApiCredentialAccess
   orgId: string | null
+  /** OAuth organization allowlist, intersected with live membership. */
+  orgIds?: string[]
   projectId: string | null
   /**
    * AQU-1180: may this credential see real human identities in agent-facing
@@ -125,6 +127,7 @@ interface CredentialRow {
   mode: "ask" | "act"
   access: string | null
   org_id: string | null
+  org_ids: string[] | null
   project_id: string | null
   expires_at: string | null
   revoked_at: string | null
@@ -173,7 +176,18 @@ export async function validateApiCredential(
               ac.org_id AS org_id, ac.project_id AS project_id,
               ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
               ac.last_used_at AS last_used_at, u.username AS username,
-              ac.pii AS pii
+              ac.pii AS pii,
+              CASE WHEN ac.org_ids IS NULL THEN NULL ELSE COALESCE((
+                SELECT jsonb_agg(o.id::text ORDER BY o.id)
+                FROM organizations o
+                WHERE jsonb_exists(ac.org_ids, o.id::text) AND (
+                  o.owner_user_id::text = ac.user_id OR EXISTS (
+                    SELECT 1 FROM org_members om
+                    WHERE om.org_id = o.id AND om.user_id::text = ac.user_id
+                      AND om.role_level >= 100
+                  )
+                )
+              ), '[]'::jsonb) END AS org_ids
          FROM api_credentials ac
          JOIN users u ON u.id::text = ac.user_id
         WHERE ac.token_hash = ?`,
@@ -213,8 +227,18 @@ export async function validateApiCredential(
     // original read-write grant, so existing tokens keep working unchanged.
     access: row.access === "read" ? "read" : "write",
     orgId: row.org_id,
+    ...(row.org_ids !== null ? { orgIds: row.org_ids } : {}),
     projectId: row.project_id,
     // Only an explicit true opts in — a NULL (pre-0091 row) stays scrubbed.
     pii: row.pii === true,
   }
+}
+
+/** Both the legacy scope and an OAuth allowlist constrain access. */
+export function credentialAllowsOrganization(
+  cred: ApiCredentialContext,
+  orgId: string | null,
+): boolean {
+  return (cred.orgId == null || cred.orgId === orgId)
+    && (cred.orgIds === undefined || (orgId !== null && cred.orgIds.includes(orgId)))
 }

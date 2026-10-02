@@ -781,11 +781,12 @@ describe("plan unit rollup", () => {
     expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
   })
 
-  it("excludes tombstoned files and audio-cue siblings from the total", async () => {
+  it("excludes tombstoned files and hidden timeline content from the total", async () => {
     await seedOrg()
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('live', 'pa', 'Live', 'e1', 5)")
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 5, 123)")
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, role) VALUES ('cue', 'pa', 'Cues', 'e1', 5, 'audio-cues')")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, role) VALUES ('caption-track', 'pa', 'Caption track', 'e1', 5, 'timeline-content')")
     expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
   })
 

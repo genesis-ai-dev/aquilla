@@ -39,11 +39,12 @@ import {
 import {
   buildSeamRequest,
   parseSeamAnswers,
-  JEV_DECISIONS_URL,
   JEV_MODEL,
   MAX_SEAMS_PER_REQUEST,
   type SeamWindowCell,
 } from "../../../src/lib/completion/seam-request"
+
+import { callJev, resolveDecisionsUrl } from "../lib/jev/client"
 
 const aiSeams = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -87,22 +88,8 @@ export interface SeamResult extends SeamDecision {
   nextCellId: string
 }
 
-/**
- * Resolve the decisions endpoint.
- *
- * OpenRouter fronts TypeSafe's evaluation API at `/api/alpha/decisions`, a
- * sibling of `/api/v1` rather than a path under it — so deriving it from
- * OPENROUTER_BASE_URL means replacing the version segment, not appending. The
- * dev stack's scripted mock (OPENROUTER_BASE_URL=http://127.0.0.1:9999/v1)
- * lands on /alpha/decisions the same way production does.
- */
-export function resolveSeamUrl(env: Pick<Env, "OPENROUTER_BASE_URL">): string {
-  const base = env.OPENROUTER_BASE_URL?.trim()
-  if (!base) return JEV_DECISIONS_URL
-  const trimmed = base.replace(/\/+$/, "")
-  const withoutVersion = trimmed.replace(/\/v\d+$/, "")
-  return `${withoutVersion}/alpha/decisions`
-}
+/** Kept as the route's name for the shared resolver (lib/jev/client.ts). */
+export const resolveSeamUrl = resolveDecisionsUrl
 
 /** Heuristic-only answer for the whole window — the shape every failure path
  *  returns, so a caller cannot tell an outage from a low-confidence file apart
@@ -154,24 +141,9 @@ aiSeams.post(
     }
 
     let answers: ReturnType<typeof parseSeamAnswers> | null = null
-    try {
-      const res = await fetch(resolveSeamUrl(c.env), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(buildSeamRequest(cells)),
-        signal: AbortSignal.timeout(SEAM_TIMEOUT_MS),
-      })
-      if (res.ok) {
-        answers = parseSeamAnswers(await res.json(), cells.length - 1)
-      } else {
-        console.warn(`[ai-seams] upstream ${res.status}; using heuristic seams`)
-      }
-    } catch (err) {
-      console.warn("[ai-seams] classification failed; using heuristic seams:", err)
-    }
+    const called = await callJev(c.env, buildSeamRequest(cells), SEAM_TIMEOUT_MS)
+    if (called.ok) answers = parseSeamAnswers(called.body, cells.length - 1)
+    else console.warn(`[ai-seams] classification ${called.reason}; using heuristic seams`)
 
     if (!answers) return c.json({ seams: heuristicWindow(cells), model: null })
 

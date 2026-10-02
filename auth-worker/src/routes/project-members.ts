@@ -21,10 +21,12 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
+import { roleRequiredBody } from "../lib/role-denial"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 import { auditMembershipChange } from "../services/admin-audit"
+import { projectElevationDenial } from "../services/elevation-gate"
 
 const projectMembers = new Hono<AuthHonoEnv>()
 
@@ -69,8 +71,13 @@ projectMembers.post(
     const callerRole = await resolveProjectRole(c.env, user, projectId)
     if (!callerRole) return c.json({ error: "no access to project" }, 403)
     if (callerRole.level < ROLE.MAINTAINER) {
-      return c.json({ error: "maintainer+ required to revoke access" }, 403)
+      return c.json(
+        roleRequiredBody("maintainer+ required to revoke access", ROLE.MAINTAINER, callerRole),
+        403,
+      )
     }
+    const unelevated = await projectElevationDenial(c, callerRole)
+    if (unelevated) return unelevated
 
     // AQU-285 (F-B6) target-level cap, mirrored from the sibling
     // DELETE /:projectId/members/:userId (projects.ts): a caller below OWNER
@@ -86,10 +93,13 @@ projectMembers.post(
     if (existingRow) {
       const targetCurrentLevel = Number(existingRow.role_level)
       if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+        // Owner always passes the target cap, so it is the one level that is required.
         return c.json(
-          {
-            error: `cannot revoke a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
-          },
+          roleRequiredBody(
+            `cannot revoke a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+            ROLE.OWNER,
+            callerRole,
+          ),
           403,
         )
       }

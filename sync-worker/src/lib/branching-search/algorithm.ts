@@ -23,7 +23,8 @@ export interface CorpusCell {
   /** Whether the cell is validated. Routes may filter on this before calling. */
   validated?: boolean
   /** Source-side file id. Populated by `loadCorpus`; used by the passages
-   *  route for ±radius expansion. The ranking algorithm ignores it. */
+   *  route for ±radius expansion. The ranking algorithm ignores it and only
+   *  copies it onto the result (AQU-1393). */
   fileId?: string
   /** Anchor-chain pointer (predecessor cell in the file's anchor chain).
    *  Populated by `loadCorpus`; used by the passages route to walk the
@@ -40,6 +41,11 @@ export interface BranchingSearchResult {
    *  not the winning sub-branch — callers want "how much of what I asked
    *  about does this cell cover" semantics. */
   queryCoverage: number
+  /** The file the hit's SOURCE cell lives in, when the corpus carried one
+   *  (AQU-1393) — the editor names it as the match's origin. For a linked
+   *  target this is the upstream project's file, which the caller's own file
+   *  inventory will not contain. */
+  fileId?: string
 }
 
 /** cellId → the contiguous slice of the winning branch that this result
@@ -93,6 +99,7 @@ function tokenizeCorpus(corpus: readonly CorpusCell[]): TokenizedCell[] {
       sourceText: c.sourceText,
       targetText: c.targetText,
       validated: c.validated,
+      fileId: c.fileId,
       tokens,
       termCounts,
       bag: new Set(tokens),
@@ -305,6 +312,7 @@ export function branchingSearch(
         sourceText: bestCell.sourceText,
         targetText: bestCell.targetText,
         queryCoverage: coverageRatio(queryTokens, bestCell.bag),
+        ...(bestCell.fileId ? { fileId: bestCell.fileId } : {}),
       })
       selectedCellIds.add(bestCell.cellId)
       provenance.set(bestCell.cellId, runTokens)

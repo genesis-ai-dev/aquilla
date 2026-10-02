@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { createOfflineSyncManager, type OfflineSyncManager } from "@/lib/offline/sync-manager"
+import { recoverInterruptedDownloads } from "@/lib/offline/download"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
 
 /**
@@ -29,6 +30,9 @@ export function OfflineSyncManagerMount(): null {
 
   useEffect(() => {
     if (!store) return
+    // Before anything can start a download this session.
+    const recovered = recoverInterruptedDownloads(store)
+    if (recovered.length > 0) console.warn("[offline] rolled back interrupted downloads", recovered)
     const mintToken = buildProjectAwareMinter(() => jwtRef.current)
     const manager: OfflineSyncManager = createOfflineSyncManager({ store, mintToken })
     return () => {

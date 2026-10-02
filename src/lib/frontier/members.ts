@@ -1,7 +1,9 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import { throwIfElevationRequired } from "./elevation";
 import { ROLE } from "@/lib/frontier/roles";
 import { createRequestCoalescer } from "@/lib/request-coalescer";
+import type { ScopePath } from "@/lib/access/types";
 
 export interface LookedUpUser {
   id: number;
@@ -44,6 +46,21 @@ export interface ProjectMember {
    * Empty when the user has access through only one path.
    */
   secondarySources: SecondarySrc[];
+  /**
+   * AQU-1352 §3.7: server-derived origin fields (additive; absent on older
+   * payloads). Computed by auth-worker services/roster-origins.ts.
+   */
+  effective?: { roleLevel: number; source: ProjectMemberRole["source"] | "platform" };
+  /** Direct role on this project, null when none. */
+  direct?: number | null;
+  /** Scope path of the winning team/org grant; null when not inherited. */
+  inheritedFrom?: ScopePath | null;
+  /** Rule 4 dry-run: access left after removing the direct grant; null = none. */
+  afterDirectRemoval?: {
+    roleLevel: number;
+    source: ProjectMemberRole["source"] | "platform";
+    from: ScopePath | null;
+  } | null;
 }
 
 /**
@@ -227,6 +244,7 @@ export async function addProjectMember(
       body: JSON.stringify({ username, role }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -267,6 +285,7 @@ export async function addProjectMembers(
       body: JSON.stringify({ members }),
     }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -284,6 +303,7 @@ export async function removeProjectMember(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}`,
     { method: "DELETE", headers: authHeaders(jwt) }
   );
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
@@ -329,6 +349,7 @@ export async function revokeAllProjectAccess(
       headers: authHeaders(jwt),
     },
   )
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const text = await res.text().catch(() => "")
     throw new UserError(res.status, text, "project")

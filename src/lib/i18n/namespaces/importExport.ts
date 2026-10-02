@@ -9,6 +9,61 @@ import { defineNamespace, plural } from "./types"
  */
 export const importExport = defineNamespace({
   keys: {
+    "importExport.mediaPreview.embedded": "Embedded captions {number}",
+    "importExport.mediaPreview.embeddedLanguage": "Embedded captions {number} ({language})",
+    "importExport.captionTrack.attach": "Attach captions",
+    "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
+    "importExport.captionTrack.title": "Attach captions to {name}",
+    "importExport.captionTrack.description": "Add captions as a new text track, or explicitly replace the content in an existing track.",
+    "importExport.captionTrack.file": "Caption file",
+    "importExport.captionTrack.destination": "Destination track",
+    "importExport.captionTrack.new": "New caption track",
+    "importExport.captionTrack.name": "Track name",
+    "importExport.captionTrack.overwrite": plural({
+      one: "{count} segment currently in this track will be overwritten.",
+      other: "{count} segments currently in this track will be overwritten.",
+    }),
+    "importExport.captionTrack.consent": "Overwrite the existing content in this track",
+    "importExport.captionTrack.add": "Add caption track",
+    "importExport.captionTrack.replace": "Overwrite caption track",
+    "importExport.captionTrack.invalidFile": "Choose a VTT, SRT, or SBV caption file.",
+    "importExport.captionTrack.saveFailed": "Couldn't save this caption track.",
+    "importExport.mediaPreview.title": "Import {name}",
+    "importExport.mediaPreview.description": "Review wording and timing before importing. Your original files are preserved.",
+    "importExport.mediaPreview.textSource": "Text source",
+    "importExport.mediaPreview.automatic": "Transcribe audio",
+    "importExport.mediaPreview.automaticHint": "Split the audio at pauses. You can choose automatic transcription after import.",
+    "importExport.mediaPreview.segmentCount": plural({ one: "{count} segment", other: "{count} segments" }),
+    "importExport.mediaPreview.needsAttention": plural({ one: "{count} segment needs attention", other: "{count} segments need attention" }),
+    "importExport.mediaPreview.wording": "Segment {number} wording",
+    "importExport.mediaPreview.start": "Segment {number} start (seconds)",
+    "importExport.mediaPreview.end": "Segment {number} end (seconds)",
+    "importExport.mediaPreview.remove": "Remove segment {number}",
+    "importExport.mediaPreview.confidence": "Alignment confidence: {percent}%",
+    "importExport.mediaPreview.empty": "Choose a text source with at least one segment.",
+    "importExport.mediaPreview.continue": "Continue import",
+    "importExport.scriptAlignment.title": "Align script to {name}",
+    "importExport.scriptAlignment.description": "Paragraph breaks define segments. Review wording and timings before saving.",
+    "importExport.scriptAlignment.script": "Script",
+    "importExport.scriptAlignment.file": "Script file",
+    "importExport.scriptAlignment.fileLimit": "Choose a UTF-8 script with at most 200,000 characters.",
+    "importExport.scriptAlignment.trackNameDefault": "Aligned script",
+    "importExport.scriptAlignment.trackName": "Track name",
+    "importExport.scriptAlignment.destination": "Destination track",
+    "importExport.scriptAlignment.newTrack": "New track",
+    "importExport.scriptAlignment.overwrite": "{count} segments currently in this track will be overwritten.",
+    "importExport.scriptAlignment.align": "Align script",
+    "importExport.scriptAlignment.aligning": "Aligning script…",
+    "importExport.scriptAlignment.use": "Use aligned segments",
+    "importExport.scriptAlignment.wording": "Segment {number} wording",
+    "importExport.scriptAlignment.start": "Segment {number} start (seconds)",
+    "importExport.scriptAlignment.end": "Segment {number} end (seconds)",
+    "importExport.scriptAlignment.coverage": "Initial word match: {percent}%",
+    "importExport.scriptAlignment.review": "I reviewed segment {number}",
+    "importExport.scriptAlignment.invalid": "Enter wording and valid timings within the media.",
+    "importExport.scriptAlignment.empty": "The alignment returned no segments.",
+    "importExport.scriptAlignment.retry": "Edit script",
+    "importExport.scriptAlignment.listen": "Listen to segment {number}",
     // — Import result panel (post-import report; also copied to the clipboard
     //   as plain text, so a couple of these keys render outside any markup) —
     "importExport.result.reportImportedCount": plural({
@@ -264,6 +319,28 @@ export const importExport = defineNamespace({
     "importExport.landing.dcs.hint": "upstream",
     "importExport.landing.dcs.description":
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
+    "importExport.landing.youtube.title": "YouTube video",
+    "importExport.landing.youtube.description": "Link a video, bring captions, or generate them from your original media.",
+    "importExport.youtube.description": "Link a YouTube picture now, or add a text source for timed segments.",
+    "importExport.youtube.source": "Caption source",
+    "importExport.youtube.aboutCaptions": "About YouTube captions",
+    "importExport.youtube.pictureOnly": "Link video only",
+    "importExport.youtube.captionExport": "Import a caption export",
+    "importExport.youtube.originalMedia": "Use original audio or video",
+    "importExport.youtube.name": "Video name",
+    "importExport.youtube.previewImport": "Preview import",
+    "importExport.youtube.linkVideo": "Link video",
+    "importExport.youtube.pictureHint": "You can add caption tracks later in the media timeline. Enable track editing in Project Settings to use this option.",
+    "importExport.youtube.media": "Your original audio or video",
+    "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your ASR settings, or review embedded caption tracks if present.",
+    "importExport.youtube.captionHint": "Export your captions from YouTube Studio as VTT, SRT, or SBV. YouTube’s player can display captions, but does not share caption text or audio with Aquilla. Text drawn into the video picture is not a subtitle track.",
+    "importExport.youtube.importMedia": "Import media and link video",
+    "importExport.youtube.link": "YouTube video link",
+    "importExport.youtube.captions": "Your caption export",
+    "importExport.youtube.preview": "Preview captions",
+    "importExport.youtube.import": "Import captions",
+    "importExport.youtube.time": "Time (seconds)",
+    "importExport.youtube.text": "Caption text",
     "importExport.landing.gdrive.title": "Google Drive",
     "importExport.landing.gdrive.hint": "cloud",
     "importExport.landing.sdbh.title": "SDBH Hebrew Lexicon",
@@ -273,6 +350,20 @@ export const importExport = defineNamespace({
     "importExport.landing.tm.title": "Translation Memory",
     "importExport.landing.tm.hint": "TMX",
     "importExport.landing.tm.description": "Import source/target pairs from a TMX memory file.",
+
+    // — AQU-1527: "From another project" — the established-project source link
+    //   (AQU-1525) offered from the Import dialog's landing screen, not only
+    //   from Project Settings → Source & sync. Both unusable cases say what
+    //   would make it usable rather than hiding the tile, because a hidden
+    //   capability is the problem this slice exists to fix.
+    "importExport.landing.linkProject.title": "From another project",
+    "importExport.landing.linkProject.hint": "live link",
+    "importExport.landing.linkProject.description":
+      "Read another Aquilla project's source files here. The link is live, so later upstream edits keep flowing through.",
+    "importExport.landing.linkProject.alreadyLinkedTooltip":
+      "This project already reads its source from another project, and it can only follow one. Manage or detach that link in Project Settings → Source & sync.",
+    "importExport.landing.linkProject.roleTooltip":
+      "Project lead or above required to link a source project.",
 
     // — Re-import collision panel —
     "importExport.collision.intro": plural({
@@ -1125,6 +1216,138 @@ export const importExport = defineNamespace({
         'Importing a source document into a project and exporting a translation back out — the format pickers, per-format hints, upload progress, collision handling and failure messages. Importing is the very first action a translator takes in Aquilla, so these strings are read before any other working surface.',
     },
     keys: {
+      // Timeline media import (AQU-1431) — the three dialogs that review segments
+      // against a media file before anything is saved: the shared media import
+      // preview, Attach captions, and Align script. In all of them {number} is a
+      // segment's 1-based position in the list on screen, not a stored id, so it
+      // renumbers as the reviewer removes rows.
+      "importExport.mediaPreview.embedded": {
+        description:
+          "Choice in the text-source picker of the media import preview, naming a subtitle track found inside the uploaded MP4/M4A when that track declares no language of its own.",
+        placeholders: {
+          number: "1-based position of this embedded caption track within the media file.",
+        },
+      },
+      "importExport.mediaPreview.embeddedLanguage": {
+        description:
+          "The same embedded-subtitle-track choice as mediaPreview.embedded, used when the track does declare a language. Keep the language in parentheses after the track name so the two variants line up in the picker.",
+        placeholders: {
+          number: "1-based position of this embedded caption track within the media file.",
+          language:
+            "Language tag the track declares ('en', 'spa') — literal data read from the file, not translated.",
+        },
+      },
+      "importExport.mediaPreview.title": {
+        description:
+          "Default heading of the media import preview dialog, naming the media file whose segments are being reviewed. A calling dialog may replace this heading with its own (Attach captions and Align script both do).",
+        placeholders: {
+          name: "Filename of the media being imported — literal data, not translated.",
+        },
+      },
+      "importExport.mediaPreview.segmentCount": {
+        description:
+          "Live status line under the text-source picker: how many segments the selected text source contains. Count-governed. When some segments are invalid it is followed by ' · ' and mediaPreview.needsAttention on the same line.",
+        placeholders: {
+          count:
+            "Number of segments in the selected text source; also governs the plural form.",
+        },
+      },
+      "importExport.mediaPreview.needsAttention": {
+        description:
+          "Second clause of that same status line, appended after ' · ' when some segments have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.segmentCount starts.",
+        placeholders: {
+          count:
+            "Number of segments that currently fail validation; also governs the plural form.",
+        },
+      },
+      "importExport.mediaPreview.wording": {
+        description:
+          "Label of the textarea holding one segment's text in the media import preview. Short field label, not an instruction.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.start": {
+        description:
+          "Label of the number input for one segment's start time in the media import preview. The '(seconds)' unit matters — the field takes a decimal second offset, not a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.end": {
+        description:
+          "Label of the number input for one segment's end time in the media import preview. As with mediaPreview.start, the unit is decimal seconds rather than a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.remove": {
+        description:
+          "Button that drops one segment from the import in the media import preview. Names the segment because several buttons with the same wording sit in the list.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.confidence": {
+        description:
+          "Badge on a segment produced by automatic alignment, reporting how well its timings matched. The literal '%' sign follows the placeholder in the string; {percent} is the number alone.",
+        placeholders: {
+          percent: "Alignment confidence as a whole number 0–100, without the percent sign.",
+        },
+      },
+      "importExport.captionTrack.title": {
+        description:
+          "Heading of the Attach captions dialog, naming the media file the caption track will be attached to.",
+        placeholders: {
+          name: "Filename of the media the captions attach to — literal data, not translated.",
+        },
+      },
+      "importExport.captionTrack.overwrite": {
+        description:
+          "Warning above the overwrite-consent checkbox, shown once the chosen destination is an existing caption track, stating how much content replacing it would discard. Count-governed.",
+        placeholders: {
+          count:
+            "Number of segments already in the destination track; also governs the plural form.",
+        },
+      },
+      "importExport.scriptAlignment.title": {
+        description:
+          "Heading of the Align script dialog, naming the media file the pasted or uploaded script is being aligned to.",
+        placeholders: {
+          name: "Filename of the media the script aligns to — literal data, not translated.",
+        },
+      },
+      "importExport.scriptAlignment.overwrite": {
+        description:
+          "Label on the destination field of the Align script dialog, warning how much of the chosen track the aligned segments would replace.",
+        placeholders: {
+          count: "Number of segments already in the destination track.",
+        },
+      },
+      "importExport.scriptAlignment.wording": {
+        description:
+          "Label of the textarea holding one aligned segment's text in the Align script dialog. Short field label, not an instruction.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.start": {
+        description:
+          "Label of the number input for one aligned segment's start time in the Align script dialog. The unit is decimal seconds, not a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.end": {
+        description:
+          "Label of the number input for one aligned segment's end time in the Align script dialog. As with scriptAlignment.start, the unit is decimal seconds.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.coverage": {
+        description:
+          "Badge on an aligned segment reporting how much of its wording the aligner matched to the audio on its first pass. The literal '%' sign follows the placeholder in the string; {percent} is the number alone.",
+        placeholders: {
+          percent: "Initial word-match score as a whole number 0–100, without the percent sign.",
+        },
+      },
+      "importExport.scriptAlignment.review": {
+        description:
+          "Label of the checkbox a reviewer ticks to confirm a low-confidence aligned segment, which is what releases the dialog's Use button. First person on purpose — the reviewer is attesting, not being instructed.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.listen": {
+        description:
+          "Button that plays back just one segment's span of the media from the Align script dialog, so the reviewer can hear what the timings cover.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
       "importExport.result.reportImportedCount": {
         description:
           "Plain-text clipboard report: how many items imported successfully, interpolated into reportHeader.",

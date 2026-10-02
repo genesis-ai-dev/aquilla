@@ -95,9 +95,125 @@ function contentHash(text: string): string {
   return (h >>> 0).toString(16).padStart(8, "0")
 }
 
+/**
+ * AQU-1520: a source cell's `metadata` bucket, normalized to a plain object or
+ * `null`.
+ *
+ * `cells.metadata` is JSONB and reaches us as a parsed object through the
+ * shim, but a value that predates the column's current use — or a row written
+ * by an older path — can be a JSON string, an array, or a scalar. Only a plain
+ * object is a usable envelope (`readImportMilestone()` in
+ * `src/lib/milestone-navigation.ts` rejects anything else), so anything else
+ * becomes `null` and the snapshot copies no metadata for that cell rather than
+ * writing a shape the navigator cannot read.
+ */
+function cellMetadata(
+  value: unknown,
+): Record<string, unknown> | null {
+  const decoded = typeof value === "string"
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown
+        } catch {
+          return null
+        }
+      })()
+    : value
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) return null
+  return decoded as Record<string, unknown>
+}
+
 function countWords(text: string): number {
   const trimmed = text.trim()
   return trimmed ? trimmed.split(/\s+/).length : 0
+}
+
+/**
+ * AQU-1358: read the upstream file a target copy was mirrored from, as
+ * recorded by `withUpstreamFileId`. Returns null for legacy rows written
+ * before the marker existed, and for meta that is absent, malformed, or holds
+ * a non-string/empty value — callers then fall back to the deterministic
+ * live-mirror id (`deterministicDownstreamFileId`), never to the display name
+ * (AQU-1547).
+ */
+export function readUpstreamFileId(meta: string | null): string | null {
+  if (!meta) return null
+  try {
+    const parsed = JSON.parse(meta) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    const value = (parsed as Record<string, unknown>).upstreamFileId
+    return typeof value === "string" && value ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * AQU-1358: stamp `upstreamFileId` into a mirrored file's `meta` JSON so a
+ * later snapshot finds its own previous copy by upstream identity rather than
+ * by display name — which changes when the upstream file is renamed, making
+ * the name lookup miss and mint a duplicate.
+ *
+ * Absent or unparseable legacy meta degrades to a fresh object rather than
+ * throwing: this runs inside the best-effort snapshot loop, and losing a
+ * malformed meta blob is strictly better than losing the file row.
+ */
+export function withUpstreamFileId(meta: string | null, upstreamFileId: string): string {
+  let parsed: Record<string, unknown> = {}
+  if (meta) {
+    try {
+      const candidate = JSON.parse(meta) as unknown
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        parsed = candidate as Record<string, unknown>
+      }
+    } catch {
+      // fall through to {}
+    }
+  }
+  return JSON.stringify({ ...parsed, upstreamFileId })
+}
+
+/**
+ * MIRROR of sync-worker/src/events/link-sync.ts's `deterministicUuid`. Built
+ * on this module's existing `contentHash`, which is already the same djb2
+ * primitive sync-worker hashes with (event-projection.ts) — the parity test
+ * below is what holds all of it together.
+ */
+function deterministicUuid(key: string): string {
+  const h1 = contentHash(key)
+  const h2 = contentHash(`${key}\0salt2`)
+  const h3 = contentHash(`${h1}${h2}`)
+  const h4 = contentHash(`${h2}${h1}`)
+  const hex = (h1 + h2 + h3 + h4).slice(0, 32).padEnd(32, "0")
+  return (
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-` +
+    `${"89ab"[parseInt(hex[16] ?? "0", 16) % 4]}${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+  )
+}
+
+/**
+ * AQU-1547: the downstream `files.id` a LIVE link's mirror gives an upstream
+ * file — a MIRROR of sync-worker/src/events/link-sync.ts's
+ * `deterministicDownstreamFileId`.
+ *
+ * Duplicated rather than imported because the two workers are separate
+ * packages with their own lockfiles (the repo's established idiom for a
+ * cross-worker contract — cf. the role-policy mirror). The parity test
+ * imports BOTH and asserts they agree, so drift fails CI rather than silently
+ * un-matching every mirrored file.
+ *
+ * Why the snapshot needs it: mirrored rows carry no `meta.upstreamFileId`
+ * marker (the mirror passes the UPSTREAM's meta through verbatim), so before
+ * this they were only findable by display name — and a name lookup cannot
+ * tell a mirrored copy from a file the project imported itself. Their id, by
+ * contrast, is a pure function of (downstream project, upstream file), which
+ * a locally imported file's random UUID can never collide with.
+ */
+export function deterministicDownstreamFileId(
+  downstreamProjectId: string,
+  upstreamFileId: string,
+): string {
+  return deterministicUuid(`file\0${downstreamProjectId}\0${upstreamFileId}`)
 }
 
 export interface SourceLinkProject {
@@ -242,10 +358,35 @@ export async function emitLinkSourceEvent(
  * returns the upstream-id → target-id map so `snapshotSourceCells` can
  * rewrite `file_id` on the cell rows it copies.
  *
- * Idempotent across re-runs by NAME (not id) within one target project — a
- * second clone/detach snapshot updates the previously-created copy in place
- * rather than creating a duplicate file, keyed on (project_id, name) since
- * that's the only stable cross-run identifier available once ids differ.
+ * Idempotent across re-runs within one target project — a second clone/detach
+ * snapshot updates the previously-created copy in place rather than creating a
+ * duplicate file.
+ *
+ * AQU-1358: the match is keyed on the UPSTREAM FILE ID, recorded in the
+ * target copy's `meta.upstreamFileId` the first time it is written. Keying on
+ * name alone is what minted duplicates: rename a file upstream and the name
+ * lookup misses, so the next snapshot created a SECOND target row beside the
+ * one it should have renamed. Upstream id is stable across renames, so the
+ * re-run renames in place and stays a no-op for untouched files.
+ *
+ * AQU-1547: the match NEVER falls back to the display name, and never
+ * considers a deleted row. A name is not an identity — it cannot distinguish
+ * the copy this link brought in from a file the project imported itself years
+ * earlier, and picking the latter overwrote real translated work with the
+ * upstream's source (an established project linked under AQU-1525/1526 is
+ * explicitly allowed to hold a file sharing an upstream file's name). The two
+ * keys below are both identities:
+ *
+ *   1. `meta.upstreamFileId` — written by this function on every copy it makes.
+ *   2. `deterministicDownstreamFileId` — the id a LIVE link's mirror gives a
+ *      mirrored row, which carries no marker because the mirror passes the
+ *      upstream's own meta through verbatim.
+ *
+ * Neither can name-collide with a locally imported file. When neither matches
+ * (no mirror ever ran, or a pre-AQU-1358 legacy copy) the upstream file is
+ * copied to a NEW row: a duplicate file the lead can delete is recoverable,
+ * silently overwriting their source text and stranding its translations is
+ * not.
  *
  * Best-effort: returns an empty map on any failure (matches
  * `snapshotSourceCells`'s defensive posture — missing/legacy schema must not
@@ -287,16 +428,46 @@ export async function snapshotSourceFiles(
     return fileIdMap
   }
 
+  // AQU-1358: the target's existing files, read once and matched in JS rather
+  // than with `meta::jsonb ->> …` in SQL — `files.meta` is TEXT, so a single
+  // malformed legacy blob would make the cast throw and (inside this
+  // best-effort loop) silently drop that file from the snapshot.
+  //
+  // AQU-1547: `deleted_at IS NULL` — a file in Recently deleted is not a
+  // snapshot target. Writing to one edited work the lead had already set aside
+  // and handed it back changed on restore, and a tombstoned row is never the
+  // "project's current copy" of anything.
+  const byUpstreamId = new Map<string, string>()
+  const liveFileIds = new Set<string>()
+  try {
+    const existingRows = await env.AQUILLA_PG.prepare(
+      `SELECT id, meta FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+    )
+      .bind(args.targetProjectId)
+      .all<{ id: string; meta: string | null }>()
+    for (const row of existingRows.results ?? []) {
+      liveFileIds.add(row.id)
+      const upstreamId = readUpstreamFileId(row.meta)
+      if (upstreamId != null) byUpstreamId.set(upstreamId, row.id)
+    }
+  } catch (err) {
+    console.warn("snapshotSourceFiles: existing-file scan failed:", err)
+  }
+
   for (const file of files) {
     try {
-      const existing = await env.AQUILLA_PG.prepare(
-        `SELECT id FROM files WHERE project_id = ? AND name = ?`,
-      )
-        .bind(args.targetProjectId, file.name)
-        .first<{ id: string }>()
+      // AQU-1547: identity only — the marker this function writes, else the
+      // live mirror's deterministic id if such a row is actually present. No
+      // name fallback: see the doc comment above.
+      const mirroredId = deterministicDownstreamFileId(args.targetProjectId, file.id)
+      const existingId =
+        byUpstreamId.get(file.id) ?? (liveFileIds.has(mirroredId) ? mirroredId : undefined)
 
-      const targetFileId = existing?.id ?? crypto.randomUUID()
+      const targetFileId = existingId ?? crypto.randomUUID()
       const eventId = makeEventId()
+      // Stamp the upstream id so the next run matches by identity rather than
+      // by name, including after the upstream file is renamed.
+      const targetMeta = withUpstreamFileId(file.meta, file.id)
       await env.AQUILLA_PG.prepare(
         `INSERT INTO files (
            id, project_id, name, role, kind, book_code,
@@ -322,9 +493,13 @@ export async function snapshotSourceFiles(
           args.authorUsername,
           now,
           now,
-          file.meta ?? "{}",
+          targetMeta,
         )
         .run()
+      // Claim the row for this upstream file so a second upstream file can
+      // never be mapped onto it within this same run.
+      byUpstreamId.set(file.id, targetFileId)
+      liveFileIds.add(targetFileId)
       fileIdMap.set(file.id, targetFileId)
     } catch (err) {
       console.warn(`snapshotSourceFiles: insert failed for ${file.id}:`, err)
@@ -437,10 +612,17 @@ export async function snapshotSourceCells(
     type: string | null
     canonical_ref: string | null
     anchor_cell_id: string | null
+    metadata: Record<string, unknown> | null
   }> = []
   try {
     const rows = await env.AQUILLA_PG.prepare(
-      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id
+      // AQU-1520: `metadata` carries the import envelope
+      // (`aquillaImport.milestone`) the section navigator builds its titles
+      // from. A clone that copies text/type/ref but not this one shows
+      // app-invented "Part N" divisions where the upstream shows "Acts
+      // Preface" and the named chapter sections.
+      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
+              metadata
          FROM cells
         WHERE project_id = ? AND side = 'source'`,
     )
@@ -453,6 +635,7 @@ export async function snapshotSourceCells(
         type: string | null
         canonical_ref: string | null
         anchor_cell_id: string | null
+        metadata: Record<string, unknown> | null
       }>()
     cells = rows.results ?? []
   } catch {
@@ -472,6 +655,10 @@ export async function snapshotSourceCells(
     // belongs to a different project (or doesn't exist under this one).
     const targetFileId = fileIdMap.get(cell.file_id) ?? cell.file_id
     const id = makeEventId()
+    // AQU-1520: normalized once — the genesis payload below and the `cells`
+    // row it projects to must carry the same envelope, or a log replay would
+    // disagree with the row it rebuilt.
+    const metadata = cellMetadata(cell.metadata)
     try {
       const existing = await env.AQUILLA_PG.prepare(
         `SELECT event_id
@@ -494,6 +681,11 @@ export async function snapshotSourceCells(
             valueHtml: cell.value_html ?? undefined,
             type: cell.type ?? undefined,
             canonicalRef: cell.canonical_ref ?? undefined,
+            // AQU-1520: the import envelope travels with the genesis event, so
+            // a replay of the log rebuilds the clone's section navigation too
+            // — the `cells` insert below is a projection of this payload, not
+            // an independent truth.
+            metadata: metadata ?? undefined,
           })
       const serverSeq = await nextServerSeq(env, args.targetProjectId)
 
@@ -521,6 +713,7 @@ export async function snapshotSourceCells(
 
       const hash = contentHash(cell.value)
       const wordCount = countWords(cell.value)
+      const metadataJson = metadata === null ? null : JSON.stringify(metadata)
       if (existing) {
         await env.AQUILLA_PG.prepare(
           `UPDATE cells
@@ -554,8 +747,10 @@ export async function snapshotSourceCells(
           `INSERT INTO cells (
             project_id, file_id, cell_id, side, value, value_html, type,
             canonical_ref, anchor_cell_id, event_id, source_event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id
+            last_editor, last_edit_at, validated, word_count, content_hash,
+            metadata, lane_id
           ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+                    ?::text::jsonb,
                     (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'source'))`,
         )
           .bind(
@@ -572,6 +767,11 @@ export async function snapshotSourceCells(
             now,
             wordCount,
             hash,
+            // AQU-1520: projects the genesis payload's import envelope, so the
+            // clone's section navigator reads the upstream's real divisions
+            // instead of falling back to "Part N". JSON text + an explicit
+            // cast, the same shape the sync-worker projection binds JSONB with.
+            metadataJson,
             args.targetProjectId,
           )
           .run()

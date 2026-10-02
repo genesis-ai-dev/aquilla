@@ -2,8 +2,8 @@
  * AQU-307 / AQU-1028: the in-app feedback dialog — free text, auto-captured
  * context, and an optional screenshot.
  *
- * Opened from HelpMenu's Report item and from the always-visible FeedbackButton
- * in the shell footer.
+ * Opened from HelpMenu's Feedback item (AQU-1548 folded the shell footer's
+ * standalone FeedbackButton back into that menu).
  *
  * AQU-1028 changed where a report goes. AQU-307 shipped it as a PostHog capture,
  * which meant the message only reached the team when the user had analytics
@@ -113,8 +113,8 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
     setState("sending")
     try {
       // Read the session at submit time rather than through useAccounts: this
-      // dialog is mounted by the always-present shell FeedbackButton, and a
-      // hook into the accounts query would make every surface that renders the
+      // dialog is mounted by the always-present shell Help menu, and a hook
+      // into the accounts query would make every surface that renders the
       // shell depend on a QueryClientProvider just to keep a closed dialog alive.
       const session = await loadActiveSession()
       const result = await submitFeedback(session?.jwt ?? "", {

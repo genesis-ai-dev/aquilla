@@ -138,6 +138,10 @@ export interface Env {
    * trimmed + lowercased for matching.
    */
   ADMIN_EMAILS?: string
+  /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+   *  today's per-table queries), "shadow" (today's answer + access_grants
+   *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+  ACCESS_GRANTS_RESOLVER?: string
 
   /**
    * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the
@@ -166,6 +170,9 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
+   *  react loop use its fixed rules without calling Jev. Unset = on. */
+  JEV_REACT?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -194,6 +201,11 @@ export interface Env {
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
+  /** OAuth issuer for MCP hosts (ChatGPT plugin, Claude, Codex): this
+   *  worker's public base, e.g. https://api.aquilla.app/identity. Must equal
+   *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
+   *  names as the authorization server. Falls back to the request origin. */
+  MCP_OAUTH_ISSUER?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may

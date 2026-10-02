@@ -121,3 +121,20 @@ describe("withCors", () => {
     expect(wrapped.headers.get("Access-Control-Allow-Origin")).toBeNull()
   })
 })
+
+describe("MCP clients in a browser", () => {
+  it("can preflight the MCP endpoint with Mcp-Protocol-Version and read the 401 challenge", () => {
+    const preflight = handleCorsPreflight(req("OPTIONS", "/api/v1/external/mcp"))
+    expect(preflight?.headers.get("Access-Control-Allow-Headers")).toContain("Mcp-Protocol-Version")
+    const challenged = withCors(
+      new Response(null, { status: 401, headers: { "WWW-Authenticate": 'Bearer resource_metadata="x"' } }),
+      req("POST", "/api/v1/external/mcp"),
+    )
+    expect(challenged.headers.get("WWW-Authenticate")).toBe('Bearer resource_metadata="x"')
+    expect(challenged.headers.get("Access-Control-Expose-Headers")).toContain("WWW-Authenticate")
+  })
+
+  it("can fetch the OAuth protected-resource metadata cross-origin", () => {
+    expect(isBrowserCorsPath("/.well-known/oauth-protected-resource/api/v1/external/mcp")).toBe(true)
+  })
+})

@@ -62,6 +62,8 @@ describe('discovery root', () => {
     const body = (await res!.json()) as any
     expect(body.name).toBe('Aquilla Agent API')
     expect(body.auth.header).toContain('Bearer aqk_')
+    // OAuth-capable MCP hosts learn they can sign in instead of pasting a token.
+    expect(body.auth.oauth).toContain('resource_metadata')
     expect(body.quickstart.length).toBeGreaterThan(0)
     expect(body.mcp.endpoint).toBe('/api/v1/external/mcp')
     expect(Object.keys(body.endpoints)).toContain('GET /api/v1/external/me')

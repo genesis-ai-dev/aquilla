@@ -21,7 +21,7 @@
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
- *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds }
+ *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds, filesChanged }
  *       FRO-479 push accelerator: this project's live upstream committed
  *       lane-relevant changes. LOSSY — never load-bearing (see
  *       docs/superpowers/specs/2026-07-06-linked-projects-provenance-invalidation-design.md
@@ -125,6 +125,9 @@ export type ProjectWsServerMessage =
       untilSeq: number
       fileIds: string[]
       cellIds: string[]
+      /** AQU-1545: the upstream created or renamed a file — the file list
+       *  moves, not just cells. False when an older worker omits it. */
+      filesChanged: boolean
     }
   /** Contextual translation pipeline activity (slice D2). LOSSY — never
    *  load-bearing; the run-store mirror re-hydrates from the transport
@@ -746,6 +749,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       untilSeq: m.untilSeq,
       fileIds: m.fileIds.filter((f): f is string => typeof f === "string"),
       cellIds: m.cellIds.filter((c): c is string => typeof c === "string"),
+      filesChanged: m.filesChanged === true,
     }
   }
   return null
@@ -1112,20 +1116,39 @@ export interface LinkUpstreamChangedHandlerOptions {
    *  Frames for any other project are ignored (a stale reconciler from a
    *  just-closed project, or — defensively — a server bug). */
   currentProjectId(): string | null
-  /** Triggers a refetch of stale-source state (`useStaleSourceCells.revalidate`). */
+  /** Re-reads stale-source state WITHOUT triggering a sync of its own
+   *  (`useStaleSourceCells.refetch`) — this handler owns the sync. */
   revalidateStaleSource(): void
-  /** Fire-and-forget POST /link/sync for the currently open project/file —
-   *  same shape as `useStaleSourceCells.ts`'s existing `triggerLinkSync`. */
-  triggerLinkSync(): void
+  /** POST /link/sync for the currently open project, then whatever refreshes
+   *  follow it. `filesChanged` is true when any frame this sync answers said
+   *  the upstream created or renamed a file. Return the promise when there is
+   *  one: a frame that lands while it is still running is answered by another
+   *  sync once it settles, because the running one may have read the upstream
+   *  before that frame's change committed. */
+  triggerLinkSync(change: { filesChanged: boolean }): Promise<unknown> | void
   /** Debounce window — bursts of frames (e.g. a large upstream re-import)
    *  collapse to one sync per project per window (spec: "one sync per 5s
    *  per project so bursts don't hammer the route"). */
   debounceMs?: number
   /** Injectable clock for tests. */
   now?(): number
+  /** Injectable timer for tests; returns a cancel function. */
+  setTimer?(fn: () => void, ms: number): () => void
+}
+
+export interface LinkUpstreamChangedHandler {
+  (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>): void
+  /** Drop a sync still waiting for its window. Call when the socket that feeds
+   *  this handler is torn down; a sync already running is left to finish. */
+  dispose(): void
 }
 
 const LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS = 5000
+
+const defaultSetTimer = (fn: () => void, ms: number): (() => void) => {
+  const id = setTimeout(fn, ms)
+  return () => clearTimeout(id)
+}
 
 /**
  * Build a handler for `link.upstream-changed` frames. Always calls
@@ -1135,27 +1158,80 @@ const LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS = 5000
  * re-import) collapses to one `/link/sync` POST instead of hammering the
  * route once per frame.
  *
- * Pure with respect to time: pass `now` in tests to avoid fake timers.
+ * The debounce keeps its trailing edge. The first frame syncs at once; frames
+ * inside the window, or while that sync is still running, are not dropped but
+ * owed ONE more sync, run when the window closes and the running sync has
+ * settled. AQU-1545: the window used to swallow them, so a burst of upstream
+ * hides left the open downstream showing only the first until a reload.
  */
 export function createLinkUpstreamChangedHandler(
   options: LinkUpstreamChangedHandlerOptions,
-): (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>) => void {
+): LinkUpstreamChangedHandler {
   const debounceMs = options.debounceMs ?? LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS
   const now = options.now ?? (() => Date.now())
+  const setTimer = options.setTimer ?? defaultSetTimer
   // -Infinity, not 0: with an injected `now: () => t` starting at t=0 (as
   // tests do), a `lastSyncAt` of 0 would suppress the very first call.
   let lastSyncAt = -Infinity
+  let running = false
+  /** A frame arrived that no sync started since has covered. */
+  let owed = false
+  /** One of those frames created or renamed an upstream file. */
+  let owedFilesChanged = false
+  let cancelTimer: (() => void) | null = null
+  let disposed = false
 
-  return (msg) => {
+  const runSync = (): void => {
+    cancelTimer = null
+    if (disposed) return
+    const filesChanged = owedFilesChanged
+    owed = false
+    owedFilesChanged = false
+    running = true
+    lastSyncAt = now()
+    let pending: Promise<unknown> | void
+    try {
+      pending = options.triggerLinkSync({ filesChanged })
+    } catch {
+      pending = undefined
+    }
+    void Promise.resolve(pending)
+      .catch(() => {
+        // Best-effort: the lazy pull on the next file open is the floor.
+      })
+      .finally(() => {
+        running = false
+        if (owed) arm()
+      })
+  }
+
+  const arm = (): void => {
+    if (disposed || running || cancelTimer) return
+    const wait = lastSyncAt + debounceMs - now()
+    if (wait <= 0) {
+      runSync()
+      return
+    }
+    cancelTimer = setTimer(runSync, wait)
+  }
+
+  const handle = (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>): void => {
     const pid = options.currentProjectId()
     if (!pid || msg.project !== pid) return
 
     // Staleness must reflect the frame immediately — cheap GET, no debounce.
     options.revalidateStaleSource()
 
-    const t = now()
-    if (t - lastSyncAt < debounceMs) return
-    lastSyncAt = t
-    options.triggerLinkSync()
+    owed = true
+    if (msg.filesChanged) owedFilesChanged = true
+    arm()
   }
+
+  return Object.assign(handle, {
+    dispose: () => {
+      disposed = true
+      cancelTimer?.()
+      cancelTimer = null
+    },
+  })
 }

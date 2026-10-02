@@ -49,18 +49,18 @@ export const nav = defineNamespace({
     "nav.help.docs": "Help",
     "nav.help.discord": "Discord server",
     "nav.help.contactSupport": "Contact support",
-    "nav.help.report": "Report",
 
-    // -- FeedbackButton (AQU-1028): the always-visible shell affordance that
-    // opens the same dialog as nav.help.report. --
+    // -- Feedback (AQU-1548): the Help menu's last item, which opens the
+    // report dialog. It replaced the "Report" label (nav.help.report, removed)
+    // when AQU-1028's standalone shell button was folded back into the menu. --
     "nav.feedback.buttonLabel": "Feedback",
-    "nav.feedback.buttonTooltip": "Send feedback to the Aquilla team",
 
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
     "nav.dock.agentTab": "Agent",
     "nav.dock.agentUnread": "{count} unread",
     "nav.dock.expandSidebar": "Expand sidebar",
+    "nav.dock.hidePanel": "Hide sidebar panel",
     "nav.shell.openSidebar": "Open sidebar",
     "nav.shell.navigation": "Navigation",
 
@@ -601,23 +601,13 @@ export const nav = defineNamespace({
       "nav.help.contactSupport": {
         description: "Dropdown item that opens a mailto: link to the support address.",
       },
-      "nav.help.report": {
-        description:
-          "Dropdown item that opens the 'Report a problem' dialog (nav.report.*).",
-      },
-
-      // -- FeedbackButton (AQU-1028) --
+      // -- Feedback (AQU-1548) --
       "nav.feedback.buttonLabel": {
         description:
-          "Visible label of the always-present feedback button in the app shell's " +
-          "sidebar footer. It opens the same dialog as nav.help.report; this one is the " +
-          "discoverable entry point, so the word should read as an invitation rather " +
-          "than a fault report.",
+          "Last item in the app shell's Help ('?') dropdown; it opens the " +
+          "'Report a problem' dialog (nav.report.*). The word should read as an " +
+          "invitation to tell the team anything rather than as a fault report.",
         maxLength: 12,
-      },
-      "nav.feedback.buttonTooltip": {
-        description:
-          "Tooltip and accessible name for that button, naming who receives the message.",
       },
 
       // -- LeftDock --
@@ -641,7 +631,10 @@ export const nav = defineNamespace({
       "nav.dock.expandSidebar": {
         description:
           "Tooltip and accessible name for the button on the collapsed 40px icon rail " +
-          "that expands the dock back open to the Files tab.",
+          "that restores the last open dock panel (or the first available one).",
+      },
+      "nav.dock.hidePanel": {
+        description: "Hide the sidebar's content panel while keeping its icon rail and the current main view.",
       },
       "nav.shell.openSidebar": {
         description:

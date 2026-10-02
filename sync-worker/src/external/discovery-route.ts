@@ -51,6 +51,8 @@ function apiMap(): Record<string, unknown> {
       header: 'Authorization: Bearer aqk_...',
       note:
         'Same token for REST and MCP. Tokens are minted by a signed-in human at Preferences → Account → "API tokens" in the Aquilla app (or POST /api/v2/credentials on the identity host with a browser-session JWT — NOT with an aqk_ token). 401 means the token is missing, malformed, revoked, or expired.',
+      oauth:
+        'MCP hosts that run OAuth themselves (ChatGPT plugins, Claude, Codex) need no pasted token: the MCP endpoint\'s 401 carries a WWW-Authenticate resource_metadata URL (RFC 9728) naming the identity host as authorization server (authorization code + PKCE S256, clients identified by a client-metadata-document URL). The token it issues is an ordinary aqk_ credential.',
     },
     hosts: {
       thisHost: 'sync — everything under /api/v1/external/* (reads, artifacts, changesets, MCP) lives here.',

@@ -475,6 +475,7 @@ describe("parseProjectWsMessage", () => {
         untilSeq: 42,
         fileIds: ["f1", "f2"],
         cellIds: ["c1", "c2"],
+        filesChanged: true,
       }),
     )
     expect(msg).toEqual({
@@ -484,7 +485,22 @@ describe("parseProjectWsMessage", () => {
       untilSeq: 42,
       fileIds: ["f1", "f2"],
       cellIds: ["c1", "c2"],
+      filesChanged: true,
     })
+  })
+
+  it("reads a link.upstream-changed frame from an older worker as no file change (AQU-1545)", () => {
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "link.upstream-changed",
+        project: "proj-down",
+        upstream: "proj-up",
+        untilSeq: 42,
+        fileIds: ["f1"],
+        cellIds: ["c1"],
+      }),
+    )
+    expect(msg).toMatchObject({ t: "link.upstream-changed", filesChanged: false })
   })
 
   it("returns null for a malformed link.upstream-changed frame", () => {
@@ -753,6 +769,7 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
       untilSeq: 1,
       fileIds: ["f1"],
       cellIds: ["c1"],
+      filesChanged: false,
       ...overrides,
     }
   }
@@ -804,12 +821,33 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
     expect(triggerLinkSync).not.toHaveBeenCalled()
   })
 
-  it("debounces link/sync triggers to one per window, but always revalidates staleness", () => {
+  /** A timer the test fires by hand: `pending()` lists what is waiting. */
+  function manualTimers() {
+    const timers: Array<{ fn: () => void; ms: number; cancelled: boolean }> = []
+    return {
+      setTimer: (fn: () => void, ms: number) => {
+        const timer = { fn, ms, cancelled: false }
+        timers.push(timer)
+        return () => { timer.cancelled = true }
+      },
+      pending: () => timers.filter((x) => !x.cancelled),
+      fireAll: () => {
+        const due = timers.filter((x) => !x.cancelled)
+        for (const x of due) x.cancelled = true
+        for (const x of due) x.fn()
+      },
+    }
+  }
+
+  const settle = () => new Promise<void>((r) => setTimeout(r, 0))
+
+  it("debounces link/sync triggers to one per window, but always revalidates staleness", async () => {
     // Spec §8 / dispatch note: "Debounce (e.g. one sync per 5s per project)
     // so bursts don't hammer the route." A large upstream re-import can
     // produce many frames in quick succession; only the sync POST should
     // collapse — staleness must still reflect every frame immediately.
     let t = 0
+    const timers = manualTimers()
     const revalidateStaleSource = vi.fn()
     const triggerLinkSync = vi.fn()
     const handle = createLinkUpstreamChangedHandler({
@@ -818,18 +856,170 @@ describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
       triggerLinkSync,
       debounceMs: 5000,
       now: () => t,
+      setTimer: timers.setTimer,
     })
 
     handle(frame()) // t=0 — fires
+    await settle()
     t = 1000
-    handle(frame()) // t=1000 — within window, suppressed
+    handle(frame()) // within window — owed, not fired
     t = 4999
-    handle(frame()) // still within window, suppressed
-    t = 5000
-    handle(frame()) // window elapsed — fires again
+    handle(frame()) // still within window — folds into the same owed sync
 
-    expect(revalidateStaleSource).toHaveBeenCalledTimes(4)
+    expect(revalidateStaleSource).toHaveBeenCalledTimes(3)
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+    // One trailing sync, due when the window that began at t=0 closes.
+    expect(timers.pending().map((x) => x.ms)).toEqual([4000])
+  })
+
+  it("never drops the last frame of a burst: the window closes with one more sync (AQU-1545)", async () => {
+    // Ten upstream hides in quick succession. The leading-edge-only debounce
+    // synced on the first and swallowed the other nine, so the open downstream
+    // showed one hidden cell until a reload.
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    for (let i = 0; i < 10; i++) {
+      t = i * 100
+      handle(frame({ cellIds: [`c${i}`] }))
+      await settle()
+    }
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+
+    t = 5000
+    timers.fireAll()
+    await settle()
+
     expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+    expect(timers.pending()).toEqual([])
+  })
+
+  it("a frame that lands while a sync is running is answered by another sync after it (AQU-1545)", async () => {
+    // The running sync may have read the upstream before this frame's change
+    // committed — joining it would leave the downstream one change short.
+    let t = 0
+    const timers = manualTimers()
+    let finishSync: (() => void) | null = null
+    const triggerLinkSync = vi.fn(
+      () => new Promise<void>((resolve) => { finishSync = resolve }),
+    )
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame()) // t=0 — sync 1 starts and stays running
+    t = 6000 // past the window, but sync 1 is still running
+    handle(frame())
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
+
+    finishSync!()
+    await settle()
+
+    // Window long closed, so the owed sync runs as soon as sync 1 settles.
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps syncing after a sync fails", async () => {
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined)
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame())
+    await settle()
+    t = 5000
+    handle(frame())
+    await settle()
+
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+  })
+
+  it("tells the sync whether any frame it answers created or renamed a file (AQU-1545)", async () => {
+    // A rename only reaches the file list through a project re-read, and the
+    // frame is the only reliable source for that: the sync's own answer is
+    // empty whenever another trigger ran the fold first.
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame({ cellIds: ["c1"] })) // a hide — leading sync
+    await settle()
+    t = 1000
+    handle(frame({ cellIds: [], filesChanged: true })) // a rename, inside the window
+    t = 2000
+    handle(frame({ cellIds: ["c2"] })) // another hide; the rename is still owed
+    t = 5000
+    timers.fireAll()
+    await settle()
+    t = 10_000
+    handle(frame({ cellIds: ["c3"] })) // the owed flag was spent on the last sync
+    await settle()
+
+    expect(triggerLinkSync.mock.calls.map(([change]) => change)).toEqual([
+      { filesChanged: false },
+      { filesChanged: true },
+      { filesChanged: false },
+    ])
+  })
+
+  it("dispose() drops an owed sync so a torn-down socket triggers nothing", async () => {
+    let t = 0
+    const timers = manualTimers()
+    const triggerLinkSync = vi.fn()
+    const handle = createLinkUpstreamChangedHandler({
+      currentProjectId: () => "proj-down",
+      revalidateStaleSource: vi.fn(),
+      triggerLinkSync,
+      debounceMs: 5000,
+      now: () => t,
+      setTimer: timers.setTimer,
+    })
+
+    handle(frame())
+    await settle()
+    t = 1000
+    handle(frame())
+    expect(timers.pending()).toHaveLength(1)
+
+    handle.dispose()
+    expect(timers.pending()).toEqual([])
+    t = 10_000
+    handle(frame())
+    await settle()
+
+    expect(triggerLinkSync).toHaveBeenCalledTimes(1)
   })
 
   it("tracks debounce state per handler instance, not globally", () => {

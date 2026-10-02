@@ -7,7 +7,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { toast } from "@/components/ui/toast"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -58,6 +66,12 @@ vi.mock("@/lib/store/project-index", () => ({
 }))
 
 vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+
+// AQU-1519: the partial-success warning now rides a toast (the dialog closes),
+// so the assertion is on what was handed to the toast manager.
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { createProject } from "@/lib/store/project-index"
@@ -234,6 +248,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
     expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("3")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -281,6 +296,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     addExtraLanguage("es")
     addExtraLanguage("pt-BR")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -314,6 +330,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
   it("submits with no extras and still writes targetLanes as [primary]", async () => {
     openDialogWithBasics()
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -341,6 +358,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       target: { value: "English" },
     })
     fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
@@ -357,28 +375,33 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })
 
-  it("a failed settings PATCH still resolves with the created project, and surfaces a non-fatal warning", async () => {
+  it("a failed settings PATCH still resolves with the created project, closes the dialog, and toasts the warning (AQU-1519)", async () => {
     // AQU-1250: the single languages+lanes PATCH fails.
     mockPatchProjectSettings.mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
 
     openDialogWithBasics()
     addExtraLanguage("es")
 
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
     await waitFor(() => {
       expect(mockCreateProject).toHaveBeenCalledTimes(1)
     })
 
-    expect(
-      screen.getByText(
-        "Project created; adding extra languages failed — add them in Settings → Languages.",
-      ),
-    ).toBeTruthy()
-
-    // Non-fatal: the project was still created (not rolled back), and the
-    // dialog is left open (not the hard-failure "submitError" path).
-    expect(screen.getByText("Create New Project")).toBeTruthy()
+    // AQU-1519: partial success is no longer a reason to hold the dialog open.
+    // The project exists, so the dialog closes and the warning survives the
+    // close on a toast instead of being wiped by it.
+    await waitFor(() => {
+      expect(screen.queryByText("Create New Project")).toBeNull()
+    })
+    expect(vi.mocked(toast.add)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "warning",
+        title:
+          "Project created; adding extra languages failed — add them in Settings → Languages.",
+      }),
+    )
   })
 
   it("no longer offers the retired source-only shape", () => {

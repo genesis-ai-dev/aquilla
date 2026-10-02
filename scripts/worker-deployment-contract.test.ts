@@ -28,6 +28,42 @@ function readRepoFile(...segments: string[]): string {
   return readFileSync(path.join(REPO_ROOT, ...segments), "utf8")
 }
 
+// AQU-1539: the deploy-credential contract below must hold for EVERY job that
+// runs a `deploy:aquilla*` command, not a hand-maintained list of job names, so
+// a newly added deploy surface cannot reintroduce the gap unnoticed.
+function workflowJobs(workflow: string): { name: string; body: string }[] {
+  const jobsIndex = workflow.indexOf("\njobs:\n")
+  expect(jobsIndex).toBeGreaterThan(-1)
+  const jobsBlock = workflow.slice(jobsIndex + "\njobs:\n".length)
+  const headings = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):$/gm)]
+  expect(headings.length).toBeGreaterThan(0)
+  return headings.map((heading, index) => ({
+    name: heading[1],
+    body: jobsBlock.slice(
+      heading.index!,
+      index + 1 < headings.length ? headings[index + 1].index! : undefined,
+    ),
+  }))
+}
+
+// The step, not the job: a `deploy:aquilla*` command only sees the `env:` of the
+// step that runs it, so credentials parked on a sibling step do not count.
+// Whole-line comments are dropped first — the workflow documents these very
+// commands and secret names in prose, and a comment is not a credential.
+function workflowSteps(job: string): string[] {
+  const indices = [...job.matchAll(/^ {6}- /gm)].map((match) => match.index!)
+  return indices
+    .map((start, index) =>
+      job.slice(start, index + 1 < indices.length ? indices[index + 1] : undefined),
+    )
+    .map((step) =>
+      step
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n"),
+    )
+}
+
 function tomlBlock(config: string, marker: string): string {
   const markerIndex = config.indexOf(`\n${marker}\n`)
   expect(markerIndex).toBeGreaterThan(-1)
@@ -679,6 +715,104 @@ describe("worker deployment environment contract", () => {
     expect(changesJob).toContain("No usable diff base; running every worker suite")
     expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs --all")
     expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs")
+  })
+
+  // AQU-682 / AQU-1157: the Neon migration guard covered the Workers only, so a
+  // dev deploy whose schema-guard failed still published the SPA —
+  // dev.aquilla.app served new front-end code against old Workers and an
+  // un-migrated database (2026-09-03, 14:26-14:32). A deployment is one unit:
+  // if the target schema is behind, NOTHING publishes, web included.
+  it("blocks every deploy surface — web included — on the target Neon schema guard", () => {
+    const scripts = (JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }).scripts ?? {}
+
+    for (const [script, guard] of [
+      ["deploy:aquilla:spa", "npm run neon:status:prod"],
+      ["deploy:aquilla:sync", "npm run neon:status:prod"],
+      ["deploy:aquilla:auth", "npm run neon:status:prod"],
+      ["deploy:aquilla:dev:spa", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:sync", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:auth", "npm run neon:status:dev"],
+    ] as const) {
+      const command = scripts[script]
+      expect(command).toContain(guard)
+      // The guard is read-only and runs before anything is built or uploaded.
+      expect(command.indexOf(guard)).toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+      expect(command).not.toContain("neon:apply")
+    }
+
+    for (const command of Object.values(scripts).filter((value) => value.includes("deploy:aquilla"))) {
+      expect(command).not.toContain("neon:apply")
+    }
+
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    const jobStart = (name: string) => {
+      const index = workflow.indexOf(`\n  ${name}:\n`)
+      expect(index).toBeGreaterThan(-1)
+      return index
+    }
+    const job = (name: string, next: string) =>
+      workflow.slice(jobStart(name), jobStart(next))
+
+    // schema-guard runs for every selectable surface, not just the Workers.
+    const guardJob = job("schema-guard", "web")
+    for (const surface of ["web", "sync", "auth"]) {
+      expect(guardJob).toContain(`needs.detect.outputs.${surface} == 'true'`)
+    }
+    expect(guardJob).not.toContain("neon:apply")
+
+    // ...and every deploy job waits on it and skips when it did not pass.
+    for (const [name, next] of [
+      ["web", "sync-worker"],
+      ["sync-worker", "auth-worker"],
+    ] as const) {
+      const deployJob = job(name, next)
+      expect(deployJob).toContain("needs: [target, detect, schema-guard]")
+      expect(deployJob).toContain("!failure() && !cancelled()")
+    }
+    const authJob = workflow.slice(jobStart("auth-worker"))
+    expect(authJob).toContain("needs: [target, detect, schema-guard]")
+    expect(authJob).toContain("!failure() && !cancelled()")
+
+    // AQU-1539: EVERY deploy step must carry the credentials its own in-script
+    // guard reads, or the guard fails closed in CI for the wrong reason — a
+    // missing-credential error instead of a pending-migration report. The two
+    // Worker steps carried only the Cloudflare secrets, so `web` published the
+    // SPA while `sync-worker`/`auth-worker` died before uploading anything:
+    // the same partial deployment AQU-682/AQU-1157 closed, from the other side.
+    // The job list is derived from the workflow, so a new deploy surface is
+    // covered the moment it is added.
+    const deploySteps = workflowJobs(workflow).flatMap((deployJob) =>
+      workflowSteps(deployJob.body)
+        .filter((step) => /run:[\s\S]*deploy:aquilla/.test(step))
+        .map((step) => ({ job: deployJob.name, step })),
+    )
+    expect(deploySteps.map((entry) => entry.job)).toEqual(["web", "sync-worker", "auth-worker"])
+    for (const { job: jobName, step } of deploySteps) {
+      for (const secret of [
+        "NEON_PG_HOST",
+        "NEON_PG_DB",
+        "NEON_PG_ROLE",
+        "NEON_PG_PASSWORD",
+        "NEON_API_KEY",
+        "NEON_DEV_PG_HOST",
+        "NEON_DEV_PG_DB",
+        "NEON_DEV_PG_ROLE",
+        "NEON_DEV_PG_PASSWORD",
+      ]) {
+        expect(step, `${jobName} deploy step is missing ${secret}`).toContain(`${secret}:`)
+      }
+      // Both targets are reachable from one step, so both credential sets are
+      // required regardless of which branch the operator dispatched from.
+      expect(step).toContain("deploy:aquilla")
+      expect(step).not.toContain("neon:apply")
+    }
+
+    // The operator-facing order is written down where deploys are run from.
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    expect(matrix).toContain("**Migrate first, then deploy.**")
+    expect(matrix).toContain("Every surface — web, identity and sync alike — runs the target")
   })
 
   it("installs root and worker dependencies before deployable worker checks", () => {

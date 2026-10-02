@@ -14,6 +14,13 @@
 // AQU-478: extended to also display the link's mode/consumes/gate/cursor
 // state (read-only — creation/mode are set at link time, not editable here).
 // Detach itself is unchanged.
+//
+// AQU-1544: a live link whose cursor is still 0 has never brought anything
+// through. Until this slice it rendered exactly like a healthy one ("Live",
+// "cursor: 0"), so a link whose first sync failed was indistinguishable from
+// one that worked — for the person who linked it once they had dismissed the
+// failure message, and for any teammate opening settings later. It now reads
+// "Not synced yet" and carries its own "Sync now".
 
 import { useState } from "react"
 import { AlertTriangle, Link2Off } from "lucide-react"
@@ -32,6 +39,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
+import { runLinkSync } from "@/lib/sync/archive"
+import { clearLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -49,6 +58,9 @@ export interface SourceLinkSectionProps {
   sourceLinkCursor?: number | null
   /** Called after successful detach so the parent can refresh the project record. */
   onDetached: () => void
+  /** AQU-1544: called after a "Sync now" that worked, so the parent can
+   *  refresh the project record and pick up the advanced cursor. */
+  onSynced?: () => void
   /** The caller's resolved role level on this project. */
   roleLevel: number | null
 }
@@ -64,6 +76,7 @@ export function SourceLinkSection({
   sourceLinkGate,
   sourceLinkCursor,
   onDetached,
+  onSynced,
   roleLevel,
 }: SourceLinkSectionProps) {
   const t = useT()
@@ -72,6 +85,37 @@ export function SourceLinkSection({
   const [confirmInput, setConfirmInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // AQU-1544: "idle" until the user presses Sync now. "empty" is a sync that
+  // worked and had nothing to bring, which on a never-synced link means the
+  // upstream has nothing to give yet — a different sentence from "failed",
+  // and the reason the never-synced state cannot simply blame the sync.
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "failed" | "empty">("idle")
+
+  // The cursor is the upstream sequence this link has mirrored up to; the
+  // link route resets it to 0 and only a mirror sync that found something
+  // advances it. Only an explicit live link qualifies: a clone never syncs
+  // after creation, and a legacy link with no recorded mode is badged "Live"
+  // above but is not mirrored by the sync engine at all, so "Sync now" would
+  // promise something it cannot do.
+  const neverSynced = sourceLinkMode === "live" && (sourceLinkCursor ?? 0) === 0
+
+  async function handleSyncNow() {
+    if (!session?.jwt || syncState === "syncing") return
+    setSyncState("syncing")
+    // Never throws: `runLinkSync` folds every failure into `{ ok: false }`.
+    const outcome = await runLinkSync(session.jwt, projectId)
+    if (!outcome.ok) {
+      setSyncState("failed")
+      return
+    }
+    clearLinkSeedFailed(projectId)
+    // Content came through: the refreshed record carries a cursor above 0 and
+    // this whole block unmounts. Nothing came through: the upstream is empty,
+    // which is said rather than left looking like an unanswered press.
+    setSyncState(outcome.ranSync ? "idle" : "empty")
+    onSynced?.()
+  }
 
   const canDetach = (roleLevel ?? 0) >= MIN_ROLE_LEVEL
   const confirmed = confirmInput.trim().toUpperCase() === DETACH_CONFIRM_WORD
@@ -151,10 +195,40 @@ export function SourceLinkSection({
                 })}
               </Badge>
             )}
-            {sourceLinkMode !== "clone" && (
+            {sourceLinkMode !== "clone" && !neverSynced && (
               <Badge variant="outline">{t("projectSettings.sourceLink.cursorLabel", { value: sourceLinkCursor ?? 0 })}</Badge>
             )}
+            {neverSynced && (
+              <Badge
+                variant="outline"
+                className="border-amber-400 text-amber-900 dark:border-amber-600 dark:text-amber-200"
+              >
+                {t("projectSettings.sourceLink.notSyncedBadge")}
+              </Badge>
+            )}
           </div>
+          {neverSynced && (
+            <div className="flex items-start justify-between gap-3 rounded border px-3 py-2 text-sm">
+              <p role={syncState === "failed" ? "alert" : "status"}>
+                {syncState === "failed"
+                  ? t("projectSettings.sourceLink.syncFailedNote")
+                  : syncState === "empty"
+                    ? t("projectSettings.sourceLink.syncNothingYetNote")
+                    : t("projectSettings.sourceLink.notSyncedNote")}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={syncState === "syncing" || !session}
+                onClick={() => void handleSyncNow()}
+              >
+                {syncState === "syncing"
+                  ? t("projectSettings.sourceLink.syncingButton")
+                  : t("projectSettings.sourceLink.syncNowButton")}
+              </Button>
+            </div>
+          )}
           {sourceLinkMode === "clone" && (
             <p className="text-xs text-muted-foreground">
               {t("projectSettings.sourceLink.cloneNote")}

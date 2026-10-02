@@ -85,3 +85,17 @@ it('clears review when the billing interval changes', async () => {
   await user.click(screen.getByRole('option', { name: 'Monthly' }))
   expect(screen.queryByRole('region', { name: 'Review selected plan' })).not.toBeInTheDocument()
 })
+
+// AQU-1524: the review panel opens inside the Compare new plans card, so it must
+// be an inset section of that card — not a second bordered card nested in it.
+it('renders the plan review inset inside the Compare new plans card rather than as a nested card', async () => {
+  responses()
+  const user = userEvent.setup()
+  render(<BillingOffers jwt="jwt" orgId={7} />)
+  await user.click(await screen.findByRole('button', { name: 'Review Team 20×' }))
+  const region = screen.getByRole('region', { name: 'Review selected plan' })
+  expect(await within(region).findByText('Translation team')).toBeVisible()
+  expect(region.querySelector('[data-slot="settings-card"]')).toBeNull()
+  expect(region.closest('[data-slot="settings-card"]')).not.toBeNull()
+  expect(region.className).toContain('px-4')
+})

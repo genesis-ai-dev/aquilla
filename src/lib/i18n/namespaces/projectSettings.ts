@@ -32,6 +32,24 @@ export const projectSettings = defineNamespace({
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
     "projectSettings.create.dialogTitle": "Create New Project",
+    // AQU-1352: destination picker at the top of the create dialog.
+    "projectSettings.create.destinationLabel": "Create in",
+    "projectSettings.create.destinationPersonal": "Personal",
+    "projectSettings.create.destinationThisOrg": "this organization",
+    "projectSettings.create.destinationRoleHint":
+      "You're a {role} in {org}, so you can't create projects there. You can create one in Personal.",
+    "projectSettings.create.destinationNotAllowedHint":
+      "You can't create projects in {org}. You can create one in Personal.",
+    "projectSettings.create.destinationLoadError":
+      "Couldn't load where you can create projects. Close this dialog and try again.",
+    "projectSettings.create.createdToast": "Created {name} in {destination}",
+    // AQU-1352 P2: teams multi-select under the destination picker.
+    "projectSettings.create.teamsLabel": "Teams",
+    "projectSettings.create.teamsPlaceholder": "Choose teams",
+    "projectSettings.create.teamsSearch": "Search teams",
+    "projectSettings.create.teamsEmpty": "No teams found.",
+    "projectSettings.create.teamsRequiredHint": "Pick a team you lead. The project will belong to that team.",
+    "projectSettings.create.teamsRequiredError": "Choose at least one team to create this project in.",
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
@@ -82,6 +100,12 @@ export const projectSettings = defineNamespace({
       "propagate here.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
+    // AQU-1518: the upstream picker is a searchable combobox, not a
+    // scroll-only dropdown.
+    "projectSettings.create.upstreamProjectSearchPlaceholder": "Search projects…",
+    "projectSettings.create.upstreamProjectSearchAriaLabel": "Search projects",
+    "projectSettings.create.upstreamProjectNoMatches": "No projects match.",
+    "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
     "projectSettings.create.linkConsumesSourceName": "Its Source",
@@ -603,6 +627,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1544: a live link that has never brought anything through.
+    "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
+    "projectSettings.sourceLink.notSyncedNote":
+      "Nothing has come through this link yet, so the source project's files are " +
+      "not in this project. Sync now to bring them in.",
+    "projectSettings.sourceLink.syncNowButton": "Sync now",
+    "projectSettings.sourceLink.syncingButton": "Syncing…",
+    "projectSettings.sourceLink.syncFailedNote":
+      "Couldn't bring in the source project's files. The link is still saved, so " +
+      "you can try again in a moment.",
+    "projectSettings.sourceLink.syncNothingYetNote":
+      "The source project has nothing to bring in yet. Its files will arrive here " +
+      "as it gains them.",
     "projectSettings.sourceLink.cloneNote": "This is a one-time snapshot — upstream changes do not propagate here.",
     "projectSettings.sourceLink.irreversibleTitle": "Detaching is irreversible",
     "projectSettings.sourceLink.irreversibleDescription":
@@ -618,6 +655,72 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.typeToConfirm": "Type {word} to confirm.",
     "projectSettings.sourceLink.detachingButton": "Detaching…",
     "projectSettings.sourceLink.detachConfirmButton": "Detach",
+
+    // ── LinkSourceSection.tsx (AQU-1525) ──
+    "projectSettings.linkSource.title": "Link to a source project",
+    "projectSettings.linkSource.description":
+      "This project owns its own source. Link it to another project to read that " +
+      "project's source files here, without recreating this project.",
+    "projectSettings.linkSource.pickerLabel": "Source project",
+    "projectSettings.linkSource.pickerPlaceholder": "Choose a project to link from…",
+    "projectSettings.linkSource.pickerSearchPlaceholder": "Search projects…",
+    "projectSettings.linkSource.pickerSearchAriaLabel": "Search projects",
+    "projectSettings.linkSource.pickerNoMatches": "No projects match.",
+    "projectSettings.linkSource.noProjectsNote": "No other project is available to link to.",
+    "projectSettings.linkSource.additiveNote":
+      "The link is live: the upstream's source files are mirrored in alongside " +
+      "everything this project already holds, and later upstream edits keep " +
+      "flowing through. Existing files, translations and validations are left as " +
+      "they are. Detach later to stop following the upstream.",
+    "projectSettings.linkSource.linkButton": "Link source project",
+    "projectSettings.linkSource.linkingButton": "Linking…",
+    "projectSettings.linkSource.roleGateNote":
+      "Project lead or above required to link a source project.",
+    "projectSettings.linkSource.cycleError":
+      "That project already reads its source from this one, so linking would " +
+      "create a loop. This project is still unlinked — choose a different project.",
+
+    // ── AQU-1526: the confirm step shown after an upstream is picked and
+    // before anything is linked. It warns about same-named files; it never
+    // blocks the link.
+    "projectSettings.linkSource.reviewButton": "Review what will be added",
+    "projectSettings.linkSource.cancelButton": "Cancel",
+    "projectSettings.linkSource.previewTitle": "Link to {upstream}?",
+    "projectSettings.linkSource.previewLoading": "Checking what this link will add…",
+    "projectSettings.linkSource.previewCount": plural({
+      one: "{count} source file will be added to this project.",
+      other: "{count} source files will be added to this project.",
+    }),
+    "projectSettings.linkSource.previewEmptyUpstream":
+      "That project has no source files yet, so nothing will be added now. Files " +
+      "will arrive here as the upstream gains them.",
+    "projectSettings.linkSource.previewLoadError":
+      "Couldn't load that project's file list, so we can't say what the link will " +
+      "add. Nothing has been linked.",
+    "projectSettings.linkSource.previewRetryButton": "Try again",
+    // ── AQU-1544: the link was saved but its first sync failed. One sentence
+    // and one action, shown wherever the user started the link.
+    "projectSettings.linkSource.seedFailedMessage":
+      "The link to the source project was saved, but its files have not arrived " +
+      "here yet. Try again to bring them in.",
+    "projectSettings.linkSource.seedRetryFailedNote":
+      "That attempt did not bring them in either. The link is still saved, so you " +
+      "can try again in a moment.",
+    "projectSettings.linkSource.seedRetryingButton": "Trying again…",
+    "projectSettings.linkSource.clashWarningHeading": plural({
+      one: "This project already has a file with the same name:",
+      other: "This project already has files with these names:",
+    }),
+    "projectSettings.linkSource.clashWarningBody": plural({
+      one:
+        "Your existing file is kept exactly as it is, with its translations. The " +
+        "mirrored copy arrives alongside it with empty translations, so this name " +
+        "will appear twice in the file list.",
+      other:
+        "Your existing files are kept exactly as they are, with their translations. " +
+        "The mirrored copies arrive alongside them with empty translations, so each " +
+        "of these names will appear twice in the file list.",
+    }),
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
@@ -887,6 +990,53 @@ export const projectSettings = defineNamespace({
         placeholders: {
           role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },
+      },
+      "projectSettings.create.destinationRoleHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller " +
+          "may not create projects in the org the page is showing.",
+        placeholders: {
+          role: "Singular localized role name, e.g. 'Contributor' or 'Guest'.",
+          org: "Organization name, e.g. 'Biblica ETT'.",
+        },
+      },
+      "projectSettings.create.destinationNotAllowedHint": {
+        description:
+          "Help text under the create-dialog destination picker when the caller may " +
+          "not create projects in the page's org and their role there is unknown.",
+        placeholders: { org: "Organization name, e.g. 'Biblica ETT'." },
+      },
+      "projectSettings.create.destinationLoadError": {
+        description:
+          "Error in the create-project dialog when the list of places the user may " +
+          "create a project could not be loaded. Creating is blocked until it loads.",
+      },
+      "projectSettings.create.createdToast": {
+        description: "Success toast after creating a project, naming where it was created.",
+        placeholders: {
+          name: "The new project's name.",
+          destination: "Where it was created: an organization name or the user's personal workspace name.",
+        },
+      },
+      "projectSettings.create.teamsLabel": {
+        description: "Field label above the teams multi-select in the create-project dialog.",
+      },
+      "projectSettings.create.teamsPlaceholder": {
+        description: "Placeholder in the teams multi-select trigger when no team is chosen.",
+      },
+      "projectSettings.create.teamsSearch": {
+        description: "Placeholder and accessible name for the search box inside the teams multi-select.",
+      },
+      "projectSettings.create.teamsEmpty": {
+        description: "Shown in the teams multi-select when the search matches no team.",
+      },
+      "projectSettings.create.teamsRequiredHint": {
+        description:
+          "Help text under the teams multi-select when the caller may only create projects " +
+          "in this organization inside a team they lead.",
+      },
+      "projectSettings.create.teamsRequiredError": {
+        description: "Form error when the caller submits without choosing a required team.",
       },
       "projectSettings.create.trigger": {
         description: "Button that opens the create-project dialog. Short, with a leading + icon.",
@@ -1465,6 +1615,146 @@ export const projectSettings = defineNamespace({
           "Disabled note in a project Members row menu, shown in place of 'Change role' " +
           "when the viewer may manage membership in general but not THIS member, whose " +
           "current role is at or above the viewer's own.",
+      },
+      "projectSettings.create.upstreamProjectSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the Create New Project dialog's " +
+          "\"Upstream project\" picker (AQU-1518). Screen-reader-only — never rendered " +
+          "as visible text; the visible hint is upstreamProjectSearchPlaceholder. " +
+          "\"Projects\" here means Aquilla translation projects, the same sense as " +
+          "projectSettings.create.upstreamProjectLabel.",
+      },
+      "projectSettings.linkSource.pickerSearchAriaLabel": {
+        description:
+          "Accessible name of the search box inside the \"Link to a source project\" " +
+          "picker in Project Settings → Source & sync (AQU-1525). Screen-reader-only — " +
+          "never rendered as visible text; the visible hint is " +
+          "projectSettings.linkSource.pickerSearchPlaceholder. \"Projects\" here means " +
+          "Aquilla translation projects, the same sense as " +
+          "projectSettings.linkSource.pickerLabel.",
+      },
+      // AQU-1526 — the confirm step between picking an upstream and linking it.
+      "projectSettings.linkSource.previewTitle": {
+        description:
+          "Heading of the confirm step in Project Settings \u2192 Source & sync, shown after " +
+          "an upstream project has been picked and before anything is linked. A " +
+          "question, because the step can still be cancelled.",
+        placeholders: {
+          upstream: "The display name of the upstream project about to be linked, as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.previewCount": {
+        description:
+          "The confirm step's headline fact: how many source files the link will " +
+          "mirror into this project. Shown only when the upstream has at least one " +
+          "file (an upstream with none gets previewEmptyUpstream instead, never " +
+          "\"0 source files\"). \"Source files\" are the upstream's own source-side " +
+          "files, not file uploads.",
+        placeholders: {
+          count: "How many upstream source files will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.previewEmptyUpstream": {
+        description:
+          "Replaces the file count in the confirm step when the chosen upstream has " +
+          "no source files yet. Reassuring, not a refusal: the link is still " +
+          "allowed, and files appear here as the upstream gains them.",
+      },
+      "projectSettings.linkSource.previewLoading": {
+        description:
+          "Transient line in the confirm step while the upstream's file list is being " +
+          "read, before the count and any same-name warning can be shown.",
+      },
+      "projectSettings.linkSource.previewLoadError": {
+        description:
+          "Shown in the confirm step when the upstream's file list could not be read, " +
+          "so the step cannot say what the link would add. Deliberately distinct from " +
+          "previewEmptyUpstream \u2014 \"we don't know\" is not \"nothing is coming\" \u2014 and it " +
+          "states that nothing has been linked, because the user is mid-action.",
+      },
+      "projectSettings.linkSource.previewRetryButton": {
+        description:
+          "Retry button with two homes in the link flow. Beside previewLoadError it " +
+          "re-reads the upstream's file list; beside seedFailedMessage it re-runs the " +
+          "sync that brings the linked project's files in. In both it repeats the " +
+          "step that just failed — never a page reload, and never the link itself.",
+      },
+      "projectSettings.linkSource.seedFailedMessage": {
+        description:
+          "Shown after a link was saved but the first sync that copies the source " +
+          "project's files in failed. Appears in the Import dialog, on the settings " +
+          "card and as a banner on the project page, next to a \"Try again\" button. " +
+          "Three facts in order: the link exists, the files are missing, retrying is " +
+          "the fix. Plain language — no error code and no technical cause.",
+      },
+      "projectSettings.linkSource.seedRetryFailedNote": {
+        description:
+          "Added under seedFailedMessage when the user pressed \"Try again\" and that " +
+          "failed as well. \"Them\" is the source project's files from the sentence " +
+          "above. Reassures that the link itself was not lost and the retry is still " +
+          "there.",
+      },
+      "projectSettings.linkSource.seedRetryingButton": {
+        description:
+          "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
+          "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.notSyncedBadge": {
+        description:
+          "Badge on the Source link settings card, in the row with \"Live\", for a " +
+          "link that has never brought any content through. Replaces the cursor " +
+          "badge. A state, not an error — keep it as short as the other badges.",
+      },
+      "projectSettings.sourceLink.notSyncedNote": {
+        description:
+          "Explains the \"Not synced yet\" badge on the Source link settings card and " +
+          "points at the \"Sync now\" button beside it. The link exists; what is " +
+          "missing is the source project's files.",
+      },
+      "projectSettings.sourceLink.syncNowButton": {
+        description:
+          "Button on the Source link settings card that runs the sync bringing the " +
+          "linked source project's files into this project. Shown only while the link " +
+          "has never synced.",
+      },
+      "projectSettings.sourceLink.syncingButton": {
+        description: "Label of the \"Sync now\" button while that sync is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.syncFailedNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" failed. Says the files did not " +
+          "come in, that the link was not lost, and that the button can be pressed " +
+          "again. No error code and no technical cause.",
+      },
+      "projectSettings.sourceLink.syncNothingYetNote": {
+        description:
+          "Replaces notSyncedNote after \"Sync now\" worked but the source project is " +
+          "empty, so there was nothing to copy. Reassuring, not an error: files will " +
+          "appear once the source project has some.",
+      },
+      "projectSettings.linkSource.clashWarningHeading": {
+        description:
+          "Opens the confirm step's warning that some upstream files share a name with " +
+          "files this project already has; the names follow as a list. Ends in a colon " +
+          "for that reason. A caution, not an error \u2014 the link is still allowed.",
+      },
+      "projectSettings.linkSource.clashWarningBody": {
+        description:
+          "Follows the clashing file names and says what will happen: the project's " +
+          "own files are kept untouched with their translations, and the mirrored " +
+          "copies arrive beside them with empty translations, so each name appears " +
+          "twice in the file list. Nothing is overwritten or merged.",
+      },
+      "projectSettings.linkSource.reviewButton": {
+        description:
+          "Button that leaves the picker and opens the confirm step. It links nothing " +
+          "by itself \u2014 the wording has to make that clear, because the press that " +
+          "actually links is linkButton on the next step.",
+      },
+      "projectSettings.linkSource.cancelButton": {
+        description:
+          "Backs out of the confirm step to the picker without linking. The picked " +
+          "project is kept, so this is \"not yet\", not \"discard\".",
       },
       "projectSettings.termMatching.title": {
         description: "Heading of the project-settings card for the project's shared prefix/suffix affix inventory.",

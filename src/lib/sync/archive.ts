@@ -207,12 +207,37 @@ export async function linkProjectSource(
  *
  * Best-effort: swallows errors (returns false) — staleness/self-heal is a
  * soft signal, never something that should block navigation into the project.
+ *
+ * AQU-1544: "best-effort" describes the CALL, not what callers may do with
+ * its answer. The link flows used to await this and drop the result, which
+ * is how a failed first sync came to be reported as a finished link.
  */
 export async function triggerLinkSync(
   jwt: string,
   projectId: string,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<boolean> {
+  return (await runLinkSync(jwt, projectId, apiUrl)).ok
+}
+
+export type LinkSyncOutcome =
+  | { ok: false }
+  /** `ranSync` is the sync engine's own answer: false means it had nothing to
+   *  do — the link is already current, or the upstream has nothing to give. */
+  | { ok: true; ranSync: boolean }
+
+/**
+ * AQU-1544: `triggerLinkSync` for a caller that has to tell "the sync worked
+ * and brought content in" from "the sync worked and there was nothing to
+ * bring" — Project Settings' "Sync now" on a never-synced link, where the
+ * second is an empty upstream and must not be reported as either a failure or
+ * an arrival. Same request, same never-throws contract.
+ */
+export async function runLinkSync(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LinkSyncOutcome> {
   try {
     const tokenRes = await fetch(`${apiUrl}/api/v2/sync-token`, {
       method: "POST",
@@ -222,7 +247,7 @@ export async function triggerLinkSync(
       },
       body: JSON.stringify({ projectId, fileId: "__project__" }),
     })
-    if (!tokenRes.ok) return false
+    if (!tokenRes.ok) return { ok: false }
     const { token } = (await tokenRes.json()) as { token: string }
 
     const { syncWorkerHttpOrigin } = await import("./sync-worker-url")
@@ -230,9 +255,11 @@ export async function triggerLinkSync(
       `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`,
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },
     )
-    return syncRes.ok
+    if (!syncRes.ok) return { ok: false }
+    const body = (await syncRes.json().catch(() => null)) as { ranSync?: unknown } | null
+    return { ok: true, ranSync: body?.ranSync === true }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 

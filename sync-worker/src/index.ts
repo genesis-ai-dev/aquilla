@@ -82,6 +82,7 @@ import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
+import { handleMcpProtectedResourceRequest } from "./external/mcp-oauth-metadata"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
@@ -91,6 +92,7 @@ export { ProjectSync } from "./project-do"
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
@@ -121,6 +123,10 @@ declare global {
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
        *  routes speak the D1 `.prepare()/.batch()` API against the shim. */
       AQUILLA_PG?: AquillaDb
+      /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+       *  today's per-table queries), "shadow" (today's answer + access_grants
+       *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+      ACCESS_GRANTS_RESOLVER?: string
       /** Postgres (Neon) via Hyperdrive — the sole datastore. Required: when
        *  absent the worker fails fast (see `fetch`) rather than silently
        *  serving an empty local D1. */
@@ -235,6 +241,12 @@ function routeProjectSync(request: Request, env: Env): Response | Promise<Respon
  *  working unchanged. Pre-migration this was `/api/sync` under the apex. */
 const APEX_PREFIX = "/sync"
 
+/** The mount prefix a request arrived under ("" when reached directly). */
+function apexPrefixOf(request: Request): string {
+  const { pathname } = new URL(request.url)
+  return pathname === APEX_PREFIX || pathname.startsWith(`${APEX_PREFIX}/`) ? APEX_PREFIX : ""
+}
+
 function stripApexPrefix(request: Request): Request {
   const url = new URL(request.url)
   if (url.pathname !== APEX_PREFIX && !url.pathname.startsWith(`${APEX_PREFIX}/`)) {
@@ -248,7 +260,10 @@ function stripApexPrefix(request: Request): Request {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Must run before CORS / route matching — those test bare paths.
+    // Must run before CORS / route matching — those test bare paths. The
+    // stripped prefix is kept for handlers that must echo the PUBLIC URL
+    // (MCP OAuth discovery advertises where clients reach this worker).
+    const mountPrefix = apexPrefixOf(request)
     request = stripApexPrefix(request)
 
     // OPTIONS must still complete so browsers can receive the guarded error
@@ -295,6 +310,8 @@ const worker = {
       )
     }
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    // AQU-1352 P1: resolveProjectRoleShared reads the resolver mode off this handle.
+    setAccessGrantsMode(pgShim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
     // The runtime injects a full R2Bucket regardless of our narrower
     // LFS_SRC type above — wrap it once here so every downstream route only
     // ever holds a get/head/list handle, never put/delete.
@@ -497,7 +514,10 @@ const worker = {
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
+    const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
+    if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.

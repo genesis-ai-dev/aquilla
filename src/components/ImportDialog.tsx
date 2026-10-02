@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, Search, Cloud, CloudDownload,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  probeMediaDurationMs,
   importEBible,
   importObs,
   importHelloao,
@@ -61,6 +62,10 @@ import {
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
+import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
+import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
+import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
@@ -106,6 +111,7 @@ import {
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
+import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
@@ -114,8 +120,10 @@ import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
+import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
+import { ROLE } from "@/lib/frontier/roles"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
 
 interface ImportDialogProps {
   open: boolean
@@ -168,6 +176,26 @@ interface ImportDialogProps {
    * setting. Absent/false imports front matter (the default).
    */
   excludeFrontMatter?: boolean
+  /**
+   * AQU-1527: the "From another project" source — link this established project
+   * to another project's source (AQU-1525's action) from the place people
+   * actually go to bring material in, instead of only from Project Settings →
+   * Source & sync. Absent means the host cannot offer it (nothing to refresh
+   * afterwards), and the tile is not shown at all.
+   *
+   * `roleLevel` is the caller's level on THIS project — the server's floor is
+   * project_lead(500). `alreadyLinked` is true once the project has an upstream:
+   * a project has one at a time, so the tile is shown disabled rather than
+   * leading to a flow that would be refused. `onLinked` lets the host refresh
+   * the project record; the dialog closes itself — except when the link was
+   * saved but its files did not arrive (AQU-1544), where the host is refreshed
+   * and the dialog stays open on the retry.
+   */
+  linkSource?: {
+    roleLevel: number | null
+    alreadyLinked: boolean
+    onLinked: () => void
+  }
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -192,6 +220,7 @@ export function ImportDialog({
   existingFiles,
   patchDcsCursor,
   excludeFrontMatter,
+  linkSource,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -480,6 +509,7 @@ export function ImportDialog({
                   label={t("importExport.dialog.backToImportTypes")}
                 />
                 {screen === "upload" ? t("importExport.landing.upload.title")
+                  : screen === "youtube" ? t("importExport.landing.youtube.title")
                   : screen === "gdrive" ? t("importExport.landing.gdrive.title")
                   : screen === "helloao" ? t("importExport.dialog.titleHelloao")
                   : screen === "obs" ? t("importExport.landing.obs.title")
@@ -490,6 +520,7 @@ export function ImportDialog({
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
+                  : screen === "linkProject" ? t("importExport.landing.linkProject.title")
                   : t("importExport.landing.ebible.title")}
               </div>
             )}
@@ -501,6 +532,14 @@ export function ImportDialog({
         {screen === "landing" && (
           <ImportLanding
             allowDcs={patchDcsCursor !== undefined}
+            linkProject={
+              linkSource
+                ? {
+                    alreadyLinked: linkSource.alreadyLinked,
+                    canLink: (linkSource.roleLevel ?? 0) >= ROLE.PROJECT_LEAD,
+                  }
+                : null
+            }
             onSelect={(s, selectedPartnerId) => {
               posthog.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
@@ -513,6 +552,43 @@ export function ImportDialog({
               }
               setScreen(s)
             }}
+          />
+        )}
+
+        {/* AQU-1527: the same flow the settings card mounts — one component, so
+            the picker, the pre-link preview and the cycle refusal cannot
+            diverge between the two entry points. */}
+        {screen === "linkProject" && linkSource && (
+          <div className="space-y-3 py-1">
+            <LinkSourceFlow
+              projectId={projectId}
+              roleLevel={linkSource.roleLevel}
+              intro={
+                <p className="text-sm text-muted-foreground">
+                  {t("projectSettings.linkSource.description")}
+                </p>
+              }
+              onLinked={() => {
+                // Refresh first, close second: the file list the user is sent
+                // back to is the thing that must already know about the link.
+                linkSource.onLinked()
+                onOpenChange(false)
+              }}
+              // AQU-1544: the link is saved but its files did not arrive. The
+              // host still has to learn the project is linked (or this tile
+              // would offer to link it again), but the dialog stays open on
+              // the flow's "try again" — closing here is the silent success
+              // this slice removes.
+              onLinkSavedWithoutFiles={() => linkSource.onLinked()}
+            />
+          </div>
+        )}
+
+        {screen === "youtube" && (
+          <YouTubeImportPanel
+            ctx={{ projectId, author: username, sourceLanguage,
+              targetLanguage, targetLang, getToken }}
+            onImported={handleChildImported}
           />
         )}
 
@@ -864,6 +940,12 @@ type ImportOption = {
   icon: LucideIcon
   badge?: "beta" | "soon"
   disabled?: boolean
+  /**
+   * Why this option is disabled, when it is disabled for a reason other than
+   * "not built yet" (AQU-1527). Replaces the coming-soon tooltip so a tile that
+   * exists but cannot be used here says what would make it usable.
+   */
+  disabledReasonKey?: MessageKey
   /** Set on a tile contributed by a partner integration; routes to screen "partner". */
   partnerId?: string
 }
@@ -879,6 +961,8 @@ const POPULAR_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.helloao.description" },
   { id: "spreadsheet", titleKey: "importExport.landing.spreadsheet.title", hintKey: "importExport.landing.spreadsheet.hint", icon: Table2, badge: "beta",
     descriptionKey: "importExport.landing.spreadsheet.description" },
+  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
+    descriptionKey: "importExport.landing.youtube.description" },
 ]
 
 const SPECIALIZED_OPTIONS: ImportOption[] = [
@@ -965,9 +1049,11 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
   const { icon: Icon, disabled } = option
   const title = t(option.titleKey)
   const select = () => { if (!disabled && option.id) onSelect(option.id, option.partnerId) }
-  const disabledTooltip = disabled
-    ? t("importExport.landing.comingSoonTooltip", { title })
-    : undefined
+  const disabledTooltip = !disabled
+    ? undefined
+    : option.disabledReasonKey
+      ? t(option.disabledReasonKey)
+      : t("importExport.landing.comingSoonTooltip", { title })
   const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
   const card = (
     <Card
@@ -1017,20 +1103,62 @@ function ImportSection({ label, children }: { label: string; children: ReactNode
   )
 }
 
+/**
+ * AQU-1527: the "From another project" tile, built per render because its state
+ * depends on this project — unlike every other option, which is the same for
+ * everyone.
+ *
+ * It is offered rather than hidden in both unusable cases, because hiding it is
+ * what sent people to the forums in the first place: the capability existed and
+ * nothing on screen said so. Disabled-with-a-reason tells a Contributor who to
+ * ask, and tells a lead on an already-linked project that the thing they are
+ * looking for is in settings (a project has one upstream at a time, so the flow
+ * would only be refused).
+ */
+function linkProjectOption({ alreadyLinked, canLink }: LinkProjectAvailability): ImportOption {
+  const reasonKey: MessageKey | undefined = alreadyLinked
+    ? "importExport.landing.linkProject.alreadyLinkedTooltip"
+    : !canLink
+      ? "importExport.landing.linkProject.roleTooltip"
+      : undefined
+  return {
+    id: "linkProject",
+    titleKey: "importExport.landing.linkProject.title",
+    hintKey: "importExport.landing.linkProject.hint",
+    descriptionKey: "importExport.landing.linkProject.description",
+    icon: Link2,
+    ...(reasonKey ? { disabled: true, disabledReasonKey: reasonKey } : {}),
+  }
+}
+
+interface LinkProjectAvailability {
+  /** The project already has an upstream; it may only have one at a time. */
+  alreadyLinked: boolean
+  /** The caller is project_lead or above on this project. */
+  canLink: boolean
+}
+
 interface ImportLandingProps {
   onSelect: (screen: Screen, partnerId?: string) => void
   /** When false, the Door43 (DCS) option is hidden — its import needs a way to
    *  write the project settings cursor (patchDcsCursor), unavailable e.g. for
    *  unsynced local-only projects. */
   allowDcs: boolean
+  /** AQU-1527: null when the host cannot offer linking at all. */
+  linkProject: LinkProjectAvailability | null
 }
 
-function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject }: ImportLandingProps) {
   const t = useT()
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
   const q = filter.trim().toLowerCase()
+  // AQU-1527: "From another project" sits in the popular tier — it is a first
+  // answer to "bring that material in here", not a specialized format.
+  const popular = linkProject
+    ? [...POPULAR_OPTIONS, linkProjectOption(linkProject)]
+    : POPULAR_OPTIONS
   // Hide DCS when the host can't persist the release cursor.
   const specializedOptions = [...SPECIALIZED_OPTIONS, ...PARTNER_OPTIONS]
   const available = allowDcs
@@ -1045,7 +1173,7 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">{t("importExport.landing.intro")}</p>
       <ImportSection label={t("importExport.landing.popularSection")}>
-        {POPULAR_OPTIONS.map((o) => (
+        {popular.map((o) => (
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
@@ -1165,6 +1293,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  const [mediaReview, setMediaReview] = useState<{
+    id: string
+    mediaName: string
+    durationMs?: number
+    sources: MediaTextSourceOption[]
+  } | null>(null)
+  const mediaReviewResolver = useRef<((source: MediaTextSource | undefined | null) => void) | null>(null)
   // AQU-823: per-file Drive provenance (normalized name → origin), set by the
   // gdrive variant just before handleFiles and stamped into importManifest.
   const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
@@ -1173,7 +1308,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     refs: FileReference[]
     skipped?: { book: string; reason: string }[]
   } | null>(null)
-  useEffect(() => () => parseAbortRef.current?.abort(), [])
+  useEffect(() => () => {
+    parseAbortRef.current?.abort()
+    mediaReviewResolver.current?.(null)
+    mediaReviewResolver.current = null
+  }, [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1219,7 +1358,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * AQU-310: when `onPreview` is provided, this splits into two phases:
    *   1. Parse phase — reads all files locally, shows a preview
    *   2. Commit phase — uploads after user confirms
-   * Media files bypass preview (they have no text cells to show).
+   * Media with companion or embedded captions shows an editable cue preview.
    */
   const doImportFiles = useCallback(
     async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
@@ -1251,9 +1390,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       }
 
       // Parse text files client-side for the preview.
-      const allParsedResults: ImportResult[] = []
       const preparedByFile = new Map<File, PreparedImportFile>()
-      if (textFiles.length > 0 && onPreview) {
+      if (onPreview && (textFiles.length > 0 || mediaFiles.some(file => /\.(mp4|m4a)$/i.test(file.name)))) {
         parseAbortRef.current?.abort()
         const parseController = new AbortController()
         parseAbortRef.current = parseController
@@ -1277,7 +1415,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               excludeFrontMatter,
             })
             preparedByFile.set(file, prepared)
-            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
           if (parseController.signal.aborted) return
@@ -1292,15 +1429,62 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setImporting(false)
           setPhase("")
           return
-        } finally {
-          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
 
+        let reviewed: Awaited<ReturnType<typeof reviewMediaCompanions>>
+        try {
+        reviewed = await reviewMediaCompanions(list, async file => {
+          const prepared = preparedByFile.get(file)
+          const format = detectFileType(file.name)
+          if (!prepared || (format !== "vtt" && format !== "srt" && format !== "sbv")) {
+            throw new Error(t("importExport.upload.parseFailed"))
+          }
+          return {
+            cues: prepared.results.flatMap(result => result.strings),
+            artifact: { name: file.name, format,
+              bytes: prepared.results[0]?.rawBytes ?? await file.arrayBuffer() },
+          }
+        }, async (media, sources) => {
+          const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+          if (parseController.signal.aborted) return null
+          return new Promise(resolve => {
+            mediaReviewResolver.current = resolve
+            setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
+          })
+        }, async media => {
+          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          parseController.signal.throwIfAborted()
+          assertSourceUploadByteLength(media.size)
+          const bytes = await media.arrayBuffer()
+          parseController.signal.throwIfAborted()
+          return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({
+            ...source, label: t(source.language
+              ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
+              number: index + 1, language: source.language ?? "",
+            }),
+          }))
+        })
+        } catch (failure) {
+          if (!parseController.signal.aborted) {
+            setError(failure instanceof Error ? failure.message : t("importExport.upload.parseFailed"))
+            setImporting(false)
+          }
+          return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
+        }
+        if (reviewed === null) return
+        const remainingResults = reviewed.files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+        if (remainingResults.length === 0 && mediaFiles.length > 0) {
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
+          return
+        }
+
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
-        onPreview(allParsedResults, async (options) => {
+        onPreview(remainingResults, async (options) => {
           if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
             for (const [file, prepared] of preparedByFile) {
               preparedByFile.set(file, {
@@ -1314,7 +1498,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               })
             }
           }
-          await doCommit(list, preparedByFile, reimportFileIds)
+          await doCommit(reviewed.files, preparedByFile, reimportFileIds, reviewed.sources)
         })
         return
       }
@@ -1332,6 +1516,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       list: File[],
       preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
       reimportFileIds?: ReadonlyMap<string, string>,
+      mediaSources?: ReadonlyMap<File, MediaTextSource>,
     ) => {
       setImporting(true)
       setProgress(null)
@@ -1404,6 +1589,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
@@ -1535,6 +1721,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
   // AQU-823: Google Drive variant — same panel state machine (importing,
   // progress, error, Paratext choice above), different file source.
+  if (mediaReview) {
+    const finishReview = (source: MediaTextSource | undefined | null) => {
+      const resolve = mediaReviewResolver.current
+      mediaReviewResolver.current = null
+      setMediaReview(null)
+      resolve?.(source)
+    }
+    return <MediaImportPreviewDialog key={mediaReview.id}
+      mediaName={mediaReview.mediaName} sources={mediaReview.sources}
+      durationMs={mediaReview.durationMs}
+      onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
+  }
   if (variant === "gdrive" && !importing) {
     return (
       <div>

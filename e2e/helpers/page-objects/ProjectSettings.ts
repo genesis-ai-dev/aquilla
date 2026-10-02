@@ -45,6 +45,18 @@ export class ProjectSettings {
     return this.page.getByTestId("target-lanes-list").locator("li").filter({ hasText: tag })
   }
 
+  async enableTimelineTracks(projectId: string): Promise<void> {
+    await this.page.goto(`/project/${projectId}/settings/audio-media`)
+    const setting = this.page.getByTestId("settings-allow-track-editing")
+    await expect(setting).toBeVisible({ timeout: 10_000 })
+    await expect(setting).not.toBeChecked()
+    await setting.click()
+    await this.page.getByRole("button", { name: /Save changes/i }).click()
+    await expect(this.page.getByText("Saved: timeline track editing.", { exact: true }))
+      .toBeVisible({ timeout: 10_000 })
+    await expect(setting).toBeChecked()
+  }
+
   /** Add a target lane via the Languages section's add-lane form. */
   async addTargetLanguage(tag: string): Promise<void> {
     const input = this.page.getByTestId("add-target-lang-input")
@@ -92,7 +104,9 @@ export class ProjectSettings {
   async openAddMemberDialog(projectId: string): Promise<Locator> {
     await this.openMembers(projectId)
     await this.page.getByRole("button", { name: /^Add a member$/i }).click()
-    const dialog = this.page.getByRole("dialog", { name: /Add a member/i })
+    // AQU-1352 §3.9: the header names the scope ("Add people to Org › Project")
+    // once it has loaded, and reads "Add a member" until then.
+    const dialog = this.page.getByRole("dialog", { name: /Add a member|Add people to/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     return dialog
   }

@@ -61,6 +61,16 @@ beforeEach(() => {
 })
 
 describe("ProjectCard health ring", () => {
+  it("counts the media file without exposing its hidden caption tracks", () => {
+    const base = { type: "vtt" as const, createdAt: "2026-09-30", cellCount: 2 }
+    const project = makeProject({ files: [
+      { ...base, id: "video", name: "Video", role: "source" },
+      { ...base, id: "captions", name: "Captions", role: "timeline-content" },
+      { ...base, id: "cues", name: "Audio cues", role: "audio-cues" },
+    ] })
+    render(<ProjectCard project={project} onClick={() => {}} />)
+    expect(screen.getByText(/1\s+file/)).toBeInTheDocument()
+  })
   it("renders HealthRing with the rollup value for a server-side project", () => {
     projectHealthStub = 72
     const project = makeProject()

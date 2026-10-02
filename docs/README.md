@@ -5,6 +5,8 @@ design and audit material.
 
 ## Current operational truth
 
+- [Self hosting guide](SELF-HOSTING.md) — local evaluation, your own Cloudflare
+  deployment, required and optional services, database bootstrap, and operations.
 - [Deployment environments](DEPLOYMENT-ENVIRONMENTS.md) — canonical branch,
   Wrangler profile, hostname, Worker, Neon branch, R2 bucket, and deploy-command
   mapping.

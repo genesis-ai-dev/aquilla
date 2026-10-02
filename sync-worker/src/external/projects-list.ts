@@ -63,6 +63,11 @@ export async function listProjectsForCredential(
            WHERE om.org_id = p.org_id AND om.user_id::text = ? AND om.role_level >= ${ROLE.MAINTAINER}
          ))
        )`
+  if (cred.orgIds !== undefined) {
+    if (cred.orgIds.length === 0) return []
+    sql += ` AND p.org_id::text IN (${cred.orgIds.map(() => '?').join(', ')})`
+    binds.push(...cred.orgIds)
+  }
   if (cred.projectId !== null) {
     sql += ` AND p.id = ?`
     binds.push(cred.projectId)

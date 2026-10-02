@@ -57,6 +57,12 @@ async function seedWorld(): Promise<{ contrib: string; viewer: string }> {
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 1)",
     ).bind(PROJECT, userId, role).run()
   }
+  // AQU-1050: steering is gated on the project's Autopilot opt-in, and the
+  // cache cases below steer to prove the funnel invalidates.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version, updated_by)
+     VALUES (?, ?, 1, 1)`,
+  ).bind(PROJECT, JSON.stringify({ autopilotEnabled: true })).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
      VALUES (?, ?, 'c1', 'source', 'In the beginning', 'MRK 1:1', 'ev-c1', 0)`,

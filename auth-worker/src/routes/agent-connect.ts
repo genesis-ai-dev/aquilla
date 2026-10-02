@@ -37,8 +37,9 @@ interface Grant {
 const normalizeCode = (code: string) => code.replace(/-/g, "")
 /** The approver's live authority over the single scope a grant carries.
  * `null` means "no authority" — an unscoped agent credential is not a thing
- * the device flow can mint (see /decision: exactly one scope is required). */
-async function scopeLevel(
+ * the device flow can mint (see /decision: exactly one scope is required).
+ * Shared with the MCP OAuth grant (mcp-oauth.ts), which has the same rule. */
+export async function scopeLevel(
   env: AuthHonoEnv["Bindings"], user: AuthUser,
   projectId: string | null | undefined, orgId: string | null | undefined,
 ): Promise<number | null> {

@@ -11,6 +11,28 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import type { BranchingSearchResponse } from "./branching-search-read-types"
+import type { ScoredPair } from "@/lib/search/dual-index"
+
+/**
+ * Adapts a branching-search response to the `ScoredPair` shape the copilot and
+ * the Examples panel still read.
+ *
+ * `fileId` is carried through rather than blanked (AQU-1393): the panel resolves
+ * each match's origin — the project file, or `TM · <file>` for an imported TMX —
+ * from it, and with `""` here no single-cell draft could ever show one. It stays
+ * `""` only when the server did not send it.
+ */
+export function branchingResponseToScoredPairs(res: BranchingSearchResponse): ScoredPair[] {
+  return res.results.map((r) => ({
+    cellId: r.cellId,
+    fileId: r.fileId ?? "",
+    source: r.sourceText,
+    target: r.targetText,
+    score: 1,
+    matchedTokens: res.provenance[r.cellId] ?? [],
+    coverageWeight: r.queryCoverage,
+  }))
+}
 
 export class BranchingSearchError extends Error {
   status: number

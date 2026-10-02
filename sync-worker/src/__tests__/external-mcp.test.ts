@@ -123,7 +123,10 @@ describe('MCP transport', () => {
     expect(body.id).toBe(1)
     expect(body.result.protocolVersion).toBe('2025-06-18')
     expect(body.result.capabilities).toEqual({ tools: {} })
-    expect(body.result.serverInfo).toEqual({ name: 'aquilla', version: '0.1.0' })
+    expect(body.result.serverInfo).toEqual({ name: 'aquilla', title: 'Aquilla', version: '0.2.0' })
+    // Cross-tool guidance for hosts that read server instructions (ChatGPT).
+    expect(body.result.instructions).toContain('get_capabilities')
+    expect(body.result.instructions).toContain('approvalUrl')
   })
 
   it('initialize pins the default protocol version for an unknown client version', async () => {

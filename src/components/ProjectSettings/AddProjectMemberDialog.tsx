@@ -17,6 +17,8 @@ import {
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { formatScopePath } from "@/lib/access/scope-path"
+import type { ScopePath } from "@/lib/access/types"
 
 type AddDialogTab = "members" | "invite"
 
@@ -32,9 +34,12 @@ export function AddProjectMemberDialog({
   members,
   addMany,
   onAdded,
+  scopePath,
   callerLevel,
 }: {
   projectId: string
+  /** AQU-1352 §3.9 rule 2: when known, the header reads "Add people to <breadcrumb>". */
+  scopePath?: ScopePath
   open: boolean
   onOpenChange: (open: boolean) => void
   members: ProjectMember[]
@@ -132,7 +137,11 @@ export function AddProjectMemberDialog({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t("org.membersPage.orgTable.addMemberTitle")}</DialogTitle>
+          <DialogTitle>
+            {scopePath?.length
+              ? t("org.access.addPeopleTo", { path: formatScopePath(scopePath) })
+              : t("org.membersPage.orgTable.addMemberTitle")}
+          </DialogTitle>
           <DialogDescription>
             {t("projectSettings.members.addDialogDescription")}
           </DialogDescription>

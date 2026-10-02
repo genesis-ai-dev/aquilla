@@ -103,6 +103,11 @@ CREATE TABLE group_members (
     user_id  BIGINT NOT NULL,
     added_by BIGINT,
     added_at TIMESTAMPTZ DEFAULT now(),
+    -- AQU-1352 (0120): NULL = legacy member (per-project grants only);
+    -- non-NULL = team-scope role flowing to every attached project.
+    role_level INTEGER NULL
+        CONSTRAINT group_members_role_level_check
+        CHECK (role_level IS NULL OR role_level IN (100, 200, 300, 400, 500, 600, 700)),
     PRIMARY KEY (group_id, user_id)
 );
 
@@ -272,8 +277,15 @@ CREATE TABLE project_settings (
     -- entirely (absent, not blanked). NULL/anything else = the pseudonymous
     -- default. Projected out of the blob for the same reason as the columns
     -- above: the agent read path must not load multiple MB to answer it.
-    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED
+    agent_authorship TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'agentAuthorship') STORED,
+    -- 0123: the v3 agent-mode react switch, projected for the 5-minute react
+    -- watcher — it asks "which projects have react on?" across the whole table
+    -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
+    -- absent/false/garbage all collapse to the documented default (off).
+    agent_react BOOLEAN
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
 );
+CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
@@ -1325,6 +1337,7 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     token_hash   TEXT NOT NULL UNIQUE,
     mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
     org_id       TEXT,
+    org_ids      JSONB,
     project_id   TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ,
@@ -1338,7 +1351,9 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     -- `mode`, which is the autonomy dial for writes that ARE permitted. 'read'
     -- makes every write surface answer scope_denied; 'write' (the default, so
     -- every pre-0113 token keeps working) is the original all-or-nothing grant.
-    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write'))
+    access       TEXT NOT NULL DEFAULT 'write' CHECK (access IN ('read', 'write')),
+    CONSTRAINT api_credentials_org_ids_array CHECK (org_ids IS NULL OR
+      (jsonb_typeof(org_ids) = 'array' AND org_id IS NULL AND project_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
@@ -1949,6 +1964,53 @@ CREATE TABLE IF NOT EXISTS rule_applicability (
 );
 CREATE INDEX IF NOT EXISTS rule_applicability_rule ON rule_applicability (rule_id);
 
+-- Durable team channel (0122_team_channel.sql; AQU-1049 port to the v2
+-- one-channel model). One shared, project-scoped history: the Coordinator
+-- narrates in the main channel (thread_id IS NULL) and every delegated piece
+-- of work owns a thread. Humans and agent personas post into the same table.
+CREATE TABLE IF NOT EXISTS team_threads (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  -- 'run' = a contextual autopilot run (source_ref is its run id);
+  -- 'human' = opened from the channel by a person (source_ref NULL).
+  source_kind text NOT NULL CHECK (source_kind IN ('run', 'human')),
+  source_ref text,
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 160),
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (source_ref IS NULL OR octet_length(source_ref) <= 512),
+  -- One thread per work item; NULL source_refs never collide, so ingestion
+  -- can ON CONFLICT its way to find-or-create for a run.
+  UNIQUE (project_id, source_kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS team_threads_project_time
+  ON team_threads(project_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS team_messages (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  thread_id text,                       -- NULL = the main project channel
+  author_kind text NOT NULL CHECK (author_kind IN ('human', 'persona')),
+  -- Username for a human; persona id for an agent teammate. Open registry.
+  author_id text NOT NULL CHECK (char_length(author_id) BETWEEN 1 AND 128),
+  body_kind text NOT NULL CHECK (body_kind IN ('text', 'activity', 'question')),
+  body jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(body) = 'object')
+    CHECK (octet_length(body::text) <= 16384),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (thread_id IS NULL OR char_length(thread_id) = 36)
+);
+CREATE INDEX IF NOT EXISTS team_messages_main_time
+  ON team_messages(project_id, created_at DESC, id DESC)
+  WHERE thread_id IS NULL;
+CREATE INDEX IF NOT EXISTS team_messages_thread_time
+  ON team_messages(project_id, thread_id, created_at DESC, id DESC);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:
@@ -2087,6 +2149,31 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
 CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
   ON agent_authorizations(expires_at);
 
+-- 0124: OAuth 2.1 authorization codes for MCP hosts (ChatGPT plugin, Claude,
+-- Codex). Hash-only; five-minute, single-use; a replay revokes credential_id.
+CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  resource TEXT,
+  user_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+  project_id TEXT,
+  org_id TEXT,
+  org_ids JSONB,
+  status TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued', 'consumed')),
+  credential_id UUID,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT mcp_oauth_codes_scope_check CHECK (
+    (org_ids IS NOT NULL AND jsonb_typeof(org_ids) = 'array'
+      AND jsonb_array_length(org_ids) > 0 AND org_id IS NULL AND project_id IS NULL)
+    OR (org_ids IS NULL AND ((project_id IS NULL) <> (org_id IS NULL))))
+);
+CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
+
 -- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh
@@ -2105,3 +2192,40 @@ ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey      
 ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
+
+-- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
+-- Lane and file scopes are not included. Platform admin is env-driven, not a row.
+-- 0121: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
+  SELECT om.user_id::BIGINT            AS user_id,
+         'org'::TEXT                   AS scope_type,
+         om.org_id::TEXT               AS scope_id,
+         om.role_level::INT            AS role_level,
+         'direct'::TEXT                AS source,
+         NULL::BIGINT                  AS via_team_id,
+         om.granted_by::BIGINT         AS granted_by,
+         om.granted_at                 AS granted_at
+    FROM org_members om
+  UNION ALL
+  SELECT pm.user_id::BIGINT, 'project'::TEXT, pm.project_id::TEXT,
+         pm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
+         pm.granted_by::BIGINT, pm.granted_at
+    FROM project_members pm
+  UNION ALL
+  SELECT gm.user_id::BIGINT, 'project'::TEXT, gpg.project_id::TEXT,
+         gpg.role_level::INT, 'team'::TEXT, gpg.group_id::BIGINT,
+         gpg.granted_by::BIGINT, gpg.granted_at
+    FROM group_project_grants gpg
+    JOIN group_members gm ON gm.group_id = gpg.group_id
+  UNION ALL
+  SELECT p.created_by::BIGINT, 'project'::TEXT, p.id::TEXT,
+         700::INT, 'creator'::TEXT, NULL::BIGINT,
+         NULL::BIGINT, p.created_at
+    FROM projects p
+   WHERE p.created_by IS NOT NULL
+  UNION ALL
+  SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
+         gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
+         gm.added_by::BIGINT, gm.added_at
+    FROM group_members gm
+   WHERE gm.role_level IS NOT NULL;

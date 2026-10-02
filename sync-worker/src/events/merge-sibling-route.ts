@@ -23,7 +23,8 @@
 // the same value, so the final cells state is unchanged and no event doubles.
 //
 // This module never touches the donor's rows and never touches the host's
-// default lane — it only ever INSERTs the new lane's target rows.
+// default lane — it only ever INSERTs the new lane's target rows, and (AQU-1550)
+// the `lanes` record those rows have to point at.
 
 import { verifyTokenForProject } from '../auth'
 import { checkProjectMembershipDetailed } from './membership'
@@ -32,10 +33,11 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import type { EventPayloads } from './types'
+import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
 
 const BATCH_LIMIT = 100
 const MERGE_AUTHOR = 'merge-sibling'
@@ -185,13 +187,26 @@ export async function mergeSibling(
     persisted[i].serverSeq = baseSeq + i
   }
 
-  const allStmts: AquillaStatement[] = [buildBulkEventInsertStmt(db, eventRows)]
+  // AQU-1549: one fold event per matched donor cell, and a donor is a whole
+  // legacy project. A single INSERT for all of them is what failed every merge
+  // past 5,461 cells (the driver's bind ceiling — see buildBulkEventInsertStmts),
+  // so the rows go out in bounded statements instead — same rows, same order,
+  // same `ON CONFLICT (id) DO NOTHING` replay safety.
+  const allStmts: AquillaStatement[] = buildBulkEventInsertStmts(db, eventRows)
   for (const event of persisted) {
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
   allStmts.push(buildSettleSeqRangeStmt(db, hostProjectId, baseSeq))
+  // AQU-1550: every cell row points at a `lanes` record (cells.lane_id is NOT
+  // NULL), and the projection above resolves it by tag — so the fold's lane has
+  // to exist before the first cell lands. Nothing else creates it: the identity
+  // route registers the tag in the host's settings only after the fold returns.
+  // The lane statement leads the FIRST batch, so the record and the first rows
+  // that use it commit together: a fold that fails before writing anything
+  // leaves no empty lane behind, and a re-run finds the record and reuses it.
+  allStmts.unshift(ensureTargetLaneStmt(db, hostProjectId, lane))
   for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
-    await db.batch(allStmts.slice(i, i + BATCH_LIMIT))
+    await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))
   }
 
   // Recompute file counters + per-lane progress for touched host files
@@ -206,6 +221,27 @@ export async function mergeSibling(
   }
 
   return { merged: eventRows.length, skipped, lane }
+}
+
+/**
+ * One atomic batch of fold statements, pipelined where the executor can.
+ *
+ * AQU-1549: the fold writes two projection statements per folded cell, so a
+ * Bible-sized donor means well over ten thousand of them. `batch()` awaits them
+ * one at a time — at the rate the shim documents for that through Hyperdrive
+ * (see `batchPipelined` in db/shim/postgres.ts) even a few thousand cells
+ * outlast PENDING_ALLOC_TTL_MS, the bound every write batch is meant to finish
+ * inside. `batchPipelined` keeps the order and the all-or-nothing transaction
+ * of `batch()`; the mirror sync and the import writers make the same choice
+ * for the same reason. Executors without it (test doubles) fall back to
+ * `batch()`.
+ */
+async function runFoldBatch(db: AquillaDb, stmts: AquillaStatement[]): Promise<void> {
+  if (db.batchPipelined) {
+    await db.batchPipelined(stmts)
+    return
+  }
+  await db.batch(stmts)
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/merge-sibling$/

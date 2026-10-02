@@ -297,3 +297,84 @@ describe('read-write credential — unchanged (back-compat)', () => {
     ).toBe('write')
   })
 })
+
+// AQU-1529: the real credential → prepare → commit seam enforces OAuth scope.
+describe('OAuth organization grant — changeset persistence', () => {
+  async function organizationToken() {
+    const token = await credToken(tdb, { credentialId: CRED_WRITE, access: 'write' })
+    await tdb.pg.query("INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Selected', 99)")
+    await tdb.pg.query("INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 1, 600)")
+    await tdb.pg.query("UPDATE projects SET org_id = 10 WHERE id = $1", [PROJECT])
+    await tdb.pg.query("UPDATE api_credentials SET project_id = NULL, org_ids = '[\"10\"]'::jsonb WHERE id = $1", [CRED_WRITE])
+    return token
+  }
+
+  it('saves an authorized translation in Act mode', async () => {
+    const token = await organizationToken()
+    const env = makeEnv(tdb.db)
+    const staged = (await handleExternalChangesetsRequest(prepareReq(token, SET_TRANSLATION), env))!
+    expect(staged.status).toBe(200)
+    const { changeset } = await staged.json() as { changeset: { id: string } }
+    const committed = (await handleExternalChangesetsRequest(commitReq(token, changeset.id), env))!
+    expect(committed.status).toBe(200)
+    expect(await tdb.rows('events')).not.toHaveLength(0)
+    const cells = await tdb.rows<{ side: string; value: string }>('cells')
+    expect(cells).toEqual(expect.arrayContaining([expect.objectContaining({ side: 'target', value: 'hello' })]))
+    expect(await tdb.rows('cell_validators')).toHaveLength(0)
+  })
+
+  it('creates projects only inside the selected organization', async () => {
+    const token = await organizationToken()
+    const env = makeEnv(tdb.db)
+    for (const [orgId, expected] of [[10, 200], [11, 403]] as const) {
+      const projectId = `new-project-${orgId}`
+      const staged = (await handleExternalChangesetsRequest(new Request(
+        `https://w/api/v1/external/projects/${projectId}/changesets`,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ commands: [{ kind: 'CreateProject', name: 'Genesis translation', orgId }] }) },
+      ), env))!
+      expect(staged.status).toBe(expected)
+      if (expected === 200) {
+        const { changeset, digest } = await staged.json() as { changeset: { id: string; autonomyMode: string }; digest: string }
+        // Project creation retains its command-specific human approval rule.
+        expect(changeset.autonomyMode).toBe('ask')
+        await tdb.pg.query(`INSERT INTO changeset_confirmations
+          (id, changeset_id, user_id, credential_id, digest, expires_at)
+          VALUES ($1, $2, '1', $3, $4, now() + interval '5 minutes')`,
+          [`conf-${changeset.id}`, changeset.id, CRED_WRITE, digest])
+        const committed = (await handleExternalChangesetsRequest(new Request(
+          `https://w/api/v1/external/projects/${projectId}/changesets/${changeset.id}/commit`,
+          { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+        ), env))!
+        expect(committed.status).toBe(200)
+        expect((await tdb.pg.query('SELECT org_id FROM projects WHERE id = $1', [projectId])).rows)
+          .toEqual([{ org_id: 10 }])
+      }
+    }
+    const denied = (await handleExternalChangesetsRequest(prepareReq(token,
+      [{ kind: 'CreateOrg', name: 'Outside grant' }]), env))!
+    expect(denied.status).toBe(403)
+    expect(await tdb.rows('organizations')).toHaveLength(1)
+  })
+
+  it('refuses commit after membership removal, despite a direct project role', async () => {
+    const token = await organizationToken()
+    const env = makeEnv(tdb.db)
+    const staged = (await handleExternalChangesetsRequest(prepareReq(token, SET_TRANSLATION), env))!
+    expect(staged.status).toBe(200)
+    const { changeset } = await staged.json() as { changeset: { id: string } }
+    await tdb.pg.query("DELETE FROM org_members WHERE org_id = 10 AND user_id = 1")
+    const committed = (await handleExternalChangesetsRequest(commitReq(token, changeset.id), env))!
+    expect(committed.status).toBe(403)
+    expect(await tdb.rows('events')).toHaveLength(0)
+    expect(await tdb.rows('changesets')).toEqual([expect.objectContaining({ status: 'staged' })])
+    for (const suffix of ['', '/discard']) {
+      const response = (await handleExternalChangesetsRequest(new Request(
+        `https://w/api/v1/external/projects/${PROJECT}/changesets/${changeset.id}${suffix}`,
+        { method: suffix ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}` } },
+      ), env))!
+      expect(response.status).toBe(403)
+    }
+    expect(await tdb.rows('changesets')).toEqual([expect.objectContaining({ status: 'staged' })])
+  })
+})

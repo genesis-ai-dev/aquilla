@@ -164,17 +164,52 @@ export interface LinkRow {
   source_link_consumes: string | null
   source_link_gate: string | null
   source_link_cursor: number
+  /** AQU-1559: a JSON array of UPSTREAM file ids this link follows, or null for
+   *  the whole project. Read through `linkFileIdsOf` — never raw. */
+  source_link_file_ids?: string | null
 }
 
 export async function loadLink(db: AquillaDb, downstreamProjectId: string): Promise<LinkRow | null> {
   return db
     .prepare(
       `SELECT id, source_project_id, source_link_mode, source_link_consumes,
-              source_link_gate, source_link_cursor
+              source_link_gate, source_link_cursor, source_link_file_ids
        FROM projects WHERE id = ?`,
     )
     .bind(downstreamProjectId)
     .first<LinkRow>()
+}
+
+/**
+ * AQU-1559: the set of upstream file ids this link follows, or `null` for a
+ * whole-project link.
+ *
+ * `null` is the answer for every link made before this slice and for every link
+ * the lead confirmed with all files checked: the fold takes the upstream's whole
+ * lane delta, so a file the upstream gains later arrives here too. A set means
+ * the link follows a fixed list — the fold drops everything outside it, which is
+ * both how an unpicked file's edits stay upstream and how a file added upstream
+ * after the link never appears here (its id cannot be in a list written before
+ * it existed).
+ *
+ * A malformed or empty blob degrades to `null`, i.e. to the whole project: the
+ * column is TEXT (migration 0126), and reading it as "follow nothing" would
+ * silently freeze a live link, while reading it as "follow everything" mirrors
+ * files the lead can delete. Matches auth-worker's `parseLinkFileIds`, which
+ * writes it.
+ */
+export function linkFileIdsOf(link: Pick<LinkRow, 'source_link_file_ids'>): Set<string> | null {
+  const raw = link.source_link_file_ids
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0)
+  return ids.length > 0 ? new Set(ids) : null
 }
 
 /** Max lane-relevant upstream server_seq — the cheap freshness probe (§4).
@@ -1085,6 +1120,23 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
     consumes === 'target'
       ? await loadDeltaTargetConsumption(db, upstreamProjectId, cursor, gate, head)
       : await loadDelta(db, upstreamProjectId, cursor)
+
+  // AQU-1559: a link that follows a fixed list of upstream files drops the rest
+  // of the delta here, at the single point both folds converge, so neither the
+  // file.mirror pass nor the cell pass below can see an unfollowed file. The
+  // cursor still advances to `head` at the end, which is what makes an upstream
+  // edit to an unpicked file a true no-op rather than a change that keeps being
+  // re-folded: the fold yields nothing, so no mirror event and no
+  // link.cursor.advance is emitted and nothing shows in "Upstream changes".
+  const followedFileIds = linkFileIdsOf(link)
+  if (followedFileIds) {
+    for (const fileId of [...deltaFileIds]) {
+      if (!followedFileIds.has(fileId)) deltaFileIds.delete(fileId)
+    }
+    for (const [key, cell] of [...folded]) {
+      if (!followedFileIds.has(cell.fileId)) folded.delete(key)
+    }
+  }
 
   // Which of the delta's upstream file ids are genuinely new to the
   // downstream (need a file.mirror) vs already present. The downstream

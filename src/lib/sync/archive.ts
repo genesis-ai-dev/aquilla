@@ -65,6 +65,14 @@ export interface ProjectStateResponse {
   sourceLinkGate?: "head" | "validated" | null
   /** AQU-476/478: max upstream server_seq this project has mirrored so far. */
   sourceLinkCursor?: number | null
+  /** AQU-1559: the upstream file ids this link follows, or null for a
+   *  whole-project link (every link made before that slice). Absent on an older
+   *  server, which the Source link card reads the same way as null. */
+  sourceLinkFileIds?: string[] | null
+  /** AQU-1559: how many files the upstream currently holds — the M of
+   *  "N of M files". Only sent for a fixed-list link; null otherwise, since a
+   *  whole-project link is stated without a count. */
+  sourceLinkUpstreamFileCount?: number | null
   role: { level: number; name: string; source: string }
   /** AQU-507: designated Project Manager (null = unassigned; absent = older
    *  server). Distinct from the member roster / permission ladder. */
@@ -172,6 +180,15 @@ export async function linkProjectSource(
     mode: "clone" | "live"
     consumes?: "source" | "target"
     gate?: "head" | "validated"
+    /**
+     * AQU-1559: the UPSTREAM file ids this link should follow. Omit to follow
+     * the whole project — every file it has now and every one it gains later,
+     * which is what every link did before that slice. A list makes the link a
+     * fixed one: only those files mirror in, and later upstream files do not
+     * arrive on their own. Never send an empty array: the server 400s it,
+     * because "follow no files" is a mistake rather than a link.
+     */
+    fileIds?: string[]
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {

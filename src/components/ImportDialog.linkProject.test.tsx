@@ -140,8 +140,15 @@ const tile = () => screen.getByText(TILE).closest("[role=button]")!
 beforeEach(() => {
   vi.clearAllMocks()
   resetLinkSeedStatusForTests()
+  // AQU-1559: the confirm step's rows — one per upstream file, all checked on
+  // arrival, which is the whole-project link this dialog has always made.
   loadLinkSourcePreview.mockResolvedValue({
     upstreamName: "English Source",
+    files: [
+      { id: "up-MAT", name: "MAT", clashes: false },
+      { id: "up-MRK", name: "MRK", clashes: false },
+      { id: "up-LUK", name: "LUK", clashes: false },
+    ],
     fileCount: 3,
     clashingNames: [],
   })
@@ -243,6 +250,49 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
     // to know about the mirrored files.
     expect(onLinked).toHaveBeenCalled()
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  // WHY (AQU-1559): the file list is part of the shared flow, so this entry
+  // point gets it too — the acceptance criterion is that the list, the count and
+  // the warning behave identically from here and from Project Settings. A subset
+  // picked here must reach the server as the picked upstream file ids, exactly as
+  // it does from the card.
+  it("offers the same file list and links the subset the user picked", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: ["up-MAT", "up-MRK"],
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    await renderDialog()
+    await act(async () => {
+      fireEvent.click(tile())
+    })
+
+    await user.click(await screen.findByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(screen.getByRole("radio", { name: /^Its Source/i }))
+    await user.click(screen.getByRole("button", { name: "Review what will be added" }))
+
+    expect(await screen.findByRole("checkbox", { name: "All files" })).toBeTruthy()
+    await user.click(screen.getByRole("checkbox", { name: /^LUK\b/ }))
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Link source project" }))
+
+    await waitFor(() => {
+      expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+        sourceProjectId: "proj-upstream",
+        mode: "live",
+        consumes: "source",
+        fileIds: ["up-MAT", "up-MRK"],
+      })
+    })
   })
 
   // WHY (AQU-1544): the link is saved first and its files are brought in by a

@@ -94,6 +94,7 @@ import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
+import { parseLinkFileIds } from "../services/source-linking"
 import { createProjectShared } from "../../../db/shared/projects"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
@@ -709,7 +710,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
             p.source_project_id, p.source_link_mode, p.source_link_consumes,
-            p.source_link_gate, p.source_link_cursor,
+            p.source_link_gate, p.source_link_cursor, p.source_link_file_ids,
             p.pm_user_id, pmu.username AS pm_username,
             u.username AS archived_by_username
        FROM projects p
@@ -731,6 +732,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       source_link_consumes: string | null
       source_link_gate: string | null
       source_link_cursor: number | string | null
+      source_link_file_ids: string | null
       pm_user_id: number | null
       pm_username: string | null
     }>()
@@ -739,6 +741,22 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 
   const filesByProject = await loadFilesByProject(c.env, [projectId])
   const files = filesByProject.get(projectId) ?? []
+
+  // AQU-1559: a link that follows a fixed list of the upstream's files, and how
+  // many files the upstream currently has — the two numbers the Source link card
+  // reads as "N of M files". Null means the link follows the whole project, and
+  // the card says so without needing a count, so the extra query is skipped for
+  // every link made before this slice (and for every whole-project one since).
+  const sourceLinkFileIds = parseLinkFileIds(row.source_link_file_ids)
+  let sourceLinkUpstreamFileCount: number | null = null
+  if (sourceLinkFileIds && row.source_project_id) {
+    const countRow = await c.env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*) AS n FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+    )
+      .bind(row.source_project_id)
+      .first<{ n: number | string }>()
+    sourceLinkUpstreamFileCount = countRow?.n != null ? Number(countRow.n) : null
+  }
 
   // AQU-822: the org's effective termbase-edit floor travels with the project
   // so the client can gate the terminology UI (and its settings write) without
@@ -794,6 +812,10 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     sourceLinkConsumes: row.source_link_consumes,
     sourceLinkGate: row.source_link_gate,
     sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
+    // AQU-1559: null = this link follows the whole upstream project (the
+    // pre-slice behaviour); a list = it follows exactly those upstream files.
+    sourceLinkFileIds,
+    sourceLinkUpstreamFileCount,
     // AQU-507: designated PM (null = unassigned).
     pm:
       row.pm_user_id != null && row.pm_username != null

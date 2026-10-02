@@ -52,6 +52,25 @@ describe("forbiddenReasonCopy", () => {
       /weren't on this project's validator allowlist/i,
     )
   })
+  // AQU-1571: the recording refusals, in the past tense like the rest, and
+  // naming a RECORDING rather than a translation.
+  it("maps the audio validation refusals", () => {
+    expect(forbiddenReasonCopy("validating your own recording is not allowed on this project")).toBe(
+      "validating your own recording wasn't allowed (self-validation of recordings was off for this project at the time)",
+    )
+    expect(
+      forbiddenReasonCopy("validating a recording before it is saved is not allowed on this project"),
+    ).toBe("the recording hadn't been saved yet, so who made it couldn't be checked")
+    expect(forbiddenReasonCopy("only a maintainer can remove another user's audio validation")).toBe(
+      "only a maintainer could remove someone else's validation",
+    )
+    expect(forbiddenReasonCopy("role too low to validate audio (project requires maintainer or above)")).toMatch(
+      /role wasn't allowed to validate/i,
+    )
+    expect(forbiddenReasonCopy("user 'bob' is not in the project's audio validator allowlist")).toMatch(
+      /weren't on this project's validator allowlist/i,
+    )
+  })
   it("falls back to the raw reason for an unmapped message", () => {
     expect(forbiddenReasonCopy("some brand new server reason")).toBe("some brand new server reason")
   })

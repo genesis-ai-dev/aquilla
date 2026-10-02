@@ -495,23 +495,37 @@ describe('cell.audio.validate — audio validation config', () => {
     expect(ids).not.toContain('evt-attach-batch')
   })
 
-  it('still lets somebody ELSE validate a take attached in the same request', async () => {
+  // The fallback must not refuse everybody. One request carries one token, so
+  // a take it CREATES is always the caller's — but a take it RE-attaches (the
+  // transcription re-attach, ~800ms after the recording) keeps its stored
+  // recorder, and somebody else may vote on it in that same request.
+  //
+  // AQU-1571: this used to post a "bob" attach under carol's token and expect
+  // carol's vote through. That only passed because the gate trusted the
+  // attach's claimed author; the server stores such a take as carol's.
+  it('still lets somebody ELSE validate a take re-attached in the same request', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-2', 'bob')
     await setProjectSettings(db, { allowSelfValidationAudio: false })
 
-    const attach: RawEvent = {
-      id: 'evt-attach-batch2', schemaVersion: 1, kind: 'cell.audio.attach',
+    const reattach: RawEvent = {
+      id: 'evt-reattach-batch2', schemaVersion: 1, kind: 'cell.audio.attach',
       projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
-      author: 'bob', payload: { audioId: 'fresh-2', url: 'frontier-audio://fresh-2.webm', slot: 'recording' },
+      author: 'carol', payload: { audioId: 'take-2', url: 'frontier-audio://take-2.wav', slot: 'recording' },
       clientTs: 199,
     } as RawEvent
     const res = await handleEventsWriteRequest(
-      await makeRequest([attach, makeAudioValidateEvent('evt-av-batch2', 'carol', 'fresh-2')], await makeToken(400, 'carol')),
+      await makeRequest([reattach, makeAudioValidateEvent('evt-av-batch2', 'carol', 'take-2')], await makeToken(400, 'carol')),
       makeEnv(db),
     )
     const body = (await res!.json()) as any
-    expect((body.rejected ?? []).map((r: { id: string }) => r.id)).not.toContain('evt-av-batch2')
+    expect(body.rejected ?? []).toEqual([])
+    const row = await db
+      .prepare(`SELECT created_by FROM cell_audio WHERE audio_id = 'take-2'`)
+      .bind()
+      .first<{ created_by: string | null }>()
+    expect(row?.created_by).toBe('bob')
   })
 
   it('still lets somebody else validate that take', async () => {
@@ -522,6 +536,109 @@ describe('cell.audio.validate — audio validation config', () => {
 
     const body = await post(db, makeAudioValidateEvent('evt-av-5', 'carol'), await makeToken(300, 'carol'))
     expect(body.rejected).toHaveLength(0)
+  })
+
+  // AQU-1571: the same-request fallback read the attach's `author` field,
+  // which is the CLIENT'S claim. The stored recorder is the token's username,
+  // so naming somebody else on the attach let the recorder vote for their own
+  // take in the same request.
+  it('does not trust the author an attach claims: a take attached in the request is the caller’s', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const spoofed: RawEvent = {
+      id: 'evt-attach-spoof', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'carol', payload: { audioId: 'fresh-s', url: 'frontier-audio://fresh-s.webm', slot: 'recording' },
+      clientTs: 199,
+    } as RawEvent
+    const res = await handleEventsWriteRequest(
+      await makeRequest([spoofed, makeAudioValidateEvent('evt-av-spoof', 'bob', 'fresh-s')], await makeToken(400, 'bob')),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    const refusal = (body.rejected ?? []).find((r: { id: string }) => r.id === 'evt-av-spoof')
+    expect(refusal?.reason).toMatch(/validating your own recording/)
+    // The take really is bob's: the server stamps the token's user, not the claim.
+    const row = await db
+      .prepare(`SELECT created_by FROM cell_audio WHERE audio_id = 'fresh-s'`)
+      .bind()
+      .first<{ created_by: string | null }>()
+    expect(row?.created_by).toBe('bob')
+  })
+
+  it('refuses a vote placed AHEAD of its take’s attach in the same request', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const attach: RawEvent = {
+      id: 'evt-attach-late', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'bob', payload: { audioId: 'fresh-l', url: 'frontier-audio://fresh-l.webm', slot: 'recording' },
+      clientTs: 201,
+    } as RawEvent
+    const res = await handleEventsWriteRequest(
+      await makeRequest([makeAudioValidateEvent('evt-av-early', 'bob', 'fresh-l'), attach], await makeToken(400, 'bob')),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    expect((body.rejected ?? []).map((r: { id: string }) => r.id)).toContain('evt-av-early')
+  })
+
+  // AQU-1571: the vote row is keyed by audio id whether or not the take
+  // exists, and audio ids are the client's to choose. Voting first and
+  // recording afterwards made the recorder's own vote count as soon as any
+  // other vote recounted the take — here, meeting a threshold of two with
+  // one independent ear.
+  it('refuses a vote on a take that has not been saved, so it cannot count for its recorder later', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidationAudio: false, validationCountAudio: 2 })
+
+    const early = await post(db, makeAudioValidateEvent('evt-av-pre', 'bob', 'future-take'), await makeToken(400, 'bob'))
+    expect(early.rejected).toHaveLength(1)
+    expect(early.rejected[0].status).toBe(403)
+    expect(early.rejected[0].reason).toMatch(/before it is saved/)
+
+    await seedTake(db, 'future-take', 'bob')
+    const other = await post(db, makeAudioValidateEvent('evt-av-other', 'carol', 'future-take'), await makeToken(300, 'carol'))
+    expect(other.rejected).toHaveLength(0)
+    const row = await db
+      .prepare(`SELECT validator_count FROM cell_audio WHERE audio_id = 'future-take'`)
+      .bind()
+      .first<{ validator_count: number }>()
+    expect(row?.validator_count).toBe(1)
+  })
+
+  // Every write path, not just the browser's: the Agent API's commits re-enter
+  // this route on a token minted with `src: 'external'` (token-bridge.ts), and
+  // nothing in these gates may treat that channel differently.
+  it('holds an Agent API token to the same three audio gates', async () => {
+    const external = (role: number, username: string) =>
+      makeTestToken(SECRET, { projectId: 'proj-v', fileId: 'file-v', role, username, src: 'external' } as any)
+
+    const floor = await makeTestDb()
+    await seedFileAndCell(floor.db, 'alice')
+    await seedTake(floor.db, 'take-1', 'alice')
+    await setProjectSettings(floor.db, { validationRoleFloorAudio: 'maintainer' })
+    const a = await post(floor.db, makeAudioValidateEvent('evt-av-x1', 'bob'), await external(500, 'bob'))
+    expect(a.rejected[0]?.reason).toMatch(/role too low to validate audio/)
+
+    const named = await makeTestDb()
+    await seedFileAndCell(named.db, 'alice')
+    await seedTake(named.db, 'take-1', 'alice')
+    await setProjectSettings(named.db, { validationNamedUsersAudio: ['carol'] })
+    const b = await post(named.db, makeAudioValidateEvent('evt-av-x2', 'bob'), await external(600, 'bob'))
+    expect(b.rejected[0]?.reason).toMatch(/audio validator allowlist/)
+
+    const self = await makeTestDb()
+    await seedFileAndCell(self.db, 'alice')
+    await seedTake(self.db, 'take-1', 'bob')
+    await setProjectSettings(self.db, { allowSelfValidationAudio: false })
+    const c = await post(self.db, makeAudioValidateEvent('evt-av-x3', 'bob'), await external(600, 'bob'))
+    expect(c.rejected[0]?.reason).toMatch(/validating your own recording/)
   })
 
   // A take whose attach event is gone — a pruned history, or a project the
@@ -606,6 +723,31 @@ describe('cell.audio.unvalidate — removing somebody else’s vote', () => {
       await makeToken(600, 'mary'),
     )
     expect(body.rejected).toHaveLength(0)
+  })
+
+  // AQU-1571: the policy gates are on CASTING a vote. Somebody whose standing
+  // a project has since withdrawn (floor raised, dropped from the list, their
+  // own recording) must still be able to take their vote back.
+  it('lets a voter withdraw their own vote under the strictest audio policy', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-1', 'bob')
+    await post(db, makeAudioValidateEvent('evt-au-cast', 'bob'), await makeToken(300, 'bob'))
+    await setProjectSettings(db, {
+      validationRoleFloorAudio: 'maintainer',
+      validationNamedUsersAudio: ['nobody'],
+      allowSelfValidationAudio: false,
+    })
+
+    const body = await post(
+      db, makeAudioUnvalidateEvent('evt-au-own', 'bob', { audioId: 'take-1' }), await makeToken(300, 'bob'),
+    )
+    expect(body.rejected).toHaveLength(0)
+    const votes = await db
+      .prepare(`SELECT username FROM cell_audio_validators WHERE audio_id = 'take-1'`)
+      .bind()
+      .all<{ username: string }>()
+    expect(votes.results).toEqual([])
   })
 
   // Naming yourself is not "somebody else's vote" — the gate reads the field,

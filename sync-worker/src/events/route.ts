@@ -547,8 +547,11 @@ interface TakeKey extends CellKey {
   audioId: string
 }
 
+// The separator is the `\0` ESCAPE, never a literal NUL character. A literal one
+// here made grep treat this whole file as binary, which is how an AQU-1571
+// audit concluded the validation gates below did not exist (they do).
 const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: string) =>
-  `${projectId} ${fileId} ${cellId} ${audioId}`
+  `${projectId}\0${fileId}\0${cellId}\0${audioId}`
 
 /**
  * AQU-490: who RECORDED each take a batch is about to validate, for the audio
@@ -769,8 +772,8 @@ export async function handleEventsWriteRequest(
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
   const validateTakes = new Map<string, TakeKey>()
-  /** Takes attached earlier in THIS request, by author. */
-  const batchTakeAuthors = new Map<string, string>()
+  /** Takes this request attaches (see the cell.audio.attach note below). */
+  const batchAttachedTakes = new Set<string>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -822,17 +825,26 @@ export async function handleEventsWriteRequest(
         })
       }
     }
-    // AQU-490: who attaches a take IN THIS BATCH. The prefetch below reads
+    // AQU-490: which takes this request ATTACHES. The prefetch below reads
     // cell_audio, which cannot know about a row this same request is about to
     // create — and that is exactly the recorder's own save: the modal enqueues
     // the attach and its auto-validation back to back with no server ack
     // between them, and the flusher posts them together. So the self-
     // validation gate was a no-op on the one path it exists to guard.
     // (Adversarial review, 2026-09-22.)
+    //
+    // AQU-1571: only WHICH takes, never `e.author`. That field is the client's
+    // claim; the stored author (and so cell_audio.created_by) is the token's
+    // username. Trusting it let a request attach its own take as "someone
+    // else" and validate it in the same breath. Every event in one request is
+    // authorized against the same bearer token, so a take attached here was
+    // recorded by the caller — the self-validation check below reads it that
+    // way. Collected before authorization and regardless of order, so a vote
+    // placed AHEAD of its attach in the batch is caught too.
     if (e.kind === 'cell.audio.attach') {
       const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
-      if (typeof audioId === 'string' && audioId && e.author) {
-        batchTakeAuthors.set(`${key}\u0000${audioId}`, e.author)
+      if (typeof audioId === 'string' && audioId) {
+        batchAttachedTakes.add(`${key}\u0000${audioId}`)
       }
     }
   }
@@ -1413,11 +1425,30 @@ export async function handleEventsWriteRequest(
           const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
           if (typeof audioId === 'string' && audioId) {
             const takeKey = takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId)
-            // The stored recorder, or — for a take this very batch is
-            // attaching — the author of that attach. Without the fallback the
-            // check silently passes for every fresh recording, which is the
-            // only case that reliably reaches it.
-            const recorder = takeRecorders.get(takeKey) ?? batchTakeAuthors.get(takeKey)
+            const attachedHere = batchAttachedTakes.has(takeKey)
+            // AQU-1571: a take the server has never seen is NOT an unknown
+            // recorder. The vote is stored keyed by audio id whether or not the
+            // take exists, and audio ids are the client's to choose, so a vote
+            // cast first and the take recorded afterwards made the recorder's
+            // own vote count — the first time anyone else's vote recounted the
+            // take. Nothing the app draws can be voted on before it is saved,
+            // so refusing costs no real flow. (Only while self-validation is
+            // off: elsewhere there is no recorder to protect against.)
+            if (!takeRecorders.has(takeKey) && !attachedHere) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating a recording before it is saved is not allowed on this project`,
+              })
+              continue
+            }
+            // The stored recorder, or — for a take this very request is
+            // attaching — the caller (see batchAttachedTakes). Without the
+            // fallback the check silently passes for every fresh recording,
+            // which is the only case that reliably reaches it. A stored
+            // recorder wins over the fallback: re-attaching somebody else's
+            // take (the transcription re-attach) leaves created_by alone.
+            const recorder = takeRecorders.get(takeKey) ?? (attachedHere ? callerUsername : null)
             if (recorder != null && recorder === callerUsername) {
               rejected.push({
                 id: rawEvent.id ?? '(unknown)',

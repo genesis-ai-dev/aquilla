@@ -1,5 +1,7 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
+import { resolveAppEnv } from "@/lib/analytics-env"
+import { dropNoisyExceptions } from "@/lib/analytics-exception-filter"
 import { redactCaptureEvent } from "@/lib/analytics-redaction"
 import { resolvePosthogHost } from "@/lib/posthog-host"
 
@@ -16,6 +18,10 @@ if (typeof window !== "undefined" && KEY) {
     autocapture: false,
     // Surface unhandled errors / rejections as $exception events so failures
     // that never reach an explicit captureException call are still queryable.
+    // AQU-1572: this wraps window.onerror and window.onunhandledrejection
+    // itself, so it is the only window-level capture on the web — the
+    // ErrorBoundary listeners no longer report there (see ErrorBoundary.tsx
+    // for the desktop shell, where this cannot load).
     capture_exceptions: true,
     // OPS-29 (docs/OPSEC-REVIEW-2026-09-14.md): the last hook before an event
     // leaves the browser. `/join/:token`, `/join-org/:token`, `/link/:token`,
@@ -24,7 +30,13 @@ if (typeof window !== "undefined" && KEY) {
     // every event (plus the replay's own rrweb `href` and the `$initial_*`
     // person properties). Redact by route position and query-parameter name so
     // no capture site has to remember to do it.
-    before_send: redactCaptureEvent,
+    //
+    // AQU-1572: `dropNoisyExceptions` runs first and discards `$exception`
+    // noise (the benign ResizeObserver loop warning, and anything captured on
+    // a localhost build). posthog-js runs the array in order and stops at the
+    // first null, and redaction stays last so nothing after it can put a URL
+    // back.
+    before_send: [dropNoisyExceptions, redactCaptureEvent],
     disable_session_recording: !isAnalyticsEnabled(),
     session_recording: {
       // Keep the page visible so replays are actually diagnosable. Inputs are
@@ -48,6 +60,12 @@ if (typeof window !== "undefined" && KEY) {
     },
     opt_out_capturing_by_default: !isAnalyticsEnabled(),
   })
+
+  // AQU-1572: one project key serves every build, so stamp each event with the
+  // deployment it came from — production / dev / preview / local / desktop —
+  // for dashboards to split on. `posthog.reset()` clears super-properties, so
+  // logout registers it again (useFrontierSession.ts).
+  posthog.register({ app_env: resolveAppEnv(window.location) })
 
   onAnalyticsConsentChange((enabled) => {
     if (enabled) {

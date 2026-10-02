@@ -75,6 +75,8 @@ import { handleBranchingSearchPassagesRequest } from "./events/branching-search-
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
+import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
+import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
@@ -409,6 +411,12 @@ const worker = {
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
     if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
+    // More specific than /concepts — that route is $-anchored, this one is the
+    // per-term occurrence page (AQU-1192).
+    const conceptOccurrencesResponse = await handleConceptOccurrencesRequest(request, env)
+    if (conceptOccurrencesResponse) return withCors(conceptOccurrencesResponse, request)
+    const terminologyScanResponse = await handleTerminologyScanRequest(request, env)
+    if (terminologyScanResponse) return withCors(terminologyScanResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)

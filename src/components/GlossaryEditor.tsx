@@ -29,9 +29,10 @@ import {
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
-import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useConcepts } from "@/hooks/useConcepts"
+import { useTermOccurrences } from "@/hooks/useTermOccurrences"
+import { useTerminologyViolations } from "@/hooks/useTerminologyViolations"
 
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
@@ -54,8 +55,8 @@ import {
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
-import { extractCandidates } from "@/lib/terminology/candidates"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
+import type { PredictedEquivalent } from "@/lib/terminology/equivalents"
 import { exportConceptsCsv } from "@/lib/terminology/csv"
 import { exportConceptsTbx } from "@/lib/terminology/tbx"
 import { importTermbaseFile } from "@/lib/terminology/import-format"
@@ -64,6 +65,7 @@ import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import { fetchConceptSuggestions, fetchTerminologyCandidates } from "@/lib/sync/terminology-scan-read"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isHiddenTimelineFile, type ProjectRecord } from "@/lib/parsers/types"
 
@@ -127,8 +129,7 @@ export function GlossaryEditor({
   const { session: frontierSession } = useFrontierSession()
   const importInputRef = useRef<HTMLInputElement>(null)
 
-  // Cells are needed only for candidate mining ("Suggest terms"). Wire a
-  // file-scoped token fetcher so useProjectCells can fetch.
+  // File-scoped sync token for the occurrence page and the project scans.
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
@@ -152,20 +153,6 @@ export function GlossaryEditor({
         project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
     })
   }, [project?.id, project?.name, project?.origin])
-
-  const [cellDataRequested, setCellDataRequested] = useState(false)
-  const [cellLoadObserved, setCellLoadObserved] = useState(false)
-  const {
-    files: cellFiles,
-    isLoading: cellsLoading,
-    revalidate: revalidateCells,
-    applyOptimisticTargetEdit,
-  } = useProjectCells({
-    projectId: id ?? null,
-    projectFiles,
-    getToken,
-    enabled: Boolean(project?.id && projectFiles.length > 0 && cellDataRequested),
-  })
 
   // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
   // retired `project.terminology` settings key.
@@ -269,26 +256,30 @@ export function GlossaryEditor({
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const allCells = useMemo(
-    () => cellFiles.flatMap((file) => file.cells),
-    [cellFiles],
-  )
-  useEffect(() => {
-    if (cellDataRequested && cellsLoading) setCellLoadObserved(true)
-  }, [cellDataRequested, cellsLoading])
-  useEffect(() => {
-    setCellLoadObserved(false)
-  }, [id, projectFiles])
-  const cellDataReady = projectFiles.length === 0 || allCells.length > 0 || (cellLoadObserved && !cellsLoading)
-  // AQU-206: the optimistic overlay now lives in useProjectCells, so it is keyed
-  // per (file, cell) and survives the outbox row being deleted on sync — the
-  // local Record<cellId, patch> this replaced reverted as soon as the write was
-  // accepted, snapping a just-fixed occurrence back to its old verdict.
-  const detailCells = allCells
+  const [predictedSuggestions, setPredictedSuggestions] = useState<PredictedEquivalent[] | undefined>(undefined)
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const violations = useTerminologyViolations({
+    projectId: id ?? null,
+    getToken,
+    enabled: view === "violations",
+  })
   const selectedConcept = useMemo(
     () => concepts.find((concept) => concept.id === selectedConceptId) ?? null,
     [concepts, selectedConceptId],
   )
+  // AQU-1192: the detail page, Violations, Suggest terms, and suggested
+  // renderings each ask the sync-worker for a result. None of them downloads
+  // every verse.
+  const occurrences = useTermOccurrences({
+    projectId: id ?? null,
+    conceptId: selectedConceptId,
+    getToken,
+    enabled: Boolean(selectedConceptId),
+  })
+  useEffect(() => {
+    setPredictedSuggestions(undefined)
+    setSuggestionsLoading(false)
+  }, [selectedConceptId])
 
   // AQU-1006: every mutation is a term.* event through the outbox — never a
   // whole-array PATCH of the settings blob. Callers still hand us the full
@@ -463,29 +454,55 @@ export function GlossaryEditor({
 
   const handleSuggest = useCallback(() => {
     if (!guard()) return
-    setCellDataRequested(true)
     setSuggestRequested(true)
   }, [project, canManage])
 
   useEffect(() => {
-    if (!suggestRequested || !cellDataReady || !project || !canManage) return
-    const corpus = cellFiles.flatMap((f) =>
-      (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
-    )
-    const candidates = extractCandidates(corpus, { managed: serverConcepts, termMatching: project.termMatching })
-    const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
-    let working = project
-    for (const cand of candidates) {
-      if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
-      working = addConcept(working, { sourceTerm: cand.term, renderings: [], status: "draft" })
-      existing.add(cand.term.trim().toLowerCase())
+    if (!suggestRequested || !project || !canManage) return
+    let cancel = false
+    void (async () => {
+      try {
+        const token = await getToken("any")
+        if (!token) throw new Error(t("terminology.editor.suggestFailed"))
+        const page = await fetchTerminologyCandidates(project.id, token)
+        if (cancel) return
+        const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
+        let working = project
+        for (const cand of page.candidates) {
+          if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
+          working = addConcept(working, { sourceTerm: cand.term, renderings: [], status: "draft" })
+          existing.add(cand.term.trim().toLowerCase())
+        }
+        await persist(working)
+      } catch (err) {
+        if (!cancel) setError(err instanceof Error ? err.message : t("terminology.editor.suggestFailed"))
+      } finally {
+        if (!cancel) setSuggestRequested(false)
+      }
+    })()
+    return () => {
+      cancel = true
     }
-    void persist(working)
-    setSuggestRequested(false)
-  }, [suggestRequested, cellDataReady, project, canManage, persist, cellFiles])
+  }, [suggestRequested, project, canManage, persist, getToken, serverConcepts, t])
+
+  const handleScanSuggestions = useCallback(() => {
+    if (!project || !selectedConcept) return
+    setSuggestionsLoading(true)
+    void (async () => {
+      try {
+        const token = await getToken("any")
+        if (!token) throw new Error(t("terminology.editor.suggestFailed"))
+        const suggestions = await fetchConceptSuggestions(project.id, selectedConcept.id, token)
+        setPredictedSuggestions(suggestions)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("terminology.editor.suggestFailed"))
+      } finally {
+        setSuggestionsLoading(false)
+      }
+    })()
+  }, [project, selectedConcept, getToken, t])
 
   const handleOpenDetails = useCallback((conceptId: string) => {
-    setCellDataRequested(true)
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
       next.set("concept", conceptId)
@@ -500,10 +517,6 @@ export function GlossaryEditor({
       return next
     })
   }, [setSearchParams])
-
-  useEffect(() => {
-    if (selectedConcept) setCellDataRequested(true)
-  }, [selectedConcept])
 
   useEffect(() => {
     const fromUrl = searchParams.get("concept")
@@ -575,14 +588,25 @@ export function GlossaryEditor({
     return (
       <TerminologyTermDetail
         concept={selectedConcept}
-        cells={detailCells}
-        examplesLoading={!cellDataReady}
+        cells={occurrences.cells}
+        examplesLoading={occurrences.isLoading && occurrences.cells.length === 0}
+        loadError={occurrences.error}
+        occurrenceTotal={occurrences.total}
+        enforcedTotal={occurrences.enforced}
+        infringedTotal={occurrences.infringed}
+        discoveredForms={occurrences.forms}
+        scanComplete={occurrences.scanComplete}
+        hasMore={occurrences.hasMore}
+        onLoadMore={occurrences.loadMore}
         canEdit={canEditCells}
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
         onClose={handleCloseDetails}
-        onCellCommitted={revalidateCells}
-        onOptimisticEdit={applyOptimisticTargetEdit}
+        onCellCommitted={occurrences.revalidate}
+        onOptimisticEdit={occurrences.applyOptimisticTargetEdit}
+        onScanSuggestions={handleScanSuggestions}
+        suggestions={predictedSuggestions}
+        suggestionsLoading={suggestionsLoading}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
         // The detail view owns add/status/remove for renderings; it hands us
@@ -679,7 +703,6 @@ export function GlossaryEditor({
           variant={view === "violations" ? "secondary" : "outline"}
           aria-pressed={view === "violations"}
           onClick={() => {
-            setCellDataRequested(true)
             setView((current) => current === "violations" ? "glossary" : "violations")
           }}
         >
@@ -788,14 +811,17 @@ export function GlossaryEditor({
 
       {view === "violations" ? (
         <main className="flex-1 overflow-y-auto p-4">
-          {!cellDataReady ? (
+          {violations.isLoading ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               {t("terminology.editor.checkingTerminology")}
             </p>
+          ) : violations.error ? (
+            <p className="py-10 text-center text-sm text-destructive">{violations.error}</p>
           ) : (
             <TerminologyViolationsInbox
               concepts={concepts}
-              cells={detailCells}
+              rows={violations.rows}
+              truncated={violations.truncated || !violations.scanComplete}
               termMatching={project?.termMatching}
               // AQU-663: lets a row name the file the infringing cell is in.
               files={projectFiles}

@@ -27,12 +27,12 @@ import {
   CONFIDENCE_AMBER,
   CONFIDENCE_HIGH,
   type VersPair,
-} from "@/lib/completion/interlinear"
+} from "../completion/interlinear"
 import {
   chiSquareEquivalents,
   type BilingualPair,
   type ChiSquareCandidate,
-} from "@/lib/completion/chi-square-align"
+} from "../completion/chi-square-align"
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

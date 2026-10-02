@@ -26,8 +26,9 @@ import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
 import { TermFormsSection } from "@/components/terminology/TermFormsSection"
-import { predictEquivalents } from "@/lib/terminology/equivalents"
-import { matchesConcept, matchesTerm } from "@/lib/terminology/match"
+import { predictEquivalents, type PredictedEquivalent } from "@/lib/terminology/equivalents"
+import { matchesConcept } from "@/lib/terminology/match"
+import { deriveTermVerdict } from "@/lib/terminology/verdict"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -114,23 +115,7 @@ function deriveVerdict(
   translated: string,
   termMatching?: TermMatchingSettings,
 ): Verdict {
-  // AQU-1271: source side via the shared CONCEPT matcher (wildcards, extra
-  // forms, mark folding, project affixes, exclusions) so this page's verdicts
-  // agree with the rule engine and the editor chips.
-  if (!matchesConcept(original, concept, termMatching)) return "na"
-
-  const approved = concept.renderings.filter(
-    (r) => r.status === "preferred" || r.status === "admitted",
-  )
-  const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
-
-  if (forbidden.some((f) => matchesTerm(translated, f.rendering))) return "infringed"
-  if (approved.length > 0) {
-    return approved.some((a) => matchesTerm(translated, a.rendering))
-      ? "enforced"
-      : "infringed"
-  }
-  return "enforced"
+  return deriveTermVerdict(concept, original, translated, termMatching)
 }
 
 // ─── Verdict chip ─────────────────────────────────────────────────────────────
@@ -299,8 +284,29 @@ function OccurrenceRow({
 
 export interface TerminologyTermDetailProps {
   concept: Concept
-  /** All cells for the project (or the active file). Filtered internally. */
+  /**
+   * Cells to list. The glossary passes one server page of confirmed
+   * occurrences; this view still confirms each row with the matcher.
+   */
   cells: CellData[]
+  /** Exact match count from the server scan, when the list is only one page. */
+  occurrenceTotal?: number
+  enforcedTotal?: number
+  infringedTotal?: number
+  /** Source surfaces counted across the whole scan, not just `cells`. */
+  discoveredForms?: ReadonlyArray<{ surface: string; count: number; excluded: boolean }>
+  /** False when the server stopped before the end of the project. */
+  scanComplete?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  /**
+   * When set, suggested renderings are not computed from `cells` (that corpus
+   * is only the matches, which degenerates the contrast). The parent scans
+   * the project when the user asks.
+   */
+  onScanSuggestions?: () => void
+  suggestions?: PredictedEquivalent[]
+  suggestionsLoading?: boolean
   canEdit: boolean
   projectId: string
   username: string
@@ -321,6 +327,8 @@ export interface TerminologyTermDetailProps {
   onPromoteRendering?: (conceptId: string, target: string) => void | Promise<void>
   /** True while the parent is still fetching cells for the examples list. */
   examplesLoading?: boolean
+  /** Set when the occurrence read failed. The list must not look simply empty. */
+  loadError?: string | null
   /** Jump to this occurrence in the editor. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
   /**
@@ -365,12 +373,23 @@ export function TerminologyTermDetail({
   canManageTermbase = false,
   onPromoteRendering,
   examplesLoading = false,
+  loadError = null,
   onJumpToCell,
   onRenderingsChange,
   termMatching,
   onMatchChange,
   onCaseSensitiveChange,
   onSetUpAffixes,
+  occurrenceTotal,
+  enforcedTotal,
+  infringedTotal,
+  discoveredForms,
+  scanComplete = true,
+  hasMore = false,
+  onLoadMore,
+  onScanSuggestions,
+  suggestions,
+  suggestionsLoading = false,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
@@ -381,6 +400,9 @@ export function TerminologyTermDetail({
   )
 
   const { enforced, infringed } = useMemo(() => {
+    if (enforcedTotal !== undefined && infringedTotal !== undefined) {
+      return { enforced: enforcedTotal, infringed: infringedTotal }
+    }
     let enforced = 0
     let infringed = 0
     for (const c of occurrences) {
@@ -389,18 +411,21 @@ export function TerminologyTermDetail({
       else if (v === "infringed") infringed++
     }
     return { enforced, infringed }
-  }, [occurrences, concept, termMatching])
+  }, [occurrences, concept, termMatching, enforcedTotal, infringedTotal])
 
-  // Predicted target equivalents over the loaded bilingual cell pairs. χ² + EM
-  // cross-check; results stay "AI-assumed" until explicitly promoted.
+  // Suggested renderings need term-absent pairs, not just the occurrence
+  // page. Callers that pass `onScanSuggestions` own that scan.
   const predicted = useMemo(
     () =>
-      predictEquivalents(
-        cells.map((c) => ({ source: c.original, target: c.translated })),
-        concept.sourceTerm,
-      ),
-    [cells, concept.sourceTerm],
+      onScanSuggestions
+        ? suggestions ?? []
+        : predictEquivalents(
+            cells.map((c) => ({ source: c.original, target: c.translated })),
+            concept.sourceTerm,
+          ),
+    [onScanSuggestions, suggestions, cells, concept.sourceTerm],
   )
+  const occurrenceCount = occurrenceTotal ?? occurrences.length
 
   const handlePromoteEquivalent = useCallback(
     (target: string) => {
@@ -543,13 +568,17 @@ export function TerminologyTermDetail({
         {!examplesLoading && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>
-            <RichMessage
-              k="terminology.common.occurrenceCount"
-              count={occurrences.length}
-              values={{
-                count: <span className="font-medium text-foreground">{occurrences.length}</span>,
-              }}
-            />
+            {scanComplete ? (
+              <RichMessage
+                k="terminology.common.occurrenceCount"
+                count={occurrenceCount}
+                values={{
+                  count: <span className="font-medium text-foreground">{occurrenceCount}</span>,
+                }}
+              />
+            ) : (
+              <span>{t("terminology.termDetail.atLeastCount", { count: occurrenceCount })}</span>
+            )}
           </span>
           {occurrences.length > 0 && (
             <>
@@ -570,6 +599,7 @@ export function TerminologyTermDetail({
         <TermFormsSection
           concept={concept}
           cells={cells}
+          forms={discoveredForms}
           termMatching={termMatching}
           canEdit={canManageTermbase && Boolean(onMatchChange)}
           onMatchChange={onMatchChange}
@@ -586,6 +616,8 @@ export function TerminologyTermDetail({
           predicted={examplesLoading ? [] : predicted}
           canPromote={canManageTermbase && Boolean(onPromoteRendering)}
           onPromote={handlePromoteEquivalent}
+          onRequestScan={onScanSuggestions && suggestions === undefined ? onScanSuggestions : undefined}
+          scanLoading={suggestionsLoading}
         />
       </div>
 
@@ -597,7 +629,9 @@ export function TerminologyTermDetail({
         </div>
       ) : (
         <main className="flex-1 overflow-y-auto px-4 py-2">
-        {occurrences.length === 0 ? (
+        {loadError ? (
+          <p className="py-16 text-center text-sm text-destructive">{loadError}</p>
+        ) : occurrences.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
             <Minus className="h-8 w-8 opacity-30" />
             <p className="text-sm">{t("terminology.termDetail.noOccurrences")}</p>
@@ -629,6 +663,13 @@ export function TerminologyTermDetail({
                 />
               ))}
             </ul>
+            {hasMore && onLoadMore && (
+              <div className="flex justify-center py-4">
+                <Button type="button" variant="outline" size="sm" onClick={onLoadMore}>
+                  {t("terminology.termDetail.loadMore")}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </main>

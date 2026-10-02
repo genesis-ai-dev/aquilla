@@ -12,6 +12,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "tester" }, loading: false }),
 }))
 let projectCellsEnabled = false
+let violationsEnabled = false
 let projectCellsLoading = false
 let projectCellFiles: Array<{ id: string; cells: Array<{
   id: string
@@ -33,6 +34,43 @@ vi.mock("@/hooks/useProjectCells", () => ({
     projectCellsEnabled = Boolean(enabled)
     return { files: projectCellFiles, isLoading: projectCellsLoading, isTruncated: false }
   },
+}))
+let occurrenceCells: Array<{
+  id: string
+  fileId: string
+  original: string
+  translated: string
+  context: string
+  group: string
+  type: string
+  status: string
+  validationStatus: string
+  activeValidators: string[]
+  validationHistory: unknown[]
+  history: unknown[]
+  threads: unknown[]
+}> = []
+let occurrenceLoading = false
+vi.mock("@/hooks/useTerminologyViolations", () => ({
+  useTerminologyViolations: ({ enabled }: { enabled?: boolean }) => {
+    violationsEnabled = Boolean(enabled)
+    return { rows: [], isLoading: false, error: null, scanComplete: true, truncated: false }
+  },
+}))
+vi.mock("@/hooks/useTermOccurrences", () => ({
+  useTermOccurrences: () => ({
+    cells: occurrenceCells,
+    total: occurrenceCells.length,
+    enforced: 0,
+    infringed: 0,
+    scanComplete: true,
+    isLoading: occurrenceLoading,
+    error: null,
+    hasMore: false,
+    loadMore: () => {},
+    revalidate: () => {},
+    applyOptimisticTargetEdit: () => {},
+  }),
 }))
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
@@ -100,8 +138,11 @@ beforeEach(() => {
   patchSettings.mockClear()
   for (const m of [emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject]) m.mockClear()
   projectCellsEnabled = false
+  violationsEnabled = false
   projectCellsLoading = false
   projectCellFiles = []
+  occurrenceCells = []
+  occurrenceLoading = false
   mockProjectLoading = false
   mockProject = {
     id: "p1",
@@ -251,18 +292,20 @@ describe("GlossaryEditor", () => {
     expect(add).toBeEnabled()
   })
 
-  it("defers project cell loading until a cell-backed surface is requested", () => {
+  it("loads violations from the server scan instead of every project cell", () => {
     mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
     renderEditor()
+    expect(violationsEnabled).toBe(false)
     expect(projectCellsEnabled).toBe(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Violations" }))
-    expect(projectCellsEnabled).toBe(true)
+    expect(violationsEnabled).toBe(true)
+    expect(projectCellsEnabled).toBe(false)
   })
 
   it("opens a concept immediately while examples still load", () => {
     mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
-    projectCellsLoading = true
+    occurrenceLoading = true
     renderEditor()
 
     fireEvent.click(screen.getByRole("button", { name: /open details for grace/i }))
@@ -271,6 +314,8 @@ describe("GlossaryEditor", () => {
     expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
     expect(screen.queryByRole("status", { name: "Loading term details" })).not.toBeInTheDocument()
     expect(screen.getByText(/loading examples/i)).toBeInTheDocument()
+    // Opening a term must not download every file's cells.
+    expect(projectCellsEnabled).toBe(false)
   })
 
   it("derives rapid rendering mutations from the latest optimistic glossary", async () => {
@@ -426,23 +471,20 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   /** One occurrence of "grace" whose target is still empty — the exact cell the
    *  QA walk opened an editor on as a viewer. */
   function seedOccurrence() {
-    projectCellFiles = [{
-      id: "f1",
-      cells: [{
-        id: "cell-1",
-        fileId: "f1",
-        original: "by grace alone",
-        translated: "",
-        context: "GEN 1:8",
-        group: "GEN 1",
-        type: "text",
-        status: "unvalidated",
-        validationStatus: "none",
-        activeValidators: [],
-        validationHistory: [],
-        history: [],
-        threads: [],
-      }],
+    occurrenceCells = [{
+      id: "cell-1",
+      fileId: "f1",
+      original: "by grace alone",
+      translated: "",
+      context: "GEN 1:8",
+      group: "GEN 1",
+      type: "text",
+      status: "unvalidated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
     }]
   }
 

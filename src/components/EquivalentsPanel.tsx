@@ -164,6 +164,13 @@ export interface EquivalentsPanelProps {
   canPromote?: boolean
   /** Called when the user promotes a predicted gloss. Crosses the line. */
   onPromote?: (target: string) => void
+  /**
+   * Present while suggested renderings have not been scanned yet. An empty
+   * prediction list then offers this action instead of reading as "nothing
+   * found". Opening a term must not scan the whole project for them.
+   */
+  onRequestScan?: () => void
+  scanLoading?: boolean
   className?: string
 }
 
@@ -177,6 +184,8 @@ export function EquivalentsPanel({
   predicted,
   canPromote = false,
   onPromote,
+  onRequestScan,
+  scanLoading = false,
   className,
 }: EquivalentsPanelProps) {
   const t = useT()
@@ -223,7 +232,13 @@ export function EquivalentsPanel({
             {t("terminology.equivalents.suggestedSubtitle")}
           </span>
         </header>
-        {predicted.length === 0 ? (
+        {scanLoading ? (
+          <p className="text-xs text-muted-foreground">{t("terminology.termDetail.loadingExamples")}</p>
+        ) : onRequestScan && predicted.length === 0 ? (
+          <Button type="button" variant="outline" size="sm" onClick={onRequestScan}>
+            {t("terminology.termDetail.scanSuggestions")}
+          </Button>
+        ) : predicted.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
             {t("terminology.equivalents.noPredicted")}
           </p>

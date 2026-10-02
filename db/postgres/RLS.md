@@ -50,7 +50,7 @@ Not covered *by design* — these are not project-scoped, and callers gate on us
 identity at the route level: identity/org tables (`users`, `organizations`,
 `org_members`, `groups`, `platform_settings`, `org_settings`, …).
 
-Not covered, **not** by design — the other **34 project-scoped tables**. Each is
+Not covered, **not** by design — the other **35 project-scoped tables**. Each is
 listed with a reason in `UNCOVERED` in `scripts/rls-coverage.test.ts`, which is the
 authoritative ledger; adding a project-scoped table without a policy fails that test
 until the decision is recorded. Two groups are worth naming here:
@@ -61,7 +61,7 @@ until the decision is recorded. Two groups are worth naming here:
   policies — a policy on either table that calls it recurses through itself. Covering
   them needs a self-scoped predicate, or a `SECURITY DEFINER` helper with a pinned
   `search_path`.
-- **19 of the 34 were never granted to `app_runtime`** (`lanes`, `api_credentials`,
+- **19 of the 35 were never granted to `app_runtime`** (`lanes`, `api_credentials`,
   `agent_memories`, `knowledge_docs`, `project_briefs`, `style_rules`, `concepts`,
   `cell_links`, `project_access_links`, …). That is not a small gap: those tables are
   on ordinary request paths, so a worker connected as `app_runtime` would fail

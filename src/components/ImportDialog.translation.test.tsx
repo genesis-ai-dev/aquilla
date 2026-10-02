@@ -13,6 +13,10 @@
  *  - A USFM file's own book may choose the file only while the person hasn't.
  *  - Roles: a Contributor imports a translation (the old three-dot entry had
  *    no gate), but not new source text.
+ *  - The importers that only fill a translation (eBible into the target
+ *    column, a paired spreadsheet) live under A translation, so New source
+ *    text never offers a way to fill a file's target. They read the chosen
+ *    file's lines too, so they wait for it to open like a dropped file does.
  */
 
 import React from "react"
@@ -32,6 +36,13 @@ vi.mock("@/lib/import", () => ({
   prepareImportFile: vi.fn(),
 }))
 vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/parsers/ebible", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/parsers/ebible")>()),
+  fetchTranslationsList: vi.fn(async () => [{
+    id: "ttrBSB", title: "Tatar Bible", languageCode: "tat", languageName: "Татар", languageNameInEnglish: "Tatar",
+    otBooks: 39, ntBooks: 27, copyright: "",
+  }]),
+}))
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>
@@ -39,7 +50,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }))
 
 import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
-import { applyEBibleTargetImport } from "@/lib/import"
+import { applyEBibleTargetImport, prepareEBibleTargetImport } from "@/lib/import"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
@@ -344,5 +355,111 @@ describe("AQU-1365: importing a translation", () => {
     await chooseTranslation()
     await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+  })
+})
+
+describe("AQU-1365: the translation-only importers live under A translation", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function otherWay(name: RegExp) {
+    return within(screen.getByTestId("translation-other-ways")).getByRole("button", { name })
+  }
+
+  it("shows eBible as source only under New source text, with no target tabs", async () => {
+    renderDialog({ sourceCells: JONAH_CELLS })
+    fireEvent.click(screen.getByRole("button", { name: /^eBible Corpus/ }))
+    expect(await screen.findByText("Tatar Bible")).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Into target column" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "New source file" })).not.toBeInTheDocument()
+    expect(screen.getByText(/Import a Bible translation directly from the/)).toBeInTheDocument()
+  })
+
+  it("keeps eBible's target tabs for a host with no translation path", async () => {
+    renderDialog({ translation: undefined, sourceCells: JONAH_CELLS })
+    fireEvent.click(screen.getByRole("button", { name: /^eBible Corpus/ }))
+    expect(await screen.findByRole("tab", { name: "Into target column" })).toBeInTheDocument()
+  })
+
+  it("leaves Paired translation out of the source importers", () => {
+    const { unmount } = renderDialog()
+    expect(screen.getByText("Translation Memory")).toBeInTheDocument()
+    expect(screen.queryByText("Paired translation")).not.toBeInTheDocument()
+    unmount()
+    renderDialog({ translation: undefined })
+    expect(screen.getByText("Paired translation")).toBeInTheDocument()
+  })
+
+  it("offers the other ways under A translation, disabled until a file is chosen", async () => {
+    renderDialog({ translation: host({ activeFileId: null, activeFileCells: [] }) })
+    const chooser = await chooseTranslation()
+    expect(within(chooser).getByRole("heading", { name: "Other ways to bring in a translation" })).toBeInTheDocument()
+    expect(chooser).toHaveTextContent("Choose the file first.")
+    expect(otherWay(/^eBible Corpus/)).toBeDisabled()
+    expect(otherWay(/^Paired translation/)).toBeDisabled()
+    await pickFile("Ruth")
+    expect(otherWay(/^eBible Corpus/)).toBeEnabled()
+    expect(otherWay(/^Paired translation/)).toBeEnabled()
+    expect(chooser).not.toHaveTextContent("Choose the file first.")
+  })
+
+  it("opens the chosen file first, then eBible in target mode against its lines", async () => {
+    vi.mocked(prepareEBibleTargetImport).mockResolvedValue({ matched: [], orphans: [], unmatchedSourceCount: 0 })
+    const { translation, rerenderWith } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Ruth")
+    fireEvent.click(otherWay(/^eBible Corpus/))
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
+      import_type: "ebible", entry: "translation", auto_picked: false,
+    }))
+
+    rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS })
+    expect(await screen.findByText("Tatar Bible")).toBeInTheDocument()
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument()
+    expect(screen.getByText(/Match eBible verses to existing source cells/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Tatar Bible"))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Next: Review matches" }))
+    })
+    expect(prepareEBibleTargetImport).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ttrBSB" }),
+      RUTH_CELLS,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    )
+  })
+
+  it("opens a paired spreadsheet for the open file straight away, and Cancel goes back to the file choice", async () => {
+    const { translation } = renderDialog()
+    await chooseTranslation()
+    fireEvent.click(otherWay(/^Paired translation/))
+    expect(translation.openFile).not.toHaveBeenCalled()
+    expect(await screen.findByText("Import paired source + target")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    const chooser = await screen.findByTestId("translation-chooser")
+    expect(within(chooser).getByRole("combobox", { name: "Which file does it translate?" })).toHaveTextContent("Jonah")
+  })
+
+  it("keeps a held upload while another way is tried, and gives it back on Back", async () => {
+    renderDialog({ translation: host({ activeFileId: null, activeFileCells: [] }) })
+    await chooseTranslation()
+    await dropFiles([new File(["Reference,Translation\nJON 1:1,a\n"], "JON-tatar.csv")])
+    await pickFile("Jonah")
+    fireEvent.click(otherWay(/^Paired translation/))
+    expect(await screen.findByText("Opening Jonah…")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to choosing a file" }))
+    expect(await screen.findByTestId("translation-held-file")).toHaveTextContent("JON-tatar.csv")
+  })
+
+  it("says so when the chosen file has no lines to fill", async () => {
+    renderDialog({ translation: host({ activeFileCells: [] }) })
+    await chooseTranslation()
+    fireEvent.click(otherWay(/^eBible Corpus/))
+    expect(await screen.findByText("Jonah has no lines yet, so there is nothing for a translation to fill.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back" }))
+    expect(await screen.findByTestId("translation-chooser")).toBeInTheDocument()
   })
 })

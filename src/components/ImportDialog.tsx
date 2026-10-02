@@ -133,7 +133,7 @@ import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
 import { ROLE } from "@/lib/frontier/roles"
 import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
 import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
-import { TranslationChooser, type TranslationStartOptions } from "@/components/import/TranslationChooser"
+import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 import {
   CLOSED_IMPORT_FILE_GATE,
@@ -156,8 +156,9 @@ import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/language
 
 type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
   // AQU-1365: a translation's destination file is opening in the editor, then
-  // its review (FileTargetImportPanel) runs.
-  | "translationOpening" | "translationReview"
+  // its review (FileTargetImportPanel) runs, or one of the other ways into it
+  // (eBible in target mode, a paired spreadsheet).
+  | "translationOpening" | "translationReview" | "translationEbible" | "translationPaired"
   // AQU-1365: a source upload looks like a translation; asked before any cell
   // is created.
   | "translationCheck"
@@ -189,10 +190,15 @@ export interface TranslationImportHost {
   targetLanguages: string[]
 }
 
-/** One translation import in flight: the upload, its file, and a key that
+/** One translation import in flight: how it arrives, its file, and a key that
  *  remounts the review for every start. */
 interface TranslationRun {
-  file: File
+  /** A dropped file goes through the review; the other ways have their own
+   *  panels. All of them read the destination's lines, so all wait for it to
+   *  open. */
+  way: "file" | TranslationOtherWay
+  /** The upload, for `way: "file"`; null for the other ways. */
+  file: File | null
   fileId: string
   key: string
   autoPicked: boolean
@@ -202,6 +208,21 @@ interface TranslationRun {
 }
 
 type TranslationEntry = "translation" | "translation-check" | "review-switch"
+
+/** AQU-1365: the screen a translation run shows once its file is open. */
+const TRANSLATION_READY_SCREEN = {
+  file: "translationReview",
+  ebible: "translationEbible",
+  paired: "translationPaired",
+} as const satisfies Record<TranslationRun["way"], Screen>
+
+/** AQU-1365: telemetry `import_type` per way. A dropped file keeps the name the
+ *  three-dot entry reported; the other two keep their landing tile names. */
+const TRANSLATION_IMPORT_TYPE = {
+  file: "file-target",
+  ebible: "ebible",
+  paired: "paired",
+} as const satisfies Record<TranslationRun["way"], string>
 
 /** AQU-1365: a source upload waiting on "Is this a translation?". */
 interface PendingTranslationCheck {
@@ -256,6 +277,8 @@ interface ImportDialogProps {
    * Optional: existing source cells to support the "into target" eBible import
    * mode (AQU-191). When provided, the eBible panel shows a mode toggle so the
    * user can import a translation into the target column of an existing file.
+   * AQU-1365: only without `translation`. With it, eBible into a target lives
+   * under "A translation" and reads the chosen file's lines from there.
    * Each cell needs at minimum: cellId, fileId, translated, canonicalRef, and
    * the AD-2 parentId fields (targetEventId / sourceEventId).
    */
@@ -662,16 +685,29 @@ export function ImportDialog({
     entry: TranslationEntry = "translation",
   ) {
     if (!translation) return
+    setHeldTranslationFile(null)
+    beginTranslationRun({ way: "file", file, fileId, autoPicked, entry })
+  }
+
+  // AQU-1365: eBible or a paired spreadsheet into the chosen file. A held
+  // upload stays held: Back from either lands on the chooser as it was left.
+  function startOtherWay(way: TranslationOtherWay) {
+    if (!translation || translationFileId === null) return
+    beginTranslationRun({ way, file: null, fileId: translationFileId, autoPicked: false, entry: "translation" })
+  }
+
+  function beginTranslationRun(run: Omit<TranslationRun, "key">) {
+    if (!translation) return
+    const { fileId } = run
     translationRunCount.current += 1
     setTranslationFileId(fileId)
-    setHeldTranslationFile(null)
     setTranslationNotice(null)
     setTranslationBack(null)
-    setTranslationRun({ file, fileId, key: `${fileId}:${translationRunCount.current}`, autoPicked, entry })
+    setTranslationRun({ ...run, key: `${fileId}:${translationRunCount.current}` })
     posthog.capture(IMPORT_STARTED, {
-      import_type: "file-target",
-      entry,
-      auto_picked: autoPicked,
+      import_type: TRANSLATION_IMPORT_TYPE[run.way],
+      entry: run.entry,
+      auto_picked: run.autoPicked,
       project_id: projectId,
     })
     if (translation.activeFileId !== fileId) {
@@ -688,7 +724,7 @@ export function ImportDialog({
       gateInput(fileId),
     )
     setOpening(first)
-    setScreen(first.state === "ready" ? "translationReview" : "translationOpening")
+    setScreen(first.state === "ready" ? TRANSLATION_READY_SCREEN[run.way] : "translationOpening")
   }
 
   // AQU-1365: the source path's "Is this a translation?" check. Runs after
@@ -804,7 +840,7 @@ export function ImportDialog({
   // every render would loop.
   const backToTranslationChooser = useCallback(() => {
     if (translationRun) {
-      setHeldTranslationFile(translationRun.file)
+      if (translationRun.file) setHeldTranslationFile(translationRun.file)
       setTranslationFileId(translationRun.fileId)
     }
     setTranslationRun(null)
@@ -826,8 +862,9 @@ export function ImportDialog({
   if (openingFileId !== null) {
     if (openingFileGone) {
       // Deleted while it opened: its lines are never coming, so hand the
-      // upload back to the chooser with nothing chosen.
-      setHeldTranslationFile(translationRun?.file ?? null)
+      // upload back to the chooser with nothing chosen. (The other ways have
+      // no upload of their own; a held one stays held.)
+      if (translationRun?.file) setHeldTranslationFile(translationRun.file)
       setTranslationFileId(null)
       setTranslationRun(null)
       setTranslationNotice(t("importExport.translation.fileGone"))
@@ -842,7 +879,7 @@ export function ImportDialog({
         firstCellFileId: hostFirstCellFileId,
       })
       if (next.gate !== opening.gate || next.state !== opening.state) setOpening(next)
-      if (next.state === "ready") setScreen("translationReview")
+      if (next.state === "ready" && translationRun) setScreen(TRANSLATION_READY_SCREEN[translationRun.way])
     }
   }
 
@@ -867,7 +904,8 @@ export function ImportDialog({
                 />
                 <span className="min-w-0">{translationCheckTitle(t, translationCheck.layout)}</span>
               </div>
-            ) : screen === "translationOpening" || screen === "translationReview" ? (
+            ) : screen === "translationOpening" || screen === "translationReview"
+              || screen === "translationEbible" || screen === "translationPaired" ? (
               <div className="flex min-w-0 items-center gap-2">
                 {screen === "translationReview" && translationBack ? (
                   <ImportDialogBackButton
@@ -958,6 +996,7 @@ export function ImportDialog({
               onHeldFileChange={setHeldTranslationFile}
               onStart={startTranslation}
               notice={translationNotice}
+              onOtherWay={startOtherWay}
             />
           </div>
         )}
@@ -991,6 +1030,7 @@ export function ImportDialog({
         {screen === "landing" && intent === "source" && (
           <ImportLanding
             allowDcs={patchDcsCursor !== undefined}
+            translationOnlyElsewhere={translation !== undefined}
             linkProject={
               linkSource
                 ? {
@@ -1136,6 +1176,9 @@ export function ImportDialog({
 
         {screen === "ebible" && (
           <EBiblePanel
+            // AQU-1365: with a translation path, New source text means source:
+            // eBible into an existing file's target lives under A translation.
+            mode={translation ? "source" : undefined}
             projectId={projectId}
             username={username}
             sourceLanguage={sourceLanguage}
@@ -1290,6 +1333,64 @@ export function ImportDialog({
           </div>
         )}
 
+        {/* AQU-1365: the other ways into a chosen file, mounted once every
+            line of it is loaded (the same opening gate as a dropped file):
+            both match against the lines they are handed. The open file IS the
+            destination by then, so its lines are the host's open-file lines. */}
+        {(screen === "translationEbible" || screen === "translationPaired") && translationRun && translation
+          && translation.activeFileCells.length === 0 && (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {t("importExport.translation.fileHasNoLines", { fileName: translationDestination?.name ?? "" })}
+            </p>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={backToTranslationChooser}>{t("common.back")}</Button>
+            </div>
+          </div>
+        )}
+        {screen === "translationEbible" && translationRun && translation && translation.activeFileCells.length > 0 && (
+          <EBiblePanel
+            key={translationRun.key}
+            mode="target"
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            getToken={getToken}
+            sourceCells={translation.activeFileCells}
+            onImported={handleChildImported}
+            onTargetImported={() => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: TRANSLATION_IMPORT_TYPE.ebible,
+                entry: translationRun.entry,
+                project_id: projectId,
+              })
+              onOpenChange(false)
+            }}
+          />
+        )}
+        {screen === "translationPaired" && translationRun && translation && translation.activeFileCells.length > 0 && (
+          <PairedImportPanel
+            key={translationRun.key}
+            projectId={projectId}
+            username={username}
+            targetLang={targetLang}
+            sourceCells={translation.activeFileCells}
+            getToken={getToken}
+            onImported={(committedCount) => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: TRANSLATION_IMPORT_TYPE.paired,
+                entry: translationRun.entry,
+                file_count: committedCount,
+                project_id: projectId,
+              })
+              onOpenChange(false)
+            }}
+            onCancel={backToTranslationChooser}
+          />
+        )}
+
         {screen === "direction" && (
           <DirectionPanel
             sourceLanguage={directionSource}
@@ -1382,7 +1483,7 @@ export function ImportDialog({
         {/* AQU-1365: the existing target-import review, handed the dropped
             file so it starts matching straight away. Mounted only once every
             line of the destination is loaded (the opening gate above). */}
-        {screen === "translationReview" && translationRun && translation && (
+        {screen === "translationReview" && translationRun?.file && translation && (
           <div className="flex min-h-0 flex-1 flex-col">
             <FileTargetImportPanel
               key={translationRun.key}
@@ -1398,6 +1499,7 @@ export function ImportDialog({
               onBackToFileChoice={backToTranslationChooser}
               fileForBook={translationFileForBook}
               onUseFile={(fileId) => {
+                if (!translationRun.file) return
                 setTranslationTouched(true)
                 startTranslation(translationRun.file, fileId, { autoPicked: false }, "review-switch")
               }}
@@ -1664,9 +1766,15 @@ interface ImportLandingProps {
   allowDcs: boolean
   /** AQU-1527: null when the host cannot offer linking at all. */
   linkProject: LinkProjectAvailability | null
+  /**
+   * AQU-1365: true when the dialog has an "A translation" path. Paired
+   * translation only ever fills an existing file's translation, so it is
+   * offered there instead of among the source importers.
+   */
+  translationOnlyElsewhere?: boolean
 }
 
-function ImportLanding({ onSelect, allowDcs, linkProject }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false }: ImportLandingProps) {
   const t = useT()
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
@@ -1679,6 +1787,7 @@ function ImportLanding({ onSelect, allowDcs, linkProject }: ImportLandingProps) 
     : POPULAR_OPTIONS
   // Hide DCS when the host can't persist the release cursor.
   const specializedOptions = [...SPECIALIZED_OPTIONS, ...PARTNER_OPTIONS]
+    .filter((o) => !(translationOnlyElsewhere && o.id === "paired"))
   const available = allowDcs
     ? specializedOptions
     : specializedOptions.filter((o) => o.id !== "dcs")
@@ -2856,14 +2965,21 @@ interface EBiblePanelProps {
   sourceCells?: SourceCellRef[]
   /** Called after a successful target-column import (no new FileReference). */
   onTargetImported?: () => void
+  /**
+   * AQU-1365: fixes the mode and hides the "New source file / Into target
+   * column" tabs, because the Import dialog's "What are you importing?" has
+   * already said which. Absent, the tabs show whenever `sourceCells` has lines.
+   */
+  mode?: EBiblePanelMode
 }
 
 type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported, mode: fixedMode }: EBiblePanelProps) {
   const t = useT()
-  const [mode, setMode] = useState<EBiblePanelMode>("source")
+  const [chosenMode, setMode] = useState<EBiblePanelMode>("source")
+  const mode = fixedMode ?? chosenMode
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
   const [targetProgress, setTargetProgress] = useState<EBibleTargetProgress | null>(null)
@@ -3046,8 +3162,9 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
   // ── Shared translation picker ────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3">
-      {/* Mode toggle — only shown when target-import is possible */}
-      {sourceCells && sourceCells.length > 0 && (
+      {/* Mode toggle — only shown when target-import is possible and the
+          dialog hasn't already fixed the mode (AQU-1365) */}
+      {!fixedMode && sourceCells && sourceCells.length > 0 && (
         <Tabs
           value={mode}
           onValueChange={(value) => setMode(value as EBiblePanelMode)}

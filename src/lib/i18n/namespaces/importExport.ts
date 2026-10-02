@@ -1292,6 +1292,9 @@ export const importExport = defineNamespace({
     "importExport.translation.tryAgain": "Try again",
     "importExport.translation.fileGone": "That file is no longer in this project.",
     "importExport.translation.backToChooser": "Back to choosing a file",
+    "importExport.translation.otherWays": "Other ways to bring in a translation",
+    "importExport.translation.chooseFileFirst": "Choose the file first.",
+    "importExport.translation.fileHasNoLines": "{fileName} has no lines yet, so there is nothing for a translation to fill.",
     "importExport.translationCheck.sameBookTitle": "{book} is already in this project",
     "importExport.translationCheck.sameBookBody": "{fileName} is for {book}, and {book} is already in this project. Is it a translation of {book}, or a new version of {book}'s source text?",
     "importExport.translationCheck.languageToo": "It also says it's in {language}, the language you translate into.",
@@ -3939,6 +3942,21 @@ export const importExport = defineNamespace({
       "importExport.translation.backToChooser": {
         description:
           "Accessible name of the back arrow in the Import dialog's title while a translation is being opened or reviewed; returns to choosing which file it translates. Never shown as text.",
+      },
+      "importExport.translation.otherWays": {
+        description:
+          "Small section heading on the Import dialog's translation screen, above two options besides dropping a file: eBible (published Bible translations) and a paired source + translation spreadsheet. Sentence case.",
+      },
+      "importExport.translation.chooseFileFirst": {
+        description:
+          "Hint under 'Other ways to bring in a translation' while no project file is chosen yet; both options stay disabled until one is. Short imperative sentence.",
+      },
+      "importExport.translation.fileHasNoLines": {
+        description:
+          "Shown on the Import dialog when the user chose eBible or a paired spreadsheet for a project file that has no lines, so nothing can be matched or filled. One sentence.",
+        placeholders: {
+          fileName: "Display name of the chosen project file, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
       },
       // AQU-1365: "Is this a translation?", asked on the New source text path
       // before any cell is created, when an upload's book is already in the

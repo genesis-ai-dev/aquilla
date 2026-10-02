@@ -13,10 +13,16 @@
  * upload is held until a file is chosen, and only Continue starts it: a held
  * file never starts on its own, so what happens next is always the person's
  * click.
+ *
+ * Below the drop zone, "Other ways to bring in a translation" offers the two
+ * importers that only ever fill a file's translation: eBible (matched by verse)
+ * and a paired source + translation spreadsheet. Both read the chosen file's
+ * lines, so they wait for a file to be chosen and go through the same opening
+ * as a dropped file.
  */
 
 import { useState } from "react"
-import { ChevronDown, FileText } from "lucide-react"
+import { ArrowLeftRight, ChevronDown, FileText, Library, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -29,6 +35,10 @@ import {
   usfmBookIds,
   type TranslationDestination,
 } from "@/lib/import/translation-destination"
+
+/** AQU-1365: the importers that only bring in a translation, besides a dropped
+ *  file. */
+export type TranslationOtherWay = "ebible" | "paired"
 
 export interface TranslationStartOptions {
   /** True when the upload's own book chose the file, not the person. */
@@ -53,7 +63,20 @@ interface TranslationChooserProps {
   /** A message from the dialog to show above the drop zone, e.g. that the
    *  chosen file was deleted while it was being opened. */
   notice?: string | null
+  /** Starts one of the other ways into the chosen file. Absent, the section
+   *  is not shown. */
+  onOtherWay?: (way: TranslationOtherWay) => void
 }
+
+const OTHER_WAYS: {
+  id: TranslationOtherWay
+  icon: LucideIcon
+  titleKey: "importExport.landing.ebible.title" | "importExport.landing.paired.title"
+  descriptionKey: "importExport.landing.ebible.description" | "importExport.landing.paired.description"
+}[] = [
+  { id: "ebible", icon: Library, titleKey: "importExport.landing.ebible.title", descriptionKey: "importExport.landing.ebible.description" },
+  { id: "paired", icon: ArrowLeftRight, titleKey: "importExport.landing.paired.title", descriptionKey: "importExport.landing.paired.description" },
+]
 
 export function TranslationChooser({
   files,
@@ -65,6 +88,7 @@ export function TranslationChooser({
   onHeldFileChange,
   onStart,
   notice,
+  onOtherWay,
 }: TranslationChooserProps) {
   const t = useT()
   const [error, setError] = useState<string | null>(null)
@@ -207,6 +231,34 @@ export function TranslationChooser({
       )}
 
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+
+      {onOtherWay && (
+        <section className="space-y-2 pt-2" aria-labelledby="translation-other-ways" data-testid="translation-other-ways">
+          <h3 id="translation-other-ways" className="px-0.5 text-xs font-medium text-muted-foreground/70">
+            {t("importExport.translation.otherWays")}
+          </h3>
+          {!chosen && <p className="px-0.5 text-xs text-muted-foreground">{t("importExport.translation.chooseFileFirst")}</p>}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {OTHER_WAYS.map(({ id, icon: Icon, titleKey, descriptionKey }) => (
+              <button
+                key={id}
+                type="button"
+                disabled={!chosen}
+                onClick={() => onOtherWay(id)}
+                className="flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
+              >
+                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium leading-tight">{t(titleKey)}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{t(descriptionKey)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

@@ -228,8 +228,9 @@ mode = "smart"
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
-# Like placement, observability is NOT inherited by env blocks — without this,
-# production has Workers Logs disabled and 4xx/5xx are invisible.
+# Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
+# env blocks, and `versions deploy` syncs the resolved value. It is declared per
+# env anyway so a top-level edit can't change what production logs.
 [env.production.observability]
 enabled = true
 
@@ -327,6 +328,11 @@ mode = "smart"
 # Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
+
+# See [env.production.observability] — declared per env so a top-level edit
+# can't change what dev logs.
+[env.development.observability]
+enabled = true
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `dev` branch.

@@ -1,14 +1,22 @@
-// AQU-1560 — "Choose files" on the Source link card: add more of the upstream's
-// files to an existing live link, without detaching and re-linking.
+// AQU-1560/AQU-1562 — "Choose files" on the Source link card: change which of
+// the upstream's files an existing live link follows, without detaching and
+// re-linking.
 //
 // Why these tests exist: after AQU-1559 the choice of files could only be made
-// once, at link time. A team that linked MAT and later needed MRK had to detach
-// (irreversible) and link again, and a file the upstream gained later never
-// reached a fixed-list link at all. The card now opens the upstream's current
-// file list — followed files checked and locked, the rest (including files the
-// upstream gained since) unchecked — and confirming adds the newly checked ones.
-// The server half (the files arriving whole) is pinned in auth-worker
-// source-linking-add-files.test.ts and sync-worker link-sync-add-files.test.ts.
+// once, at link time, and after AQU-1560 it could only grow. A team that linked
+// MAT and later needed MRK had to detach (irreversible) and link again; a file
+// the upstream gained later never reached a fixed-list link at all; and a team
+// that linked a file by mistake, or that wanted one book to go its own way,
+// had to delete the file (losing its translations) or cut every file loose.
+//
+// The card now opens the upstream's current file list — followed files checked,
+// the rest (including files the upstream gained since, and files this project
+// stopped following) unchecked. Checking adds; unchecking stops. Anything that
+// carries a promise a checkbox does not goes through a confirm step first.
+//
+// The server halves are pinned in auth-worker source-linking-add-files.test.ts /
+// source-linking-stop-files.test.ts and sync-worker link-sync-add-files.test.ts /
+// link-sync-stop-files.test.ts.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, within } from "@testing-library/react"
@@ -18,9 +26,13 @@ import { UserError } from "@/lib/errors/user-error"
 import { SourceLinkSection, type SourceLinkSectionProps } from "./SourceLinkSection"
 
 const addLinkedSourceFiles = vi.fn()
+const stopLinkedSourceFiles = vi.fn()
+const loadLinkedSourceFileState = vi.fn()
 
 vi.mock("@/lib/sync/archive", () => ({
   addLinkedSourceFiles: (...args: unknown[]) => addLinkedSourceFiles(...args),
+  stopLinkedSourceFiles: (...args: unknown[]) => stopLinkedSourceFiles(...args),
+  loadLinkedSourceFileState: (...args: unknown[]) => loadLinkedSourceFileState(...args),
   runLinkSync: vi.fn(),
 }))
 
@@ -82,6 +94,8 @@ function renderCard(props: Partial<SourceLinkSectionProps> = {}) {
 
 const chooseFilesButton = () => screen.queryByRole("button", { name: "Choose files" })
 const addButton = () => screen.getByRole("button", { name: "Add files" })
+const reviewButton = () => screen.getByRole("button", { name: "Review changes" })
+const confirmButton = () => screen.getByRole("button", { name: "Confirm" })
 const fileCheckbox = (name: string) => screen.getByRole("checkbox", { name: new RegExp(`^${name}\\b`) })
 
 async function openDialog() {
@@ -90,10 +104,19 @@ async function openDialog() {
   await screen.findByRole("checkbox", { name: /^MAT\b/ })
 }
 
+/** The dialog reads the link's state from the server on every open; by default
+ *  it agrees with the card's props and nothing is stopped. */
+function linkState(fileIds: string[] | null = ["up-MAT", "up-MRK"], stoppedFileIds: string[] = []) {
+  return { fileIds, stoppedFileIds }
+}
+
 beforeEach(() => {
   addLinkedSourceFiles.mockReset()
+  stopLinkedSourceFiles.mockReset()
+  loadLinkedSourceFileState.mockReset()
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(upstreamPreview())
+  loadLinkedSourceFileState.mockResolvedValue(linkState())
 })
 
 describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
@@ -105,6 +128,8 @@ describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
 
   // WHY: "a Contributor or Viewer does not get a working action" — the same
   // floor, and the same disabled-not-hidden treatment, as Detach beside it.
+  // AQU-1562 rides on this: it is also what stops them stopping or resuming a
+  // file, which the server refuses independently.
   it("is not a working action for a Contributor", async () => {
     renderCard({ roleLevel: 300 })
     expect((chooseFilesButton() as HTMLButtonElement).disabled).toBe(true)
@@ -114,7 +139,7 @@ describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
   })
 
   // WHY: a one-time clone never syncs, so there is nothing that could bring a
-  // file in; a legacy link with no recorded mode is not mirrored either.
+  // file in or be stopped; a legacy link with no recorded mode is not mirrored.
   it("is not offered on a clone or a legacy link", () => {
     renderCard({ sourceLinkMode: "clone" })
     expect(chooseFilesButton()).toBeNull()
@@ -126,20 +151,21 @@ describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
   })
 })
 
-describe("'Choose files' — the list (AQU-1560)", () => {
-  // WHY: the three row states the issue names. Followed files are checked and
-  // cannot be unchecked (stopping a file is AQU-1562); every other upstream
-  // file is unchecked — including JHN, which the upstream gained after the
-  // link was made and which a fixed-list link never received.
-  it("shows linked files checked and locked, and every other upstream file unchecked", async () => {
+describe("'Choose files' — the list (AQU-1560/AQU-1562)", () => {
+  // WHY: the row states the issues name. Followed files are checked — and since
+  // AQU-1562 they can be unchecked, which is the whole slice; every other
+  // upstream file is unchecked, including JHN, which the upstream gained after
+  // the link was made and which a fixed-list link never received.
+  it("shows followed files checked and unlockable, and every other upstream file unchecked", async () => {
     renderCard()
     await openDialog()
 
     expect(loadLinkSourcePreview).toHaveBeenCalledWith("tok", PROJECT_ID, UPSTREAM_ID)
+    expect(loadLinkedSourceFileState).toHaveBeenCalledWith("tok", PROJECT_ID)
     for (const name of ["MAT", "MRK"]) {
       const box = fileCheckbox(name)
       expect(box.getAttribute("aria-checked")).toBe("true")
-      expect(box.hasAttribute("disabled") || box.getAttribute("aria-disabled") === "true").toBe(true)
+      expect(box.hasAttribute("disabled") || box.getAttribute("aria-disabled") === "true").toBe(false)
     }
     expect(screen.getAllByText("already linked")).toHaveLength(2)
     for (const name of ["LUK", "JHN"]) {
@@ -147,8 +173,8 @@ describe("'Choose files' — the list (AQU-1560)", () => {
       expect(box.getAttribute("aria-checked")).toBe("false")
       expect(box.hasAttribute("disabled") || box.getAttribute("aria-disabled") === "true").toBe(false)
     }
-    // Nothing new is checked yet, so there is nothing to confirm.
-    expect(screen.getByText("Check a file above to add it to this link.")).toBeTruthy()
+    // Nothing changed yet, so there is nothing to confirm.
+    expect(screen.getByText(/Check a file above to add it to this link, or uncheck one/)).toBeTruthy()
     expect((addButton() as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -184,14 +210,19 @@ describe("'Choose files' — the list (AQU-1560)", () => {
   })
 
   // WHY: a whole-project link already follows every file, and files the
-  // upstream gains arrive on their own — the list says so, and offers nothing.
-  it("offers nothing on a whole-project link", async () => {
+  // upstream gains arrive on their own — so there is nothing to add. Since
+  // AQU-1562 there is still something to DO: a file can be stopped.
+  it("has nothing to add on a whole-project link, but still offers stopping", async () => {
+    loadLinkedSourceFileState.mockResolvedValue(linkState(null))
     renderCard({ sourceLinkFileIds: null })
     await openDialog()
 
     expect(screen.getAllByText("already linked")).toHaveLength(4)
     expect(screen.getByText(/follows every file in the source project/)).toBeTruthy()
     expect((addButton() as HTMLButtonElement).disabled).toBe(true)
+
+    await userEvent.click(fileCheckbox("MRK"))
+    expect((reviewButton() as HTMLButtonElement).disabled).toBe(false)
   })
 
   // WHY: a list the server could not read is said to be unread, with a retry —
@@ -207,11 +238,24 @@ describe("'Choose files' — the list (AQU-1560)", () => {
     expect(await screen.findByRole("checkbox", { name: /^LUK\b/ })).toBeTruthy()
     expect(loadLinkSourcePreview).toHaveBeenCalledTimes(2)
   })
+
+  // WHY: the stopped/never-had distinction is the server's to make, and without
+  // it the dialog must still work — off the card's own props, describing a check
+  // as a plain add rather than promising a replacement that may not happen.
+  it("still works when the server cannot say which files are stopped", async () => {
+    loadLinkedSourceFileState.mockRejectedValue(new Error("older server"))
+    renderCard()
+    await openDialog()
+
+    expect(screen.queryByText("stopped following")).toBeNull()
+    await userEvent.click(fileCheckbox("LUK"))
+    expect((addButton() as HTMLButtonElement).disabled).toBe(false)
+  })
 })
 
-describe("'Choose files' — confirming (AQU-1560)", () => {
-  // WHY: the slice's action. Only the newly checked upstream ids are sent —
-  // never the locked ones — and the card is told to refresh once they are in.
+describe("'Choose files' — adding files (AQU-1560)", () => {
+  // WHY: the slice's action, and still ONE press: adding a file this project
+  // never had promises nothing a checkbox does not already say.
   it("adds the newly checked files and refreshes the card", async () => {
     addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK", "up-LUK"], complete: true })
     const { onFilesAdded } = renderCard()
@@ -221,6 +265,7 @@ describe("'Choose files' — confirming (AQU-1560)", () => {
     await userEvent.click(addButton())
 
     expect(addLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-LUK"])
+    expect(stopLinkedSourceFiles).not.toHaveBeenCalled()
     await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
@@ -274,5 +319,219 @@ describe("'Choose files' — confirming (AQU-1560)", () => {
     expect(onFilesAdded).not.toHaveBeenCalled()
     await openDialog()
     expect(fileCheckbox("LUK").getAttribute("aria-checked")).toBe("false")
+  })
+})
+
+describe("'Choose files' — stopping a file (AQU-1562)", () => {
+  // WHY: "before anything changes, a confirm lists the files that will stop
+  // being followed and states that they stay in the project with their
+  // translations and will no longer receive upstream changes." Those exact
+  // terms, because the alternatives this replaces — deleting the file, or
+  // detaching — both lose something, and the lead has to be able to tell.
+  it("names the file and says what happens to it before anything changes", async () => {
+    renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(reviewButton())
+
+    expect(screen.getByText("Stop following this file:")).toBeTruthy()
+    expect(screen.getByText("MRK")).toBeTruthy()
+    expect(screen.getByText(/stays in this project with the source text it has now/)).toBeTruthy()
+    expect(screen.getByText(/translations, validations and comments are untouched/)).toBeTruthy()
+    expect(screen.getByText(/no longer receive the source project's changes/)).toBeTruthy()
+    // "Every other linked file keeps syncing" — said, not just true.
+    expect(screen.getByText(/Every other file this link follows keeps syncing/)).toBeTruthy()
+    // Nothing has been sent yet: this is a confirm, not a report.
+    expect(stopLinkedSourceFiles).not.toHaveBeenCalled()
+  })
+
+  it("stops the file on confirm and refreshes the card", async () => {
+    stopLinkedSourceFiles.mockResolvedValue({ stopped: ["up-MRK"], fileIds: ["up-MAT"], wasWholeProject: false })
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(reviewButton())
+    await userEvent.click(confirmButton())
+
+    expect(stopLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-MRK"])
+    expect(addLinkedSourceFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  // WHY: "stopping a file on a whole-project link … the confirm warns that new
+  // upstream files will no longer arrive on their own". That is AQU-1559's rule
+  // biting in the direction nobody asked for, so it is said out loud rather
+  // than discovered later when a new book never shows up.
+  it("warns on a whole-project link that later upstream files will stop arriving", async () => {
+    loadLinkedSourceFileState.mockResolvedValue(linkState(null))
+    stopLinkedSourceFiles.mockResolvedValue({ stopped: ["up-MRK"], fileIds: ["up-MAT", "up-LUK", "up-JHN"], wasWholeProject: true })
+    renderCard({ sourceLinkFileIds: null })
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(reviewButton())
+
+    expect(screen.getByText(/pins it to the remaining files/)).toBeTruthy()
+    expect(screen.getByText(/no longer arrive here on their own/)).toBeTruthy()
+
+    await userEvent.click(confirmButton())
+    expect(stopLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-MRK"])
+  })
+
+  // WHY: "unchecking every linked file cannot be confirmed; the dialog says at
+  // least one file must stay linked and points to 'Detach from source'" — a
+  // link following nothing could never sync, and detaching is the operation
+  // that actually does this, with its own snapshot and its own confirmation.
+  it("refuses to leave the link following nothing, and points at Detach", async () => {
+    renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MAT"))
+    await userEvent.click(fileCheckbox("MRK"))
+
+    const keepOne = screen.getByText(/At least one file must stay linked/)
+    expect(keepOne.textContent).toMatch(/Detach from source/)
+    expect((screen.getByRole("button", { name: "Review changes" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(stopLinkedSourceFiles).not.toHaveBeenCalled()
+
+    // Checking something else to take their place makes it confirmable again:
+    // the rule is about the selection left behind, not the boxes.
+    await userEvent.click(fileCheckbox("LUK"))
+    expect(screen.queryByText(/At least one file must stay linked/)).toBeNull()
+    expect((reviewButton() as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // WHY: "Back" from the confirm is not a cancel — the pick survives, so a lead
+  // who went to read the wording can change one box and go on.
+  it("keeps the pick when the lead goes back from the confirm", async () => {
+    renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(reviewButton())
+
+    await userEvent.click(screen.getByRole("button", { name: "Back" }))
+
+    expect(fileCheckbox("MRK").getAttribute("aria-checked")).toBe("false")
+    expect(stopLinkedSourceFiles).not.toHaveBeenCalled()
+  })
+
+  it("states a refused stop and sends nothing else", async () => {
+    stopLinkedSourceFiles.mockRejectedValue(
+      new UserError(409, '{"error":"at least one file must stay linked"}', "project"),
+    )
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(reviewButton())
+
+    await userEvent.click(confirmButton())
+
+    expect(await screen.findByRole("alert")).toBeTruthy()
+    // Stopping comes first, so a refused stop means the add never ran — the
+    // link is exactly as it was.
+    expect(addLinkedSourceFiles).not.toHaveBeenCalled()
+    expect(onFilesAdded).not.toHaveBeenCalled()
+  })
+
+  // WHY: one confirm can hold both, and the order matters — stopping first
+  // means the add lands on the narrowed selection instead of being undone by it.
+  it("stops before adding when one confirm does both", async () => {
+    const calls: string[] = []
+    stopLinkedSourceFiles.mockImplementation(async () => {
+      calls.push("stop")
+      return { stopped: ["up-MRK"], fileIds: ["up-MAT"], wasWholeProject: false }
+    })
+    addLinkedSourceFiles.mockImplementation(async () => {
+      calls.push("add")
+      return { added: ["up-LUK"], fileIds: ["up-MAT", "up-LUK"], complete: true }
+    })
+    renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(reviewButton())
+
+    expect(screen.getByText("Stop following this file:")).toBeTruthy()
+    expect(screen.getByText("Add this file:")).toBeTruthy()
+    await userEvent.click(confirmButton())
+
+    await waitFor(() => expect(calls).toEqual(["stop", "add"]))
+  })
+})
+
+describe("'Choose files' — resuming a stopped file (AQU-1562)", () => {
+  beforeEach(() => {
+    loadLinkedSourceFileState.mockResolvedValue(linkState(["up-MAT"], ["up-MRK"]))
+  })
+
+  // WHY: "a stopped file appears unchecked in 'Choose files'", and it is marked
+  // as such — the row otherwise looks exactly like a file this project never
+  // had, while checking it does something quite different.
+  it("shows a stopped file unchecked and badged", async () => {
+    renderCard({ sourceLinkFileIds: ["up-MAT"] })
+    await openDialog()
+
+    expect(fileCheckbox("MRK").getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByText("stopped following")).toBeTruthy()
+    expect(screen.getAllByText("already linked")).toHaveLength(1)
+  })
+
+  // WHY: "the resume confirm states that the file's source text will be
+  // replaced with the upstream's current text." That is the one thing a resume
+  // costs, and the lead has been editing the file in the meantime, so it cannot
+  // be worded as a plain add.
+  it("says the source text will be replaced, and that translations stay", async () => {
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-MRK"], fileIds: ["up-MAT", "up-MRK"], complete: true })
+    const { onFilesAdded } = renderCard({ sourceLinkFileIds: ["up-MAT"] })
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(reviewButton())
+
+    expect(screen.getByText("Follow this file again:")).toBeTruthy()
+    expect(screen.getByText(/source text will be replaced with the source project's current text/)).toBeTruthy()
+    expect(screen.getByText(/translations, validations and comments stay/)).toBeTruthy()
+    // Resuming IS the add request — the same route, which re-uses the same file.
+    await userEvent.click(confirmButton())
+    expect(addLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-MRK"])
+    expect(stopLinkedSourceFiles).not.toHaveBeenCalled()
+    await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
+  })
+
+  // WHY: the two are worded apart, and in one confirm both wordings appear
+  // against the right files — a never-had file is not promised a replacement
+  // of text it does not have.
+  it("words a resume and a plain add apart in the same confirm", async () => {
+    renderCard({ sourceLinkFileIds: ["up-MAT"] })
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(reviewButton())
+
+    const resume = screen.getByText("Follow this file again:").parentElement as HTMLElement
+    expect(within(resume).getByText("MRK")).toBeTruthy()
+    expect(within(resume).queryByText("LUK")).toBeNull()
+    const add = screen.getByText("Add this file:").parentElement as HTMLElement
+    expect(within(add).getByText("LUK")).toBeTruthy()
+    expect(within(add).queryByText("MRK")).toBeNull()
+  })
+
+  // WHY: a resumed file is not a name clash with itself — it IS the file
+  // already here, so AQU-1526's "this will appear twice" warning must not fire
+  // on it. The whole point is that no second copy appears.
+  it("does not warn about a name clash with the stopped file itself", async () => {
+    loadLinkSourcePreview.mockResolvedValue(upstreamPreview(["MRK"]))
+    renderCard({ sourceLinkFileIds: ["up-MAT"] })
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+
+    expect(screen.queryByText(/already has a file with the same name/)).toBeNull()
   })
 })

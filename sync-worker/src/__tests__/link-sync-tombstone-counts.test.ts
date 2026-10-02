@@ -13,7 +13,8 @@
 //   1. The delete lands after the cell was mirrored: the existing row is
 //      stamped and keeps its last text (and any translation made against it).
 //   2. The create and the delete fold into the same sync: the downstream never
-//      held the cell, and gets an empty tombstoned row with nothing to orphan.
+//      held the cell. It used to get an empty tombstoned row with nothing to
+//      orphan; since AQU-1567 it gets no row at all, and the counts agree.
 
 import { describe, it, expect } from "vitest"
 import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
@@ -174,7 +175,7 @@ describe("mirrorSync — a cell deleted upstream leaves the downstream's counts"
     }
   })
 
-  it("drops an empty tombstone from a create and delete folded into the first sync", async () => {
+  it("leaves a create and delete folded into the first sync out of the counts", async () => {
     const t = await makeTestDb()
     try {
       await seedProjects(t)
@@ -182,7 +183,8 @@ describe("mirrorSync — a cell deleted upstream leaves the downstream's counts"
       await emitUpstream(t, "source.cell.delete", { cellId: "c3", payload: {} })
       await mirrorSync(t.db, DOWNSTREAM)
 
-      expect(await tombstonedIds(t)).toEqual(["c3"])
+      // AQU-1567: never held downstream, so no row — not even a tombstone.
+      expect(await tombstonedIds(t)).toEqual([])
       expect(await countersOf(t)).toMatchObject({ cell_count: 2 })
       expect((await progressOf(t)).find((r) => r.scope === "file")).toMatchObject({ total_count: 2 })
     } finally {

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const { capture } = vi.hoisted(() => ({ capture: vi.fn() }))
 vi.mock("@/lib/posthog", () => ({ default: { capture } }))
 
-import { reportGeneratedClips, reportValidation } from "./review-telemetry"
+import { reportGeneratedClips, reportQueued, reportValidation } from "./review-telemetry"
 
 beforeEach(() => { capture.mockReset() })
 
@@ -65,5 +65,16 @@ describe("the dev log", () => {
     })
     const logged: Array<{ event: string }> = win.__aqTelemetry ?? []
     expect(logged.map((e) => e.event)).toEqual(["cell validated"])
+  })
+})
+
+describe("reportQueued", () => {
+  it("reports only the writes that reached the outbox", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const report = vi.fn()
+    await reportQueued([Promise.resolve("a"), Promise.reject(new Error("idb")), Promise.resolve("c")], report)
+    expect(report).toHaveBeenCalledWith(["a", "c"])
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 })

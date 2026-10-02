@@ -42,7 +42,7 @@ import {
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
-import { reportValidation } from "@/lib/review-telemetry"
+import { reportQueued, reportValidation } from "@/lib/review-telemetry"
 
 interface Props {
   project: ProjectRecord
@@ -199,11 +199,13 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     // The rule is the org's to relax, so say where — a greyed-out button with
     // no way forward is how this read to Sam on 2026-10-01.
     if (aiDrafts > 0) {
+      // One column: the tooltip lays its children out in a row, so two
+      // siblings stood side by side as two narrow columns.
       return (
-        <>
-          <span className="block">{t("editor.selection.validateAiDrafts")}</span>
-          <span className="block">{t("editor.selection.validateAiDraftsOrgHint")}</span>
-        </>
+        <span className="flex flex-col gap-1">
+          <span>{t("editor.selection.validateAiDrafts")}</span>
+          <span>{t("editor.selection.validateAiDraftsOrgHint")}</span>
+        </span>
       )
     }
     if (needTranslation > 0) return t("editor.selection.validateNeedTranslation")
@@ -432,22 +434,23 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         hasTarget: Boolean(project.id),
         allowAiDrafts: allowBulkValidateAiDrafts,
       })
-      for (const cell of summary.validatable) {
-        void emitCellValidate({
+      const queued = summary.validatable.map((cell) =>
+        emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
-        })
-      }
+        }).then(() => ({ fileId: cell.fileId, cellId: cell.id })),
+      )
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
-      reportValidation({
-        medium: "text", validated: true, projectId: project.id,
-        cells: summary.validatable.map((cell) => ({ fileId: cell.fileId, cellId: cell.id })),
+      // AQU-1572: counted once every write has reached the outbox (or failed
+      // to), so a write that never landed is not reported as a validation.
+      void reportQueued(queued, (cells) => reportValidation({
+        medium: "text", validated: true, projectId: project.id, cells,
         lane: activeLane, source: "ui", surface: "selection",
-      })
+      }))
       const message = batchValidateToast(summary, t, formatLocaleList)
       toast.add({
         type: message.type,
@@ -467,30 +470,29 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (unvalidatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      const removed: Array<{ fileId: string; cellId: string }> = []
+      const removed: Array<Promise<{ fileId: string; cellId: string }>> = []
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
         if (!cell.activeValidators.includes(username)) continue
         if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue // AQU-633: skip out-of-scope
         if (!cell.targetEventId || !project.id) continue
-        void emitCellUnvalidate({
+        removed.push(emitCellUnvalidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
-        })
-        removed.push({ fileId: cell.fileId, cellId: cell.id })
+        }).then(() => ({ fileId: cell.fileId, cellId: cell.id })))
       }
       toast.add({
         type: "success",
         title: t("editor.selection.unvalidatedToast", { count: removed.length }),
       })
-      reportValidation({
-        medium: "text", validated: false, projectId: project.id, cells: removed,
+      void reportQueued(removed, (cells) => reportValidation({
+        medium: "text", validated: false, projectId: project.id, cells,
         lane: activeLane, source: "ui", surface: "selection",
-      })
+      }))
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed.length > 0) onValidationCommitted?.()
     } finally {

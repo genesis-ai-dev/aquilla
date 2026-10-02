@@ -555,7 +555,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
 describe("SelectionBar — validation telemetry (AQU-1572)", () => {
   const events = (name: string) => vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === name)
 
-  it("reports a bulk text validation once, counting only what it validated", () => {
+  it("reports a bulk text validation once, counting only what it validated", async () => {
     vi.mocked(posthog.capture).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
@@ -566,14 +566,15 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
-    expect(events("cell validated")).toHaveLength(1)
+    // Reported once the writes reach the outbox, not at the click.
+    await vi.waitFor(() => expect(events("cell validated")).toHaveLength(1))
     expect(events("cell validated")[0][1]).toMatchObject({
       medium: "text", source: "ui", surface: "selection", cell_count: 2, lane: "fr",
     })
     vi.restoreAllMocks()
   })
 
-  it("reports a bulk removal as one cell unvalidated", () => {
+  it("reports a bulk removal as one cell unvalidated", async () => {
     vi.mocked(posthog.capture).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
@@ -582,7 +583,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
 
-    expect(events("cell unvalidated")).toHaveLength(1)
+    await vi.waitFor(() => expect(events("cell unvalidated")).toHaveLength(1))
     expect(events("cell unvalidated")[0][1]).toMatchObject({ medium: "text", cell_count: 1, lane: "default" })
     vi.restoreAllMocks()
   })
@@ -803,6 +804,31 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
     fireEvent.click(translateButton())
 
     expect(completeBatch).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+})
+
+describe("SelectionBar — a write that never queued is not counted (AQU-1572)", () => {
+  it("leaves a failed enqueue out of the event", async () => {
+    vi.mocked(posthog.capture).mockClear()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.mocked(emitCellValidate)
+      .mockImplementationOnce(() => Promise.resolve("ok"))
+      .mockImplementationOnce(() => Promise.reject(new Error("idb full")))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    await vi.waitFor(() => expect(
+      vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === "cell validated"),
+    ).toHaveLength(1))
+    const [, props] = vi.mocked(posthog.capture).mock.calls.find(([n]) => n === "cell validated")!
+    expect(props).toMatchObject({ cell_count: 1 })
+    warn.mockRestore()
     vi.restoreAllMocks()
   })
 })

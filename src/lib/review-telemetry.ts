@@ -51,6 +51,24 @@ function send(event: TelemetryEvent | null): void {
   }
 }
 
+/**
+ * For a bulk action that queues its writes without waiting for each one:
+ * report only what actually reached the outbox, once every write has settled.
+ * A failed write is logged rather than left as an unhandled rejection.
+ */
+export async function reportQueued<T>(
+  writes: ReadonlyArray<Promise<T>>,
+  report: (queued: T[]) => void,
+): Promise<void> {
+  const settled = await Promise.allSettled(writes)
+  const queued: T[] = []
+  for (const result of settled) {
+    if (result.status === "fulfilled") queued.push(result.value)
+    else console.warn("[validate] enqueue failed:", result.reason)
+  }
+  report(queued)
+}
+
 export function reportValidation(input: ValidationEventInput): void {
   send(validationEvent(input))
 }

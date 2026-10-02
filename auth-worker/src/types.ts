@@ -229,6 +229,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them

@@ -11,6 +11,7 @@ import {
   orgSettingsPath,
   parseOrgPath,
   projectEditorPath,
+  projectOverviewPath,
   projectSettingsPath,
   resumeOrgPath,
   safeReturnPath,
@@ -146,6 +147,14 @@ describe("projectEditorPath", () => {
   it("treats null/undefined fileId as the editor root", () => {
     expect(projectEditorPath("abc", null)).toBe("/project/abc/editor")
     expect(projectEditorPath("abc", undefined)).toBe("/project/abc/editor")
+  })
+})
+
+describe("projectOverviewPath", () => {
+  // AQU-1535: the overview lives at `/projects/:id` (plural). A bare
+  // `/project/:id` is a redirect, never a destination to build by hand.
+  it("builds the plural overview URL", () => {
+    expect(projectOverviewPath("abc")).toBe("/projects/abc")
   })
 })
 

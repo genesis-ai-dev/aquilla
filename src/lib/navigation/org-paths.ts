@@ -108,6 +108,11 @@ export function projectMemoryPath(projectId: string, section?: string): string {
     : `/project/${projectId}/memory`
 }
 
+/** Project overview — the project's home page (`/projects/$id`). */
+export function projectOverviewPath(projectId: string): string {
+  return `/projects/${projectId}`
+}
+
 /** Default work surface — paired cell editor (`/project/$id/editor`). */
 export function projectEditorPath(projectId: string, fileId?: string | null): string {
   const base = `/project/${projectId}/editor`

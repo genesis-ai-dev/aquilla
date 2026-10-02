@@ -142,6 +142,7 @@ import {
   type ImportFileGateState,
 } from "@/lib/import/import-file-gate"
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
+import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
 import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
 import {
   translationCheckLayout,
@@ -808,12 +809,22 @@ export function ImportDialog({
         setHeldTranslationFile(flaggedFile)
         setScreen("landing")
         return
-      case "update":
-        // The collision screen's "Update existing": re-import in place by
-        // book code, which keeps the file's translations.
+      case "update": {
+        // The collision screen's "Update existing": re-import in place, which
+        // keeps the file's translations. Keyed by the same keys
+        // `emitParsedFile` looks up: a USFM upload's result has no book code,
+        // so its name is what finds Jonah (AQU-1365 review).
         if (layout.kind !== "sameBook") return
-        void check.resume({ reimportFileIds: new Map([[layout.book.bookCode, layout.book.file.id]]) })
+        const flagged = check.uploads.find((upload) => upload.fileKey === layout.signal.fileKey)
+        const keys = new Set([
+          layout.book.bookCode,
+          ...(flagged?.results ?? [])
+            .filter((result) => result.books.includes(layout.book.bookCode))
+            .flatMap((result) => result.reimportKeys),
+        ])
+        void check.resume({ reimportFileIds: new Map([...keys].map((key) => [key, layout.book.file.id])) })
         return
+      }
       case "leave-out": {
         const flagged = new Set(check.signals.map((signal) => signal.fileKey))
         void check.resume({
@@ -1899,6 +1910,9 @@ export interface UploadForTranslationCheck extends TranslationCheckUpload {
   file: File
   /** True when the person already answered about it on the collision screen. */
   resolved: boolean
+  /** Each parsed result's books and the keys `emitParsedFile` looks it up by
+   *  in `reimportFileIds`, so "Update Jonah's source text" re-imports in place. */
+  results: { books: string[]; reimportKeys: string[] }[]
 }
 
 /** AQU-1365: how the import continues after the translation check. */
@@ -1922,9 +1936,13 @@ async function uploadsForTranslationCheck(
   for (const file of files) {
     const prepared = preparedByFile.get(file)
     if (!prepared) continue
-    const bookIds = [...new Set(prepared.results
-      .map((result) => result.bookCode?.trim().toUpperCase())
-      .filter((code): code is string => Boolean(code)))]
+    // The real USFM parse carries no `bookCode`, so the books come off the
+    // parsed lines (AQU-1365 review).
+    const results = prepared.results.map((result) => ({
+      books: parsedResultBooks(prepared.fileType, result),
+      reimportKeys: reimportKeysFor(result),
+    }))
+    const bookIds = [...new Set(results.flatMap((result) => result.books))]
     let header = EMPTY_UPLOAD_HEADER
     if (hasLanguageHeader(file.name)) {
       try {
@@ -1938,15 +1956,12 @@ async function uploadsForTranslationCheck(
     // (see `emitParsedFile`): lowercased names, uppercased book codes.
     const importKeys = [...new Set([
       file.name.trim().toLowerCase(),
-      ...prepared.results.flatMap((result) => [
-        result.name.trim().toLowerCase(),
-        ...(result.originalName ? [result.originalName.trim().toLowerCase()] : []),
-      ]),
+      ...results.flatMap((result) => result.reimportKeys),
       ...bookIds,
     ])]
     const resolved = answered.names.has(file.name.trim().toLowerCase())
       || importKeys.some((key) => answered.reimportFileIds?.has(key))
-    uploads.push({ fileKey: file.name, fileName: file.name, bookIds, header, importKeys, file, resolved })
+    uploads.push({ fileKey: file.name, fileName: file.name, bookIds, header, importKeys, file, resolved, results })
   }
   return uploads
 }

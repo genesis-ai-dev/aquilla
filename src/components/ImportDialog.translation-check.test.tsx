@@ -43,6 +43,8 @@ import { importFile, prepareImportFile } from "@/lib/import"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_TRANSLATION_CHECK } from "@/lib/event-names"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
+import { reimportKeysFor } from "@/lib/import/reimport-keys"
 
 const JONAH_CELLS: FileTargetCellRef[] = [1, 2].map((verse) => ({
   cellId: `jonah-${verse}`,
@@ -134,10 +136,6 @@ async function answer(name: string | RegExp) {
   })
 }
 
-/** The book each fixture's parse reports, as the real USFM parser does. */
-function bookOf(text: string): string | undefined {
-  return /^\\id\s+([A-Z0-9]{3})/m.exec(text)?.[1]
-}
 
 function lastCheckEvent() {
   const calls = vi.mocked(posthog.capture).mock.calls.filter(([name]) => name === IMPORT_TRANSLATION_CHECK)
@@ -147,13 +145,13 @@ function lastCheckEvent() {
 describe("AQU-1365: Is this a translation?", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(prepareImportFile).mockImplementation(async (file: File) => {
-      const bookCode = bookOf(await file.text())
-      return {
-        fileType: "usfm",
-        results: [{ name: file.name, ...(bookCode ? { bookCode } : {}), strings: [{ id: "s1", original: "content" }] }],
-      } as never
-    })
+    // The REAL parser's output: a parsed USFM upload carries no `bookCode`
+    // (an earlier mock added one, which hid that the book check never fired
+    // on a real upload).
+    vi.mocked(prepareImportFile).mockImplementation(async (file: File) => ({
+      fileType: "usfm",
+      results: parseTextFormat({ fileType: "usfm", name: file.name, text: await file.text() }),
+    }) as never)
     vi.mocked(importFile).mockResolvedValue({ refs: [{ fileId: "new-ref" } as never], speakerPairs: [] })
   })
 
@@ -210,7 +208,12 @@ describe("AQU-1365: Is this a translation?", () => {
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(1)
     const ctx = vi.mocked(importFile).mock.calls[0][1]
-    expect(ctx.reimportFileIds?.get("JON")).toBe("jonah")
+    // Resolved the way `emitParsedFile` resolves it, from the parsed result
+    // the import commits (which has no book code, only its name).
+    const [result] = parseTextFormat({ fileType: "usfm", name: "JON-tatar.usfm", text: JON_TATAR })
+    expect(Object.keys(result)).not.toContain("bookCode")
+    const resolved = reimportKeysFor(result).map((key) => ctx.reimportFileIds?.get(key)).find(Boolean)
+    expect(resolved).toBe("jonah")
     expect(lastCheckEvent()).toMatchObject({ choice: "update" })
   })
 
@@ -221,7 +224,7 @@ describe("AQU-1365: Is this a translation?", () => {
     await answer("Import it as a separate file")
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.get("JON")).toBeUndefined()
+    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.size ?? 0).toBe(0)
   })
 
   it("asks only about the language for a book the project doesn't have, and hands it to the file choice", async () => {

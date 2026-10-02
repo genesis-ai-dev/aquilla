@@ -63,6 +63,15 @@ export function archiveCheckApplies(kind: string): boolean {
 }
 
 /**
+ * AQU-1532: kinds whose projection writes a row keyed by `lane_id`
+ * (`cells`, `cell_validators`). Their lane tag must name an existing lane row,
+ * or the projection resolves a NULL `lane_id` and the write fails.
+ */
+export function writesLaneRow(kind: string): boolean {
+  return ALWAYS_LANE_KINDS.has(kind)
+}
+
+/**
  * The lane tag this event is asking to write, or null when the event is not
  * a lane write. `''` is the default lane.
  */

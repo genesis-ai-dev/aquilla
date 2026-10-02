@@ -149,6 +149,9 @@ beforeEach(async () => {
         meta: '{}',
       },
     ],
+    // The tagged lane has its row, as a registered lane does in production
+    // (AQU-1532: a cell write to a lane with no row is a 422).
+    lanes: [{ id: 'enlane01', project_id: PROJECT, role: 'target', name: 'English', legacy_tag: TAG }],
   })
 })
 

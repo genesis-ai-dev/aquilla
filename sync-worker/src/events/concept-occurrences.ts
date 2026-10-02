@@ -105,12 +105,19 @@ function parseTermMatching(raw: unknown): TermMatchingSettings | undefined {
   }
 }
 
+/**
+ * A row's matcher input. `renderings` is always parsed (an empty list when the
+ * column is null or malformed), so callers that build a full `Concept` — whose
+ * renderings are required — can rely on it.
+ */
+export type RowConceptMatch = ConceptMatchInput & { renderings: TermRendering[] }
+
 export function conceptMatchFromRow(row: {
   source_term: string
   renderings: unknown
   case_sensitive: number | boolean
   match_options: unknown
-}): ConceptMatchInput {
+}): RowConceptMatch {
   return toConcept({
     source_term: row.source_term,
     renderings: row.renderings,
@@ -119,7 +126,7 @@ export function conceptMatchFromRow(row: {
   })
 }
 
-function toConcept(row: ConceptRow): ConceptMatchInput {
+function toConcept(row: ConceptRow): RowConceptMatch {
   const match = coerceMatchOptions(typeof row.match_options === "string" ? safeParse(row.match_options) : row.match_options)
   return {
     sourceTerm: row.source_term,

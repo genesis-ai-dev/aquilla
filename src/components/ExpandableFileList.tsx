@@ -478,7 +478,7 @@ export function ExpandableFileList({
                               // row's menu, which is where it belongs.
                               role="img"
                               aria-label={t("nav.fileList.reorderHandle", { name: file.name })}
-                              className="pointer-events-none absolute start-0 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-70"
+                              className="pointer-events-none absolute -start-2 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-70"
                             >
                               <GripVertical className="h-3 w-3" />
                             </span>

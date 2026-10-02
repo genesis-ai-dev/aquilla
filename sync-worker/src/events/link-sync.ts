@@ -135,8 +135,26 @@ const LANE_KINDS_TARGET_EXTRA = [
   'cell.unvalidate',
 ] as const
 
-function laneKindsFor(consumes: string | null): readonly string[] {
-  return consumes === 'target' ? [...LANE_KINDS_SOURCE, ...LANE_KINDS_TARGET_EXTRA] : LANE_KINDS_SOURCE
+/** The two link shapes a lane set is defined for. Anything that is not
+ *  'target' (including NULL on legacy rows) consumes the upstream's source. */
+export type LinkConsumes = 'source' | 'target'
+
+export function linkConsumesOf(consumes: string | null): LinkConsumes {
+  return consumes === 'target' ? 'target' : 'source'
+}
+
+/** The upstream event kinds a link of this shape mirrors.
+ *
+ *  AQU-1545: this is the ONE definition of "an upstream change this link
+ *  cares about". The freshness probe below reads it, so it decides whether a
+ *  sync runs at all, and so does the push accelerator (link-notify.ts) that
+ *  tells an open downstream to sync. The accelerator used to keep its own
+ *  copy, and AQU-1453 / AQU-1358 added hide/show and rename here but not
+ *  there, so an open downstream only saw them after a reload. */
+export function laneKindsFor(consumes: string | null): readonly string[] {
+  return linkConsumesOf(consumes) === 'target'
+    ? [...LANE_KINDS_SOURCE, ...LANE_KINDS_TARGET_EXTRA]
+    : LANE_KINDS_SOURCE
 }
 
 export interface LinkRow {

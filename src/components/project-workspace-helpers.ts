@@ -346,3 +346,41 @@ export function runReconnectResync(targets: ReconnectResyncTargets): void {
     // The next normal sidebar refresh retries a transient failure.
   })
 }
+
+/**
+ * What a live-linked project re-reads after a push-triggered mirror sync
+ * (AQU-479's `link.upstream-changed`) has landed.
+ *
+ * The sync writes this project's events server-side without an
+ * `event.applied` broadcast, so nothing else tells this client what it
+ * changed. The open file's cells are always re-read (the existing QA-BUG-2
+ * step). AQU-1545 adds the rest: the sync recomputed the touched files'
+ * progress, so the cached figures are dropped and re-read — a hidden cell
+ * stops counting as work without a reload — and when a frame said the
+ * upstream created or renamed a file, the project is re-read so the file list
+ * shows it (the same re-read a same-project `file.*` frame triggers).
+ *
+ * Decided from the frames, never from what this client's own sync request
+ * reports it mirrored: the fold may have been run by another trigger (a second
+ * tab, a teammate in the same project, the file-open lazy pull), in which case
+ * this client's request is answered by an empty one and would refresh nothing.
+ */
+export interface PushedLinkSyncTargets {
+  revalidateCells(): void
+  refreshProject(): void
+  invalidateProjectFileProgress(): void
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runAfterPushedLinkSync(
+  outcome: { synced: boolean; filesChanged: boolean },
+  targets: PushedLinkSyncTargets,
+): void {
+  targets.revalidateCells()
+  if (!outcome.synced) return
+  if (outcome.filesChanged) targets.refreshProject()
+  targets.invalidateProjectFileProgress()
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}

@@ -268,6 +268,18 @@ UI chrome that used to be one smoke file per click is covered under
   It stays out of smoke for the reason the rules give: it is a message and a retry on a
   failure path, nothing is lost that was not already missing, and reproducing it needs
   the sync service to be made to fail, which the local e2e stack has no switch for.
+  An OPEN live-linked project following its upstream without a reload (the AQU-479
+  push accelerator; AQU-1545 hide/show and rename) is worker/unit-tested. Which upstream
+  changes notify, per link shape, is one definition shared with the mirror sync and is
+  pinned through the real `POST /events` route in `sync-worker/src/__tests__/link-notify.test.ts`
+  (hide, show, rename, clone gets nothing, consumes-target links hear translations).
+  A sync asked for mid-sync gets a fresh fold (`rerun-single-flight.test.ts`). On the
+  client, a burst keeps its trailing sync and a frame landing mid-sync is owed another
+  (`ws-reconciler.test.ts`); the frame-time staleness read fires no sync of its own
+  (`useStaleSourceCells.test.tsx`); after the sync, progress is re-read and the file list
+  re-read when a frame said files moved (`ProjectWorkspace.pushedLinkSync.test.ts`).
+  Not smoke: a missed push loses nothing — the lazy pull on the next file open is the
+  floor — and the walk needs two projects, a link and a second socket.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

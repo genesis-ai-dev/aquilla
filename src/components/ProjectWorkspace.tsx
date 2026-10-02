@@ -138,6 +138,7 @@ import {
   buildGlosserSeeds,
   nextPaintGate,
   runReconnectResync,
+  runAfterPushedLinkSync,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -1907,7 +1908,7 @@ export function ProjectWorkspace() {
     staleCellIds,
     upstreamStaleCellIds,
     lastSuccessfulFetchKey: staleSourceFetchKey,
-    revalidate: revalidateStaleSource,
+    refetch: refetchStaleSource,
     syncNow: syncStaleSourceNow,
   } = useStaleSourceCells({
     projectId: project?.id ?? null,
@@ -1932,13 +1933,13 @@ export function ProjectWorkspace() {
   ])
   // FRO-479: the WS connect effect's onMessage closure is created once, before
   // staleness state settles — route link.upstream-changed frames through a ref
-  // so the handler always reaches the latest revalidate (which piggybacks the
-  // fire-and-forget POST /link/sync, single-flighted server-side).
-  const staleSourceRevalidateRef = useRef<() => void>(() => {})
-  staleSourceRevalidateRef.current = revalidateStaleSource
+  // so the handler always reaches the latest staleness read. AQU-1545: the
+  // read-only one; the handler runs the sync itself.
+  const staleSourceRefetchRef = useRef<() => void>(() => {})
+  staleSourceRefetchRef.current = refetchStaleSource
   // QA-BUG-2: awaitable sync — the push handler awaits this THEN revalidates
   // cells too, so the mirrored source TEXT updates live (not just the badge).
-  const syncStaleSourceNowRef = useRef<() => Promise<void>>(async () => {})
+  const syncStaleSourceNowRef = useRef<() => Promise<boolean>>(async () => false)
   syncStaleSourceNowRef.current = syncStaleSourceNow
   const revalidateCellsRef = useRef<() => void>(() => {})
   revalidateCellsRef.current = revalidateCells
@@ -6921,6 +6922,8 @@ export function ProjectWorkspace() {
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     let appliedRefreshScheduler:
       import("@/lib/sync/ws-reconciler").ScopedRefreshScheduler | null = null
+    let handleLinkUpstreamChanged:
+      import("@/lib/sync/ws-reconciler").LinkUpstreamChangedHandler | null = null
     void (async () => {
       const { createWsReconciler, createScopedRefreshScheduler, isOwnWriteEcho, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
@@ -6944,12 +6947,23 @@ export function ProjectWorkspace() {
       // POST resolves (syncStaleSourceNow awaits it) fixes both: cells finally
       // refetch post-commit, and staleness settles on the correct tone
       // instead of the transient pre-sync "violet" (QA-BUG-3's other half).
-      const handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
+      //
+      // AQU-1545: the sync's writes are never broadcast here, so progress and
+      // (when a frame says files moved) the file list are re-read after it —
+      // see runAfterPushedLinkSync. The frame-time staleness read fires no
+      // sync of its own: this handler owns the sync. The promise is returned
+      // so a frame that lands mid-sync is owed another one.
+      handleLinkUpstreamChanged = createLinkUpstreamChangedHandler({
         currentProjectId: () => pid,
-        revalidateStaleSource: () => staleSourceRevalidateRef.current(),
-        triggerLinkSync: () => {
-          void syncStaleSourceNowRef.current().then(() => {
-            revalidateCellsRef.current()
+        revalidateStaleSource: () => staleSourceRefetchRef.current(),
+        triggerLinkSync: async ({ filesChanged }) => {
+          const synced = await syncStaleSourceNowRef.current()
+          if (cancelled) return
+          runAfterPushedLinkSync({ synced, filesChanged }, {
+            revalidateCells: () => revalidateCellsRef.current(),
+            refreshProject: refresh,
+            invalidateProjectFileProgress: () => invalidateProjectFileProgress(pid),
+            refreshAllFilesProgress,
           })
         },
       })
@@ -7228,7 +7242,7 @@ export function ProjectWorkspace() {
               // changes. Refetch staleness immediately; the handler debounces
               // the mirror-sync trigger (push is a lossy accelerator — the
               // lazy pull on file open remains the self-healing floor).
-              handleLinkUpstreamChanged(msg)
+              handleLinkUpstreamChanged?.(msg)
             } else if (msg.t === "presence") {
               presenceStore.applyPresenceFrame(msg.users)
               // FRO-288: forward presence snapshots to the focus-lock hook so
@@ -7324,6 +7338,7 @@ export function ProjectWorkspace() {
       reconcilerRef.current = null
       setLiveReconciler(null)
       appliedRefreshScheduler?.dispose()
+      handleLinkUpstreamChanged?.dispose()
       reconciler?.close()
     }
   }, [

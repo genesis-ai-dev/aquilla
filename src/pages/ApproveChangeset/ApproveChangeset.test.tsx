@@ -384,7 +384,9 @@ describe("ApproveChangeset", () => {
     // 202 total, 2 shown — the truncation notice keeps the reviewer honest.
     expect(screen.getByText(/and 200 more changes/i)).toBeInTheDocument()
     const back = screen.getByRole("link", { name: /back to Blackfoot/i })
-    expect(back).toHaveAttribute("href", "/project/proj-1")
+    // AQU-1535: the overview route is `/projects/:id`; a bare `/project/:id`
+    // used to land the reviewer on the 404 catch-all.
+    expect(back).toHaveAttribute("href", "/projects/proj-1")
   })
 
   it("renders an import preview for a PlanImport changeset", async () => {

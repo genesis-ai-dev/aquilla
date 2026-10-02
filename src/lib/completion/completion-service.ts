@@ -14,6 +14,7 @@ import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 import {
   buildBriefBlock,
   buildPrompt,
+  buildReferenceVersesBlock,
   buildRulesBlock,
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -29,6 +30,7 @@ import {
 export {
   buildBriefBlock,
   buildPrompt,
+  buildReferenceVersesBlock,
   buildRulesBlock,
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -285,6 +287,10 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
+  /** AQU-1573: the verses the batch's cells cite, from the lane's reference
+   *  Bible (buildReferenceVersesBlock) — the union, since the batch shares one
+   *  system prompt. Placed before `systemAddendum`; absent → unchanged prompt. */
+  referenceBlock?: string
   /** Bilingual pairs immediately preceding the first live cell. Approved
    *  targets, plus (AQU-1386) this run's own earlier drafts marked `draft`. */
   precedingContext?: PrecedingContextEntry[]
@@ -301,6 +307,7 @@ export function buildBatchPrompt(options: {
   }
   const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
   if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
+  if (options.referenceBlock) baseSys = baseSys + "\n\n" + options.referenceBlock
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -400,6 +407,9 @@ export function buildParagraphPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
+  /** AQU-1573: the verses the paragraph's draftable cells cite
+   *  (buildReferenceVersesBlock). Placed before `systemAddendum`. */
+  referenceBlock?: string
   /** How to render few-shot examples. */
   exampleFormat?: "source-and-target" | "target-only"
   // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
@@ -429,6 +439,7 @@ export function buildParagraphPrompt(options: {
   }
   const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
   if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
+  if (options.referenceBlock) sys = sys + "\n\n" + options.referenceBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {

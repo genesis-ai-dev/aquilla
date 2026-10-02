@@ -215,6 +215,95 @@ export function buildBriefBlock(summary: string | undefined | null): string {
   return "Translation brief (the project's purpose and standards — follow it):\n" + s
 }
 
+/** AQU-1573: the first words of every reference-verses block. Stable: the dev
+ *  mock AI (scripts/mock-openrouter.ts) and the tests find the block by it. */
+export const REFERENCE_VERSES_HEADING = "Scripture quotations — copy from "
+/** Most verses one drafting call carries, across every cited passage. */
+export const MAX_REFERENCE_BLOCK_VERSES = 40
+/** Most characters of verse text one drafting call carries. */
+export const MAX_REFERENCE_BLOCK_CHARS = 6000
+
+/** Structural twin of ReferencePassage (src/lib/reference-bible/types.ts), so
+ *  callers on both sides can pass their own rows without a type import. */
+export interface ReferenceBlockPassage {
+  canonical: string
+  label: string
+  verses: readonly { chapter: number; verse: number; text: string }[]
+  truncated?: boolean
+}
+
+/**
+ * The verses a source names, from the lane's reference Bible, as a labelled
+ * MUST-copy block for the system prompt (AQU-1573). A sermon that quotes
+ * "Isaiah 40:25" must carry the wording its readers know (Van Dyck for LOTE's
+ * Arabic), not a fresh translation, so the model gets the exact text and is
+ * told to copy it. A source that only names a verse is translated as usual.
+ *
+ * Capped at MAX_REFERENCE_BLOCK_VERSES verses and MAX_REFERENCE_BLOCK_CHARS
+ * characters per call so a passage-heavy batch cannot crowd out the examples;
+ * what is left out is counted in the block. No passages → "" (caller skips).
+ *
+ * Format (one line per single-verse passage, sub-lines for a range):
+ *   Scripture quotations — copy from Van Dyck (Arabic) (MUST follow):
+ *   <instruction>
+ *   - Isaiah 40:25 [ISA 40:25]: «فَبِمَنْ تُشَبِّهُونَنِي …
+ *   - John 3:16–17 [JHN 3:16-17]:
+ *     3:16 لأَنَّهُ هكَذَا …
+ *     3:17 لأَنَّهُ لَمْ …
+ */
+export function buildReferenceVersesBlock(input: {
+  versionName: string
+  languageName?: string | null
+  passages: readonly ReferenceBlockPassage[]
+}): string {
+  if (input.passages.length === 0) return ""
+  const lines: string[] = []
+  let verseCount = 0
+  let charCount = 0
+  let omitted = 0
+  for (let p = 0; p < input.passages.length; p++) {
+    const passage = input.passages[p]
+    const kept: ReferenceBlockPassage["verses"][number][] = []
+    let full = false
+    for (const v of passage.verses) {
+      if (verseCount + 1 > MAX_REFERENCE_BLOCK_VERSES || charCount + v.text.length > MAX_REFERENCE_BLOCK_CHARS) {
+        full = true
+        break
+      }
+      kept.push(v)
+      verseCount += 1
+      charCount += v.text.length
+    }
+    if (kept.length === 0) {
+      omitted = input.passages.length - p
+      break
+    }
+    if (passage.verses.length === 1) {
+      lines.push(`- ${passage.label} [${passage.canonical}]: ${kept[0].text}`)
+    } else {
+      lines.push(`- ${passage.label} [${passage.canonical}]:`)
+      for (const v of kept) lines.push(`  ${v.chapter}:${v.verse} ${v.text}`)
+    }
+    if (full || passage.truncated) lines.push("  (the rest of this passage is not shown)")
+    if (full) {
+      omitted = input.passages.length - p - 1
+      break
+    }
+  }
+  if (lines.length === 0) return ""
+  if (omitted > 0) {
+    lines.push(
+      `(${omitted} more cited reference${omitted === 1 ? " is" : "s are"} not listed, to keep this request short; translate ${omitted === 1 ? "it" : "them"} as usual.)`,
+    )
+  }
+  const bible = input.languageName ? `${input.versionName} (${input.languageName})` : input.versionName
+  return (
+    `${REFERENCE_VERSES_HEADING}${bible} (MUST follow):\n` +
+    "The source cites the verses below. Where it quotes one of them, in full or in part, copy the matching words from this Bible exactly instead of translating them yourself: do not change, add or drop words inside the quotation. You may leave out vowel marks to match the rest of your translation. If the source only names a reference without quoting it, translate the source as usual.\n" +
+    lines.join("\n")
+  )
+}
+
 export const DEFAULT_SYSTEM_PROMPT =
   "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
   "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
@@ -260,6 +349,10 @@ export interface BuildPromptOptions {
    *  never inside `sourceText`, where they contradict the base prompt's
    *  "translate the final source line only" rule. */
   systemAddendum?: string
+  /** AQU-1573: the cited verses from the lane's reference Bible
+   *  (buildReferenceVersesBlock), appended after the style rules and before
+   *  `systemAddendum`. Absent or "" → the prompt is byte-identical to before. */
+  referenceBlock?: string
   /** Labelled context block rendered in the user message after
    *  precedingContext and immediately BEFORE the final `Source:` line — never
    *  inside it. Used for the source-footnote listing. */
@@ -282,6 +375,8 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
 
   const styleBlock = buildStyleRulesBlock(options.styleInstructions)
   if (styleBlock) sys = sys + "\n\n" + styleBlock
+
+  if (options.referenceBlock) sys = sys + "\n\n" + options.referenceBlock
 
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 

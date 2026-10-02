@@ -79,6 +79,8 @@ import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useStyleRules } from "@/hooks/useStyleRules"
+import { useReferenceBible } from "@/hooks/useReferenceBible"
+import { referenceBibleForLane } from "@/lib/reference-bible/lane-setting"
 import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "@/lib/rules/applicability"
 import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
@@ -5653,6 +5655,22 @@ export function ProjectWorkspace() {
     confirmCommitted(cell.id, eventId)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, confirmCommitted])
 
+  // AQU-1573: the Bible the active lane quotes from. When a source cell cites
+  // a verse ("Isaiah 40:25"), every drafting path adds that verse's wording
+  // from this Bible to the prompt with a MUST-copy instruction. Independent of
+  // Bible resources (bibleResourcesEnabled), which is the Aquifer feature.
+  const referenceBibleVersionId = referenceBibleForLane(
+    { referenceBibleVersions: project?.referenceBibleVersions, targetLanguage: project?.targetLanguage },
+    activeLane,
+  )
+  const referenceBible = useReferenceBible({
+    jwt: frontierSession?.jwt,
+    versionId: referenceBibleVersionId,
+    getCells: getActiveCells,
+    cellsVersion: cellStoreVersion,
+  })
+  const referenceBlockFor = referenceBible.blockFor
+
   const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
@@ -5663,6 +5681,7 @@ export function ProjectWorkspace() {
     activeLane,
     commitCompletedCells,
     styleInstructionsFor,
+    referenceBlockFor,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so

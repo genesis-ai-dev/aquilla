@@ -85,7 +85,8 @@ export function deriveMilestoneNavigation(
   cells: readonly MilestoneNavigationCell[],
   options: MilestoneNavigationOptions = {},
 ): DerivedMilestoneNavigation {
-  const seeds = identityPreservingSeeds(cells.map(legacyMilestoneSeed))
+  const rawSeeds = cells.map(legacyMilestoneSeed)
+  const seeds = identityPreservingSeeds(rawSeeds)
   const scriptureMode = seeds.some((seed) => (
     seed?.key.startsWith("scripture:") || seed?.key.startsWith("story:OBS:")
   ))
@@ -141,7 +142,13 @@ export function deriveMilestoneNavigation(
     }
   }
 
-  applyAiSections(cells, resolved, options)
+  // AQU-1164 lets a persisted generic `part` inherit the identity around it, so
+  // the header no longer swaps to "Part N" mid-file. The cell is still one the
+  // app invented a division for, so the AI overlay may re-cut it (AQU-1387);
+  // when the overlay is off or has no answers the inherited identity stands.
+  // Scripture mode ignored `part` seeds before AQU-1164 too, so it is left out.
+  const inheritedPart = (index: number) => !scriptureMode && rawSeeds[index]?.kind === "part"
+  applyAiSections(cells, resolved, options, inheritedPart)
 
   const milestoneByCellId = new Map<string, ImportMilestone>()
   const groups = new Map<string, {
@@ -211,6 +218,7 @@ function applyAiSections(
   cells: readonly MilestoneNavigationCell[],
   resolved: ImportMilestone[],
   options: MilestoneNavigationOptions,
+  inheritedPart: (index: number) => boolean,
 ): void {
   const { boundaries } = options
   if (!boundaries) return
@@ -218,7 +226,8 @@ function applyAiSections(
 
   let runStart: number | null = null
   for (let index = 0; index <= cells.length; index += 1) {
-    const invented = index < cells.length && isAppInventedKind(resolved[index]?.kind)
+    const invented = index < cells.length
+      && (isAppInventedKind(resolved[index]?.kind) || inheritedPart(index))
     if (invented) {
       if (runStart === null) runStart = index
       continue

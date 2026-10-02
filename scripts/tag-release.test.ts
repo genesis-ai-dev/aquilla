@@ -2,6 +2,11 @@ import { spawnSync } from "node:child_process"
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+// The root config's vite-plugin-node-polyfills swaps the global `process` for a
+// browser shim whose env is empty. Spread into the child, that leaves bash with
+// no PATH, so the script's `node` calls fail wherever node is not in /usr/bin or
+// /usr/local/bin (nvm, Homebrew on Apple Silicon). Import the real one.
+import process from "node:process"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 const SCRIPT = path.join(import.meta.dirname, "tag-release.sh")

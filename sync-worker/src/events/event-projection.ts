@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
@@ -2726,6 +2727,18 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.reorder': {
+      // AQU-1569: hand-placed sidebar position — rebuild path; the dispatch
+      // path (handlers/file-reorder.ts) uses the same shared SQL builder, so
+      // replaying the log reproduces the order the live writes produced.
+      const p = event.payload as EventPayloads['file.reorder']
+      if (!event.fileId) {
+        throw new Error(`file.reorder event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileSortIndexSetStmt(db, event.projectId, event.fileId, event.id, p.sortIndex))
+      return ['files']
+    }
+
     case 'file.track.set': {
       // Per-track presentation overrides — rebuild path; the dispatch path
       // (handlers/file-track-set.ts) uses the same shared SQL builder.
@@ -3036,6 +3049,47 @@ export function buildFileCorpusSetStmt(
     .prepare(
       `UPDATE files
           SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('corpusMarker', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(usable, eventId, fileId, projectId)
+}
+
+/**
+ * AQU-1569: shared meta-merge for the file's hand-placed sidebar position.
+ * Same shape as buildFileCorpusSetStmt (one files.meta JSON key, merged or
+ * removed) — null, or anything that is not a finite number, REMOVES the key
+ * and puts the file back under the automatic name-derived order.
+ *
+ * The unusable-value case is a clear rather than a throw on purpose: rebuild.ts
+ * replays already-accepted history through this builder, so a value some older
+ * build once let through must still project to something orderable instead of
+ * failing the whole rebuild. New writes are refused up front by the live
+ * handler, which is the only path that ever sees one.
+ */
+export function buildFileSortIndexSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  sortIndex: number | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const usable = usableSortIndex(sortIndex)
+  if (usable === undefined) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'sortIndex')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('sortIndex', ?::double precision))::text,
               event_id = ?, updated_at = ${NOW}
         WHERE id = ? AND project_id = ?`,
     )

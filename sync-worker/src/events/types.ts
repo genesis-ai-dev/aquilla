@@ -162,6 +162,11 @@ export type EventKind =
   // Non-chain-mutating; contributor-level — same class as file.rename (label
   // cleanup), not track structure. Null clears the file back to Ungrouped.
   | 'file.corpus.set'
+  // AQU-1569: the file's hand-placed position within its sidebar group,
+  // stored in files.meta JSON. Non-chain-mutating; project-lead floor — it
+  // relayouts the sidebar for every member, the file.video.set rationale.
+  // Null clears it back to the automatic name-derived order.
+  | 'file.reorder'
   // Stage 1 (first-class timeline tracks): one track's presentation overrides
   // — rename, reorder, group, or the whole record of a user-added track —
   // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
@@ -680,6 +685,13 @@ export interface EventPayloads {
   // null clears it (Ungrouped). Contributor-level, like file.rename.
   'file.corpus.set': {
     corpusMarker: string | null
+  }
+  // AQU-1569: hand-placed position within the corpus group, stored in
+  // files.meta.sortIndex. Deliberately fractional — placing a file between two
+  // neighbours is the midpoint of their indices, so two leads moving two
+  // different files write two different rows and neither loses. Null clears.
+  'file.reorder': {
+    sortIndex: number | null
   }
   // Soft-delete a file. Non-chain-mutating; parentId omitted.
   // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).

@@ -26,6 +26,9 @@ export interface CloudFileSummary {
   hasScriptureContent?: boolean
   /** Sidebar folder. Absent when the file is ungrouped. */
   corpusMarker?: string | null
+  /** AQU-1569: hand-placed position within the sidebar group; absent/null when
+   *  nobody has reordered that group. */
+  sortIndex?: number | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -445,6 +448,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
+      // Shape-checked rather than truthiness-checked, twice over: 0 is an
+      // ordinary position (a renumber stamps it on the first file), and this is
+      // raw JSON off the wire, so a NaN would otherwise reach the comparator.
+      ...(typeof f.sortIndex === "number" && Number.isFinite(f.sortIndex)
+        ? { sortIndex: f.sortIndex }
+        : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),

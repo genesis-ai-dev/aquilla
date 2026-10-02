@@ -126,6 +126,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.rename': ROLE.CONTRIBUTOR,
   // Sidebar folder label — same class as file.rename (grouping, not inventory).
   'file.corpus.set': ROLE.CONTRIBUTOR,
+  // AQU-1569: NOT the contributor floor its file.corpus.set neighbour sits at.
+  // A corpus marker moves one file into a folder; a reorder rewrites the
+  // sidebar every member of the project reads, which is the same "project
+  // setup, not an edit" argument that put file.video.set at PROJECT_LEAD.
+  'file.reorder': ROLE.PROJECT_LEAD,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.

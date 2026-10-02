@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
+import { Search as SearchIcon, X, ChevronDown, Pencil, GripVertical, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import {
+  hasPlacedFiles,
+  planFileMove,
+  planFileNudge,
+  planFileOrderReset,
+  type SortIndexWrite,
+} from "@/lib/sidebar/file-sort-index"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
@@ -26,6 +37,14 @@ import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
 import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
 interface FileStats { translated: number; validated: number; total: number }
+
+/** What the Reset-order confirmation needs to remember while it is open: which
+ *  group is being reset, how to label it, and the writes that will clear it. */
+interface CorpusGroupForReset {
+  label: string
+  displayLabel: string
+  writes: SortIndexWrite[]
+}
 
 /** Stable empty set, so an omitted `assignedFileIds` doesn't allocate per render. */
 const EMPTY_ASSIGNED: ReadonlySet<string> = new Set<string>()
@@ -87,6 +106,22 @@ interface Props {
    * the Files panel) is invisible when the panel is already showing.
    */
   filterFocus?: FileFilterFocusHandle
+  /**
+   * AQU-1569: whether this member may give the project's files a hand-placed
+   * order. PROJECT_LEAD+ — a reorder rewrites the sidebar everyone reads.
+   *
+   * False withholds the affordances entirely (no grip, no Move up/down, no
+   * Reset order) rather than letting them fail on the server, which is what
+   * the acceptance criterion asks for and what stops a contributor wedging
+   * the outbox on a guaranteed 403.
+   */
+  canReorderFiles?: boolean
+  /**
+   * Persist a batch of hand-placed positions. Called with the output of
+   * `planFileMove` / `planFileNudge` / `planFileOrderReset`, never with
+   * positions computed here — the arithmetic lives in one tested module.
+   */
+  onReorderFiles?: (writes: SortIndexWrite[]) => void
 }
 
 export function ExpandableFileList({
@@ -97,6 +132,8 @@ export function ExpandableFileList({
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
   filterFocus,
+  canReorderFiles = false,
+  onReorderFiles,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -150,6 +187,29 @@ export function ExpandableFileList({
     const labels = new Set(groupByCorpus(files).map((g) => g.label))
     return labels.has("OT") && labels.has("NT")
   }, [files])
+  // AQU-1569 — hand-placed file order.
+  //
+  // Deliberately OFF while the filter box has text. `planFileMove` positions a
+  // file within the list it is given, and under a filter that list is a subset:
+  // a renumber computed over it would stamp indices that push every hidden file
+  // of the group to the end. Reordering a list you can only partly see is also
+  // not a thing anyone means to do.
+  const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
+  const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
+  const [dropAt, setDropAt] = useState<{ group: string; position: number } | null>(null)
+  const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
+  const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
+
+  function endDrag() {
+    setDrag(null)
+    setDropAt(null)
+    setRefusedGroup(null)
+  }
+
+  function submit(writes: SortIndexWrite[]) {
+    if (writes.length > 0) onReorderFiles?.(writes)
+  }
+
   const groupEls = useRef(new Map<string, HTMLDivElement>())
   const visibleGroupLabels = useMemo(() => new Set(groups.map((g) => g.label)), [groups])
   function jumpToGroup(label: string) {
@@ -239,12 +299,36 @@ export function ExpandableFileList({
             const canEditCorpus =
               showHeader && group.label !== "Ungrouped" && onRenameCorpus !== undefined && !group.derived
             const isEditingCorpus = editingCorpus === group.label
+            // AQU-1569: a group of one has nothing to reorder, and "Reset
+            // order" only means something once a file in it has been placed.
+            const canReorderGroup = reorderEnabled && group.files.length > 1
+            const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
+            const isRefusing = refusedGroup === group.label
             return (
               <div
                 key={group.label}
                 ref={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
+                }}
+                // The group is the drop boundary. Hovering anywhere in a group
+                // that is not the dragged file's own — its header, the gap
+                // below its rows — has to say no, not quietly fall through to
+                // whatever row happens to be under the cursor. No
+                // preventDefault here, so the browser also shows "no drop".
+                onDragOver={(e) => {
+                  if (!drag || drag.group === group.label) return
+                  e.stopPropagation()
+                  setRefusedGroup(group.label)
+                  setDropAt(null)
+                }}
+                onDrop={(e) => {
+                  if (!drag || drag.group === group.label) return
+                  // Swallow it: nothing moves, and no corpus changes. Changing
+                  // a file's group is "Move to corpus…", which asks first.
+                  e.preventDefault()
+                  e.stopPropagation()
+                  endDrag()
                 }}
               >
                 {showHeader && (
@@ -296,21 +380,109 @@ export function ExpandableFileList({
                         </button>
                       </AppTooltip>
                     )}
+                    {canResetGroup && !isEditingCorpus && (
+                      <AppTooltip content={t("nav.fileList.resetOrder", { group: displayLabel })} side="right">
+                        <button
+                          type="button"
+                          className="rounded-md p-0.5 transition-colors hover:text-foreground"
+                          // Confirmed before it runs: the hand-placed order is
+                          // work, it is shared with the whole project, and
+                          // clearing it cannot be undone from here.
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setResetGroup({
+                              label: group.label,
+                              displayLabel,
+                              writes: planFileOrderReset(group.files),
+                            })
+                          }}
+                          aria-label={t("nav.fileList.resetOrder", { group: displayLabel })}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </button>
+                      </AppTooltip>
+                    )}
                   </div>
+                )}
+                {!isCollapsed && isRefusing && (
+                  // The refusal has to be visible, not just a cursor shape:
+                  // a drop that silently does nothing is indistinguishable
+                  // from a drop that failed.
+                  <p
+                    role="status"
+                    className="mx-1 mb-1 rounded-md bg-muted px-2 py-1 text-[10px] leading-snug text-muted-foreground"
+                  >
+                    {t("nav.fileList.reorderWrongGroup")}
+                  </p>
                 )}
                 {!isCollapsed && (
                   <div className="space-y-0.5">
-                    {group.files.map((file) => {
+                    {group.files.map((file, position) => {
                       const canExpand = fileHasSections(file)
                         || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
+                      // Not while renaming: the row holds a text input, and a
+                      // draggable ancestor takes the pointer away from
+                      // selecting inside it.
+                      const isDraggable = canReorderGroup && !isEditing
+                      const isDropTarget =
+                        dropAt?.group === group.label && dropAt.position === position
                       return (
                         <div
                           key={file.id}
                           onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
                           onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          draggable={isDraggable}
+                          data-reorderable={isDraggable ? "true" : undefined}
+                          onDragStart={(e) => {
+                            if (!isDraggable) return
+                            e.dataTransfer.effectAllowed = "move"
+                            // Firefox refuses to start a drag with no payload.
+                            e.dataTransfer.setData("text/plain", file.id)
+                            setDrag({ fileId: file.id, group: group.label })
+                          }}
+                          onDragEnd={endDrag}
+                          onDragOver={(e) => {
+                            if (!drag) return
+                            if (drag.group !== group.label) return  // the group wrapper answers
+                            // Dropping ON a row means taking its slot, which
+                            // is exactly what planFileMove's `toPosition` is.
+                            e.preventDefault()
+                            e.stopPropagation()
+                            e.dataTransfer.dropEffect = "move"
+                            setRefusedGroup(null)
+                            setDropAt({ group: group.label, position })
+                          }}
+                          onDrop={(e) => {
+                            if (!drag) return
+                            e.preventDefault()
+                            e.stopPropagation()
+                            const moved = drag
+                            endDrag()
+                            if (moved.group !== group.label) return
+                            submit(planFileMove(group.files, moved.fileId, position))
+                          }}
+                          className={cn(
+                            "group/file-slot relative",
+                            isDropTarget && drag?.fileId !== file.id
+                              && "rounded-md ring-1 ring-primary/60",
+                            drag?.fileId === file.id && "opacity-50",
+                          )}
                         >
+                          {isDraggable && (
+                            <span
+                              // Decorative for the mouse, named for the
+                              // screen reader — though the keyboard route to
+                              // the same move is Move up / Move down in the
+                              // row's menu, which is where it belongs.
+                              role="img"
+                              aria-label={t("nav.fileList.reorderHandle", { name: file.name })}
+                              className="pointer-events-none absolute start-0 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-70"
+                            >
+                              <GripVertical className="h-3 w-3" />
+                            </span>
+                          )}
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}
@@ -346,6 +518,12 @@ export function ExpandableFileList({
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
+                            reorder={canReorderGroup ? {
+                              onUp: () => submit(planFileNudge(group.files, file.id, -1)),
+                              onDown: () => submit(planFileNudge(group.files, file.id, 1)),
+                              canUp: position > 0,
+                              canDown: position < group.files.length - 1,
+                            } : undefined}
                           />
                           {isExpanded && (
                             <FileSectionGrid
@@ -379,6 +557,35 @@ export function ExpandableFileList({
           })}
         </div>
       </div>
+      {/* AQU-1569: clearing a group's hand-placed order is shared and cannot be
+          undone from here, so it asks first. */}
+      <AlertDialog
+        open={resetGroup !== null}
+        onOpenChange={(open) => { if (!open) setResetGroup(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("nav.fileList.resetOrderTitle", { group: resetGroup?.displayLabel ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("nav.fileList.resetOrderDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const pending = resetGroup
+                setResetGroup(null)
+                if (pending) submit(pending.writes)
+              }}
+            >
+              {t("nav.fileList.resetOrderConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 

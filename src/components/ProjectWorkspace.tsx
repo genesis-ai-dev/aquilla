@@ -202,7 +202,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -372,7 +372,7 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
-import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
+import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
@@ -8809,6 +8809,30 @@ export function ProjectWorkspace() {
     ).then(() => refresh())
   }, [project, currentUsername, refresh])
 
+  // AQU-1569: persist a hand-placed file order. Same shape as
+  // handleRenameCorpus above — patch the cached project so the sidebar shows
+  // the new order on drop, emit one event per moved file, then revalidate.
+  //
+  // The positions arrive already computed by src/lib/sidebar/file-sort-index.ts;
+  // nothing here decides an order, which is what keeps the drag, the Move
+  // up/down items and the tests all agreeing about one rule.
+  const handleReorderFiles = useCallback(async (
+    writes: ReadonlyArray<{ fileId: string; sortIndex: number | null }>,
+  ) => {
+    if (!project || writes.length === 0) return
+    await patchProject(project.id, (p) => applyFileSortIndexes(p, writes))
+    void Promise.all(
+      writes.map((w) =>
+        emitFileReorder({
+          projectId: project.id,
+          fileId: w.fileId,
+          sortIndex: w.sortIndex,
+          author: currentUsername,
+        }),
+      ),
+    ).then(() => refresh())
+  }, [project, currentUsername, refresh])
+
   const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
     if (!project) return
@@ -12449,6 +12473,11 @@ export function ProjectWorkspace() {
                   canExportByOrgPolicy={canExportByOrgPolicy}
                   assignedFileIds={myAssignedFileIds}
                   filterFocus={fileFilterFocus}
+                  // AQU-1569: PROJECT_LEAD+, mirroring the server floor for
+                  // `file.reorder`. Below it the affordances are absent rather
+                  // than present-and-403ing.
+                  canReorderFiles={canPerform("file.reorder", project?.syncRole?.level ?? null)}
+                  onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}

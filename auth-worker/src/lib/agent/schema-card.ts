@@ -44,6 +44,10 @@ export const AGENT_REQUIRED_ROLE: Record<string, number> = {
   "file.rename": AGENT_ROLE.CONTRIBUTOR,
   "file.delete": AGENT_ROLE.PROJECT_LEAD,
   "file.restore": AGENT_ROLE.PROJECT_LEAD,
+  // AQU-1569: a reorder relayouts the sidebar for every member, which is why
+  // it carries the project-lead floor the sync-worker enforces rather than
+  // file.rename's contributor one.
+  "file.reorder": AGENT_ROLE.PROJECT_LEAD,
   "comment.create": AGENT_ROLE.COMMENTER,
   "comment.edit": AGENT_ROLE.COMMENTER,
   "comment.delete": AGENT_ROLE.COMMENTER,
@@ -91,6 +95,8 @@ const EVENT_LINES: Record<string, string> = {
   "file.create": "file.create {name, fileType, sourceLanguage?, targetLanguage?} — new file (structural; propose sparingly).",
   "file.rename": "file.rename {name} — rename a file's display label. Needs fileId.",
   "file.delete": "file.delete {} — soft-delete a file (structural).",
+  "file.reorder":
+    "file.reorder {sortIndex} — place a file in its sidebar group; lower sorts first, null clears it back to the automatic order. Needs fileId. Fractional: to drop a file between two neighbours use the midpoint of their sortIndex values; a file with no index sorts after every file that has one.",
   "file.restore": "file.restore {} — restore a soft-deleted file.",
   "comment.create":
     "comment.create {body, scope?, parentCommentId?} — leave a note. Markdown OK. Default scope: the event's fileId/cellId; server fills commentId.",

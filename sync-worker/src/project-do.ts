@@ -42,7 +42,7 @@ import {
 } from "./project-do-handlers"
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
-import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
+import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
 import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
@@ -172,7 +172,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // synthesized AQUILLA_PG the worker's top-level fetch uses).
     const db = this.env.AQUILLA_PG ?? makePostgres(this.env.HYPERDRIVE!.connectionString)
     try {
-      return await mirrorSync(db as AquillaDb, projectId)
+      // AQU-1563: one invocation does a bounded slice of a large sync and
+      // reports `more`; the /link/sync route calls again until the link is
+      // caught up, so neither CPU time nor memory here grows with the upstream.
+      return await mirrorSync(db as AquillaDb, projectId, { budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS })
     } finally {
       if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
     }

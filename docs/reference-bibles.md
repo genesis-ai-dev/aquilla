@@ -65,6 +65,72 @@ installed and drafting adds no verses. Options: `--version <id>` (one Bible),
 `--if-missing` (skip any Bible already loaded, even an older text), `--force`
 (rewrite even when current).
 
+## The "Reference Bible quotes" check
+
+A built-in check (on by default, minor, so it shows amber; it never blocks
+anything) compares each draft with the verses its source cites, in the active
+lane's Bible:
+
+- **Does not match**: the draft quotes a cited verse (three or more words in a
+  row match) but changes, adds or drops words inside the quote. The quoted part
+  of the translation is marked.
+- **Not taken from the Bible**: the source visibly quotes the verse (quotation
+  marks around three or more words, or the reference in brackets after the
+  quote) but the draft does not use the Bible's wording at all. The reference
+  in the source is marked.
+
+Ignored: vowel marks (Arabic tashkeel, shadda, sukun, superscript alef),
+tatweel, hamza and alef-wasla spellings, punctuation and case. A partial quote
+passes; an ellipsis or a `[bracketed insertion]` splits a quote into parts that
+are checked separately. A source that only mentions a verse, a lane with no
+Bible, and a verse that has not loaded yet are left alone.
+
+It runs live in the editor, in Check file (which loads every cited verse
+first), and in the in-app agent's staging lint, where a mismatch becomes a
+`NEEDS REVIEW` line that hands the model the Bible's wording. Agent proposal
+cards and the rules preview do not run it yet.
+
+## Demo project for testing
+
+On a running dev stack (any ports):
+
+```sh
+npx tsx scripts/dev-seed-reference-bible.ts \
+  --identity http://127.0.0.1:8788 --sync http://127.0.0.1:8789 --web http://localhost:5173
+```
+
+It builds **Sermon demo — reference Bible** in the dev org: source English,
+default lane Arabic quoting Van Dyck, a **Plain English** lane quoting the KJV,
+Bible resources off, and one sermon file of twelve rows. It prints the link,
+what each row should show, and (unless `--no-token`) a fresh Agent API token
+with ready-to-paste curl lines. It is re-runnable: settings and every seeded
+draft are put back to the demo state, and a deleted demo file is replaced by a
+fresh copy. If the stack has no Bibles yet it runs the loader first
+(`AQUILLA_DATABASE_URL`, else `LOCAL_PG_URL`, else the dev default database).
+
+The rows live in `scripts/reference-bible-demo.ts`, and every quoted draft is
+derived from the committed text. `scripts/reference-bible-demo.test.ts` runs the
+built-in checks over each row, so the expectations below are tested:
+
+| Row | Source | Arabic draft | Shows |
+|-----|--------|--------------|-------|
+| 1 | Heading "Who is God?" | translated | clean |
+| 2 | Prose, no reference | translated | clean |
+| 3 | Isaiah 40:25 quoted | blank | draft it: the Van Dyck verse arrives, no warning |
+| 4 | John 3:16 quoted, reference in brackets | exact vowelled Van Dyck (KJV in Plain English) | clean |
+| 5 | 1 Cor. 13:4–7, first clause quoted | that clause without vowel marks | clean |
+| 6 | Romans 8:28 quoted | Van Dyck with one word changed (KJV too, in Plain English) | does not match |
+| 7 | Psalm 23:1 quoted | a fresh translation | not taken from Van Dyck |
+| 8 | Philippians 4:13 mentioned | translated | clean |
+| 9 | An allusion, no reference | translated | clean, no verses added |
+| 10 | Romans 5:8; John 15:13 | blank | draft it: both verses arrive |
+| 11 | "Read Romans 8 this week." | blank | draft it: no verses (a chapter is not a verse) |
+| 12 | "John chapter 3, verse 16 …" | blank | draft it: John 3:16 arrives |
+
+Blank rows also show the usual "Empty translation" warning until drafted. The
+local stack's mock AI copies the verses in the prompt into its draft, so the
+copied wording is visible without a real model key.
+
 ## Updating the texts (maintainers)
 
 ```sh
@@ -92,3 +158,8 @@ two Bibles are empty and which uses Original numbering).
   passages for a set of source texts, and setting validation.
 - `db/shared/reference-bible-load.ts` and `scripts/reference-bibles.ts`: the
   loader.
+- `src/lib/lqa/check-functions/reference-quote.ts`: the built-in check (the
+  lane's Bible arrives through the check context, `src/lib/lqa/check-context.ts`);
+  `auth-worker/src/lib/agent/reference-lint.ts`: the same check in emit staging.
+- `scripts/dev-seed-reference-bible.ts` and `scripts/reference-bible-demo.ts`:
+  the demo project.

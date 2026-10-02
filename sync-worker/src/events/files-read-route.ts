@@ -413,9 +413,12 @@ function visibleLastEditSql(tagCount: number): string {
  * The files list is pinned to the default lane (`target_lang ''`) so a project
  * with several lanes does not fan out into one row per lane. That pin is the
  * default lane's counts. When the wall is on and this caller was not granted
- * that lane, replace the three text counters with the sum of the lanes they
- * were granted. A grant of the default lane leaves the pin alone: it is one
- * lane they can see, not a sum of the others.
+ * that lane, replace those counts with the lanes they were granted. Every
+ * lane's progress row carries a copy of the same source-cell denominator
+ * (`total_count`, `structural_count`), so that denominator is taken once;
+ * filled and validated are the work on each lane and are summed. A grant of
+ * the default lane leaves the pin alone: it is one lane they can see, not a
+ * sum of the others.
  */
 async function hideUngrantedDefaultLaneCounts(
   env: FilesReadEnv,
@@ -456,7 +459,7 @@ async function hideUngrantedDefaultLaneCounts(
          LEFT JOIN org_settings os ON os.org_id = pr.org_id
      )
      SELECT p.file_id AS file_id,
-            SUM(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
+            MAX(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
             SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
             SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
        FROM file_section_progress p

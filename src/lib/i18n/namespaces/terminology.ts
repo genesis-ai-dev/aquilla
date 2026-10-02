@@ -1010,6 +1010,13 @@ export const terminology = defineNamespace({
           "concept's approved/forbidden renderings; {count} is that count.",
         placeholders: { count: "Number of occurrences that violate the concept's renderings." },
       },
+      "terminology.termDetail.atLeastCount": {
+        description:
+          "Stat line on the term detail header, shown in place of the exact occurrence " +
+          "count when the server scan stopped before the end of the project; {count} is " +
+          "the occurrences found so far, so the real total is that or more.",
+        placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
+      },
       "terminology.reviewQueue.approveAria": {
         description:
           "Accessible name for the checkmark button approving a draft concept; {term} " +

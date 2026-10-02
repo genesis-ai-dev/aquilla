@@ -73,6 +73,10 @@ const UNCOVERED: Record<string, string> = {
   checkpoints: "granted to app_runtime, no policy yet",
   diarization_jobs: "granted to app_runtime, no policy yet",
   file_source_blobs: "granted to app_runtime, no policy yet",
+  // 0034's shape does not fit: the OAuth token endpoint redeems a code by its
+  // hash with no user in context, and codes issued since 0125 carry org_ids
+  // with project_id NULL. Rows hold only the SHA-256 of a five-minute code.
+  mcp_oauth_codes: "granted to app_runtime, no policy — redeemed by code hash with no user context (0124/0125)",
   project_invites: "granted to app_runtime, no policy yet — rows are plaintext credentials (OPS-26)",
   project_termbase_subscriptions: "granted to app_runtime, no policy yet",
 

@@ -464,7 +464,19 @@ parseDocument.post("/", authMiddleware, async (c) => {
     }
   } catch (err) {
     console.error("parse-document extraction failed:", err)
-    return c.json({ error: "Could not extract text from file" }, 422)
+    // AQU-1499: same contract as the knowledge-base upload — a
+    // DocumentExtractionError's message is authored to be shown, so a caller
+    // whose file was refused for a fixable reason can act on it instead of
+    // guessing. Anything else stays generic.
+    return c.json(
+      {
+        error:
+          err instanceof DocumentExtractionError
+            ? `Could not extract text from file: ${err.message}`
+            : "Could not extract text from file",
+      },
+      422,
+    )
   }
 
   if (!text.trim()) {

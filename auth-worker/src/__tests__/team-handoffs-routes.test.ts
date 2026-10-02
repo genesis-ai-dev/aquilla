@@ -49,7 +49,7 @@ interface RaiseResponse {
   message: TeamMessage
 }
 
-function req(method: string, path: string, jwt: string, body?: unknown): Promise<Response> {
+async function req(method: string, path: string, jwt: string, body?: unknown): Promise<Response> {
   return app.request(
     `${base}${path}`,
     {

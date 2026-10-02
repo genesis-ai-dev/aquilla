@@ -8,7 +8,7 @@
     "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check",
     "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs sync",
     "deploy": "pnpm --dir .. run deploy:aquilla:sync",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.runtime.json",
     "test": "vitest run"
   },
   "dependencies": {

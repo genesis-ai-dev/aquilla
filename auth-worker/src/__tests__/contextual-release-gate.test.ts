@@ -65,7 +65,7 @@ async function setReleased(released: boolean | undefined): Promise<void> {
     .run()
 }
 
-function ctx(method: string, path: string, body?: unknown): Promise<Response> {
+async function ctx(method: string, path: string, body?: unknown): Promise<Response> {
   return app.request(
     `/api/v2/projects/${PROJECT}/contextual${path}`,
     {
@@ -77,7 +77,7 @@ function ctx(method: string, path: string, body?: unknown): Promise<Response> {
   )
 }
 
-function teamReq(method: string, path: string, body?: unknown): Promise<Response> {
+async function teamReq(method: string, path: string, body?: unknown): Promise<Response> {
   return app.request(
     `/api/v2/projects/${PROJECT}/team${path}`,
     {
@@ -104,7 +104,6 @@ async function seedRun(): Promise<string> {
     runId: created.run.id,
     projectId: PROJECT,
     fileId: FILE,
-    targetLang: "",
     drafts: [{ cellId: "c1", text: "Hapo mwanzo" }],
   })
   return created.run.id

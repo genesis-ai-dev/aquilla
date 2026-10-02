@@ -1034,7 +1034,7 @@ export async function handleCellsReadRequest(
     // First occurrence follows the source chain, then target-only chains.
     // Group all target lanes with their source before taking a page: absence
     // of a target now means genuinely untranslated, never "on a later page".
-    const byCell = new Map<string, CellRowRaw[]>()
+    const byCell = new Map<string, OrderRow[]>()
     for (const row of ordered) {
       const group = byCell.get(row.cell_id)
       if (group) group.push(row)

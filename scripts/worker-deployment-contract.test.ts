@@ -681,6 +681,9 @@ describe("worker deployment environment contract", () => {
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
     expect(build).toContain("pnpm exec tsc -b")
+    // esbuild bundles the Workers without type-checking them.
+    expect(build).toContain("pnpm --dir auth-worker run type-check")
+    expect(build).toContain("pnpm --dir sync-worker run type-check")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
     const hook = readRepoFile(".husky", "pre-push")

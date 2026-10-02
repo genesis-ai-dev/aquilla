@@ -74,7 +74,7 @@ async function submit(opts: SubmitOptions = {}): Promise<Response> {
   if (opts.screenshot) {
     form.set(
       "screenshot",
-      new File([opts.screenshot.bytes as BlobPart], opts.screenshot.name ?? "shot.png", {
+      new File([opts.screenshot.bytes], opts.screenshot.name ?? "shot.png", {
         type: opts.screenshot.type,
       }),
     )

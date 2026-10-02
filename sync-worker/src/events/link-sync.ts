@@ -1097,8 +1097,9 @@ async function loadLocalMirrorState(
  * comes back (the existence-changing kinds, latest first), so a chain upstream's
  * large mirror payloads are never read into memory here.
  *
- * No read at all on a run's last window (`afterSeq === head`), which is every
- * sync of an established link.
+ * No read at all on a run's last window (`afterSeq === head`) — the only window
+ * of any sync whose delta fits in one, which is nearly every sync of an
+ * established link.
  */
 async function deletedByHead(
   db: AquillaDb,

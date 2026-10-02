@@ -330,10 +330,20 @@ async function loadDelta(
 
   const cells = new Map<string, FoldedCell>()
   const fileIds = new Set<string>()
-  /** AQU-1453: cells this window only changed the VISIBILITY of. They have no
-   *  content in the fold, so they are resolved against the upstream's live rows
-   *  once the window is read (see below). */
-  const visibilityOnly = new Map<
+  /**
+   * AQU-1546: the LATEST visibility this window declared per cell, tracked
+   * independently of content.
+   *
+   * It used to be `visibilityOnly` — populated only when no content event for
+   * the cell had been seen yet, and otherwise folded straight into the content
+   * state. That made visibility a property of one content state rather than its
+   * own dimension, and a later `source.cell.commit` replaced that state
+   * wholesale: hide-then-edit ended the window with no visibility to say, so a
+   * cell the upstream lead deliberately parked arrived downstream as ordinary
+   * visible work. Text and visibility are independent — the last value of each
+   * wins — so they are folded separately and merged after the window is read.
+   */
+  const visibility = new Map<
     string,
     { fileId: string; cellId: string; eventId: string; seq: number; hidden: boolean }
   >()
@@ -351,6 +361,22 @@ async function loadDelta(
     }
 
     if (row.kind === 'source.cell.create' || row.kind === 'source.cell.mirror') {
+      // AQU-1546: a `source.cell.mirror` is how a LINKED project records a cell
+      // it received from ITS upstream, visibility included (see the payload
+      // construction in the emit loop below). In a chain A → B → C, B's hidden
+      // cells were never hidden by anyone in B — the state only exists on these
+      // mirror events — so C's fold has to read it here or every cell A parked
+      // is ordinary visible work in C. `source.cell.create` carries no
+      // visibility, so the `typeof` guard leaves the importer path untouched.
+      if (typeof payload.hidden === 'boolean') {
+        visibility.set(key, {
+          fileId: row.file_id,
+          cellId: row.cell_id,
+          eventId: row.id,
+          seq: row.server_seq,
+          hidden: payload.hidden,
+        })
+      }
       cells.set(key, {
         fileId: row.file_id,
         cellId: row.cell_id,
@@ -396,30 +422,22 @@ async function loadDelta(
       })
     } else if (row.kind === 'source.cell.visibility.set') {
       // AQU-1453: hide/show carries no text, so it can only ADJUST a state,
-      // never create one. When the cell's content also moved in this window we
-      // ride that fold; when it did not, the cell is parked here and its
-      // content is backfilled from the upstream's live row after the loop.
+      // never create one. It is recorded on its own dimension here and merged
+      // with whatever content the window produced, after the window is read.
       //
-      // WITHOUT THAT BACKFILL this branch would have to invent a FoldedCell
-      // with `value: ''`, and the emit loop would mirror an empty string over
-      // the downstream's text — a hide that silently deletes the verse it was
-      // supposed to park.
-      const hidden = payload.hidden === true
-      const prev = cells.get(key)
-      if (prev) {
-        // The visibility event is the newer one, so it becomes the mirror's
-        // provenance: a fresh deterministic event id and the higher
-        // `upstream_seq` the projection's monotonic guard compares against.
-        cells.set(key, { ...prev, hidden, eventId: row.id, seq: row.server_seq })
-      } else {
-        visibilityOnly.set(key, {
-          fileId: row.file_id,
-          cellId: row.cell_id,
-          eventId: row.id,
-          seq: row.server_seq,
-          hidden,
-        })
-      }
+      // IT MUST NOT BECOME A CONTENT STATE of its own: a hide carries no
+      // `value`, so a FoldedCell invented here would mirror an empty string
+      // over the downstream's text — a hide that silently deletes the verse it
+      // was supposed to park. When the window holds no content event for the
+      // cell either, the merge below backfills the text from the upstream's
+      // live row instead.
+      visibility.set(key, {
+        fileId: row.file_id,
+        cellId: row.cell_id,
+        eventId: row.id,
+        seq: row.server_seq,
+        hidden: payload.hidden === true,
+      })
     } else if (row.kind === 'source.cell.delete') {
       const prev = cells.get(key)
       cells.set(key, {
@@ -446,15 +464,32 @@ async function loadDelta(
     // extend the fold to carry timing/cast deltas.
   }
 
+  // AQU-1546: merge the window's visibility onto the window's content. A cell
+  // whose content also moved keeps that content — the newer truth — and simply
+  // gains the visibility the window declared, in whichever order the two
+  // landed. When the visibility event is the LATER of the two it also becomes
+  // the mirror's provenance: a fresh deterministic event id and the higher
+  // `upstream_seq` that the projection's monotonic guard compares against.
+  for (const [key, v] of visibility) {
+    const content = cells.get(key)
+    if (!content) continue
+    cells.set(
+      key,
+      v.seq > content.seq
+        ? { ...content, hidden: v.hidden, eventId: v.eventId, seq: v.seq }
+        : { ...content, hidden: v.hidden },
+    )
+  }
+
   // AQU-1453: resolve the visibility-only cells against the upstream's LIVE
   // source rows. Same fallback shape as `loadUpstreamTargetCurrentState` on the
   // target path, and for the same reason: the delta window holds the change,
   // but not always the state the change applies to.
   //
-  // A cell whose content DID move in this window is already complete above and
-  // is skipped here — its folded text is the newer truth, and re-reading the
-  // live row would only race it.
-  const pending = [...visibilityOnly.values()].filter(
+  // A cell whose content DID move in this window was completed by the merge
+  // just above and is skipped here — its folded text is the newer truth, and
+  // re-reading the live row would only race it.
+  const pending = [...visibility.values()].filter(
     (v) => !cells.has(`${v.fileId}\0${v.cellId}`),
   )
   if (pending.length > 0) {
@@ -910,6 +945,12 @@ async function loadDeltaTargetConsumption(
       deleted: false,
       value: value ?? '',
       valueHtml: valueHtml ?? null,
+      // AQU-1546: a dubbing chain is a chain of links too. The structural fold
+      // is the consumes='source' fold, so it already knows what this window
+      // said about the upstream cell's visibility; dropping it here was the
+      // same defect as dropping it in the chain case, one lane over.
+      // `undefined` (the window said nothing) still omits the key downstream.
+      hidden: structuralFold?.hidden,
       type: struct?.type ?? null,
       canonicalRef: struct?.canonicalRef ?? null,
       anchorCellId: struct?.anchorCellId ?? null,

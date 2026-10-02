@@ -178,9 +178,13 @@ export interface ServerLinkUpstreamChanged {
   untilSeq: number
   /** Files touched by the batch (uncapped — batches are already request-scoped). */
   fileIds: string[]
-  /** Cell ids touched by the batch, capped (see route.ts) — enough to hint a
+  /** Cell ids touched by the batch, capped (see link-notify.ts) — enough to hint a
    *  targeted refetch without growing the frame unbounded for big imports. */
   cellIds: string[]
+  /** AQU-1545: the batch created or renamed a file, so after syncing the
+   *  client must re-read the project's file list, not just the open file's
+   *  cells. Absent from older workers — read as false. */
+  filesChanged?: boolean
 }
 /**
  * Slice D2: relay of contextual-pipeline activity (run state / scene / span

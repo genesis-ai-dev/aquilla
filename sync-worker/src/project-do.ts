@@ -44,6 +44,7 @@ import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
+import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
@@ -149,22 +150,39 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private removedUsers = new Map<number, number>()
   /**
    * AQU-476: single-flight for the mirror sync. One DO instance == one
-   * project, so a single in-flight promise field serializes concurrent
-   * /__link-sync callers (push accelerator + lazy pull racing) — the second
-   * caller awaits the SAME run instead of starting an overlapping fold. This
-   * is what the design spec's "serialized single-flight per downstream
-   * through the ProjectSync DO" means concretely.
+   * project, so concurrent /__link-sync callers (push accelerator + lazy pull
+   * racing) never start overlapping folds — the design spec's "serialized
+   * single-flight per downstream through the ProjectSync DO".
+   *
+   * AQU-1545: a caller that arrives mid-sync is answered by the NEXT run, not
+   * the running one. Joining the running fold handed it a read of the upstream
+   * from BEFORE the change it was told about (a push frame for a commit that
+   * landed mid-sync), and nothing asked again, so a burst of upstream hides
+   * left an open downstream short of the last few until a reload. See
+   * lib/rerun-single-flight.ts.
    */
-  private linkSyncInFlight: Promise<MirrorSyncResult> | null = null
+  private readonly linkSync = createRerunSingleFlight((projectId: string) => this.runLinkSync(projectId))
   /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
    *  identity's cron reconciliation covers gaps). */
   private lastMondayNotifyAt = 0
+
+  private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
+    // Test seam takes priority; otherwise build a short-lived PG connection
+    // from HYPERDRIVE (this DO instance's own env, not the request-scoped
+    // synthesized AQUILLA_PG the worker's top-level fetch uses).
+    const db = this.env.AQUILLA_PG ?? makePostgres(this.env.HYPERDRIVE!.connectionString)
+    try {
+      return await mirrorSync(db as AquillaDb, projectId)
+    } finally {
+      if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
+    }
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
     // AQU-476: mirror sync trigger, single-flighted per DO instance (see
-    // linkSyncInFlight above). Internal-only, same bearer-secret gate as
+    // linkSync above). Internal-only, same bearer-secret gate as
     // /__broadcast. `?project=` is required (the DO doesn't trust
     // `idFromName`'s internal id string as the project id) — same query-
     // param convention as /connect, so the caller (link-sync-route.ts)
@@ -180,8 +198,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // then fire two overlapping
     //   curl -X POST https://<sync>/api/v1/projects/B/link/sync
     // calls (e.g. via `xargs -P2`) and confirm via server logs / a DB read
-    // that only one fold ran (the second awaited the first's in-flight
-    // promise) and B's cells match A's head afterward.
+    // that the folds ran one after the other, never overlapping (the second
+    // waits for the first, then runs once more — AQU-1545), and B's cells
+    // match A's head afterward.
     if (request.method === "POST" && url.pathname === "/__link-sync") {
       if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
@@ -190,21 +209,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (!projectId) {
         return new Response("missing project query param", { status: 400 })
       }
-      // Test seam takes priority; otherwise build a short-lived PG connection
-      // from HYPERDRIVE (this DO instance's own env, not the request-scoped
-      // synthesized AQUILLA_PG the worker's top-level fetch uses).
-      const db = this.env.AQUILLA_PG ?? (this.env.HYPERDRIVE && makePostgres(this.env.HYPERDRIVE.connectionString))
-      if (!db) {
+      if (!this.env.AQUILLA_PG && !this.env.HYPERDRIVE) {
         return new Response("HYPERDRIVE binding not configured", { status: 500 })
       }
-      if (!this.linkSyncInFlight) {
-        this.linkSyncInFlight = mirrorSync(db as AquillaDb, projectId).finally(() => {
-          this.linkSyncInFlight = null
-          if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
-        })
-      }
       try {
-        const result = await this.linkSyncInFlight
+        const result = await this.linkSync(projectId)
         return Response.json(result)
       } catch (err) {
         console.error("[project-do] mirror sync failed:", err)

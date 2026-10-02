@@ -64,6 +64,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
@@ -428,7 +429,9 @@ function AppRoutes() {
 
         {/* Project routes stay flat (not nested under /orgs).
             Default work surface is explicit: /project/:id/editor[/file/:fileId].
-            Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
+            Bare /project/:id redirects to the overview (AQU-1535);
+            /project/:id/file/:fileId is still intentionally dead. */}
+        <Route path="/project/:id" element={<RedirectToProjectOverview />} />
         <Route path="/project/:id/editor" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />

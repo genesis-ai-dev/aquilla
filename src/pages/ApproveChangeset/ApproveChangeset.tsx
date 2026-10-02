@@ -26,6 +26,7 @@ import {
 } from "@/lib/agent/changeset-review"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { fmtLabeledDateTime } from "@/lib/format-date"
+import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
@@ -174,7 +175,7 @@ function BackToProjectLink({ data }: { data: ApprovalData | null }) {
   if (!data) return null
   return (
     <Link
-      to={`/project/${data.projectId}`}
+      to={projectOverviewPath(data.projectId)}
       className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
     >
       <ArrowLeft className="h-3 w-3" />

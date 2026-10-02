@@ -29888,7 +29888,9 @@
     "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
     "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
     "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
-    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139",
+    "editor.validation.ownEditTooltip": "af0d0f50dd563070",
+    "editor.selection.validateOwnEdits": "f63c604bde619146"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35630,7 +35632,9 @@
     "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
     "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
     "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
-    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139",
+    "editor.validation.ownEditTooltip": "af0d0f50dd563070",
+    "editor.selection.validateOwnEdits": "f63c604bde619146"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41281,6 +41285,8 @@
     "settings.bulkValidateAiDrafts.blocked": "e977223dbb456600",
     "settings.bulkValidateAiDrafts.saveFailed": "53ad6f999b1f062f",
     "settings.bulkValidateAiDrafts.label": "a49eb66c6883c5fb",
-    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139"
+    "settings.bulkValidateAiDrafts.description": "6057ce0ea299b139",
+    "editor.validation.ownEditTooltip": "af0d0f50dd563070",
+    "editor.selection.validateOwnEdits": "f63c604bde619146"
   }
 }

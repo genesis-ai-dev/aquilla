@@ -16,6 +16,7 @@ import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { getOutboxRecords } from "@/lib/sync/outbox"
 import { fetchProjectSettingsResult } from "@/lib/sync/project-settings"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
+import { textValidationScope } from "@/lib/review/text-validation-policy"
 import { resolveIdmlEditorConfiguration, validateIdmlEditorCommit } from "@/lib/richtext/idml-editor"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
@@ -161,6 +162,11 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
         canValidate: canPerform("cell.validate", mint.role.level),
         allowSelfValidation: settings.value.settings.allowSelfValidation,
         roleLevel: mint.role.level,
+        // AQU-1571: the stored blob uses the project record's key names.
+        scopeCanValidate: textValidationScope(settings.value.settings, {
+          roleLevel: mint.role.level,
+          username: session.username,
+        }).canValidate,
       }),
     }
     onQueued(queued)

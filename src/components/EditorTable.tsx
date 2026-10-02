@@ -215,6 +215,7 @@ import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -5055,7 +5056,13 @@ function EditorRow({
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
-  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // AQU-1571: and the project's own text rules, which the server enforces on
+  // every vote — its minimum role and named-validator list ("policy"), and
+  // "Allow self-validation" off on a line whose latest change in this lane is
+  // the viewer's ("self"). Mirrored here so the check is greyed with the
+  // reason instead of sending a vote that comes back as a red "1 failed".
+  const textBlock = textValidationBlock(cell, project, { roleLevel: project.syncRole?.level ?? null, username })
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane) && textBlock === null
   // AQU-777: this cell's own attachments, read out of the file-wide map the
   // workspace provides. EMPTY_ATTACHMENTS is a module constant, not a fresh
   // [], so a cell with none keeps a stable identity across renders.
@@ -5718,6 +5725,7 @@ function EditorRow({
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
         roleLevel: project.syncRole?.level ?? null,
+        scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
       })) {
         void emitCellValidate({
           projectId: project.id,
@@ -5766,7 +5774,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6060,6 +6068,12 @@ function EditorRow({
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
       return false
     }
+    // AQU-1571: the same for the project's text rules (see `textBlock`). Only
+    // on the way in: the server never gates taking your own vote back.
+    if (validated && textBlock) {
+      console.warn("[validate] aborting: the project's validation rules refuse this vote:", textBlock)
+      return false
+    }
     // AQU-646: `getPendingTargetEventId` covers the take case. Recording emits an
     // empty target commit to create the row, and the projection has not come
     // back by the time the control appears — without this, validating a
@@ -6099,7 +6113,7 @@ function EditorRow({
       setWriteError("Couldn't save this change locally — copy your text and reload.")
       return false
     }
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, textBlock, onCellCommitted, onValidated, getPendingTargetEventId])
 
   // AQU-1333: close the activation window — always through here, so the row can
   // never be left as a stray editing host competing with the real editor.
@@ -6845,6 +6859,7 @@ function EditorRow({
       validationRequirement={readValidationCount(project)}
       canValidate={canValidate}
       canValidateThisCell={canValidateThisCell}
+      blockedReason={textBlock}
       onValidationChange={emitValidationChange}
     />
   )

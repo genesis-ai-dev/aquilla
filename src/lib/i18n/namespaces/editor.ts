@@ -610,6 +610,8 @@ export const editor = defineNamespace({
     "editor.selection.validateOutOfScope":
       "Some selected cells are outside your assigned files or lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
+    "editor.selection.validateOwnEdits":
+      "You made the latest change to these cells, so someone else must validate them",
     "editor.selection.validateAiDrafts":
       "Nothing eligible — untouched AI drafts require individual review",
     "editor.selection.validateAiDraftsOrgHint":
@@ -682,6 +684,10 @@ export const editor = defineNamespace({
     "editor.batchValidate.skip.alreadyMine": plural({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
+    }),
+    "editor.batchValidate.skip.ownEdit": plural({
+      one: "{count} has your latest change, so someone else must validate it",
+      other: "{count} have your latest change, so someone else must validate them",
     }),
     "editor.batchValidate.skip.aiDraft": plural({
       one: "{count} is an untouched AI draft, reviewed one at a time",
@@ -1447,6 +1453,8 @@ export const editor = defineNamespace({
     "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
     "editor.validation.unavailableTooltip": "Text validation unavailable",
+    "editor.validation.ownEditTooltip":
+      "You made the latest change to this text, so someone else must validate it",
     "editor.validation.noContentTooltip": "No text to validate",
     "editor.validation.ariaNoContent": "No text to validate — {ref}.",
     "editor.validation.ariaValidated":
@@ -4397,6 +4405,13 @@ export const editor = defineNamespace({
           "Tooltip when bulk-validate is disabled because this user has already " +
           "signed off every selected cell. Nothing is wrong.",
       },
+      "editor.selection.validateOwnEdits": {
+        description:
+          "Tooltip when bulk-validate is disabled because the project does not " +
+          "let people validate their own work and this user made the latest " +
+          "change to the selected cells. A project rule: someone else has to " +
+          "sign them off.",
+      },
       "editor.selection.validateAiDrafts": {
         description:
           "Tooltip when bulk-validate is disabled because the selected cells are " +
@@ -4601,6 +4616,15 @@ export const editor = defineNamespace({
           + "off, so the batch left them alone. A fragment, not a sentence.",
         placeholders: {
           count: "How many cells this reader had already validated. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.ownEdit": {
+        description:
+          "One clause inside {reasons}: cells whose latest change this reader "
+          + "made, on a project that does not let people validate their own "
+          + "work, so someone else has to. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells carried this reader's own latest change. Selects the plural form.",
         },
       },
       "editor.batchValidate.skip.aiDraft": {
@@ -5411,6 +5435,14 @@ export const editor = defineNamespace({
         description:
           "Tooltip when validation is unavailable for any other reason, typically " +
           "the user's project role. Deliberately vague — do not guess a cause.",
+      },
+      "editor.validation.ownEditTooltip": {
+        description:
+          "Tooltip on a row's validation button when the project does not let " +
+          "people validate their own work and this user made the latest change " +
+          "to the cell's translation. A project rule, not a fault: someone else " +
+          "has to sign it off. Same idea as the audio control's \"You recorded " +
+          "this\" tooltip.",
       },
       "editor.validation.ariaValidated": {
         description:

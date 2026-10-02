@@ -275,3 +275,102 @@ describe("summarizeBatchValidate — when the org allows AI drafts in bulk", () 
       .toBe("alreadyMine")
   })
 })
+
+// AQU-1571: with "Allow self-validation" off, the server refuses a vote on the
+// caller's own latest change. Both bulk paths now leave those lines alone and
+// say so, in their own bucket, instead of sending votes that come back as a
+// red "failed" banner.
+describe("summarizeBatchValidate — the caller's own latest change", () => {
+  const off = { ...base, allowSelfValidation: false }
+
+  it("buckets the caller's own latest change as ownEdit, and only when the setting is off", () => {
+    expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, [], "", { allowSelfValidation: false })).toBe("ownEdit")
+    expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, [], "", { allowSelfValidation: true })).toBeNull()
+    expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, [], "")).toBeNull()
+    expect(batchValidateSkipReason(cell({ lastEditor: "other" }), ME, [], "", { allowSelfValidation: false })).toBeNull()
+  })
+
+  it("never treats an unknown editor as the caller", () => {
+    expect(batchValidateSkipReason(cell({ lastEditor: null }), ME, [], "", { allowSelfValidation: false })).toBeNull()
+    expect(batchValidateSkipReason(cell(), ME, [], "", { allowSelfValidation: false })).toBeNull()
+  })
+
+  // needsTranslation → alreadyMine → notCommitted → ownEdit → aiDraft → outOfScope.
+  it("sits after already-mine and not-committed, and before AI draft and scope", () => {
+    const self = { allowSelfValidation: false }
+    expect(batchValidateSkipReason(cell({ lastEditor: ME, activeValidators: [ME] }), ME, [], "", self)).toBe("alreadyMine")
+    expect(batchValidateSkipReason(cell({ lastEditor: ME, targetEventId: null }), ME, [], "", self)).toBe("notCommitted")
+    // The caller's own AI draft: refused one at a time too, so "review it
+    // individually" would be the wrong advice — whatever the org allows.
+    expect(batchValidateSkipReason(cell({ lastEditor: ME, aiDrafted: true }), ME, [], "", self)).toBe("ownEdit")
+    expect(batchValidateSkipReason(cell({ lastEditor: ME, aiDrafted: true }), ME, [], "", { ...self, allowAiDrafts: true })).toBe("ownEdit")
+    const scopes: MemberScope[] = [{ kind: "file", value: "other-file" }]
+    expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, scopes, "", self)).toBe("ownEdit")
+  })
+
+  it("keeps the books balanced with all six reasons in play", () => {
+    const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
+    const candidates = [
+      cell({ id: "ok" }),
+      cell({ id: "empty", translated: "" }),
+      cell({ id: "mine", activeValidators: [ME] }),
+      cell({ id: "own", lastEditor: ME }),
+      cell({ id: "draft", aiDrafted: true }),
+      cell({ id: "away", fileId: "file-2" }),
+      cell({ id: "unsaved", targetEventId: null }),
+    ]
+    const summary = summarizeBatchValidate(candidates, { ...off, myScopes: scopes })
+    expect(summary.skips).toEqual({
+      needsTranslation: 1, alreadyMine: 1, ownEdit: 1, aiDraft: 1, outOfScope: 1, notCommitted: 1,
+    })
+    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
+    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(6)
+    expect(bucketed).toBe(summary.skippedTotal)
+    expect(summary.validatable.map((c) => c.id)).toEqual(["ok"])
+    expect(summary.validatable.length + bucketed).toBe(candidates.length)
+  })
+
+  it("reads its clause after already-mine and before out-of-scope", () => {
+    expect(BATCH_VALIDATE_SKIP_REASONS).toEqual([
+      "needsTranslation", "aiDraft", "alreadyMine", "ownEdit", "outOfScope", "notCommitted",
+    ])
+    const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
+    const summary = summarizeBatchValidate(
+      [cell({ id: "a" }), cell({ id: "b", activeValidators: [ME] }), cell({ id: "c", lastEditor: ME }), cell({ id: "d", fileId: "file-2" })],
+      { ...off, myScopes: scopes },
+    )
+    const clauses = batchValidateSkipClauses(summary, t)
+    expect(clauses.map((c) => c.replace(/\(.*$/, ""))).toEqual([
+      "editor.batchValidate.skip.alreadyMine",
+      "editor.batchValidate.skip.ownEdit",
+      "editor.batchValidate.skip.outOfScope",
+    ])
+  })
+
+  it("names the clause in the toast and in the confirmation", () => {
+    const summary = summarizeBatchValidate([cell({ id: "a" }), cell({ id: "b", lastEditor: ME })], off)
+    expect(summary.outcome).toBe("partial")
+    expect(batchValidateToast(summary, t, joinList).description).toContain("skip.ownEdit")
+    const confirm = batchValidateConfirmDescription(summary, t, joinList)
+    expect(confirm).toContain("nav.workspaceActions.batchValidate.willValidate")
+    expect(confirm).toContain('"count":1')
+    expect(confirm).toContain("skip.ownEdit")
+  })
+
+  it("says why nothing will happen when every line is the caller's own", () => {
+    const summary = summarizeBatchValidate([cell({ id: "a", lastEditor: ME }), cell({ id: "b", lastEditor: ME })], off)
+    expect(summary.outcome).toBe("nothing-eligible")
+    expect(batchValidateToast(summary, t, joinList).description).toContain("skip.ownEdit")
+    expect(batchValidateConfirmDescription(summary, t, joinList)).toContain("skip.ownEdit")
+  })
+
+  it("reports the bucket to telemetry", () => {
+    const summary = summarizeBatchValidate([cell({ id: "a", lastEditor: ME }), cell({ id: "b" })], off)
+    expect(batchValidateTelemetry(summary, "selection")).toMatchObject({
+      skipped_count: 1,
+      skipped_own_edit: 1,
+      validated_count: 1,
+    })
+    expect(batchValidateTelemetry(summarizeBatchValidate([cell()], base), "selection").skipped_own_edit).toBe(0)
+  })
+})

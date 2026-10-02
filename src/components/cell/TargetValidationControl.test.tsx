@@ -114,4 +114,81 @@ describe("TargetValidationControl", () => {
     expect(await screen.findByText("Text validated by")).toBeInTheDocument()
     expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
   })
+
+  // AQU-1571: the project's own text rules, mirrored so a vote the server is
+  // about to refuse is never sent — and the reader is told why.
+  describe("when the project's text rules refuse the vote", () => {
+    const hover = async () => {
+      const button = screen.getByRole("button")
+      fireEvent.mouseEnter(button)
+      fireEvent.pointerEnter(button)
+      fireEvent.focus(button)
+      return screen.findByRole("tooltip")
+    }
+
+    it("says the reader made the latest change, and a click sends nothing", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      expect(screen.getByRole("button")).toHaveAttribute("aria-disabled", "true")
+      expect(await hover()).toHaveTextContent(
+        "You made the latest change to this text, so someone else must validate it",
+      )
+      fireEvent.click(screen.getByRole("button"))
+      expect(onValidationChange).not.toHaveBeenCalled()
+    })
+
+    it("puts the same sentence under somebody else's vote", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button"))
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+      expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent(
+        "You made the latest change to this text, so someone else must validate it",
+      )
+      expect(onValidationChange).not.toHaveBeenCalled()
+    })
+
+    // The named-validator list is deliberately not named, as audio does not.
+    it("reads as unavailable when the minimum role or validator list excludes the reader", async () => {
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="policy" onValidationChange={vi.fn()}
+        />,
+      )
+      expect(await hover()).toHaveTextContent("Text validation unavailable")
+    })
+
+    // The server never gates taking your own vote back.
+    it("still offers to remove a vote the reader cast before the rule applied", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Validated/ }))
+      expect(screen.queryByTestId("validation-blocked-note")).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+    })
+  })
 })

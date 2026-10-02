@@ -21,8 +21,8 @@
  * once, here, as plain data: both surfaces render the same words and emit the
  * same telemetry, and the guard branches are unit-testable without React.
  */
-import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
-import type { BulkReviewPolicy } from "@/lib/review/review-eligibility"
+import { isBulkValidatableByMe, type BulkValidatePolicy } from "@/lib/review/bulk-validation"
+import { isOwnTextEdit } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TVars } from "@/lib/i18n/translate"
@@ -34,6 +34,8 @@ export interface BatchValidateCandidate {
   targetEventId?: string | null
   aiDrafted?: boolean
   activeValidators?: string[]
+  /** AQU-1571: who wrote the current text in the active lane. */
+  lastEditor?: string | null
 }
 
 /**
@@ -44,6 +46,7 @@ export interface BatchValidateCandidate {
 export type BatchValidateSkipReason =
   | "needsTranslation"
   | "alreadyMine"
+  | "ownEdit"
   | "aiDraft"
   | "outOfScope"
   | "notCommitted"
@@ -52,6 +55,7 @@ export const BATCH_VALIDATE_SKIP_REASONS: readonly BatchValidateSkipReason[] = [
   "needsTranslation",
   "aiDraft",
   "alreadyMine",
+  "ownEdit",
   "outOfScope",
   "notCommitted",
 ]
@@ -87,7 +91,7 @@ export interface BatchValidateSummary {
 }
 
 function emptySkips(): BatchValidateSkips {
-  return { needsTranslation: 0, alreadyMine: 0, aiDraft: 0, outOfScope: 0, notCommitted: 0 }
+  return { needsTranslation: 0, alreadyMine: 0, ownEdit: 0, aiDraft: 0, outOfScope: 0, notCommitted: 0 }
 }
 
 /**
@@ -97,18 +101,24 @@ function emptySkips(): BatchValidateSkips {
  * an AI draft, review it individually" before "you already signed this off".
  * Scope comes last of the real reasons because it is the only one the reader
  * cannot resolve themselves.
+ *
+ * AQU-1571: "your own latest change" comes before "AI draft". The reader's own
+ * AI draft is refused by the server whatever the org allows in bulk, and
+ * "review it one at a time" would be wrong advice for a line they cannot
+ * validate one at a time either.
  */
 export function batchValidateSkipReason(
   cell: BatchValidateCandidate,
   username: string,
   myScopes: MemberScope[],
   activeLane: string,
-  policy: BulkReviewPolicy = {},
+  policy: BulkValidatePolicy = {},
 ): BatchValidateSkipReason | null {
   if (isBulkValidatableByMe(cell, username, myScopes, activeLane, policy)) return null
   if (!cell.translated.trim()) return "needsTranslation"
   if (cell.activeValidators?.includes(username)) return "alreadyMine"
   if (!cell.targetEventId) return "notCommitted"
+  if (isOwnTextEdit(cell, username, policy.allowSelfValidation)) return "ownEdit"
   if (cell.aiDrafted && policy.allowAiDrafts !== true) return "aiDraft"
   if (!isInMemberScope(myScopes, cell.fileId, activeLane)) return "outOfScope"
   // Unreachable while `isBulkValidatableByMe` asks exactly the questions above;
@@ -125,7 +135,8 @@ export interface SummarizeOptions {
    * AQU-586: the project's per-run cap on eligible cells. 0/undefined = no cap.
    */
   cap?: number | null
-  /** False when the caller's role cannot validate at all. */
+  /** False when the caller cannot validate text at all: their role, or the
+   *  project's minimum role / named-validator list (`textValidationScope`). */
   canValidate?: boolean
   /** False when there is no project/file to validate against. */
   hasTarget?: boolean
@@ -134,13 +145,21 @@ export interface SummarizeOptions {
    * the run instead of skipping them as "aiDraft". Absent means the rule holds.
    */
   allowAiDrafts?: boolean
+  /**
+   * AQU-1571: the project's "Allow self-validation". When false, a line whose
+   * latest change is the caller's is skipped as "ownEdit" — the server would
+   * refuse its vote.
+   */
+  allowSelfValidation?: boolean
 }
 
 export function summarizeBatchValidate(
   candidates: readonly BatchValidateCandidate[],
   options: SummarizeOptions,
 ): BatchValidateSummary {
-  const { username, myScopes, activeLane, cap, canValidate = true, hasTarget = true, allowAiDrafts } = options
+  const {
+    username, myScopes, activeLane, cap, canValidate = true, hasTarget = true, allowAiDrafts, allowSelfValidation,
+  } = options
   const skips = emptySkips()
 
   if (!hasTarget) {
@@ -152,7 +171,7 @@ export function summarizeBatchValidate(
 
   const eligible: BatchValidateCandidate[] = []
   for (const cell of candidates) {
-    const reason = batchValidateSkipReason(cell, username, myScopes, activeLane, { allowAiDrafts })
+    const reason = batchValidateSkipReason(cell, username, myScopes, activeLane, { allowAiDrafts, allowSelfValidation })
     if (reason === null) eligible.push(cell)
     else skips[reason]++
   }
@@ -187,6 +206,7 @@ export function batchValidateTelemetry(
     capped_out_count: summary.cappedOut,
     skipped_needs_translation: summary.skips.needsTranslation,
     skipped_already_mine: summary.skips.alreadyMine,
+    skipped_own_edit: summary.skips.ownEdit,
     skipped_ai_draft: summary.skips.aiDraft,
     skipped_out_of_scope: summary.skips.outOfScope,
     skipped_not_committed: summary.skips.notCommitted,
@@ -210,6 +230,7 @@ type JoinList = (items: readonly string[]) => string
 const SKIP_MESSAGE_KEY: Record<BatchValidateSkipReason, MessageKey> = {
   needsTranslation: "editor.batchValidate.skip.needsTranslation",
   alreadyMine: "editor.batchValidate.skip.alreadyMine",
+  ownEdit: "editor.batchValidate.skip.ownEdit",
   aiDraft: "editor.batchValidate.skip.aiDraft",
   outOfScope: "editor.batchValidate.skip.outOfScope",
   notCommitted: "editor.batchValidate.skip.notCommitted",

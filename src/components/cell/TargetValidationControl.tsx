@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
 
 interface TargetValidationControlProps {
   cellRef: string
@@ -17,6 +18,12 @@ interface TargetValidationControlProps {
   validationRequirement: number
   canValidate: boolean
   canValidateThisCell: boolean
+  /**
+   * AQU-1571: why the project's own text rules refuse this viewer's vote here
+   * (`textValidationBlock`), when they do. Only chooses the words: whether a
+   * click votes is still `canValidateThisCell`, which the caller narrows by it.
+   */
+  blockedReason?: TextValidationBlock | null
   onValidationChange: (validated: boolean) => unknown
 }
 
@@ -107,6 +114,7 @@ export function TargetValidationControl({
   validationRequirement,
   canValidate,
   canValidateThisCell,
+  blockedReason = null,
   onValidationChange,
 }: TargetValidationControlProps) {
   const { t } = useI18n()
@@ -149,9 +157,18 @@ export function TargetValidationControl({
   const validationColorClass = state === "full-self" || state === "full-others" || state === "full" || state === "self"
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
+  // AQU-1571: a project rule about WHO validates reads like the role limit it
+  // is ("unavailable" — deliberately not naming the named-validator list, as
+  // audio does not); the reader's own latest change says so, since the way
+  // forward is someone else; scope comes last, as the rule nearest to hand
+  // is the one worth reading.
   const tooltip = canValidateThisCell
     ? t("editor.validation.notValidatedTooltip")
-    : canValidate ? t("editor.validation.outOfScopeTooltip") : t("editor.validation.unavailableTooltip")
+    : !canValidate || blockedReason === "policy"
+      ? t("editor.validation.unavailableTooltip")
+      : blockedReason === "self"
+        ? t("editor.validation.ownEditTooltip")
+        : t("editor.validation.outOfScopeTooltip")
   // Why the viewer cannot add a vote, at the foot of the "Text validated by" list —
   // the same place the audio control puts it, so a blocked reason is never
   // hidden just because somebody else voted first.

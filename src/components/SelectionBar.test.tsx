@@ -112,7 +112,9 @@ function makeRows(cells: CellData[]): CellRow[] {
         anchorCellId,
         eventId: `${cell.id}-target`,
         sourceEventId: `${cell.id}-source`,
-        lastEditor: "alice",
+        // The viewer, unless a test says otherwise. Inert while the project
+        // allows self-validation (the default); AQU-1571 tests switch it off.
+        lastEditor: cell.lastEditor !== undefined ? cell.lastEditor : "alice",
         lastEditAt: 2,
         validated: false,
         aiDrafted: cell.aiDrafted ?? false,
@@ -829,6 +831,110 @@ describe("SelectionBar — a write that never queued is not counted (AQU-1572)",
     const [, props] = vi.mocked(posthog.capture).mock.calls.find(([n]) => n === "cell validated")!
     expect(props).toMatchObject({ cell_count: 1 })
     warn.mockRestore()
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-1571 — the server refuses a text vote on the caller's own latest change
+ * when the project switched "Allow self-validation" off, and any vote from a
+ * reader the project's minimum role or named-validator list excludes. Both
+ * used to come back as a red "failed" banner after a bulk run; the bar now
+ * leaves those lines alone and says so.
+ */
+describe("SelectionBar — the project's text validation rules (AQU-1571)", () => {
+  const strict = (level: number = ROLE.CONTRIBUTOR, over: Partial<ProjectRecord> = {}) =>
+    ({ ...makeProject(level), allowSelfValidation: false, ...over })
+  const validateButton = () => screen.getByRole("button", { name: /^Validate text/i })
+
+  it("counts and validates only the lines somebody else changed last", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    const captured = vi.mocked(posthog.capture)
+    captured.mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs", "own-1", "own-2"]))
+    renderBar(strict(), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "own-2", translated: "coucou", lastEditor: "alice" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    expect(validateButton()).toHaveTextContent(/1$/)
+    fireEvent.click(validateButton())
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "theirs" }))
+    const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
+    expect(description).toContain("2 have your latest change, so someone else must validate them")
+    const batch = captured.mock.calls.find(([name]) => name === BATCH_VALIDATE_ATTEMPTED)
+    expect(batch?.[1]).toMatchObject({ outcome: "partial", validated_count: 1, skipped_own_edit: 2 })
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("disables Validate with the own-change reason when every line is the reader's", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1", "own-2"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "own-2", translated: "coucou", lastEditor: "alice" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    vi.restoreAllMocks()
+  })
+
+  // The reader's own AI draft is refused one at a time too, so "review it
+  // individually" would be the wrong advice.
+  it("names the own change, not the AI-draft rule, for the reader's own draft", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft"]))
+    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" })])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    vi.restoreAllMocks()
+  })
+
+  it("validates the reader's own lines when the project allows it", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1"]))
+    renderBar(strict(ROLE.CONTRIBUTOR, { allowSelfValidation: true }), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("never treats a line with no known editor as the reader's", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["old"]))
+    renderBar(strict(), [makeCell({ id: "old", translated: "salut", lastEditor: null })], [], "", {
+      onValidationCommitted: vi.fn(),
+    })
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("tells a reader below the project's minimum role that their role cannot validate here", async () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs"]))
+    renderBar(strict(ROLE.CONTRIBUTOR, { validationRoleFloor: "project_lead" }), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it("does the same for a reader left off the named-validator list", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs"]))
+    renderBar(strict(ROLE.PROJECT_LEAD, { validationNamedUsers: ["bob"] }), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
     vi.restoreAllMocks()
   })
 })

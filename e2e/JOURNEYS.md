@@ -268,6 +268,16 @@ UI chrome that used to be one smoke file per click is covered under
   It stays out of smoke for the reason the rules give: it is a message and a retry on a
   failure path, nothing is lost that was not already missing, and reproducing it needs
   the sync service to be made to fail, which the local e2e stack has no switch for.
+  A link to a LARGE upstream seeding at all (AQU-1543: statement size; AQU-1563: the
+  first sync folding the whole history at once ran the ProjectSync Durable Object out
+  of its 128 MB) is worker-tested against real Postgres. `link-sync-large-upstream.test.ts`
+  pins that no statement grows with the upstream; `link-sync-windowed.test.ts` pins that
+  the delta is read and committed in bounded windows (events and payload bytes), that an
+  interrupted sync resumes at its last finished window, that one event per window ends in
+  exactly the state one window gives (both link shapes), and that `POST /link/sync` keeps
+  calling budgeted invocations until the link is caught up. No smoke: local workerd does
+  not enforce the memory limit the bug hit, so a browser walk would pass on the broken
+  code too; what bounds memory is that no read or write grows with the upstream.
   An OPEN live-linked project following its upstream without a reload (the AQU-479
   push accelerator; AQU-1545 hide/show and rename) is worker/unit-tested. Which upstream
   changes notify, per link shape, is one definition shared with the mirror sync and is

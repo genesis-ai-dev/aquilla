@@ -138,3 +138,27 @@ export async function loadLinkSourcePreview(
   ])
   return buildLinkSourcePreview(upstream, self.files)
 }
+
+/**
+ * AQU-1561: the upstream's files alone, for a project that does not exist yet.
+ *
+ * Create New Project asks the same "which of these files?" question as the link
+ * flow above, but one read short of it: the project being created has no files,
+ * so there is nothing to clash with and nothing to compare against. Reusing
+ * `buildLinkSourcePreview` with an empty existing-file list is what keeps the
+ * two answers the same shape — every row comes back `clashes: false`, and the
+ * shared list component renders no clash badges for it — rather than the create
+ * dialog growing its own notion of an upstream file row.
+ *
+ * Throws what `fetchProject` throws. The caller shows the failure and offers a
+ * retry rather than rendering an empty list, which would read as "an upstream
+ * with no files" — a different situation, and one that still creates.
+ */
+export async function loadUpstreamFileChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<LinkSourcePreviewFile[]> {
+  const upstream = await fetchProject(upstreamProjectId, jwt, apiUrl)
+  return buildLinkSourcePreview(upstream, []).files
+}

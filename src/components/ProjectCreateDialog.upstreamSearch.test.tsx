@@ -10,6 +10,21 @@ import userEvent from "@testing-library/user-event"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { openCombobox, pickComboboxOption } from "@/test-utils/combobox"
 
+// AQU-1561: the dialog reads the chosen upstream's file list so the lead can
+// pick which files to bring in. These tests are about everything else in the
+// create flow, so the list resolves to one file and stays all-checked — the
+// whole-project default, which keeps `linkProjectSource` carrying no `fileIds`
+// exactly as it did before that slice.
+vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi
+      .fn()
+      .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+  }
+})
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },

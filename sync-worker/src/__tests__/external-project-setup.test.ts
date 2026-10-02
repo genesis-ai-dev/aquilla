@@ -543,6 +543,88 @@ describe('ProjectSetup — the brief reaches the copilot (AQU-1323)', () => {
   })
 })
 
+describe('ProjectSetup — the receipt reports the import text direction (AQU-1471)', () => {
+  it('reports the direction the plan LEAVES BEHIND, not the one it found', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'Acts.usfm', USFM_ACTS)
+    // The settings write and the import ride in the SAME approval, so reading
+    // the pre-plan blob would report "ltr" for a project about to be RTL.
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        settings: { sourceLanguage: 'en', targetLanguage: 'Journey Arabic', targetTextDirection: 'rtl' },
+        imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(body.summary.importTextDirection).toBe('source ltr, target rtl')
+  })
+
+  it('falls back to the target language when the plan sets no direction', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'Acts.usfm', USFM_ACTS)
+    const { body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        settings: { sourceLanguage: 'en', targetLanguage: 'ar' },
+        imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
+      }),
+    )
+    expect(body.summary.importTextDirection).toBe('source ltr, target rtl')
+  })
+
+  it('names each file when the plan is mixed, and stamps the per-file override', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const a = await upload(env, caller.token, 'Acts.usfm', USFM_ACTS)
+    const b = await upload(env, caller.token, 'Acts2.usfm', USFM_ACTS)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        settings: { targetLanguage: 'ar' },
+        imports: [
+          { artifactId: a, fileName: 'Acts', fileType: 'usfm' },
+          // The odd file that runs against its project.
+          { artifactId: b, fileName: 'Acts (transliteration)', fileType: 'usfm', targetTextDirection: 'ltr' },
+        ],
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(body.summary.importTextDirection).toBe(
+      'Acts: source ltr, target rtl; Acts (transliteration): source ltr, target ltr',
+    )
+
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { res: commitRes } = await commit(env, caller.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    // Only the override is stamped onto a file row: the project default is
+    // resolved on read, so the RTL file carries no direction of its own.
+    const files = await tdb.rows<{ name: string; meta: string }>('files')
+    const metaOf = (name: string) => JSON.parse(files.find((f) => f.name === name)!.meta) as Record<string, unknown>
+    expect(metaOf('Acts (transliteration)').targetTextDirection).toBe('ltr')
+    expect(metaOf('Acts').targetTextDirection).toBeUndefined()
+  })
+
+  it('refuses a per-import direction that is not "ltr" or "rtl"', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'Acts.usfm', USFM_ACTS)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({ imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm', targetTextDirection: 'auto' }] }),
+    )
+    expect(res.status).toBe(400)
+    expect(JSON.stringify(body.error)).toContain('targetTextDirection')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+})
+
 describe('ProjectSetup — prepare rejections name the field', () => {
   it('refuses the spec’s create-in-plan `project` block', async () => {
     const env = makeEnv(tdb.db, bucket)

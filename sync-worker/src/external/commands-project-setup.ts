@@ -25,6 +25,7 @@
 
 import { MEMBERSHIP_MAX_COMMANDS } from './commands-membership'
 import { POLICY_SETTINGS_KEYS, type PatchSettingsOp } from './commands-patch-settings'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import type { BriefPatch } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
 
@@ -40,6 +41,11 @@ export interface ProjectSetupImport {
   resultIndex?: number
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file direction override. Absent = the project's
+   *  `sourceTextDirection`/`targetTextDirection` setting (which this same plan
+   *  may be writing in its `settings` block), then the language. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
 }
 
 export interface ProjectSetupCommand {
@@ -201,6 +207,12 @@ export function validateProjectSetupCommand(
           return null
         }
       }
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (raw[key] !== undefined && normalizeTextDirection(raw[key]) === null) {
+          issues.push({ index, message: `ProjectSetup.imports[${i}].${key} must be "ltr" or "rtl" when present` })
+          return null
+        }
+      }
       if (
         raw.resultIndex !== undefined &&
         (typeof raw.resultIndex !== 'number' || !Number.isInteger(raw.resultIndex) || raw.resultIndex < 0)
@@ -215,6 +227,8 @@ export function validateProjectSetupCommand(
         ...(raw.resultIndex !== undefined ? { resultIndex: raw.resultIndex as number } : {}),
         ...(raw.sourceLanguage !== undefined ? { sourceLanguage: raw.sourceLanguage as string } : {}),
         ...(raw.targetLanguage !== undefined ? { targetLanguage: raw.targetLanguage as string } : {}),
+        ...(raw.sourceTextDirection !== undefined ? { sourceTextDirection: raw.sourceTextDirection as TextDirection } : {}),
+        ...(raw.targetTextDirection !== undefined ? { targetTextDirection: raw.targetTextDirection as TextDirection } : {}),
       })
     }
   }

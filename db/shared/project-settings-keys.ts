@@ -18,6 +18,8 @@
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
 
+import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
+
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
   | 'string'
@@ -73,6 +75,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   targetLanguage: { kind: 'string' },
   targetLanes: { kind: 'string[]' },
   archivedLanes: { kind: 'string[]' },
+  // AQU-1471: the project's DEFAULT text direction per side. "auto" (and an
+  // absent key) means "take it from the language", which is what every project
+  // did before these keys existed. They are a default, never a stamp: nothing
+  // copies them onto the file rows, so a per-file override still wins and
+  // changing targetLanguage still moves every file that has no override.
+  sourceTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
+  targetTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
 
   // Drafting
   systemPrompt: { kind: 'string' },

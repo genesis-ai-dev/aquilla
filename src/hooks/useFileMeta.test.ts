@@ -4,6 +4,7 @@ import "fake-indexeddb/auto"
 import { beforeEach, describe, expect, it } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useFileMeta } from "./useFileMeta"
+import { projectSettingTextDirection } from "@/lib/text-direction"
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -100,6 +101,31 @@ describe("useFileMeta (Phase 2b, localStorage-backed)", () => {
     const { result } = renderHook(() => useFileMeta("file-a", "en", "en", { targetTextDirection: "rtl" }))
     await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
     expect(result.current.targetDirectionMode).toBe("auto")
+  })
+
+  // AQU-1471: the hint ProjectWorkspace passes is `file row ?? project setting`,
+  // and the language stays underneath both. These three cases are the whole
+  // chain — the composition itself is one expression in ProjectWorkspace.
+  it("uses a project-level direction when the file row has none", async () => {
+    const hint = projectSettingTextDirection({ targetLanguage: "Journey Arabic", targetTextDirection: "rtl" }, "target")
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "Journey Arabic", { targetTextDirection: hint }))
+    // Without the setting this language is unreadable to us and would be ltr.
+    await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
+    expect(result.current.targetDirectionMode).toBe("auto")
+  })
+
+  it("lets a per-file direction win over the project-level one", async () => {
+    // The composition ProjectWorkspace performs, with a file row present.
+    const fileRow: "ltr" | "rtl" | null = "ltr"
+    const hint = fileRow ?? projectSettingTextDirection({ targetTextDirection: "rtl" }, "target")
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "ar", { targetTextDirection: hint }))
+    await waitFor(() => expect(result.current.targetTextDirection).toBe("ltr"))
+  })
+
+  it("falls back to the language when the project setting is \"auto\"", async () => {
+    const hint = projectSettingTextDirection({ targetTextDirection: "auto" }, "target") ?? undefined
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "ar", { targetTextDirection: hint }))
+    await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
   })
 
   it("scopes preferences by fileId — different files keep separate state", async () => {

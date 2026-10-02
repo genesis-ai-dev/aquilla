@@ -30,6 +30,10 @@ import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import { createSmartEditDecorationExtension, smartEditPluginKey, smartEditRange } from "@/lib/richtext/smart-edit-decoration-plugin"
+import { suggestionId } from "@/lib/smart-edits/store"
+import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
+import { SmartEditPopover } from "@/components/SmartEditPopover"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
@@ -410,6 +414,10 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
+  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+   *  committed plain text; see smart-edit-decoration-plugin.ts. */
+  smartEdits?: SmartEditSuggestion[]
+  onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -497,6 +505,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onRuleClick,
   onRuleHover,
   onLiveTextChange,
+  smartEdits,
+  onSmartEditFeedback,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -550,6 +560,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
     waivedRuleIds: waivedRuleIds ?? new Set<string>(),
   })
+
+  const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
+  const [openSmartEdit, setOpenSmartEdit] = useState<{ suggestion: SmartEditSuggestion; anchor: HTMLElement } | null>(null)
 
   const latestKaraokeStateRef = useRef<KaraokePluginState>({
     timings: audioTimings,
@@ -785,6 +798,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         () => showFootnoteTooltipsRef.current,
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
@@ -1650,6 +1664,22 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
 
   useEffect(() => {
+    latestSmartEditsRef.current = smartEdits ?? []
+    if (editor) editor.view.dispatch(editor.state.tr.setMeta(smartEditPluginKey, "rebuild"))
+  }, [editor, smartEdits])
+
+  const acceptSmartEdit = useCallback((s: SmartEditSuggestion) => {
+    setOpenSmartEdit(null)
+    if (!editor) return
+    const range = smartEditRange(editor.state.doc, s)
+    if (!range) return
+    // Plain text through the normal transaction path, so the edit commits on
+    // idle like typing would — the commit is the translator's own.
+    editor.view.dispatch(editor.state.tr.insertText(s.new, range.from, range.to))
+    onSmartEditFeedback?.(s, "accept")
+  }, [editor, onSmartEditFeedback])
+
+  useEffect(() => {
     latestKaraokeStateRef.current = {
       ...latestKaraokeStateRef.current,
       timings: audioTimings,
@@ -1862,9 +1892,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // TermLookupPopover. Precedence lives in `resolveEditorClickTarget`.
           const hit = resolveEditorClickTarget(e.target as HTMLElement, {
             rule: Boolean(onRuleClick),
+            smartEdit: Boolean(smartEdits?.length),
             term: Boolean(onTermChipClick),
           })
           if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          else if (hit?.kind === "smartEdit") {
+            const suggestion = smartEdits?.find((s) => suggestionId(s) === hit.id)
+            if (suggestion) setOpenSmartEdit({ suggestion, anchor: hit.element })
+          }
           else if (hit?.kind === "term") onTermChipClick?.(hit.term, hit.element)
         }}
       >
@@ -1878,6 +1913,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
         />
       </div>
+      {openSmartEdit && (
+        <SmartEditPopover
+          suggestion={openSmartEdit.suggestion}
+          anchor={openSmartEdit.anchor}
+          onAccept={() => acceptSmartEdit(openSmartEdit.suggestion)}
+          onDismiss={() => {
+            onSmartEditFeedback?.(openSmartEdit.suggestion, "dismiss")
+            setOpenSmartEdit(null)
+          }}
+          onClose={() => setOpenSmartEdit(null)}
+        />
+      )}
     </div>
   )
 })

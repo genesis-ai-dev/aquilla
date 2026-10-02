@@ -476,7 +476,7 @@ async function denyLanguageWrite(
 }
 
 /** Add or remove one tag in targetLanes / archivedLanes, bumping the version. */
-async function mergeSettingsArray(
+export async function mergeSettingsArray(
   db: AquillaDb,
   projectId: string,
   userId: number,

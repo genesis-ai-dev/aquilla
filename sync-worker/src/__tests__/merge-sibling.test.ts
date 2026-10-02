@@ -259,4 +259,14 @@ describe("handleMergeSiblingRequest — donor authorization (pen test 2026-09-29
     const res = await post({ userId: 7 })
     expect(res?.status).toBe(200)
   })
+
+  // AQU-1550: the identity route's service token now names the caller. A
+  // platform operator has no membership row on any project, so the route marks
+  // the token `src: "platform"` — the one case this check stands aside for.
+  it("allows a platform operator who has no role on the donor", async () => {
+    await seedContent(t, ["c1"], [])
+    const res = await post({ userId: 7, src: "platform" })
+    expect(res?.status).toBe(200)
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(1)
+  })
 })

@@ -118,6 +118,8 @@ curl -s -X POST "http://127.0.0.1:8788/api/v2/projects/$HOST/merge-sibling" \
 | --- | --- |
 | Response | `{ merged: n, skipped: [...], lane: "pt", actions: ... }` — skipped lists donor cells with no matching host `cell_id` |
 | Host workspace | New `pt` lane in the switcher with the donor's translations, each pinned to the host source head |
+| Host Settings → Languages | The lane is listed like any other, named after the tag you passed (`pt`); rename it there. Pass a language name as the tag (`"lane":"Portuguese"`) to get that name from the start |
+| A tag another host lane already shows as its name | 400, nothing merged |
 | Donor | Archived, `{ mergedInto, mergedLane }` in its settings |
 | Re-run the same curl | Idempotent — no duplicate events, cell state unchanged |
 | Below project_lead on either side | 403 |

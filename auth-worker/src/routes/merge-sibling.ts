@@ -21,6 +21,11 @@
 //      version bump), archive the donor (existing archive semantics), and write
 //      a { mergedInto, mergedLane } pointer into the donor's settings blob.
 //   4. Return the fold report + the actions taken.
+//
+// The lane is a real lane (AQU-1550): the fold creates its `lanes` record with
+// the first rows it writes, named after the tag, and step 3 registers the tag
+// through the same shared settings write the Languages screen uses. A
+// maintainer renames it afterwards like any other lane.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -30,6 +35,9 @@ import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listDownstreamProjects, loadProjectWithSource } from "../services/source-linking"
 import { triggerMergeSiblingFold } from "../services/merge-sibling"
+import { mergeSettingsArray } from "./project-settings"
+import { listProjectLanes } from "../../../db/shared/lanes"
+import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 
 const mergeSibling = new Hono<AuthHonoEnv>()
 
@@ -171,6 +179,21 @@ mergeSibling.post(
       return c.json({ error: `lane "${lane}" already exists on the host project` }, 400)
     }
 
+    // AQU-1550: the fold creates the lane as a real lane, named after its
+    // tag. Hold that name to the rule every other new lane meets (AQU-1418):
+    // one another of the host's lanes already shows is refused — here, before
+    // anything is written. A record already carrying this tag is the same lane
+    // (an earlier attempt that got as far as creating it), not a clash.
+    const hostLanes = await listProjectLanes(c.env.AQUILLA_PG, hostId)
+    const nameProblem = laneNameProblem({
+      laneId: "",
+      name: lane,
+      others: hostLanes.filter((row) => row.legacyTag !== lane),
+    })
+    if (nameProblem === "duplicate") {
+      return c.json({ error: `a lane named "${lane}" already exists on the host project` }, 400)
+    }
+
     // Fold the donor's default-lane translations into the host lane via the
     // sync-worker front door. If this fails, DON'T mutate anything — the donor
     // stays live and re-runnable.
@@ -178,19 +201,36 @@ mergeSibling.post(
       hostProjectId: hostId,
       donorProjectId,
       lane,
+      caller: { userId: user.id, donorRoleSource: donorRole.source },
     })
     if (!fold.ok) {
       return c.json({ error: fold.error }, fold.status === 500 ? 500 : 502)
     }
 
-    // Register the lane on the host + bump settings version.
-    await writeProjectSettings(
-      c.env,
+    // Register the lane on the host + bump settings version — through the
+    // shared settings write, so the tag and the host's `lanes` records cannot
+    // disagree (AQU-1550): it creates the record if the fold had nothing to
+    // write, and re-reads the settings rather than overwrite a change made
+    // while the fold ran. If it fails the donor stays live; the fold is
+    // idempotent, so running the merge again finishes the job.
+    const registered = await mergeSettingsArray(
+      c.env.AQUILLA_PG,
       hostId,
-      hostSettings,
-      { ...hostSettings.settings, targetLanes: [...existingLanes, lane] },
       user.id,
+      "targetLanes",
+      lane,
+      true,
     )
+    if (registered !== "ok") {
+      return c.json(
+        {
+          error:
+            "the fold succeeded but the lane could not be registered on the host; run the merge again",
+          merged: fold.result.merged,
+        },
+        registered === "conflict" ? 409 : 500,
+      )
+    }
 
     // Archive the donor (existing archive semantics: stamp archived_at/by).
     await c.env.AQUILLA_PG.prepare(

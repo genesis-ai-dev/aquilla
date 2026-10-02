@@ -23,7 +23,8 @@
 // the same value, so the final cells state is unchanged and no event doubles.
 //
 // This module never touches the donor's rows and never touches the host's
-// default lane — it only ever INSERTs the new lane's target rows.
+// default lane — it only ever INSERTs the new lane's target rows, and (AQU-1550)
+// the `lanes` record those rows have to point at.
 
 import { verifyTokenForProject } from '../auth'
 import { checkProjectMembershipDetailed } from './membership'
@@ -36,6 +37,7 @@ import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, ty
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import type { EventPayloads } from './types'
+import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
 
 const BATCH_LIMIT = 100
 const MERGE_AUTHOR = 'merge-sibling'
@@ -190,6 +192,14 @@ export async function mergeSibling(
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
   allStmts.push(buildSettleSeqRangeStmt(db, hostProjectId, baseSeq))
+  // AQU-1550: every cell row points at a `lanes` record (cells.lane_id is NOT
+  // NULL), and the projection above resolves it by tag — so the fold's lane has
+  // to exist before the first cell lands. Nothing else creates it: the identity
+  // route registers the tag in the host's settings only after the fold returns.
+  // The lane statement leads the FIRST batch, so the record and the first rows
+  // that use it commit together: a fold that fails before writing anything
+  // leaves no empty lane behind, and a re-run finds the record and reuses it.
+  allStmts.unshift(ensureTargetLaneStmt(db, hostProjectId, lane))
   for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
     await db.batch(allStmts.slice(i, i + BATCH_LIMIT))
   }

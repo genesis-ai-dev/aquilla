@@ -9,7 +9,7 @@
 // success/failure instead of a bare boolean.
 
 import { sign } from "hono/jwt"
-import type { Env } from "../types"
+import type { Env, RoleResolution } from "../types"
 
 export interface MergeSkip {
   cellId: string
@@ -28,7 +28,14 @@ export type TriggerMergeResult =
 
 export async function triggerMergeSiblingFold(
   env: Env,
-  args: { hostProjectId: string; donorProjectId: string; lane: string },
+  args: {
+    hostProjectId: string
+    donorProjectId: string
+    lane: string
+    /** Who is running the merge, and the path their role on the DONOR resolved
+     *  through — the sync worker re-checks that role itself (see below). */
+    caller: { userId: number; donorRoleSource: RoleResolution["source"] }
+  },
 ): Promise<TriggerMergeResult> {
   if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) {
     return { ok: false, status: 500, error: "sync worker not configured" }
@@ -37,13 +44,22 @@ export async function triggerMergeSiblingFold(
   const now = Math.floor(Date.now() / 1000)
   const token = await sign(
     {
-      userId: 0,
+      // AQU-1550: the person running the merge, not a placeholder. The token
+      // only proves host access, so the fold endpoint re-checks the caller's
+      // LIVE role on the donor (pen test 2026-09-29) — which it can only do
+      // for a real user id. With `userId: 0` it refused every merge.
+      userId: args.caller.userId,
       username: "merge-sibling",
       projectId: args.hostProjectId,
       // Not checked by verifyTokenForProject (project-scoped, not file-scoped)
       // — placeholder to satisfy the SyncTokenClaims shape.
       fileId: "__merge_sibling__",
       role: 500,
+      // How the caller's DONOR role resolved. The donor check is the one thing
+      // the fold endpoint reads this for: "platform" (an ADMIN_EMAILS operator,
+      // who has no membership row to re-check) is its documented exemption;
+      // every other source is verified against the donor's live grants.
+      src: args.caller.donorRoleSource,
       aud: "sync",
       iat: now,
       exp: now + 300,

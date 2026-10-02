@@ -156,6 +156,89 @@ export async function updateProjectSettings(
   }
 }
 
+/** One row of the `lanes` list GET …/settings returns alongside the blob. */
+export interface ProjectLane {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  archivedAt: string | null
+}
+
+/** GET /api/v2/projects/:projectId/settings — the project's lane records
+ * (what the lane switcher and Settings → Languages list), not the tag registry
+ * in the settings blob. */
+export async function readProjectLanes(jwt: string, projectId: string): Promise<ProjectLane[]> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+    { headers: authHeaders(jwt) },
+  )
+  if (!r.ok) throw new Error(`read lanes failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { lanes?: ProjectLane[] }).lanes ?? []
+}
+
+/** PATCH /api/v2/projects/:projectId/lanes/:laneId — rename a target lane, as
+ * Settings → Languages does. Returns the HTTP status for the spec to assert. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  name: string,
+): Promise<number> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+    { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ name }) },
+  )
+  return r.status
+}
+
+/** POST /api/v2/projects/:projectId/link-source — make `projectId` read its
+ * source from another project. `seeded` reports whether the upstream's files
+ * and cells arrived before the call returned. */
+export async function linkProjectToSource(
+  jwt: string,
+  projectId: string,
+  args: { sourceProjectId: string; mode: "clone" | "live"; consumes?: "source" | "target"; gate?: "head" | "validated" },
+): Promise<{ seeded: boolean }> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/link-source`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(args) },
+  )
+  if (!r.ok) throw new Error(`link-source failed: HTTP ${r.status} — ${await r.text()}`)
+  return (await r.json()) as { seeded: boolean }
+}
+
+export interface MergeSiblingResponse {
+  merged?: number
+  skipped?: Array<{ cellId: string; preview: string }>
+  lane?: string
+  actions?: { laneRegistered: boolean; donorArchived: boolean; donorPointerWritten: boolean }
+  error?: string
+}
+
+/** POST /api/v2/projects/:hostId/merge-sibling — fold a sibling project into
+ * the host as one more target lane. There is no UI for this yet; the route is
+ * the product surface. Returns status + body so a spec can assert a refusal. */
+export async function mergeSiblingProject(
+  jwt: string,
+  hostProjectId: string,
+  args: { donorProjectId: string; lane: string },
+): Promise<{ status: number; body: MergeSiblingResponse }> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(hostProjectId)}/merge-sibling`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(args) },
+  )
+  const text = await r.text()
+  let body: MergeSiblingResponse
+  try {
+    body = JSON.parse(text) as MergeSiblingResponse
+  } catch {
+    body = { error: text }
+  }
+  return { status: r.status, body }
+}
+
 /** POST /api/v2/projects/:projectId/invites — mint a share-link invite
  * (caller needs project_lead+). Pass an email to email-bind it. */
 export async function createProjectInvite(

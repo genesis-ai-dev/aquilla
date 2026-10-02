@@ -12,6 +12,19 @@ describe("extraRegistryLanes", () => {
     expect(extraRegistryLanes(["Spanish", "French"], "es")).toEqual(["French"])
   })
 
+  it("keeps a regional lane of the primary's language", () => {
+    // languagesEqual("fr-CA", "French") is true — it ignores the region — but
+    // Canadian French is its own lane in a French project.
+    expect(isPrimaryRegistryLane("fr-CA", "French")).toBe(false)
+    expect(extraRegistryLanes(["fr-CA", "fr-BE"], "French")).toEqual(["fr-CA", "fr-BE"])
+    expect(extraRegistryLanes(["French", "fr-CA"], "fr")).toEqual(["fr-CA"])
+  })
+
+  it("drops a regional primary stored in the registry, whatever its case or separator", () => {
+    expect(extraRegistryLanes(["fr-CA", "fr-BE"], "fr-CA")).toEqual(["fr-BE"])
+    expect(extraRegistryLanes(["fr_ca", "fr-BE"], "fr-CA")).toEqual(["fr-BE"])
+  })
+
   it("keeps extras-only registries used by older projects", () => {
     expect(extraRegistryLanes(["French"], "Spanish")).toEqual(["French"])
     expect(extraRegistryLanes(["swh"], null)).toEqual(["swh"])

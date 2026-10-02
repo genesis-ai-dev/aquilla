@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
+import { nextValidatorsListState } from "./validators-list-state"
 
 interface TargetValidationControlProps {
   cellRef: string
@@ -119,6 +120,8 @@ export function TargetValidationControl({
 }: TargetValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
+  // A click opened (or kept) the list, so the pointer leaving must not close it.
+  const [popoverPinned, setPopoverPinned] = useState(false)
   const [pendingValidation, setPendingValidation] = useState<{
     value: boolean
     authoritativeAtRequest: boolean
@@ -182,23 +185,18 @@ export function TargetValidationControl({
   }
 
   function handleOpenChange(nextOpen: boolean, details: { reason: string; cancel(): void }) {
-    if (!nextOpen) {
-      setPopoverOpen(false)
-      return
-    }
-    if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidateThisCell && !isSelfValidated) {
-        details.cancel()
-        return
-      }
-      setPopoverOpen(true)
-      return
-    }
-    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
-      details.cancel()
-      return
-    }
-    setPopoverOpen(true)
+    const decision = nextValidatorsListState(
+      { open: nextOpen, reason: details.reason },
+      {
+        open: popoverOpen,
+        pinned: popoverPinned,
+        pressValidates: canValidateThisCell && !isSelfValidated,
+        hasValidatorInfo,
+      },
+    )
+    if (decision.cancel) details.cancel()
+    setPopoverOpen(decision.open)
+    setPopoverPinned(decision.pinned)
   }
 
   const renderButton = (onClick?: () => void) => (
@@ -283,6 +281,7 @@ export function TargetValidationControl({
                             onClick={() => {
                               changeValidation(false)
                               setPopoverOpen(false)
+                              setPopoverPinned(false)
                             }}
                           >
                             <Trash2 className="h-3 w-3" />

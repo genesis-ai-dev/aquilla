@@ -191,4 +191,60 @@ describe("TargetValidationControl", () => {
       expect(onValidationChange).toHaveBeenCalledWith(false)
     })
   })
+
+  // PR 1 browser pass, 2026-10-02: after hover opened the "Text validated by"
+  // list, a click on the check closed it. Base UI reads a click that comes
+  // more than 500 ms after a hover open as "close". A click now pins it.
+  describe("the Text validated by list", () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    it("stays open after a click on a hover-opened list, and after the pointer leaves", async () => {
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice", "bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={vi.fn()}
+        />,
+      )
+      const button = screen.getByRole("button", { name: /Validated/ })
+      fireEvent.pointerEnter(button, { pointerType: "mouse" })
+      fireEvent.mouseEnter(button)
+      fireEvent.mouseMove(button, { movementX: 5, movementY: 5 })
+      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+
+      // Past Base UI's 500 ms "patient click" window, where the click used to close it.
+      await wait(650)
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      await wait(50)
+      expect(screen.getByText("Text validated by")).toBeInTheDocument()
+
+      fireEvent.mouseLeave(button, { relatedTarget: document.body })
+      await wait(300)
+      expect(screen.getByText("Text validated by")).toBeInTheDocument()
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+
+      // Closed lists open again on the next click.
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+    })
+
+    it("closes after Remove your validation", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice", "bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Validated/ }))
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+    })
+  })
 })

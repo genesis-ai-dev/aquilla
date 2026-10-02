@@ -591,6 +591,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
+    // AQU-1573 — the Bible each target language copies quoted verses from.
+    "projectSettings.section.referenceBible": "Reference Bible",
+    "projectSettings.referenceBible.description":
+      "Choose the Bible each language quotes from. When a source line gives a verse " +
+      "reference, such as Isaiah 40:25, the AI copies that verse from this Bible instead " +
+      "of translating it, and a check warns when a quoted verse does not match. This is " +
+      "separate from Bible resources.",
+    "projectSettings.referenceBible.defaultLane": "Default language",
+    "projectSettings.referenceBible.none": "None",
+    "projectSettings.referenceBible.optionLabel": "{name} ({language})",
+    "projectSettings.referenceBible.notInstalled": "{id} (not installed)",
+    "projectSettings.referenceBible.noneInstalled":
+      "No reference Bibles are installed on this server yet.",
+    "projectSettings.referenceBible.loading": "Loading the Bibles…",
+    "projectSettings.referenceBible.loadFailed": "Could not load the list of Bibles. Try again later.",
+    "projectSettings.referenceBible.selectLabel": "Reference Bible for {lane}",
+    "projectSettings.referenceBible.saveFailed": "Could not save that change",
+
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
@@ -1053,6 +1071,59 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      // AQU-1573 — Reference Bible card.
+      "projectSettings.section.referenceBible": {
+        description:
+          "Heading of the Project settings card where each target language picks the Bible " +
+          "it copies quoted verses from. \"Reference Bible\" means a published Bible text used " +
+          "as the source of verse wording, not a study tool.",
+      },
+      "projectSettings.referenceBible.description": {
+        description:
+          "Explanation under the Reference Bible heading. \"Bible resources\" is the name of " +
+          "the separate card above it; translate it the same way that card's heading is translated.",
+      },
+      "projectSettings.referenceBible.defaultLane": {
+        description:
+          "Small caption under the project's main target language in the Reference Bible card, " +
+          "marking it as the project's default language.",
+      },
+      "projectSettings.referenceBible.none": {
+        description: "Dropdown option meaning this language quotes from no reference Bible.",
+        maxLength: 24,
+      },
+      "projectSettings.referenceBible.optionLabel": {
+        description: "One Bible in the dropdown, e.g. \"Van Dyck (Arabic)\".",
+        placeholders: {
+          name: "Short name of the Bible, e.g. \"Van Dyck\" or \"King James Version\" (data, not translated).",
+          language: "Language the Bible is written in, in English, e.g. \"Arabic\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.notInstalled": {
+        description:
+          "Shown in the dropdown when the project names a Bible that this server does not have.",
+        placeholders: {
+          id: "The Bible's id as stored in the settings, e.g. \"arb-vandyck\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.noneInstalled": {
+        description: "Shown in the Reference Bible card, instead of the dropdowns, when the server has no Bibles loaded.",
+      },
+      "projectSettings.referenceBible.loading": {
+        description: "Shown in the Reference Bible card while the list of Bibles loads.",
+      },
+      "projectSettings.referenceBible.loadFailed": {
+        description: "Shown in the Reference Bible card when the list of Bibles could not be loaded.",
+      },
+      "projectSettings.referenceBible.selectLabel": {
+        description: "Accessible name of one language's Bible dropdown (read by screen readers).",
+        placeholders: {
+          lane: "The target language's name, e.g. \"Arabic\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.saveFailed": {
+        description: "Error under a Bible dropdown when the choice could not be saved.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

@@ -40735,7 +40735,17 @@
     "workspace.analysis.exportCsv": "91f71c14c8d6cc64",
     "workspace.analysis.unpopulatedNote": "7aa135571e580992",
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
-    "workspace.analysis.skipped": "e23b1f00abf0439f"
+    "workspace.analysis.skipped": "e23b1f00abf0439f",
+    "projectSettings.section.referenceBible": "a421af95909ebf88",
+    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
+    "projectSettings.referenceBible.none": "dc937b59892604f5",
+    "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
+    "projectSettings.referenceBible.noneInstalled": "38a6338d6748355b",
+    "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
+    "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
+    "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47303,7 +47313,17 @@
     "workspace.analysis.exportCsv": "91f71c14c8d6cc64",
     "workspace.analysis.unpopulatedNote": "7aa135571e580992",
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
-    "workspace.analysis.skipped": "e23b1f00abf0439f"
+    "workspace.analysis.skipped": "e23b1f00abf0439f",
+    "projectSettings.section.referenceBible": "a421af95909ebf88",
+    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
+    "projectSettings.referenceBible.none": "dc937b59892604f5",
+    "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
+    "projectSettings.referenceBible.noneInstalled": "38a6338d6748355b",
+    "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
+    "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
+    "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53782,6 +53802,16 @@
     "workspace.analysis.exportCsv": "91f71c14c8d6cc64",
     "workspace.analysis.unpopulatedNote": "7aa135571e580992",
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
-    "workspace.analysis.skipped": "e23b1f00abf0439f"
+    "workspace.analysis.skipped": "e23b1f00abf0439f",
+    "projectSettings.section.referenceBible": "a421af95909ebf88",
+    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
+    "projectSettings.referenceBible.none": "dc937b59892604f5",
+    "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
+    "projectSettings.referenceBible.noneInstalled": "38a6338d6748355b",
+    "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
+    "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
+    "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
   }
 }

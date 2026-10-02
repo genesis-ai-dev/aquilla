@@ -109,6 +109,8 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { ReferenceBibleSection } from "./ProjectSettings/ReferenceBibleSection"
+import { fetchReferenceBibles } from "@/lib/frontier/reference-bibles"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -477,6 +479,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+  // AQU-1573: the installed reference Bibles for the Reference Bible card.
+  const loadReferenceBibles = useCallback(() => {
+    const jwt = session?.jwt
+    return jwt ? fetchReferenceBibles(jwt) : Promise.reject(new Error("not signed in"))
+  }, [session?.jwt])
 
   const renameLane = useCallback(async (laneId: string, name: string) => {
     const jwt = session?.jwt
@@ -1325,6 +1332,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    // AQU-1573: server-side texts, so cloud projects only.
+    { id: "section-reference-bible", label: "Reference Bible", keywords: ["reference bible", "bible version", "quote", "quotation", "scripture", "verse", "van dyck", "kjv", "king james", "sermon"], visible: isCloudProject },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
@@ -1394,10 +1403,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, content structure, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible resources, reference Bible",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-reference-bible", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1538,6 +1547,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-project-info",
       "section-languages",
       "section-bible-resources",
+      "section-reference-bible",
       "section-import",
       "section-user",
       "section-members",
@@ -2011,6 +2021,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
+          </div>
+        )}
+
+        {searchGroupLabel("section-reference-bible")}
+        {sectionsToRender.some((s) => s.id === "section-reference-bible") && (
+          <div id="section-reference-bible">
+            {/* AQU-1573. Saves on change, like the repetition-propagation
+                control — see the component's note for why it patches the
+                shared blob directly instead of riding this page's Save. */}
+            <ReferenceBibleSection
+              value={sharedSettingsBlob?.referenceBibleVersions}
+              targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
+              targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+              archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
+              laneRecords={sharedLanes ?? undefined}
+              loadVersions={loadReferenceBibles}
+              disabled={!canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
           </div>
         )}
 

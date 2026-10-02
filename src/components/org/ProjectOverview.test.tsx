@@ -121,8 +121,18 @@ vi.mock("@/lib/frontier/portfolio", () => ({
 // Stub both to capture the lane they were handed (defaultLane / lane) without
 // pulling their whole fetch surface into this suite.
 vi.mock("@/components/AssignModal", () => ({
-  AssignModal: ({ open, defaultLane }: { open: boolean; defaultLane?: string }) =>
-    open ? <div data-testid="assign-modal-mock" data-lane={defaultLane ?? ""} /> : null,
+  AssignModal: ({ open, defaultLane, projectFiles }: {
+    open: boolean
+    defaultLane?: string
+    projectFiles?: Array<{ id: string }>
+  }) =>
+    open ? (
+      <div
+        data-testid="assign-modal-mock"
+        data-lane={defaultLane ?? ""}
+        data-files={(projectFiles ?? []).map((f) => f.id).join(",")}
+      />
+    ) : null,
 }))
 vi.mock("@/components/StaffLanePopover", () => ({
   StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
@@ -1880,6 +1890,25 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {
+    // A linked video with an attached caption track and a dubbing cue sheet:
+    // one document, two timeline files the editor never lists.
+    useLaneProject([
+      { id: "f-video", name: "Episode", type: "video", createdAt: "x", cellCount: 0 },
+      { id: "f-track", name: "Episode captions", type: "vtt", role: "timeline-content", createdAt: "x", cellCount: 500 },
+      { id: "f-cues", name: "Episode audio cues", type: "vtt", role: "audio-cues", createdAt: "x", cellCount: 40 },
+    ] as ProjectRecord["files"])
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByText("1 file")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
+    const modal = await screen.findByTestId("assign-modal-mock")
+    expect(modal.getAttribute("data-files")).toBe("f-video")
   })
 
   it("lane row ⋯ menu has Assign and Staff, not Open", async () => {

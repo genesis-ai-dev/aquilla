@@ -13,6 +13,7 @@ import { resolveExportFloor } from "./export-floor"
 import { humanOriginalDownloadName, uniqueZipEntryName } from "../../../shared/import-contract"
 import { makeZip, type ZipEntry } from "../lib/zip"
 import { readOriginalSourceBytes } from "./original-source"
+import { countedFileSql } from "../../../db/shared/counted-files"
 
 export interface OriginalsBundleEnv {
   AQUILLA_PG?: AquillaDb
@@ -63,7 +64,10 @@ export async function handleOriginalsBundleRequest(
          FROM file_source_blobs b
          JOIN files f ON f.id = b.file_id AND f.project_id = b.project_id
         WHERE b.project_id = ?
-          AND f.deleted_at IS NULL
+          -- AQU-1566: a caption track keeps its original caption file too,
+          -- but the track is not a file of the project, so its original is
+          -- not one of the project's originals.
+          AND ${countedFileSql("f")}
         ORDER BY f.name ASC`,
     )
     .bind(projectId)

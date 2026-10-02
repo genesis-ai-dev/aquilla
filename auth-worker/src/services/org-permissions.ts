@@ -5,9 +5,9 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import {
+  inAudioCountedFileSetSql,
   inCountedFileSql,
-  inCountedFileSetSql,
-  uncountedFilesCteSql,
+  uncountedAudioFilesCteSql,
   countedFileSql,
   notHiddenFileSql,
 } from "../../../db/shared/counted-files"
@@ -1624,9 +1624,11 @@ const PORTFOLIO_UNIT_COLUMNS = `
  *     projects up front, as an array the executor has in hand before it
  *     touches `cells`: empty array, no read; otherwise an index lookup per
  *     excluding project.
- *   * The counted-files rule is applied against `uncounted_files`, one small
- *     set built once for the page's projects, never as a probe per audio row
- *     (see `inCountedFileSetSql`). That probe ran ~140k times here.
+ *   * The counted-files rule is applied against `uncounted_audio_files`, one
+ *     small set built once for the page's projects, never as a probe per audio
+ *     row (see `inCountedFileSetSql`). That probe ran ~140k times here. It is
+ *     the AUDIO form of the set (AQU-1566), which keeps a dubbing project's
+ *     cue sheet: both of its readers here describe recordings.
  *
  * Measured on the dev database for an 8-org, 433-project caller, same rows
  * either way: 6-9s warm and 74s cold before, 0.7s after.
@@ -1656,12 +1658,15 @@ const portfolioCtes = (orgPredicate: string) => `
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
-     ), ${uncountedFilesCteSql('SELECT project_id FROM policy')},
+     ), ${uncountedAudioFilesCteSql('SELECT project_id FROM policy')},
      structural_cells AS (
        -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
-       -- and has to describe the same files the totals above now do. A heading
-       -- inside a hidden or deleted file is no longer in the numerator, so
+       -- and has to describe the same files the totals it is taken off do. A
+       -- heading inside a deleted file is no longer in the numerator, so
        -- subtracting it would push a project's count below its real one.
+       -- AQU-1566: its only reader is au_cells below, so it takes the AUDIO
+       -- form of the rule, the one au_cells uses: a dubbing project's cue
+       -- sheet stays in, as it does there.
        --
        -- The project filter is an ARRAY on purpose, not a join to policy: see
        -- the note above portfolioCtes. Do not turn it back into a join.
@@ -1670,7 +1675,7 @@ const portfolioCtes = (orgPredicate: string) => `
         WHERE c.project_id = ANY(ARRAY(
                 SELECT pol.project_id FROM policy pol WHERE pol.excluded))
           AND c.side = 'source' AND c.type IN ('heading', 'paratext')
-          AND ${inCountedFileSetSql('c')}
+          AND ${inAudioCountedFileSetSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1701,11 +1706,14 @@ const portfolioCtes = (orgPredicate: string) => `
           AND sc.file_id = a.file_id
           AND sc.cell_id = a.cell_id
         WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
-          -- AQU-1626: takes recorded against a cue sheet or a deleted file are
-          -- not coverage of the work. The recorded-milliseconds sum takes the
-          -- same filter: a tombstoned file's hours are not hours the project
-          -- has banked.
-          AND ${inCountedFileSetSql('a')}
+          -- AQU-1626: takes recorded against a deleted file are not coverage
+          -- of the work. The recorded-milliseconds sum takes the same filter:
+          -- a tombstoned file's hours are not hours the project has banked.
+          -- AQU-1566: the AUDIO form of the rule, which keeps the cue sheet. A
+          -- dubbing project records every take against its hidden audio-cues
+          -- sibling (AQU-1278), so the text rule here read every dubbed
+          -- episode as 0% recorded while its plan board showed the takes.
+          AND ${inAudioCountedFileSetSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (

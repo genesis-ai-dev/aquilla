@@ -566,8 +566,10 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(structuralCells).not.toMatch(/JOIN\s+policy/)
     // The counted-files rule (AQU-1626) is one small set built once for the
     // page. As a correlated probe it ran once per audio take — ~140k times.
-    expect(aggregate).toContain("uncounted_files AS MATERIALIZED")
+    // (AQU-1566: the AUDIO form of that set, which keeps the cue sheet.)
+    expect(aggregate).toContain("uncounted_audio_files AS MATERIALIZED")
     expect(aggregate).not.toMatch(/FROM files uncounted_file\b/)
+    expect(aggregate).not.toMatch(/FROM files uncounted_audio_file\b/)
   })
 
   it("returns one bounded portfolio per requested organization", async () => {
@@ -881,14 +883,15 @@ describe("plan unit rollup", () => {
 
   // AQU-1626 applied the same rule to the AUDIO rollup, through a different
   // door: a take is keyed by file but never joined to `files`, so it is
-  // filtered against the uncounted-files set (inCountedFileSetSql). That half
-  // shipped without a test, and it is the half whose first form — a probe per
-  // take — took this endpoint past the SPA's 15s abort.
+  // filtered against the uncounted-files set (inAudioCountedFileSetSql since
+  // AQU-1566, which keeps the cue sheet). That half shipped without a test,
+  // and it is the half whose first form — a probe per take — took this
+  // endpoint past the SPA's 15s abort.
   const take = (fileId: string, cellId: string, durationMs: number) =>
     sql(`INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts)
          VALUES ('pa', '${fileId}', '${cellId}', 'a-${fileId}-${cellId}', 'recording', 'frontier-audio://${fileId}-${cellId}.wav', ${durationMs}, 1, 0, 1, 'ea-${fileId}-${cellId}', 1)`)
 
-  it("keeps takes in tombstoned files and hidden companions out of audio coverage and recorded time", async () => {
+  it("keeps takes in tombstoned files and caption-track content out of audio coverage and recorded time", async () => {
     await seedOrg()
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('live', 'pa', 'Live', 'e1', 10)")
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 7, 123)")
@@ -898,9 +901,11 @@ describe("plan unit rollup", () => {
     await take("gone", "c1", 9000)
     await take("cue", "c1", 9000)
     await take("caption-track", "c1", 9000)
-    // One take is work. The other three are a deleted file's and two cue
-    // sheets', and their 27 seconds are not time the project has banked.
-    expect(await portfolio()).toMatchObject({ audioCells: 1, validatedAudioCells: 1, recordedMs: 4000 })
+    // Two takes are work: the file's own and the cue sheet's, because a
+    // dubbing project records against its cue sheet (AQU-1566). The deleted
+    // file's and the caption track's 18 seconds are not time the project has
+    // banked.
+    expect(await portfolio()).toMatchObject({ audioCells: 2, validatedAudioCells: 2, recordedMs: 13000 })
   })
 
   it("still counts a take whose file row is missing", async () => {
@@ -1179,4 +1184,116 @@ describe("AQU-1421 portfolio lane visibility", () => {
       expect(four.statements).toHaveLength(one.statements.length)
     },
   )
+})
+
+describe("AQU-1566 portfolio counts only the files that count", () => {
+  const sql = (q: string) => env.AQUILLA_PG.prepare(q).run()
+
+  // One real episode (6 cells) beside the three kinds of file row that are not
+  // a document: a deleted file, the dubbing import's cue sheet, and a 500-cue
+  // caption track's content file. Before AQU-1566 the portfolio summed all four.
+  async function seedEpisodeWithHiddenFiles() {
+    await seedUser(1, "owner")
+    await seedUser(2, "translator")
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)")
+    await sql("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)")
+    await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Linked video', 1, 1)")
+    await sql("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('pa', 2, 400)")
+    await sql(
+      `INSERT INTO project_settings (project_id, settings, version) VALUES ('pa', '{"targetLanguage":"French","targetLanes":["es"]}', 1)`,
+    )
+    await sql("INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'French', ''), ('eslane01', 'pa', 'target', 'Spanish', 'es')")
+    await sql("INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('pa', 2, 'eslane01', 400)")
+    await sql(
+      `INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES
+        ('e1', 1, 'pa', 'file.create', 'owner', '{}', 1, 1, 1),
+        ('e2', 1, 'pa', 'file.create', 'owner', '{}', 2, 2, 2),
+        ('e3', 1, 'pa', 'file.create', 'owner', '{}', 3, 3, 3),
+        ('e4', 1, 'pa', 'file.create', 'owner', '{}', 4, 4, 4)`,
+    )
+    await sql(
+      `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count, filled_count, approved_count, ai_drafted_count, last_edit_at, deleted_at) VALUES
+        ('f-ep',    'pa', 'Episode 1',        NULL,               'vtt', NULL,   'e1', 6,   3,  2,  2,  9000,  NULL),
+        ('f-del',   'pa', 'Old episode',      NULL,               'vtt', NULL,   'e2', 50,  50, 50, 50, 99999, 1700000000000),
+        ('f-cue',   'pa', 'Episode 1 audio',  'audio-cues',       'vtt', 'f-ep', 'e3', 40,  40, 40, 40, 99999, NULL),
+        ('f-track', 'pa', 'Episode captions', 'timeline-content', 'vtt', 'f-ep', 'e4', 500, 0,  0,  0,  99999, NULL)`,
+    )
+    await sql(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, updated_at) VALUES
+        ('pa', 'f-ep',    'file', '', '',   6,   3,  '{}', 8000),
+        ('pa', 'f-ep',    'file', '', 'es', 6,   1,  '{}', 1000),
+        ('pa', 'f-del',   'file', '', '',   50,  50, '{}', 1),
+        ('pa', 'f-del',   'file', '', 'es', 50,  50, '{}', 1),
+        ('pa', 'f-cue',   'file', '', '',   40,  40, '{}', 1),
+        ('pa', 'f-cue',   'file', '', 'es', 40,  40, '{}', 1),
+        ('pa', 'f-track', 'file', '', '',   500, 0,  '{}', 1),
+        ('pa', 'f-track', 'file', '', 'es', 500, 0,  '{}', 1)`,
+    )
+    await sql(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted) VALUES
+        ('pa', 'f-ep',    'c1', 'target', 'es', 'draft', 'e1', 1, 1),
+        ('pa', 'f-del',   'c1', 'target', 'es', 'draft', 'e2', 1, 1),
+        ('pa', 'f-del',   'c2', 'target', 'es', 'draft', 'e2', 1, 1),
+        ('pa', 'f-cue',   'q1', 'target', 'es', 'draft', 'e3', 1, 1),
+        ('pa', 'f-track', 't1', 'target', 'es', 'draft', 'e4', 1, 1)`,
+    )
+    // A take on the episode, one on the deleted file, one on a cue of the cue
+    // sheet (where a dubbing project's takes really live) and one on the
+    // caption track's content.
+    await sql(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts) VALUES
+        ('pa', 'f-ep',    'c1', 'a1', 'recording', 'frontier-audio://a1.wav', 1000, 1, 0, 'e1', 1),
+        ('pa', 'f-del',   'c1', 'a2', 'recording', 'frontier-audio://a2.wav', 2000, 1, 0, 'e2', 1),
+        ('pa', 'f-cue',   'q1', 'a3', 'recording', 'frontier-audio://a3.wav', 4000, 1, 0, 'e3', 1),
+        ('pa', 'f-track', 't1', 'a4', 'recording', 'frontier-audio://a4.wav', 8000, 1, 0, 'e4', 1)`,
+    )
+  }
+
+  async function rowFor(userId: number) {
+    const rows = await getOrgPortfolios(env as unknown as Env, [1], { userId, isAdmin: false })
+    return rows.find((row) => row.id === "pa")!
+  }
+
+  it("leaves deleted files, cue sheets and caption tracks out of the text totals and lanes", async () => {
+    await seedEpisodeWithHiddenFiles()
+    const owner = await rowFor(1)
+    expect(owner).toMatchObject({
+      totalCells: 6,
+      filledCells: 3,
+      validatedCells: 2,
+      aiDraftedCells: 2,
+      lastEditAt: 9000,
+      // The plan board's own rule, so the two numbers on OrgHome agree.
+      unitsTotal: 1,
+    })
+    const byLane = Object.fromEntries(owner.lanes.map((lane) => [lane.lane, lane]))
+    expect(byLane[""]).toMatchObject({ totalCells: 6, filledCells: 3 })
+    expect(byLane.es).toMatchObject({ totalCells: 6, filledCells: 1 })
+  })
+
+  it("keeps the cue sheet's takes in audio coverage and drops the deleted file's and the track's", async () => {
+    await seedEpisodeWithHiddenFiles()
+    const owner = await rowFor(1)
+    expect(owner).toMatchObject({ audioCells: 2, recordedMs: 5000 })
+  })
+
+  it("counts machine drafts per lane on the same files behind the read wall", async () => {
+    await seedEpisodeWithHiddenFiles()
+    env.LANE_READ_WALL = "1"
+    try {
+      const translator = await rowFor(2)
+      expect(translator.lanes.map((lane) => lane.lane)).toEqual(["es"])
+      expect(translator).toMatchObject({ totalCells: 6, filledCells: 1, aiDraftedCells: 1 })
+    } finally {
+      env.LANE_READ_WALL = undefined
+    }
+  })
+
+  it("serves the same totals through the org portfolio route", async () => {
+    await seedEpisodeWithHiddenFiles()
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("owner")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; totalCells: number; audioCells: number }> }
+    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 6, audioCells: 2 })
+  })
 })

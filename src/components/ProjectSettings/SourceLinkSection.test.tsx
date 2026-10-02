@@ -166,3 +166,46 @@ describe("SourceLinkSection — a link that has never synced (AQU-1544)", () => 
     expect(screen.queryByText(/Nothing has come through this link yet/)).toBeNull()
   })
 })
+
+// AQU-1559 — how much of the upstream this link follows. The two kinds of link
+// behave differently where it matters most and least visibly: a whole-project
+// link keeps receiving the files the upstream gains, a fixed-list one does not.
+// After a reload the confirm step is long gone, so this card is the only place
+// that distinction can be read.
+describe("SourceLinkSection — followed-file scope (AQU-1559)", () => {
+  // WHY: the subset badge is the answer to "what did we actually link?" — the N
+  // the link follows against the M the upstream holds, both server-supplied so a
+  // reload says the same thing.
+  it("states how many of the upstream's files a subset link follows", () => {
+    renderSection({
+      sourceLinkCursor: 42,
+      sourceLinkFileIds: ["up-MAT", "up-MRK"],
+      sourceLinkUpstreamFileCount: 3,
+    })
+
+    expect(screen.getByText("2 of 3 files")).toBeTruthy()
+    expect(screen.queryByText("All files")).toBeNull()
+  })
+
+  // WHY: a link made with everything checked follows the whole project, and must
+  // not be shown as a count — "66 of 66 files" would read as a pinned link,
+  // which is the opposite of what it does with the upstream's next file.
+  it("says all files for a whole-project link, including a legacy one", () => {
+    renderSection({ sourceLinkCursor: 42, sourceLinkFileIds: null })
+    expect(screen.getByText("All files")).toBeTruthy()
+
+    // An older server omits the field entirely; that means the same thing.
+    renderSection({ sourceLinkCursor: 42 })
+    expect(screen.getAllByText("All files").length).toBe(2)
+  })
+
+  // WHY: a server that sends the selection without a total must not make the
+  // card invent one. Stating the count against itself is honest about what is
+  // known ("the link follows these two"); "All files" would be a stronger claim
+  // than the data supports.
+  it("falls back to the followed count when the upstream total is missing", () => {
+    renderSection({ sourceLinkCursor: 42, sourceLinkFileIds: ["up-MAT", "up-MRK"] })
+
+    expect(screen.getByText("2 of 2 files")).toBeTruthy()
+  })
+})

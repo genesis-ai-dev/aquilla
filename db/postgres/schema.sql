@@ -175,6 +175,13 @@ CREATE TABLE projects (
     source_link_gate     TEXT,   -- 'head' | 'validated' (target-consumption only)
     -- Max upstream server_seq (lane-relevant) this project has mirrored.
     source_link_cursor   BIGINT NOT NULL DEFAULT 0,
+    -- AQU-1559: which of the upstream's files this link follows (migration
+    -- 0127). NULL = the whole project, including files the upstream gains
+    -- later (every link before this slice). A JSON array of UPSTREAM file ids =
+    -- a fixed list: the mirror folds only those, later upstream files do not
+    -- arrive, and detach copies only them. TEXT, parsed in JS, degrading to
+    -- "whole project" on a malformed blob.
+    source_link_file_ids TEXT,
     -- AQU-507: designated Project Manager (attribution, distinct from the
     -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
     -- so removing a user never orphans the row. (migration 0072)

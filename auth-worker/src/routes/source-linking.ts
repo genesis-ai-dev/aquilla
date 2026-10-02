@@ -28,6 +28,7 @@ import {
   emitLinkSourceEvent,
   listDownstreamProjects,
   loadProjectWithSource,
+  loadLinkFileIds,
   snapshotSourceCells,
   triggerLinkSeedSync,
 } from "../services/source-linking"
@@ -41,11 +42,26 @@ const LINK_MIN_ROLE = ROLE.PROJECT_LEAD // 500
 // (no mirror sync runs) rather than silently opting an old client into live
 // mirroring. `consumes`/`gate` default per the design spec §2 ('source' /
 // 'validated').
+//
+// AQU-1559: `fileIds` is the caller's file selection — the UPSTREAM file ids
+// this link should follow. Omitted (the only shape any client sent before this
+// slice) means the whole project: every file the upstream has now and every one
+// it gains later, which is what every existing link does. A list means a fixed
+// link: only those files mirror, and later upstream files are not among them.
+// The ids are stored as given — the mirror matches on identity, so an id the
+// upstream does not (or no longer) has simply never matches, and a client that
+// passes the upstream's entire current list is asking for exactly that: those
+// files, pinned.
 const linkSourceSchema = z.object({
   sourceProjectId: z.string().min(1).max(256),
   mode: z.enum(["clone", "live"]).optional(),
   consumes: z.enum(["source", "target"]).optional(),
   gate: z.enum(["head", "validated"]).optional(),
+  // Non-empty: "follow no files" is not a link, it is a mistake — the client
+  // disables its own confirm button on an empty selection, and a request that
+  // got past that is a 400 rather than a link that can never sync. The cap is a
+  // whole Bible and then some; files.id is a UUID, hence 256.
+  fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000).optional(),
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -64,7 +80,15 @@ sourceLinking.post(
       mode = "clone",
       consumes = "source",
       gate = "validated",
+      fileIds,
     } = c.req.valid("json")
+
+    // AQU-1559: deduped so the stored list is the set it is read as, and
+    // serialized once here rather than at the two places it is bound below.
+    // NULL (not '[]') is the whole-project link — every reader treats a null
+    // column as "follow everything", which is what keeps pre-slice rows working.
+    const followedFileIds = fileIds ? [...new Set(fileIds)] : null
+    const followedFileIdsJson = followedFileIds ? JSON.stringify(followedFileIds) : null
 
     if (sourceProjectId === projectId) {
       return c.json({ error: "a project cannot link to itself" }, 400)
@@ -125,15 +149,45 @@ sourceLinking.post(
                 source_link_mode     = ?,
                 source_link_consumes = ?,
                 source_link_gate     = ?,
+                source_link_file_ids = ?,
                 source_link_cursor   = 0,
                 updated_at           = CURRENT_TIMESTAMP
           WHERE id = ?`,
       )
-        .bind(sourceProjectId, mode, consumes, gate, projectId)
+        // AQU-1559: written on every link, including a whole-project one —
+        // re-linking a project that previously followed a subset must clear the
+        // old list, not inherit it.
+        .bind(sourceProjectId, mode, consumes, gate, followedFileIdsJson, projectId)
         .run()
     } catch (err) {
-      console.error("link-source UPDATE failed:", err)
-      return c.json({ error: "link failed" }, 500)
+      // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
+      // worker can be deployed before it is applied (a per-PR preview runs new
+      // code against the shared development database). A whole-project link does
+      // not need the column at all, so it falls back to the pre-slice statement
+      // rather than failing a link that worked before this slice. A link that
+      // asked to follow a subset genuinely cannot be honoured there, and saying
+      // so is better than silently saving a whole-project link instead.
+      if (followedFileIdsJson !== null) {
+        console.error("link-source UPDATE failed:", err)
+        return c.json({ error: "link failed" }, 500)
+      }
+      try {
+        await c.env.AQUILLA_PG.prepare(
+          `UPDATE projects
+              SET source_project_id    = ?,
+                  source_link_mode     = ?,
+                  source_link_consumes = ?,
+                  source_link_gate     = ?,
+                  source_link_cursor   = 0,
+                  updated_at           = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+        )
+          .bind(sourceProjectId, mode, consumes, gate, projectId)
+          .run()
+      } catch (retryErr) {
+        console.error("link-source UPDATE failed:", retryErr)
+        return c.json({ error: "link failed" }, 500)
+      }
     }
 
     // Emit the durable event. 1A's projector consumes this kind.
@@ -163,6 +217,9 @@ sourceLinking.post(
         upstreamProjectId: sourceProjectId,
         targetProjectId: projectId,
         authorUsername: user.username,
+        // AQU-1559: a clone's one snapshot IS its whole content — there is no
+        // later sync to narrow — so the selection has to apply here too.
+        onlyUpstreamFileIds: followedFileIds,
       })
       seeded = snapshotted > 0
     }
@@ -173,6 +230,8 @@ sourceLinking.post(
       mode,
       consumes,
       gate,
+      // AQU-1559: the stored selection, echoed back. null = the whole project.
+      fileIds: followedFileIds,
       previousSourceProjectId: project.source_project_id,
       // AQU-476/QA-BUG-1: best-effort signal — false means the client
       // should not assume content is present yet (e.g. the sync-worker
@@ -212,6 +271,12 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   }
 
   const upstreamId = project.source_project_id
+  // AQU-1559: read BEFORE the UPDATE below clears it — the snapshot that makes
+  // this project self-contained must copy exactly the files the link followed.
+  // A whole-project link reads as null and copies everything, as it always has,
+  // and so does a database that predates migration 0127 (see `loadLinkFileIds`):
+  // detach kept working before this slice and must keep working.
+  const followedFileIds = await loadLinkFileIds(c.env, projectId)
 
   try {
     // AQU-476: clear link metadata too — detach makes the project fully
@@ -223,6 +288,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
               source_link_mode     = NULL,
               source_link_consumes = NULL,
               source_link_gate     = NULL,
+              source_link_file_ids = NULL,
               source_link_cursor   = 0,
               updated_at           = CURRENT_TIMESTAMP
         WHERE id = ?`,
@@ -230,8 +296,26 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    console.error("detach-source UPDATE failed:", err)
-    return c.json({ error: "detach failed" }, 500)
+    // AQU-1559: a database that predates migration 0127 has nothing to clear in
+    // that one column, and detach is not the operation to break over it — it
+    // worked before this slice. Retry without it.
+    try {
+      await c.env.AQUILLA_PG.prepare(
+        `UPDATE projects
+            SET source_project_id    = NULL,
+                source_link_mode     = NULL,
+                source_link_consumes = NULL,
+                source_link_gate     = NULL,
+                source_link_cursor   = 0,
+                updated_at           = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+      )
+        .bind(projectId)
+        .run()
+    } catch (retryErr) {
+      console.error("detach-source UPDATE failed:", err, retryErr)
+      return c.json({ error: "detach failed" }, 500)
+    }
   }
 
   // 1) Durable link-source event with null payload.
@@ -247,6 +331,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
     upstreamProjectId: upstreamId,
     targetProjectId: projectId,
     authorUsername: user.username,
+    onlyUpstreamFileIds: followedFileIds,
   })
 
   return c.json({

@@ -94,6 +94,7 @@ import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
+import { loadLinkFileIds } from "../services/source-linking"
 import { createProjectShared } from "../../../db/shared/projects"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
@@ -740,6 +741,30 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const filesByProject = await loadFilesByProject(c.env, [projectId])
   const files = filesByProject.get(projectId) ?? []
 
+  // AQU-1559: a link that follows a fixed list of the upstream's files, and how
+  // many files the upstream currently has — the two numbers the Source link card
+  // reads as "N of M files". Null means the link follows the whole project, and
+  // the card says so without needing a count, so the extra query is skipped for
+  // every link made before this slice (and for every whole-project one since).
+  //
+  // Read in its own statement (`loadLinkFileIds`) rather than alongside the
+  // project row above: `source_link_file_ids` arrives with migration 0127, and a
+  // database that predates it would otherwise fail THIS select — the read behind
+  // every project open — rather than just withholding the new field. Only asked
+  // at all for a project that has an upstream.
+  const sourceLinkFileIds = row.source_project_id
+    ? await loadLinkFileIds(c.env, projectId)
+    : null
+  let sourceLinkUpstreamFileCount: number | null = null
+  if (sourceLinkFileIds && row.source_project_id) {
+    const countRow = await c.env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*) AS n FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+    )
+      .bind(row.source_project_id)
+      .first<{ n: number | string }>()
+    sourceLinkUpstreamFileCount = countRow?.n != null ? Number(countRow.n) : null
+  }
+
   // AQU-822: the org's effective termbase-edit floor travels with the project
   // so the client can gate the terminology UI (and its settings write) without
   // a second org-settings round trip. Server-authoritative either way — the
@@ -794,6 +819,10 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     sourceLinkConsumes: row.source_link_consumes,
     sourceLinkGate: row.source_link_gate,
     sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
+    // AQU-1559: null = this link follows the whole upstream project (the
+    // pre-slice behaviour); a list = it follows exactly those upstream files.
+    sourceLinkFileIds,
+    sourceLinkUpstreamFileCount,
     // AQU-507: designated PM (null = unassigned).
     pm:
       row.pm_user_id != null && row.pm_username != null

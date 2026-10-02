@@ -15,6 +15,13 @@
 // state (read-only — creation/mode are set at link time, not editable here).
 // Detach itself is unchanged.
 //
+// AQU-1559: the card also says how much of the upstream this link follows —
+// "N of M files" for a link made with only some of them picked, "All files" for
+// one made with everything checked. The two are different products, not a
+// cosmetic difference: a whole-project link keeps receiving the files the
+// upstream gains later, a fixed-list one does not, and after a reload the card is
+// the only place that distinction is visible.
+//
 // AQU-1544: a live link whose cursor is still 0 has never brought anything
 // through. Until this slice it rendered exactly like a healthy one ("Live",
 // "cursor: 0"), so a link whose first sync failed was indistinguishable from
@@ -56,6 +63,15 @@ export interface SourceLinkSectionProps {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: the upstream file ids this link follows, or null/undefined for a
+   *  whole-project link — which is every link made before that slice, and what
+   *  an older server that omits the field means too. */
+  sourceLinkFileIds?: string[] | null
+  /** AQU-1559: how many files the upstream holds, for the "N of M" the subset
+   *  badge states. Null/undefined when the server did not send it (a
+   *  whole-project link needs no total), and the badge then states the count
+   *  alone rather than inventing a denominator. */
+  sourceLinkUpstreamFileCount?: number | null
   /** Called after successful detach so the parent can refresh the project record. */
   onDetached: () => void
   /** AQU-1544: called after a "Sync now" that worked, so the parent can
@@ -75,6 +91,8 @@ export function SourceLinkSection({
   sourceLinkConsumes,
   sourceLinkGate,
   sourceLinkCursor,
+  sourceLinkFileIds,
+  sourceLinkUpstreamFileCount,
   onDetached,
   onSynced,
   roleLevel,
@@ -99,6 +117,14 @@ export function SourceLinkSection({
   // above but is not mirrored by the sync engine at all, so "Sync now" would
   // promise something it cannot do.
   const neverSynced = sourceLinkMode === "live" && (sourceLinkCursor ?? 0) === 0
+
+  // AQU-1559: a non-empty list is a link pinned to those upstream files;
+  // null/absent/empty is the whole project. `?? followedCount` keeps the badge
+  // honest on a server that sends the list without a total — "2 of 2 files" is
+  // wrong only if the upstream has more, and saying "All files" there would be a
+  // stronger claim than the data supports.
+  const followedCount = sourceLinkFileIds?.length ?? 0
+  const followsSubset = followedCount > 0
 
   async function handleSyncNow() {
     if (!session?.jwt || syncState === "syncing") return
@@ -195,6 +221,14 @@ export function SourceLinkSection({
                 })}
               </Badge>
             )}
+            <Badge variant="outline">
+              {followsSubset
+                ? t("projectSettings.sourceLink.scopeSomeFiles", {
+                    count: followedCount,
+                    total: sourceLinkUpstreamFileCount ?? followedCount,
+                  })
+                : t("projectSettings.sourceLink.scopeAllFiles")}
+            </Badge>
             {sourceLinkMode !== "clone" && !neverSynced && (
               <Badge variant="outline">{t("projectSettings.sourceLink.cursorLabel", { value: sourceLinkCursor ?? 0 })}</Badge>
             )}

@@ -223,6 +223,70 @@ export interface SourceLinkProject {
   archived_at: string | null
 }
 
+/**
+ * AQU-1559: a link's followed-file selection, parsed from
+ * `projects.source_link_file_ids`.
+ *
+ * `null` means "this link follows the whole upstream project" — the default and,
+ * for every link made before this slice, the only answer. A non-empty array of
+ * upstream file ids means the link follows a fixed list: nothing outside it
+ * mirrors in, and files the upstream gains later are not in it, so they never
+ * arrive on their own.
+ *
+ * Anything that is not a non-empty array of non-empty strings degrades to
+ * `null`, i.e. to the whole project. The column is TEXT (see migration 0127), so
+ * a malformed blob is possible, and the two ways to be wrong are not equal:
+ * reading it as "follow everything" brings in files the lead did not pick (which
+ * they can delete), while reading it as "follow nothing" would silently stop a
+ * working link from syncing — including the detach snapshot, which would then
+ * copy nothing and strand the project with no source at all.
+ */
+/**
+ * AQU-1559: this link's followed-file selection, read in a statement of its own.
+ *
+ * Isolated deliberately — `projects.source_link_file_ids` arrives with migration
+ * 0127, and this worker is deployed independently of the migration being applied
+ * (a per-PR preview runs new code against the shared development database, which
+ * has not had it applied at all). Selecting the column alongside anything else
+ * would make a database that predates it fail the whole statement: the project
+ * read behind every project open, or the detach that makes a project
+ * self-contained. Both worked before this slice and must keep working.
+ *
+ * `null` on a missing column is the same answer as a NULL value — this link
+ * follows the whole upstream project — so an un-migrated deployment simply does
+ * not offer the new capability, rather than breaking the old one. Same posture as
+ * `hiddenSourceCellKeys` for `cells.hidden_at` (AQU-1453).
+ */
+export async function loadLinkFileIds(
+  env: Env,
+  projectId: string,
+): Promise<string[] | null> {
+  if (!env.AQUILLA_PG) return null
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_file_ids FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_file_ids: string | null }>()
+    return parseLinkFileIds(row?.source_link_file_ids ?? null)
+  } catch {
+    return null
+  }
+}
+
+export function parseLinkFileIds(raw: string | null | undefined): string[] | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed)) return null
+  const ids = parsed.filter((id): id is string => typeof id === "string" && id.length > 0)
+  return ids.length > 0 ? ids : null
+}
+
 /** AQU-476: link mode/consumes/gate — see the linked-projects design spec §2. */
 export type SourceLinkMode = "clone" | "live"
 export type SourceLinkConsumes = "source" | "target"
@@ -394,7 +458,15 @@ export async function emitLinkSourceEvent(
  */
 export async function snapshotSourceFiles(
   env: Env,
-  args: { upstreamProjectId: string; targetProjectId: string; authorUsername: string },
+  args: {
+    upstreamProjectId: string
+    targetProjectId: string
+    authorUsername: string
+    /** AQU-1559: the upstream files this link follows, or null for the whole
+     *  project. A subset link must not hand the project files it never
+     *  followed — detach keeps what the link brought in, it does not widen it. */
+    onlyUpstreamFileIds?: string[] | null
+  },
 ): Promise<Map<string, string>> {
   const fileIdMap = new Map<string, string>()
   if (!env.AQUILLA_PG) return fileIdMap
@@ -426,6 +498,15 @@ export async function snapshotSourceFiles(
     files = rows.results ?? []
   } catch {
     return fileIdMap
+  }
+
+  // AQU-1559: a fixed-list link copies only the files it followed. Applied here
+  // rather than in SQL so the snapshot stays one query per project whatever the
+  // selection's size, and so an id in the list that the upstream no longer has
+  // simply drops out.
+  if (args.onlyUpstreamFileIds) {
+    const followed = new Set(args.onlyUpstreamFileIds)
+    files = files.filter((f) => followed.has(f.id))
   }
 
   // AQU-1358: the target's existing files, read once and matched in JS rather
@@ -575,6 +656,10 @@ export async function snapshotSourceCells(
     upstreamProjectId: string
     targetProjectId: string
     authorUsername: string
+    /** AQU-1559: the upstream files this link follows, or null/absent for the
+     *  whole project. Cells of an unfollowed file are skipped, so a detach on a
+     *  subset link leaves exactly the files the link brought in. */
+    onlyUpstreamFileIds?: string[] | null
   },
 ): Promise<number> {
   if (!env.AQUILLA_PG) return 0
@@ -585,7 +670,7 @@ export async function snapshotSourceCells(
   // snapshotSourceFiles's doc comment) BEFORE the cell rows below, which
   // reference file_id and must point at the target's own file row, not the
   // upstream's.
-  const fileIdMap = await snapshotSourceFiles(env, args)
+  const fileIdMap = await snapshotSourceFiles(env, args)  // same `onlyUpstreamFileIds`
 
   // AQU-1453: the upstream's parked cells, and the target's own, read once
   // rather than per cell. `null` from either means this deployment predates
@@ -640,6 +725,14 @@ export async function snapshotSourceCells(
     cells = rows.results ?? []
   } catch {
     return 0
+  }
+
+  // AQU-1559: cells of a file this link never followed are not this project's
+  // to receive. Keyed on the upstream file id — the same identity the selection
+  // is stored with, so a rename upstream cannot change what is copied.
+  if (args.onlyUpstreamFileIds) {
+    const followed = new Set(args.onlyUpstreamFileIds)
+    cells = cells.filter((c) => followed.has(c.file_id))
   }
 
   if (cells.length === 0) return 0

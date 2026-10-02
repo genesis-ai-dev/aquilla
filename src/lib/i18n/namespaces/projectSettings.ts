@@ -627,6 +627,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1559: how much of the upstream this link follows. A subset link is
+    // pinned to the files it was made with; a whole-project one keeps picking up
+    // the files the upstream gains.
+    "projectSettings.sourceLink.scopeAllFiles": "All files",
+    "projectSettings.sourceLink.scopeSomeFiles": plural(
+      {
+        one: "{count} of {total} file",
+        other: "{count} of {total} files",
+      },
+      "total",
+    ),
     // AQU-1544: a live link that has never brought anything through.
     "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
     "projectSettings.sourceLink.notSyncedNote":
@@ -691,6 +702,19 @@ export const projectSettings = defineNamespace({
       one: "{count} source file will be added to this project.",
       other: "{count} source files will be added to this project.",
     }),
+    // ── AQU-1559: the confirm step's file list. Every file arrives checked,
+    // so the stock outcome is the whole-project link; unchecking any of them
+    // pins the link to the rest.
+    "projectSettings.linkSource.selectAllFiles": "All files",
+    "projectSettings.linkSource.fileClashBadge": "same name here",
+    "projectSettings.linkSource.previewNoneSelected":
+      "Pick at least one file to link.",
+    "projectSettings.linkSource.scopeAllNote":
+      "This link follows the whole project, so files the source project adds " +
+      "later will arrive here too.",
+    "projectSettings.linkSource.scopeSubsetNote":
+      "This link follows only the files you picked. Files the source project " +
+      "adds later will not arrive here on their own.",
     "projectSettings.linkSource.previewEmptyUpstream":
       "That project has no source files yet, so nothing will be added now. Files " +
       "will arrive here as the upstream gains them.",
@@ -1452,6 +1476,15 @@ export const projectSettings = defineNamespace({
         description: "Small badge on the Source link card naming the sync gate for a chain (consumes-target) link.",
         placeholders: {
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
+        },
+      },
+      "projectSettings.sourceLink.scopeSomeFiles": {
+        description:
+          "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
+        placeholders: {
+          count: "How many of the upstream's files this link follows (data, a plain integer), e.g. '2'.",
+          total:
+            "How many files the upstream project has in total (data, a plain integer), e.g. '3'. The plural form is chosen from THIS number.",
         },
       },
       "projectSettings.sourceLink.cursorLabel": {

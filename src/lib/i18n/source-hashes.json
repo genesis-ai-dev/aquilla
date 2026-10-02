@@ -3613,7 +3613,8 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110"
+    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7219,7 +7220,8 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110"
+    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10810,7 +10812,8 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110"
+    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14417,7 +14420,8 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110"
+    "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -14546,7 +14550,6 @@
     "nav.help.docs": "b79cac926e0b2e34",
     "nav.help.discord": "3a9884e3ad9a4550",
     "nav.help.contactSupport": "814f4ed2d5bd33e3",
-    "nav.help.report": "b6ce788d9786917c",
     "nav.dock.filesTab": "abc7e9892806b047",
     "nav.dock.agentTab": "11b39c93777e8f1f",
     "nav.dock.agentUnread": "788425b285937b91",
@@ -19333,7 +19336,8 @@
     "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
-    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -19462,7 +19466,6 @@
     "nav.help.docs": "b79cac926e0b2e34",
     "nav.help.discord": "3a9884e3ad9a4550",
     "nav.help.contactSupport": "814f4ed2d5bd33e3",
-    "nav.help.report": "b6ce788d9786917c",
     "nav.dock.filesTab": "abc7e9892806b047",
     "nav.dock.agentTab": "11b39c93777e8f1f",
     "nav.dock.agentUnread": "788425b285937b91",
@@ -24249,7 +24252,8 @@
     "workspace.aiConsent.justThisButton": "3509f82cd3c5dc0a",
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
-    "workspace.aiConsent.genericModelName": "4d2e74abb8282496"
+    "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -24373,7 +24377,6 @@
     "nav.help.docs": "b79cac926e0b2e34",
     "nav.help.discord": "3a9884e3ad9a4550",
     "nav.help.contactSupport": "814f4ed2d5bd33e3",
-    "nav.help.report": "b6ce788d9786917c",
     "nav.dock.filesTab": "abc7e9892806b047",
     "nav.dock.agentTab": "11b39c93777e8f1f",
     "nav.dock.agentUnread": "788425b285937b91",
@@ -29879,7 +29882,8 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -30010,7 +30014,6 @@
     "nav.help.docs": "b79cac926e0b2e34",
     "nav.help.discord": "3a9884e3ad9a4550",
     "nav.help.contactSupport": "814f4ed2d5bd33e3",
-    "nav.help.report": "b6ce788d9786917c",
     "nav.dock.filesTab": "abc7e9892806b047",
     "nav.dock.agentTab": "11b39c93777e8f1f",
     "nav.dock.agentUnread": "788425b285937b91",
@@ -35616,7 +35619,8 @@
     "segmentation.unavailable": "245fc38a936418b2",
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
-    "segmentation.readOnly": "34b046473fe9b27d"
+    "segmentation.readOnly": "34b046473fe9b27d",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -35742,7 +35746,6 @@
     "nav.help.docs": "b79cac926e0b2e34",
     "nav.help.discord": "3a9884e3ad9a4550",
     "nav.help.contactSupport": "814f4ed2d5bd33e3",
-    "nav.help.report": "b6ce788d9786917c",
     "nav.dock.filesTab": "abc7e9892806b047",
     "nav.dock.agentUnread": "788425b285937b91",
     "nav.dock.expandSidebar": "37a5d6485e109bf6",
@@ -41262,6 +41265,7 @@
     "segmentation.loadFailed": "f1b03ca25211a604",
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
-    "knowledgeBase.status.stalled": "d8e9d488c1579f94"
+    "knowledgeBase.status.stalled": "d8e9d488c1579f94",
+    "nav.feedback.buttonLabel": "aac77df347205252"
   }
 }

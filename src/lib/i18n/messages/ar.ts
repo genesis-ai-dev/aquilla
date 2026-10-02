@@ -135,7 +135,7 @@ export const ar: Catalog = {
   "nav.help.docs": "المساعدة",
   "nav.help.discord": "خادم Discord",
   "nav.help.contactSupport": "التواصل مع الدعم",
-  "nav.help.report": "إبلاغ",
+  "nav.feedback.buttonLabel": "ملاحظات",
   "nav.dock.filesTab": "الملفات",
   "nav.dock.agentTab": "الوكيل",
   "nav.dock.agentUnread": "{count} غير مقروءة",

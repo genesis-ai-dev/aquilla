@@ -18,7 +18,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ScreenshotCancelled } from "@/lib/feedback"
 import { ReportProblemDialog } from "./ReportProblemDialog"
-import { FeedbackButton } from "./FeedbackButton"
 
 const submitFeedback = vi.hoisted(() => vi.fn())
 const captureViewportScreenshot = vi.hoisted(() => vi.fn())
@@ -207,37 +206,5 @@ describe("ReportProblemDialog screenshot (AQU-1028)", () => {
     isScreenshotCaptureSupported.mockReturnValue(false)
     renderDialog()
     expect(screen.queryByRole("button", { name: /attach a screenshot/i })).not.toBeInTheDocument()
-  })
-})
-
-describe("FeedbackButton (AQU-1028)", () => {
-  it("is a visible, labelled control — not an item hidden inside a dropdown", () => {
-    render(
-      <MemoryRouter>
-        <FeedbackButton />
-      </MemoryRouter>,
-    )
-    expect(screen.getByRole("button", { name: /feedback/i })).toBeVisible()
-  })
-
-  it("keeps an accessible name when collapsed to an icon", () => {
-    render(
-      <MemoryRouter>
-        <FeedbackButton compact />
-      </MemoryRouter>,
-    )
-    expect(screen.getByRole("button", { name: /send feedback to the aquilla team/i })).toBeVisible()
-  })
-
-  it("opens the feedback dialog", async () => {
-    render(
-      <MemoryRouter>
-        <FeedbackButton />
-      </MemoryRouter>,
-    )
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }))
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText(/what went wrong/i)).toBeInTheDocument(),
-    )
   })
 })

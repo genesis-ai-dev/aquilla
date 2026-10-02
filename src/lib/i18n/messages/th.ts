@@ -135,7 +135,7 @@ export const th: Catalog = {
   "nav.help.docs": "ศูนย์ช่วยเหลือ",
   "nav.help.discord": "เซิร์ฟเวอร์ Discord",
   "nav.help.contactSupport": "ติดต่อฝ่ายสนับสนุน",
-  "nav.help.report": "แจ้งปัญหา",
+  "nav.feedback.buttonLabel": "ข้อเสนอแนะ",
   "nav.dock.filesTab": "ไฟล์",
   "nav.dock.agentTab": "เอเจนต์",
   "nav.dock.agentUnread": "ยังไม่ได้อ่าน {count} ข้อความ",

@@ -108,6 +108,7 @@ import type {
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -227,7 +228,10 @@ export function matchEBibleToSourceCells(
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
     // string only when neither is available (rare legacy cells with no event id).
-    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    const parentId = resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? ""
     matched.push({
       cellId: cell.cellId,
       fileId: cell.fileId,

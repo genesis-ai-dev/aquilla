@@ -122,8 +122,10 @@ async function navigateToRunSource() {
     await new Promise((r) => setTimeout(r, 0))
   })
 
-  // ParatextChoice "Source text" button should now be visible
+  // ParatextChoice "Source text" button should now be visible. Books are
+  // opt-in, so tick them all before importing.
   const sourceBtn = await screen.findByText("Source text")
+  fireEvent.click(await screen.findByRole("button", { name: "Select all" }))
   await act(async () => {
     fireEvent.click(sourceBtn)
     // Allow runSource to resolve
@@ -245,11 +247,18 @@ describe("AQU-277 — partial import holds dialog open", () => {
     // Nothing uploaded yet — preview-before-commit.
     expect(commitParatextProject).not.toHaveBeenCalled()
 
-    // Unchecking the only book disables both import actions.
-    fireEvent.click(screen.getByLabelText("Include Genesis"))
+    // Books are opt-in: nothing is ticked yet, so both import actions are
+    // disabled — a project never lands whole without the user choosing it.
+    expect(screen.getByLabelText("Include Genesis")).not.toBeChecked()
     expect(screen.getByText("Source text").closest("button")).toBeDisabled()
 
-    // Re-include and confirm — commit runs with no skipKeys.
+    // Tick it, then Deselect all clears it again.
+    fireEvent.click(screen.getByLabelText("Include Genesis"))
+    expect(screen.getByText("Source text").closest("button")).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: "Deselect all" }))
+    expect(screen.getByText("Source text").closest("button")).toBeDisabled()
+
+    // Opt in and confirm — commit runs with no skipKeys.
     fireEvent.click(screen.getByLabelText("Include Genesis"))
     await act(async () => {
       fireEvent.click(screen.getByText("Source text"))

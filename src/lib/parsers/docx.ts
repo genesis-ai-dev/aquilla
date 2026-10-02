@@ -45,6 +45,29 @@ const MASK_RE = /(\d+)/g
 const DOCUMENT_PART = "word/document.xml"
 const FOOTNOTES_PART = "word/footnotes.xml"
 
+/**
+ * Ceiling on the inflated `word/document.xml` this parser will try to build a
+ * tree for (AQU-1499).
+ *
+ * `zip-safety` bounds the ARCHIVE (95 MB in, 128 MB per entry), but nothing
+ * bounded what this parser then does with the part it reads, and the full
+ * element tree costs roughly 19× the XML: a 41.7 MB `document.xml` measures at
+ * ~785 MB of heap. For a document Word saved with one `<w:r><w:rPr>…` per
+ * character — which is what a real 68k-word Arabic partner book looked like,
+ * 39.5 MB of XML from 882 KB on disk — an unbounded parse is a frozen tab on a
+ * low-memory device, and death inside the 128 MB Cloudflare Worker that runs
+ * this same function for the Agent API's server-side import
+ * (sync-worker/src/external/import-parse.ts). A 128 MB entry would be ~2.4 GB
+ * of tree.
+ *
+ * So the limit is deliberately set ABOVE the real-world bloat this issue was
+ * filed for — that file must still import — and only refuses the shapes no
+ * device survives, with a message that says what is wrong instead of hanging.
+ * Lowering the tree's cost (a streaming, paragraph-at-a-time parse) is how this
+ * number comes down; it is a change to `xml-lite`'s contract, not to this cap.
+ */
+const MAX_DOCUMENT_XML_CHARS = 64 * 1024 * 1024 // 64 M chars
+
 /** The XML parts a DOCX import reads, already inflated and decoded. Splitting
  *  this out lets a caller that already holds the archive (or the raw parts)
  *  reuse the exact cell-building logic without a second unzip. */
@@ -75,8 +98,24 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
   })
 }
 
+/**
+ * Refuse a `word/document.xml` too large to build a tree for, naming the size
+ * and the fix, rather than letting the parse take the tab (or the Worker) down
+ * with it (AQU-1499). See MAX_DOCUMENT_XML_CHARS.
+ */
+function assertParseableDocumentXml(documentXml: string): void {
+  if (documentXml.length <= MAX_DOCUMENT_XML_CHARS) return
+  const mb = (chars: number) => (chars / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")
+  throw new Error(
+    `DOCX file is too complex to parse: word/document.xml is ${mb(documentXml.length)} MB, ` +
+      `over the ${mb(MAX_DOCUMENT_XML_CHARS)} MB limit. Re-saving the file from Word ` +
+      `("Save As" a new .docx) usually shrinks it.`,
+  )
+}
+
 /** Turn the DOCX XML parts into translatable cells. Pure (no zip, no DOM). */
 export function docxPartsToStrings(parts: DocxParts): TranslatableString[] {
+  assertParseableDocumentXml(parts.documentXml)
   const doc = parseXmlLite(parts.documentXml)
   const footnotes = parts.footnotesXml === undefined ? new Map<string, string>() : loadFootnotes(parts.footnotesXml)
 

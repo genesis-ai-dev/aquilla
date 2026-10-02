@@ -21,7 +21,7 @@
  */
 
 import { LANGUAGES } from '../languages/catalog'
-import { normalizeLanguageTag } from '../language-normalize'
+import { isPrimaryRegistryLane } from './registry-lanes'
 
 /** Placeholder name for a default lane on a BLANK project (no targetLanguage). */
 export const BLANK_LANE_PLACEHOLDER = 'Untitled lane'
@@ -84,12 +84,12 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
 
   // Registry-only lanes: declared in targetLanes but not present in data. The
   // primary entry (== targetLanguage) is the '' default lane, so never spawn a
-  // duplicate for it.
-  const primaryNorm = normalizeLanguageTag(input.targetLanguage)
+  // duplicate for it. AQU-1532: a regional lane beside the primary ("fr-CA"
+  // next to "French") is a real extra lane, so the region is not stripped.
   for (const raw of input.registryTargetLanes) {
     const r = (raw ?? '').trim()
     if (!r) continue
-    if (primaryNorm && normalizeLanguageTag(r) === primaryNorm) continue // == default lane
+    if (isPrimaryRegistryLane(r, input.targetLanguage)) continue // == default lane
     tags.add(r)
   }
 

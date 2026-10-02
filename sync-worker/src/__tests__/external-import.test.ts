@@ -31,6 +31,7 @@ import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
 import { handleExportSourceRequest } from '../events/export-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
+import { ensureProjectLanes } from '../../../db/shared/lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -600,6 +601,8 @@ describe('PlanImport — commit', () => {
        VALUES ($1, $2::jsonb, 1)`,
       [PROJECT, JSON.stringify({ targetLanes: ['fr', 'arq'] })],
     )
+    // A settings write creates the lane rows in production (AQU-1532).
+    await ensureProjectLanes(tdb.db, PROJECT, { settings: { targetLanes: ['fr', 'arq'] } })
 
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, {

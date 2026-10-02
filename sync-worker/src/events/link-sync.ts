@@ -1561,7 +1561,6 @@ export async function mirrorSync(
       gate,
       cursor,
       head,
-      followedFileIds,
       backfill,
       expectedRaw: link.source_link_backfill!,
       windowEvents,
@@ -1617,8 +1616,6 @@ interface RunBackfillArgs {
   cursor: number
   /** The run's fenced lane-relevant head, for `deletedByHead`'s lookahead. */
   head: number
-  /** The link's selection before the files join it (null = whole project). */
-  followedFileIds: Set<string> | null
   backfill: SourceLinkBackfill
   /** `source_link_backfill` exactly as read — every write compares against it. */
   expectedRaw: string
@@ -1699,9 +1696,21 @@ async function runBackfill(db: AquillaDb, args: RunBackfillArgs): Promise<RunBac
 
   // AQU-1559's rule for the result: following every file the upstream has now
   // IS the whole-project link, which also takes in the files it gains later.
+  //
+  // AQU-1562: read the selection FRESH here rather than using the one this run
+  // started with. The write below compares against the pending column, not this
+  // one, so a lead who stopped following a file while the replay was running
+  // would otherwise have it put straight back — the run-start snapshot still
+  // held it. Re-reading means this write adds the replayed files to whatever the
+  // selection says NOW, which is the only value the lead has seen.
+  const freshSelection = await db
+    .prepare(`SELECT source_link_file_ids FROM projects WHERE id = ?`)
+    .bind(downstreamProjectId)
+    .first<{ source_link_file_ids: string | null }>()
+  const selectionNow = linkFileIdsOf({ source_link_file_ids: freshSelection?.source_link_file_ids ?? null })
   let followed: Set<string> | null = null
-  if (args.followedFileIds) {
-    followed = new Set([...args.followedFileIds, ...fileIds])
+  if (selectionNow) {
+    followed = new Set([...selectionNow, ...fileIds])
     const { results } = await db
       .prepare(`SELECT id FROM files WHERE project_id = ? AND deleted_at IS NULL`)
       .bind(upstreamProjectId)

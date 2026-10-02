@@ -1218,6 +1218,17 @@ export class Workspace {
     await target.fill(text)
   }
 
+  /** Keyboard cell navigation from an ACTIVE editor: Tab steps to the next
+   * cell, Shift+Tab to the previous one. Leaving the cell commits it. Waits
+   * for the destination's editor to take focus. */
+  async tabFromTargetCell(index: number, direction: "next" | "previous"): Promise<Locator> {
+    await expect(this.editableTarget(index)).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.keyboard.press(direction === "next" ? "Tab" : "Shift+Tab")
+    const destination = this.editableTarget(direction === "next" ? index + 1 : index - 1)
+    await expect(destination).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    return destination
+  }
+
   /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
    * does not wait for a commit — the value may already be committed by the
    * idle debounce, in which case blur only releases the focus lock. */

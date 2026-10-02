@@ -39,6 +39,23 @@ function rowsFor(db: AquillaDb, projectId: string, cache: RequestCache): Promise
 }
 
 /**
+ * AQU-1532: true when the project has a target lane row whose legacy tag is
+ * exactly `tag` — the same match the projection's lane_id lookup uses. The
+ * default lane (`''`) always counts as present. Shares the per-request lane
+ * list with the archived-lane check.
+ */
+export async function targetLaneRowExists(
+  db: AquillaDb,
+  projectId: string,
+  tag: string,
+  cache: RequestCache,
+): Promise<boolean> {
+  if (tag === '') return true
+  const lanes = await rowsFor(db, projectId, cache)
+  return lanes.some((lane) => lane.legacyTag === tag)
+}
+
+/**
  * Stable 403 reason, or null. `tag` of `''` is the default lane and is never refused.
  * `visibleLaneIds` null means the caller may know every lane. A set hides the
  * archived name from a caller who may not know that lane exists.

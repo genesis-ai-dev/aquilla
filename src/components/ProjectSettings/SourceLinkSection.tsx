@@ -23,9 +23,14 @@
 // the only place that distinction is visible.
 //
 // AQU-1560: a live link also offers "Choose files" to Project Leads — the
-// upstream's file list with the followed files locked, to add more of them
-// (ChooseLinkedFilesDialog). Not on a clone, which never syncs, nor on a legacy
-// link with no recorded mode, which the sync engine does not mirror.
+// upstream's file list, to add more of them (ChooseLinkedFilesDialog). Not on a
+// clone, which never syncs, nor on a legacy link with no recorded mode, which
+// the sync engine does not mirror.
+//
+// AQU-1562: the same dialog is where a followed file is UNCHECKED to stop this
+// project following it, keeping it as the project's own copy. That is why the
+// card's scope badge can now fall as well as rise, and why it reads "N of M
+// files" on a link that was made as a whole-project one.
 //
 // AQU-1544: a live link whose cursor is still 0 has never brought anything
 // through. Until this slice it rendered exactly like a healthy one ("Live",
@@ -84,8 +89,9 @@ export interface SourceLinkSectionProps {
   /** AQU-1544: called after a "Sync now" that worked, so the parent can
    *  refresh the project record and pick up the advanced cursor. */
   onSynced?: () => void
-  /** AQU-1560: called once files added through "Choose files" are in, so the
-   *  parent can refresh the project record (the scope badge, the file list). */
+  /** AQU-1560/AQU-1562: called once the changes confirmed in "Choose files"
+   *  are in — files added, or files stopped — so the parent can refresh the
+   *  project record (the scope badge, the file list). */
   onFilesAdded?: () => void
   /** The caller's resolved role level on this project. */
   roleLevel: number | null
@@ -336,7 +342,7 @@ export function SourceLinkSection({
           followedFileIds={sourceLinkFileIds}
           open={chooseFilesOpen}
           onOpenChange={setChooseFilesOpen}
-          onAdded={() => onFilesAdded?.()}
+          onApplied={() => onFilesAdded?.()}
         />
       )}
 

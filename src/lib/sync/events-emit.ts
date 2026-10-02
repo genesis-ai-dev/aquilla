@@ -198,6 +198,13 @@ export async function enqueueEvents<K extends OutboxEventKind>(
 // ── Convenience builders for common writer flows ──────────────────────────
 
 export interface CellCommitInput {
+  /**
+   * AQU-1578: caller-minted event id (UUIDv7). The editor mints it so it can
+   * record the commit as the cell's pending head BEFORE the asynchronous
+   * outbox write — a second commit inside that window must chain on it.
+   * Omit to have the envelope builder mint one.
+   */
+  id?: string
   projectId: string
   fileId: string
   cellId: string
@@ -263,6 +270,7 @@ function targetCellCommitEventInput(
   input: CellCommitInput,
 ): BuildEventInput<"target.cell.commit"> {
   return {
+    ...(input.id ? { id: input.id } : {}),
     kind: "target.cell.commit",
     projectId: input.projectId,
     fileId: input.fileId,

@@ -256,6 +256,99 @@ export async function addLinkedSourceFiles(
   return (await res.json()) as AddLinkedSourceFilesResult
 }
 
+export interface LinkedSourceFileState {
+  /** The upstream file ids this link follows. null = the whole project. */
+  fileIds: string[] | null
+  /**
+   * Upstream file ids this project holds as a STOPPED copy — files the link
+   * once followed and no longer does, still here with the source text they had
+   * when they were stopped and every translation on them. Always empty on a
+   * whole-project link, which has stopped nothing.
+   *
+   * Why the client needs it: a stopped file and a file this project never had
+   * both read as an unchecked row, but checking them does different things —
+   * following a stopped file again REPLACES its source text with the upstream's
+   * current text, where checking a never-had file only brings one in. The
+   * confirm has to say which.
+   */
+  stoppedFileIds: string[]
+}
+
+/**
+ * AQU-1562: what this project's live link follows, and which of the upstream's
+ * other files are here as stopped copies. project_lead(500)+, server-enforced.
+ * Throws `UserError` on non-2xx.
+ */
+export async function loadLinkedSourceFileState(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LinkedSourceFileState> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  const body = (await res.json()) as Partial<LinkedSourceFileState>
+  return {
+    fileIds: Array.isArray(body.fileIds) ? body.fileIds : null,
+    // An older server that does not answer this reads as "nothing stopped",
+    // which is what every link looked like before this slice.
+    stoppedFileIds: Array.isArray(body.stoppedFileIds) ? body.stoppedFileIds : [],
+  }
+}
+
+export interface StopLinkedSourceFilesResult {
+  /** The upstream file ids this request stopped — the requested ones the link
+   *  was actually following. Empty = nothing was being followed, so a no-op. */
+  stopped: string[]
+  /** The link's selection afterwards. Never null: stopping every file is
+   *  refused, so a link that was following the whole project comes back as the
+   *  fixed list of the rest (AQU-1559's rule). */
+  fileIds: string[] | null
+  /** Whether the link followed the whole project before this call — i.e.
+   *  whether it has just become a fixed list. */
+  wasWholeProject: boolean
+}
+
+/**
+ * AQU-1562: stop this project following some of the upstream's files, keeping
+ * them as the project's own copies.
+ *
+ * Nothing is deleted or moved: each file stays with the source text it has now
+ * and every translation, validation and comment on it, and only stops receiving
+ * upstream changes. Other followed files are unaffected. At least one file must
+ * stay linked — stopping all of them is "Detach from source", and the server
+ * answers 409 rather than leaving a link that can never sync.
+ *
+ * project_lead(500)+, server-enforced. Throws `UserError` on non-2xx.
+ */
+export async function stopLinkedSourceFiles(
+  jwt: string,
+  projectId: string,
+  /** UPSTREAM file ids, as the link-source preview lists them. Non-empty. */
+  fileIds: string[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<StopLinkedSourceFilesResult> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files/stop`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ fileIds }),
+    },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  return (await res.json()) as StopLinkedSourceFilesResult
+}
+
 /**
  * AQU-476/QA-BUG-1: client-side seed self-heal for `mode: 'live'` links.
  * `linkProjectSource` already triggers this server-side and awaits it — this

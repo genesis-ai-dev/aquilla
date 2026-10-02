@@ -1,6 +1,7 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -1846,18 +1847,43 @@ export function ProjectWorkspace() {
     return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
   }, [laneCellKey])
 
+  // AQU-1578: the optimistic row of a just-filled empty cell carries
+  // `targetEventId: ""` — resolveTargetCommitParent treats it as absent, so no
+  // commit ever leaves with an empty parentId.
   const resolveTargetCommitParentId = useCallback((cell: Pick<CellData, "id" | "targetEventId" | "sourceEventId">) => {
-    return (
-      pendingTargetCommitHeadsRef.current.get(laneCellKey(cell.id))?.eventId ??
-      pendingCompletionEventIdRef.current.get(laneCellKey(cell.id)) ??
-      cell.targetEventId ??
-      cell.sourceEventId ??
-      null
-    )
+    const key = laneCellKey(cell.id)
+    return resolveTargetCommitParent({
+      pending: [
+        pendingTargetCommitHeadsRef.current.get(key)?.eventId,
+        pendingCompletionEventIdRef.current.get(key),
+      ],
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    })
   }, [laneCellKey])
 
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
     pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
+  }, [laneCellKey])
+
+  // AQU-1578: the editor reserves its commit as the pending head
+  // SYNCHRONOUSLY, before the asynchronous outbox write. Recording it only
+  // after the write left a window (Tab on, Shift+Tab back, type) in which a
+  // second commit could not see the first and chained on the lagging
+  // projection — for a just-filled cell, the "" placeholder — and the server
+  // dropped it as a stale sibling. The reservation is an ordinary pending
+  // entry: a stale report deletes it (AQU-1154) and only confirmation of this
+  // id retires it (AQU-1309). The returned release undoes it after an enqueue
+  // failure, but only while it still holds this id — a newer commit's
+  // reservation is never dropped.
+  const reservePendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
+    const key = laneCellKey(cellId)
+    pendingTargetCommitHeadsRef.current.set(key, { eventId, parentId })
+    return () => {
+      if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === eventId) {
+        pendingTargetCommitHeadsRef.current.delete(key)
+      }
+    }
   }, [laneCellKey])
 
   // I2: a stale sibling is a REJECTION of this client's commit, not a save.
@@ -5162,7 +5188,7 @@ export function ProjectWorkspace() {
               (r) => r.side === "target" && (r.targetLang ?? "") === activeLane,
             )
             const sourceRow = rows.find((r) => r.side === "source")
-            const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+            const rebasedParent = resolveTargetCommitParent({ targetEventId: targetRow?.eventId, sourceEventId: sourceRow?.eventId })
             if (rebasedParent && rebasedParent !== parentId) {
               console.warn(
                 `[commitCompletedCell] draft dead-lettered; rebasing onto authoritative head ${rebasedParent} (was ${parentId}) for cell ${cell.id}`,
@@ -5379,7 +5405,7 @@ export function ProjectWorkspace() {
           const sourceRow = rows.find((row) => (
             row.cellId === item.draft.cell.id && row.side === "source"
           ))
-          const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+          const rebasedParent = resolveTargetCommitParent({ targetEventId: targetRow?.eventId, sourceEventId: sourceRow?.eventId })
           if (!rebasedParent || rebasedParent === item.parentId) {
             results[item.index] = {
               status: "rejected",
@@ -11420,10 +11446,11 @@ export function ProjectWorkspace() {
     return total
   }, [infractions, legacyCells])
 
-  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
-    if (cellId && committedEventId) {
-      rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
-    }
+  // AQU-1578: the editor already reserved `committedEventId` as the pending
+  // head before enqueueing (reservePendingTargetCommit). Re-recording it here,
+  // after the await, would regress the head when a newer commit reserved in
+  // the meantime — and resurrect a head a stale report has already cleared.
+  const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
     const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -11442,7 +11469,7 @@ export function ProjectWorkspace() {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, confirmCommitted, revalidateCells])
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, confirmCommitted, revalidateCells])
 
   // AQU-1391: the effective repetition-propagation policy — this project's own
   // answer, else its org's, else on. Same three-state shape as
@@ -11663,7 +11690,7 @@ export function ProjectWorkspace() {
         console.warn("[agent-target-auto-validate] emit failed:", error)
       }
     }
-    await handleCellCommitted(cell.id, eventId, parentId)
+    await handleCellCommitted(cell.id, eventId)
     return { autoValidated }
   }, [
     activeLane,
@@ -13496,6 +13523,7 @@ export function ProjectWorkspace() {
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
             getPendingTargetEventId={getPendingTargetEventId}
+            reservePendingTargetCommit={reservePendingTargetCommit}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}
             presenceStore={presenceStore}

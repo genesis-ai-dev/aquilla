@@ -4,6 +4,7 @@
 // delete-cleans-R2, and reindex.
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi, afterEach } from "vitest"
+import { zipSync, strToU8 } from "fflate"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
@@ -455,6 +456,23 @@ describe("knowledge routes — validation", () => {
     expect(res.status).toBe(422)
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe("validation_failed")
+  })
+
+  // AQU-1499: the reason has to travel. A bare `catch` here used to flatten
+  // every extraction failure into "could not extract text", so a partner whose
+  // .docx was refused for a fixable reason got a message no retry could clear
+  // and no hint that re-saving the file fixes it.
+  it("a .docx the extractor refuses → 422 whose message carries the reason", async () => {
+    const jwt = await setup()
+    stubIndexingFetch()
+    // A valid zip that is not a .docx: the extractor's "no word/document.xml"
+    // path, reached through the real route.
+    const notADocx = zipSync({ "unrelated.xml": strToU8("<foo/>") })
+    const res = await uploadDoc(PROJECT, jwt, notADocx, "mislabelled.docx", new FakeBucket())
+    expect(res.status).toBe(422)
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe("validation_failed")
+    expect(body.error.message).toContain("word/document.xml")
   })
 })
 

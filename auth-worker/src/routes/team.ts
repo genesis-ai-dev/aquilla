@@ -9,10 +9,15 @@
 // Ported from the AQU-1049→1053 `team-threads` router. Intentional
 // divergences from that donor:
 //
-//   • NO release flag. The donor gated every route behind a platform
-//     `aiTeamWorkspace` flag and 404'd when off; this surface ships unflagged
-//     on dev, so `withTeamWrite`/`resolveReleaseFlags` are not ported and
-//     neither is the admin flag console.
+//   • The release flag is dev's own, not the donor's. The donor gated every
+//     route behind a PLATFORM `aiTeamWorkspace` flag and 404'd when off;
+//     `withTeamWrite`/`resolveReleaseFlags` and the admin flag console are
+//     still not ported. What AQU-1050 did port is the BEHAVIOUR, onto the
+//     gate dev already has: the per-project `autopilotEnabled` opt-in of
+//     AQU-1246. POST is refused with 409 when a project has Autopilot off;
+//     the two GETs stay open, because disabling must stop new work without
+//     taking the shared history away from the people who own it. See
+//     lib/contextual/release-gate.ts.
 //   • No POST /threads. Threads are opened by the work they cover — the
 //     ingestion write-through creates a run's thread (lib/team-ingest.ts).
 //     A human-opened thread has no producer yet, so the endpoint would have
@@ -30,7 +35,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
-import { errorJson, requireRole } from "./_contextual-helpers"
+import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import {
   appendMessage,
@@ -153,6 +158,12 @@ team.post(
     const projectId = c.req.param("projectId") ?? ""
     const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
     if (!gate.ok) return gate.res
+    // AQU-1050 — admission. A message in this channel addresses the
+    // orchestrator, so posting one is how a human asks the team for work;
+    // it rides the release flag for the same reason POST /contextual/runs
+    // does. Reads above are untouched.
+    const released = await requireAutopilotReleased(c, projectId)
+    if (!released.ok) return released.res
 
     const input = c.req.valid("json")
     const user = c.get("user")

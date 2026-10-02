@@ -20,9 +20,10 @@ async function setup() {
   const paid = await completedPayment('pro', 'month')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Autopilot', 1, 1)").bind(PROJECT).run()
-  // The start gate (AQU-827) needs both languages and an answered brief question.
+  // The start gate (AQU-827) needs both languages and an answered brief
+  // question; AQU-1050's release gate needs the project to have opted in.
   await env.AQUILLA_PG.prepare('INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)')
-    .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
+    .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', autopilotEnabled: true, translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
   for (const [cellId, ref, text] of [['c1', 'MRK 1:1', 'In the beginning'], ['c2', 'MRK 1:2', 'was the word']] as const) {
     await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
       VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()

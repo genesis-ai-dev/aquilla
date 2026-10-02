@@ -26,7 +26,8 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { visibleSourceSql } from "../lib/hidden-cells-scope"
 import { ROLE, type Env } from "../types"
-import { errorJson, requireRole } from "./_contextual-helpers"
+import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
+import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
@@ -570,6 +571,32 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
     projectRuns.push(run)
     byProject.set(run.projectId, projectRuns)
   }
+  // AQU-1050 — subsequent AI work. A project whose lead has switched Autopilot
+  // off must not have its stranded runs driven onward by the cron; that is the
+  // "disabling stops new work" half of the flag, and the sweep is the one
+  // caller with no human behind it. The run rows are left exactly as they are
+  // — status, cursor, drafts and activity all intact — so switching the flag
+  // back on resumes them on a later sweep instead of losing their place.
+  // Their heartbeats were refreshed by the claim above, so they will be
+  // re-offered each sweep and quietly declined again; that costs one UPDATE
+  // every five minutes and keeps the re-enable path free, which is the better
+  // trade than parking a run the operator never asked us to touch.
+  let declined = 0
+  for (const [projectId, runs] of [...byProject.entries()]) {
+    let released = false
+    try {
+      released = await isAutopilotReleased(db, projectId)
+    } catch (err) {
+      // Unreadable settings are not consent. Fail closed and try next sweep.
+      console.warn(`[contextual] release-flag read failed for ${projectId}:`, err)
+    }
+    if (released) continue
+    byProject.delete(projectId)
+    declined += runs.length
+  }
+  if (declined > 0) {
+    console.log(`[contextual cron] left ${declined} run(s) alone — Autopilot is off for their project`)
+  }
   const projectConcurrency = resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY)
   const projectLoops = [...byProject.entries()].map(([projectId, runs]) => {
     const perFile = Math.min(
@@ -583,7 +610,9 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
   const done = Promise.allSettled(projectLoops).then(() => {})
   if (projectLoops.length > 0) _test.lastLoop = done
   return {
-    adopted: adopted.length,
+    // Runs actually DRIVEN, not runs claimed: the cron logs this number as
+    // "resumed N stranded run(s)", and a declined run was not resumed.
+    adopted: adopted.length - declined,
     done,
   }
 }
@@ -789,6 +818,12 @@ contextual.post(
     const projectId = c.req.param("projectId") ?? ""
     const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
     if (!gate.ok) return gate.res
+    // AQU-1050 — admission. The release flag is checked before every other
+    // guard below: a project that never opted in should not be told which of
+    // its languages or briefs are missing, and must never reach the budget
+    // guards, which is where the spend starts.
+    const released = await requireAutopilotReleased(c, projectId)
+    if (!released.ok) return released.res
     if (!c.env.OPENROUTER_API_KEY) {
       const { body, status } = errorJson("not_configured", "OPENROUTER_API_KEY is not configured", 500)
       return c.json(body, status)
@@ -1321,6 +1356,16 @@ contextual.post("/:projectId/contextual/runs/:runId/:action", authMiddleware, as
   const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
   if (!gate.ok) return gate.res
 
+  // AQU-1050 — retries. `resume`, `continue` and `continue-all` all put the
+  // run back to work, so they are admission by another name and ride the
+  // release flag. `pause` and `terminate` deliberately do NOT: they are the
+  // only way to bring an in-flight run to rest, and a project that has just
+  // switched Autopilot off is exactly when someone needs them.
+  if (action === "resume" || action === "continue" || action === "continue-all") {
+    const released = await requireAutopilotReleased(c, projectId)
+    if (!released.ok) return released.res
+  }
+
   const run = await getRun(c.env.AQUILLA_PG, runId)
   if (!run || run.projectId !== projectId) {
     const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
@@ -1456,6 +1501,12 @@ contextual.post(
       return c.json({ command: intent, applied: false })
     }
 
+    // AQU-1050 — mutations. Checked AFTER the command fast-path above, so a
+    // "stop" typed into the composer of a project whose flag just went off
+    // still stops the run. Everything past here queues work for the agent.
+    const releasedToSteer = await requireAutopilotReleased(c, projectId)
+    if (!releasedToSteer.ok) return releasedToSteer.res
+
     if (body.kind === "refresh_span") {
       const brief = await getSceneBrief(c.env.AQUILLA_PG, body.body.trim())
       if (
@@ -1535,6 +1586,12 @@ contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) 
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
   if (!gate.ok) return gate.res
+  // AQU-1050 — subsequent AI work, on demand. `reactCheckProject` refuses a
+  // disabled project on its own (that is what covers the cron), but the route
+  // answers before it so the client gets the flag's own 409 rather than a 200
+  // carrying a skip reason it would have to parse.
+  const released = await requireAutopilotReleased(c, projectId)
+  if (!released.ok) return released.res
 
   const result = await reactCheckProject(c.env, projectId, {
     startRun: startReactionRun,

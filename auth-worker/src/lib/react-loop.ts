@@ -42,6 +42,7 @@ import {
   type AgentReactState,
 } from "./agent-mode"
 import { appendMessage, touchThread } from "./team-channel"
+import { readAutopilotReleased } from "./contextual/release-gate"
 import { raiseDecision } from "../../../db/shared/contextual-decisions"
 import { decide, type DecideResult } from "./jev/decide"
 import {
@@ -277,6 +278,15 @@ export async function reactCheckProject(
   })
 
   const stored = await loadProjectSettings(db, projectId)
+  // AQU-1050 — subsequent AI work. The release flag is read off the SAME
+  // settings object the mode comes from (no extra query) and is checked
+  // first: `agentMode.react` is a dial inside a surface the project may not
+  // have opted into at all, and a stored `react: true` left over from before
+  // a lead switched Autopilot off must not keep the watcher starting runs.
+  if (!readAutopilotReleased(stored.settings)) {
+    skipped.push({ fileId: null, reason: "Autopilot is switched off for this project" })
+    return settle()
+  }
   const mode = readAgentMode(stored.settings)
   if (!mode.react) {
     skipped.push({ fileId: null, reason: "react mode is off for this project" })

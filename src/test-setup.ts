@@ -23,6 +23,14 @@ globalThis.fetch = createOffMachineFetchGuard(globalThis.fetch, () => {
   return [testPath, currentTestName].filter(Boolean).join(" › ") || "unknown test"
 })
 
+// happy-dom ≥20.14 implements Element.getAnimations, so Base UI no longer
+// unmounts a closed popup synchronously: it waits a frame for exit animations
+// that never run here (no CSS animation engine), and an assertion straight
+// after a close sees the popup still mounted. This is Base UI's declared switch
+// for runtimes like this one (@base-ui/react/global.d.ts); real-browser exit
+// timing is covered by e2e.
+Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true })
+
 // Stub PostHog globally. A real VITE_POSTHOG_KEY in a developer's .env makes
 // src/lib/posthog.ts call posthog.init() at import time, which tries to fetch a
 // remote config script that happy-dom refuses to load (DOMException), crashing

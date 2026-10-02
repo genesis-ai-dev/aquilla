@@ -28,6 +28,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { emitEventsTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -838,5 +839,19 @@ export async function commitEmitEvents(
     committedAt: new Date().toISOString(),
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
+
+  // AQU-1572: report the validations that landed — after the terminal write,
+  // and only the accepted events, so a refused, stale or still-staged plan
+  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id.
+  sendReviewTelemetry(
+    env,
+    ctx,
+    cred.username,
+    emitEventsTelemetry(
+      projectId,
+      cmd.events.filter((_, i) => acceptedIds.has(allEventIds[i])),
+      telemetrySourceFor(channel),
+    ),
+  )
   return Response.json({ receipt })
 }

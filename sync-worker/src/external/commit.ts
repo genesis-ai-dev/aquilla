@@ -60,6 +60,7 @@ import { resolveCellStates } from './preconditions'
 import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
+import { linkMediaTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
@@ -1315,6 +1316,8 @@ async function commitLinkMedia(
 
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
+  // AQU-1572: which cell each attach event lands on, for the telemetry below.
+  const attaches: { eventId: string; fileId: string; cellId: string }[] = []
 
   for (const cmd of cmds) {
     // Re-check the artifact: still present, still audio, same project.
@@ -1403,6 +1406,7 @@ async function commitLinkMedia(
     // attach must precede select in the batch so the projection sees the row
     // before the select re-affirms it.
     allEventIds.push(attachId, selectId)
+    attaches.push({ eventId: attachId, fileId: cmd.fileId, cellId: cmd.cellId })
     const list = eventsByFile.get(cmd.fileId)
     if (list) list.push(attachEvent, selectEvent)
     else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
@@ -1473,6 +1477,20 @@ async function commitLinkMedia(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  // AQU-1572: one `audio attached` for the cells whose attach landed. After the
+  // terminal write, and before the partial-failure reply: a partly rejected
+  // changeset is still committed, and its accepted attaches are real.
+  sendReviewTelemetry(
+    env,
+    ctx,
+    cred.username,
+    linkMediaTelemetry(
+      projectId,
+      attaches.filter((a) => acceptedIds.has(a.eventId)),
+      telemetrySourceFor(channel),
+    ),
+  )
 
   if (rejected.length > 0) {
     return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {

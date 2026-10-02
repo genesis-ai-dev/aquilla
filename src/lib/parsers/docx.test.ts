@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import JSZip from "jszip"
-import { extractDocxStrings } from "./docx"
+import { docxPartsToStrings, extractDocxStrings } from "./docx"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 
 function makeDocx(bodyXml: string, footnotesXml?: string): Promise<ArrayBuffer> {
@@ -222,6 +222,55 @@ describe("extractDocxStrings", () => {
       const buffer = await makeDocx(`<w:p><w:r><w:t>Just body.</w:t></w:r></w:p>`)
       const [cell] = await extractDocxStrings(buffer)
       expect(cell.original).toBe("Just body.")
+    })
+  })
+
+  // AQU-1499: a real partner .docx (68k-word Arabic book, 882 KB on disk) had
+  // 39.5 MB of word/document.xml because Word saved nearly every CHARACTER as
+  // its own `<w:r>` with a full `<w:rPr>`. Building the element tree for that
+  // costs roughly 19× the XML, so this parser — which also runs inside the
+  // 128 MB Worker that serves the Agent API's server-side import — needs a
+  // ceiling. The ceiling must sit ABOVE the real-world bloat: that file is
+  // valid and has to import.
+  describe("bloated run XML (AQU-1499)", () => {
+    /** One `<w:r><w:rPr>…` per character, the real file's shape. */
+    function bloatedParagraph(text: string): string {
+      const rPr = '<w:rPr><w:rFonts w:cs="Arial"/><w:szCs w:val="24"/><w:rtl/></w:rPr>'
+      let runs = ""
+      for (const ch of text) {
+        const t = ch === " " ? '<w:t xml:space="preserve"> </w:t>' : `<w:t>${ch}</w:t>`
+        runs += `<w:r>${rPr}${t}</w:r>`
+      }
+      return `<w:p><w:pPr><w:bidi/></w:pPr>${runs}</w:p>`
+    }
+
+    function documentXml(bodyXml: string): string {
+      return `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${bodyXml}</w:body></w:document>`
+    }
+
+    it("parses per-character runs to the same cells as the clean one-run-per-paragraph rebuild", () => {
+      const paragraphs = ["هذا كتاب عن الله الحقيقي.", "A second paragraph in Latin script."]
+
+      const bloated = docxPartsToStrings({
+        documentXml: documentXml(paragraphs.map(bloatedParagraph).join("")),
+      })
+      const clean = docxPartsToStrings({
+        documentXml: documentXml(
+          paragraphs.map((text) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`).join(""),
+        ),
+      })
+
+      expect(bloated.map((c) => c.original)).toEqual(paragraphs)
+      expect(bloated.map((c) => c.original)).toEqual(clean.map((c) => c.original))
+    })
+
+    it("refuses a word/document.xml past the tree-size ceiling with a message naming the size and the fix", () => {
+      // 64 M chars is the ceiling; a tree for this would be ~1.2 GB of heap.
+      const oversized = documentXml(`<w:p><w:r><w:t>${"a".repeat(65 * 1024 * 1024)}</w:t></w:r></w:p>`)
+      expect(() => docxPartsToStrings({ documentXml: oversized })).toThrow(
+        /too complex to parse: word\/document\.xml is 65(\.\d)? MB/,
+      )
+      expect(() => docxPartsToStrings({ documentXml: oversized })).toThrow(/Save As/)
     })
   })
 })

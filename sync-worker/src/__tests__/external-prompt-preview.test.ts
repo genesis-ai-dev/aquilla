@@ -50,6 +50,13 @@ interface PreviewBody {
       approvedRenderings: string[]
       forbiddenRenderings: string[]
     }[]
+    referenceScripture: {
+      canonicalRef: string
+      citedAs: string
+      versionId: string
+      versionLabel: string
+      text: string
+    }[]
     examples: { cellId?: string; source: string; target: string }[]
     precedingContext: { source: string; target: string }[]
   }
@@ -591,6 +598,119 @@ describe("external prompt preview", () => {
       })
 
       expect(body.messages).toEqual(expected)
+    })
+  })
+
+  // ── AQU-1573: the reference Bible ─────────────────────────────────────────
+  // The ticket's third acceptance criterion: prompt-preview shows the injected
+  // verse as a labelled part. The fifth: it works with Bible resources OFF.
+  describe("reference Bible", () => {
+    const ISA_VANDYCK = [
+      "\\id ISA",
+      "\\c 40",
+      "\\v 25 فَبِمَنْ تُشَبِّهُونَنِي وَأُسَاوَى، يَقُولُ الْقُدُّوسُ.",
+    ].join("\n")
+
+    /** Env with a reference-Bible store holding Van Dyck's Isaiah. */
+    function envWithBibles(testDb: TestDb, objects: Record<string, string>) {
+      return {
+        ...env(testDb),
+        SNAPSHOTS: {
+          get: async (key: string) => {
+            const body = objects[key]
+            return body === undefined ? null : { text: async () => body }
+          },
+        } as unknown as R2Bucket,
+      }
+    }
+
+    async function previewWithBibles(
+      testDb: TestDb,
+      token: string,
+      objects: Record<string, string>,
+    ): Promise<PreviewBody> {
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/cells/cell-sermon/prompt-preview", token),
+        envWithBibles(testDb, objects),
+      )
+      expect(res).not.toBeNull()
+      expect(res!.status).toBe(200)
+      return (await res!.json()) as PreviewBody
+    }
+
+    beforeEach(async () => {
+      await insertCell(testDb, {
+        cellId: "cell-sermon",
+        seq: 1,
+        source: 'Chip asks, as Isaiah 40:25 does, "To whom will you compare me?"',
+      })
+    })
+
+    it("labels the injected verse and puts it in the prompt the copilot would send", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "Arabic",
+        // Deliberately OFF: this is a sermon project, and the reference Bible
+        // must not depend on the Aquifer switch.
+        bibleResourcesEnabled: false,
+        referenceBibleVersions: ["arb-vandyck"],
+      })
+      const body = await previewWithBibles(testDb, token, {
+        "reference-bibles/arb-vandyck/ISA.usfm": ISA_VANDYCK,
+      })
+
+      expect(body.parts.referenceScripture).toHaveLength(1)
+      expect(body.parts.referenceScripture[0]).toMatchObject({
+        canonicalRef: "ISA 40:25",
+        citedAs: "Isaiah 40:25",
+        versionId: "arb-vandyck",
+      })
+      expect(body.parts.referenceScripture[0].text).toContain("تُشَبِّهُونَنِي")
+      // And it is really in the message, not only in the parts.
+      expect(body.messages[1].content).toContain(body.parts.referenceScripture[0].text)
+      expect(body.warnings.map((w) => w.code)).not.toContain("reference_bible_book_missing")
+    })
+
+    // The preview's whole contract is that it matches what the copilot sends.
+    // Until the SPA draft path fetches reference verses, this one block is the
+    // exception — so the preview says so out loud rather than overstating itself.
+    it("says out loud that the editor's own draft call does not carry the block yet", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "Arabic",
+        referenceBibleVersions: ["arb-vandyck"],
+      })
+      const body = await previewWithBibles(testDb, token, {
+        "reference-bibles/arb-vandyck/ISA.usfm": ISA_VANDYCK,
+      })
+      expect(body.warnings.map((w) => w.code)).toContain("reference_bible_not_yet_in_editor_draft")
+    })
+
+    it("does not claim that gap when no reference verse was injected", async () => {
+      const body = await previewWithBibles(testDb, token, {})
+      expect(body.warnings.map((w) => w.code)).not.toContain(
+        "reference_bible_not_yet_in_editor_draft",
+      )
+    })
+
+    it("injects nothing when the project names no reference Bible", async () => {
+      const body = await previewWithBibles(testDb, token, {
+        "reference-bibles/arb-vandyck/ISA.usfm": ISA_VANDYCK,
+      })
+      expect(body.parts.referenceScripture).toEqual([])
+    })
+
+    it("warns, naming the R2 key, when a named version has no text for the book", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "Arabic",
+        referenceBibleVersions: ["arb-vandyck"],
+      })
+      const body = await previewWithBibles(testDb, token, {})
+      expect(body.parts.referenceScripture).toEqual([])
+      const warning = body.warnings.find((w) => w.code === "reference_bible_book_missing")
+      expect(warning?.message).toContain("reference-bibles/arb-vandyck/ISA.usfm")
+      expect(warning?.message).toContain("Isaiah 40:25")
     })
   })
 

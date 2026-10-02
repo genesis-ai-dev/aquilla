@@ -223,6 +223,21 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1573: reference Bible version ids (db/shared/reference-bibles.ts) whose
+   * wording a draft must reproduce where the source quotes Scripture.
+   *
+   * This is the setting a NON-Scripture project needs: its cells are sermon,
+   * devotional or curriculum prose that quotes verses, and those quotations have
+   * to carry the Bible its readers already know rather than a fresh rendering of
+   * the English. `bibleResourcesEnabled` above answers a different question
+   * (Aquifer verse LOOKUP for projects whose cells ARE Scripture, English only,
+   * no version choice) and the two are INDEPENDENT on purpose — every project
+   * that wants a reference Bible keeps Bible resources off.
+   *
+   * Absent or empty means no reference Bible, which is today's behaviour.
+   */
+  referenceBibleVersions?: string[]
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

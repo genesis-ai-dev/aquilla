@@ -747,6 +747,12 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1573: reference Bible version ids (db/shared/reference-bibles.ts) whose
+   *  wording a draft reproduces where the source quotes Scripture. Synced via
+   *  ProjectWideSettings; absent/empty means no reference Bible. INDEPENDENT of
+   *  `bibleResourcesEnabled` above — a sermon/curriculum project keeps Aquifer
+   *  lookup off and still needs its readers' Bible quoted verbatim. */
+  referenceBibleVersions?: string[]
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

@@ -98,6 +98,9 @@ function overlaySettings(
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
+  // AQU-1573: the reference Bible. Must reach the workspace or the drafting
+  // path would inject no reference verse on a project that has chosen one.
+  assign("referenceBibleVersions", settings.referenceBibleVersions)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

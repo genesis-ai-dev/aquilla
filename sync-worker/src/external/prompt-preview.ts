@@ -31,6 +31,13 @@
 //     IDML decomposition of the live editor buffer. A cell whose source
 //     carries USFM footnote markers gets a `warnings` entry saying the real
 //     draft call will add a footnote instruction block.
+//   - AQU-1573 reference Bible: the preview assembles it (the resolver and the
+//     builder are the shared ones) but the SPA's own draft path does not fetch
+//     reference verses YET — the browser has no route to the texts. So for now
+//     the preview is AHEAD of the copilot here, which is the one direction this
+//     module must never be silent about: a `warnings` entry says so on every
+//     preview that injects one. DELETE THAT WARNING when the SPA draft path is
+//     wired, not before.
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
@@ -61,8 +68,14 @@ import {
   selectApprovedExamples,
   type ChatMessage,
   type PromptRule,
+  type ReferenceScriptureEntry,
   type ValidatedPair,
 } from "../../../src/lib/completion/prompt-build"
+import {
+  resolveReferenceScripture,
+  type ReferenceBibleBucket,
+  type ReferenceBibleMiss,
+} from "../lib/reference-bible"
 import {
   compileConceptsToRulesCore,
   type CompiledConcept,
@@ -101,6 +114,10 @@ const WORKER_COMPILE_LABELS: CompileLabels = {
 
 export interface PromptPreviewEnv {
   AQUILLA_PG?: AquillaDb
+  /** Holds the reference-Bible texts (AQU-1573). Absent in a deployment that
+   *  has not provisioned them; the preview then reports every citation as a
+   *  miss rather than pretending the project has no reference Bible. */
+  SNAPSHOTS?: R2Bucket
 }
 
 interface CellRow {
@@ -152,6 +169,34 @@ function objectSetting(
 function stringSetting(settings: Record<string, unknown>, key: string): string {
   const value = settings[key]
   return typeof value === "string" ? value : ""
+}
+
+/** Read a top-level settings key as `string[]`, tolerating junk. */
+function stringArraySetting(settings: Record<string, unknown>, key: string): string[] {
+  const value = settings[key]
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []
+}
+
+/**
+ * One warning per reference verse the project asked for and did not get. Named
+ * at the object key so an operator can act on it: an un-provisioned book is an
+ * upload, not a code change.
+ */
+export function referenceBibleWarnings(
+  misses: readonly ReferenceBibleMiss[],
+): { code: string; message: string }[] {
+  return misses.map((m) => ({
+    code:
+      m.reason === "book_not_provisioned"
+        ? "reference_bible_book_missing"
+        : "reference_bible_verse_missing",
+    message:
+      m.reason === "book_not_provisioned"
+        ? `the source cites ${m.citedAs} but reference Bible "${m.versionId}" has no text for that ` +
+          `book — expected R2 object ${m.objectKey}; the real draft call injects no verse for it either`
+        : `reference Bible "${m.versionId}" carries ${m.objectKey} but not ${m.canonicalRef}, ` +
+          `cited here as ${m.citedAs} — no verse is injected for it`,
+  }))
 }
 
 /** A prompt-injectable rule that also carries the AQU-609 lane scoping fields.
@@ -212,6 +257,11 @@ export interface PromptPreviewBody {
     /** The rules block (terminology + style rules), or "" when nothing injects. */
     rules: string
     injectedTerms: InjectedTerm[]
+    /** AQU-1573: the reference-Bible verses injected for the Scripture this
+     *  cell quotes, each labelled with the citation and version it came from.
+     *  Empty when the project names no reference Bible or the cell quotes
+     *  nothing — independent of `bibleResourcesEnabled`. */
+    referenceScripture: ReferenceScriptureEntry[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
   }
@@ -244,7 +294,15 @@ export interface PromptPreviewBody {
  */
 export async function buildPromptPreview(
   db: AquillaDb,
-  args: { projectId: string; cellId: string; targetLang: string; fileId?: string },
+  args: {
+    projectId: string
+    cellId: string
+    targetLang: string
+    fileId?: string
+    /** Reference-Bible text store (AQU-1573). Omitted in a deployment without
+     *  one; every citation then reports as un-provisioned. */
+    referenceBibles?: ReferenceBibleBucket
+  },
 ): Promise<{ ok: true; body: PromptPreviewBody } | { ok: false; response: Response }> {
   const { projectId, cellId, targetLang } = args
 
@@ -433,6 +491,12 @@ export async function buildPromptPreview(
     { source: sourceText },
   ])
 
+  // ── reference Bible (AQU-1573) ───────────────────────────────────────────
+  const referenceScripture = await resolveReferenceScripture(args.referenceBibles, {
+    sourceText,
+    versionIds: stringArraySetting(settings, "referenceBibleVersions"),
+  })
+
   const messages = buildPrompt({
     sourceLanguage,
     targetLanguage,
@@ -444,6 +508,7 @@ export async function buildPromptPreview(
     exampleFormat,
     briefSummary,
     precedingContext,
+    referenceScripture: referenceScripture.entries,
   })
 
   const warnings: { code: string; message: string }[] = []
@@ -453,6 +518,18 @@ export async function buildPromptPreview(
       message:
         "this cell has no effective source text (an untranscribed media section, or an empty cell) — " +
         "the copilot refuses to draft it, and retrieval was skipped",
+    })
+  }
+  for (const warning of referenceBibleWarnings(referenceScripture.misses)) {
+    warnings.push(warning)
+  }
+  if (referenceScripture.entries.length) {
+    warnings.push({
+      code: "reference_bible_not_yet_in_editor_draft",
+      message:
+        "this preview injects the project's reference Bible, but the in-app editor's own draft call " +
+        "does not fetch reference verses yet (AQU-1573 follow-up) — so an editor draft of this cell " +
+        "currently receives the prompt WITHOUT the block above",
     })
   }
   if (/\\f\s/.test(sourceText) || sourceText.includes("\\f*")) {
@@ -482,6 +559,7 @@ export async function buildPromptPreview(
         brief: buildBriefBlock(briefSummary),
         rules: buildRulesBlock(rules),
         injectedTerms,
+        referenceScripture: referenceScripture.entries,
         examples,
         precedingContext,
       },
@@ -662,6 +740,7 @@ export async function handlePromptPreview(
     cellId,
     targetLang,
     ...(fileId ? { fileId } : {}),
+    ...(env.SNAPSHOTS ? { referenceBibles: env.SNAPSHOTS } : {}),
   })
   if (!result.ok) return result.response
   return Response.json(result.body)

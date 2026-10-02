@@ -2,8 +2,9 @@
 // top-level `project_settings.settings` keys an agent may write, with the type
 // each one holds.
 //
-// This file is METADATA + PURE VALIDATORS ONLY, dependency-free so BOTH
-// workers can import it: sync-worker rejects unknown/mistyped keys at
+// This file is METADATA + PURE VALIDATORS ONLY, and imports nothing but its
+// equally dependency-free siblings in this directory, so BOTH workers can
+// import it: sync-worker rejects unknown/mistyped keys at
 // PatchSettings prepare, and the command catalog renders the same list into
 // `describe_command("PatchSettings")` so an agent discovers the legal keys
 // instead of guessing at them.
@@ -17,6 +18,11 @@
 // `permission_denied` it deserves rather than being mistaken for a typo.
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
+
+import {
+  REFERENCE_BIBLE_VERSIONS,
+  validateReferenceBibleVersions,
+} from './reference-bibles'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -32,6 +38,14 @@ export interface SettingsKeySpec {
   kind: SettingsValueKind
   /** Allowed values when `kind` is 'enum'. */
   values?: readonly string[]
+  /**
+   * Allowed ELEMENT values when `kind` is 'string[]' and the array draws from a
+   * closed set. Documentation and error text only — the element check itself
+   * lives in EXTRA_VALIDATORS, which owns the per-key rules (a cap, say) a bare
+   * list cannot express. Rendered so `describe_command("PatchSettings")` names
+   * the legal values instead of leaving an agent to probe for them.
+   */
+  itemValues?: readonly string[]
 }
 
 function isPlainObject(v: unknown): boolean {
@@ -40,7 +54,11 @@ function isPlainObject(v: unknown): boolean {
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
-  return spec.kind === 'enum' ? (spec.values ?? []).map((v) => `"${v}"`).join(' | ') : spec.kind
+  if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.kind === 'string[]' && spec.itemValues?.length) {
+    return `string[] of ${spec.itemValues.map((v) => `"${v}"`).join(' | ')}`
+  }
+  return spec.kind
 }
 
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
@@ -79,6 +97,15 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   draftContext: { kind: 'object' },
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },
+  // AQU-1573: reference Bible version ids (db/shared/reference-bibles.ts) whose
+  // wording a draft must reproduce when the source quotes Scripture. Values are
+  // checked against the registry below, not just for `string[]`. Deliberately
+  // INDEPENDENT of `bibleResourcesEnabled`: the projects that need this are the
+  // non-Scripture ones, which keep Bible resources off.
+  referenceBibleVersions: {
+    kind: 'string[]',
+    itemValues: REFERENCE_BIBLE_VERSIONS.map((v) => v.id),
+  },
   alignmentSeeds: { kind: 'object[]' },
 
   // Rules / checks
@@ -165,7 +192,18 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   if (!matchesSpec(spec, value)) {
     return `settings key "${key}" expects ${settingsTypeName(spec)}`
   }
-  return null
+  const extra = EXTRA_VALIDATORS[key]
+  return extra ? extra(value) : null
+}
+
+/**
+ * Keys whose legal values are narrower than their `kind`. The shape check above
+ * runs first, so these only ever see a value of the right type; they name the
+ * closed set it has to come from. Kept beside the registry so a key cannot gain
+ * a value check the command catalog does not know about.
+ */
+const EXTRA_VALIDATORS: Readonly<Record<string, (value: unknown) => string | null>> = {
+  referenceBibleVersions: validateReferenceBibleVersions,
 }
 
 /** `key: type` lines for describe_command / docs, in registry order. */

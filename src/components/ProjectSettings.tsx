@@ -96,6 +96,7 @@ import {
 } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
+import { ReferenceBibleSection } from "./ProjectSettings/ReferenceBibleSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
@@ -262,6 +263,8 @@ interface Baseline {
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
+  /** AQU-1573: reference Bible version ids, independent of the switch above. */
+  referenceBibleVersions: string[]
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -319,6 +322,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
+    referenceBibleVersions: project.referenceBibleVersions ?? [],
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
@@ -610,6 +614,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
+  // AQU-1573: the reference Bible versions whose wording drafts must reproduce.
+  const [referenceBibleVersions, setReferenceBibleVersions] = useState<string[]>([])
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
@@ -673,6 +679,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
+    setReferenceBibleVersions(b.referenceBibleVersions)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
@@ -844,6 +851,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
+      JSON.stringify(referenceBibleVersions) !== JSON.stringify(baseline.referenceBibleVersions) ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
@@ -861,7 +869,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
     timingLocked,
-    harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
+    harmonizeMinRole, bibleResourcesEnabled, referenceBibleVersions, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, termMatching,
   ])
 
@@ -1080,6 +1088,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
+      if (JSON.stringify(referenceBibleVersions) !== JSON.stringify(baseline.referenceBibleVersions)) { sharedUpdates.referenceBibleVersions = referenceBibleVersions; changedFieldLabels.push("reference Bible") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
@@ -1160,6 +1169,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
+        referenceBibleVersions,
         decaySettings,
         audioMediaStrategy,
         geminiApiKey,
@@ -1216,7 +1226,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
-    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
+    bibleResourcesEnabled, referenceBibleVersions, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
   ])
 
@@ -1952,6 +1962,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     />
                   </DisabledFieldTooltip>
                 }
+              />
+              {/* AQU-1573: deliberately in this group but NOT behind the switch
+                  above — a sermon/curriculum project keeps Aquifer lookup off
+                  and still needs its readers' Bible quoted verbatim. */}
+              <ReferenceBibleSection
+                value={referenceBibleVersions}
+                onChange={setReferenceBibleVersions}
+                disabled={!canEditShared}
+                disabledTooltip={sharedDisabledTooltip ?? null}
               />
             </SettingsGroup>
           </div>

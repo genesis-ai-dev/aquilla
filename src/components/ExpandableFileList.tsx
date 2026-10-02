@@ -304,6 +304,32 @@ export function ExpandableFileList({
             const canReorderGroup = reorderEnabled && group.files.length > 1
             const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
             const isRefusing = refusedGroup === group.label
+            // A project whose files are all ungrouped shows no header
+            // (showHeader is false), but its one group can still be given an
+            // order — so the control cannot live only inside the header, or
+            // that project would have no way back to the automatic order.
+            const resetOrderButton = (
+              <AppTooltip content={t("nav.fileList.resetOrder", { group: displayLabel })} side="right">
+                <button
+                  type="button"
+                  className="rounded-md p-0.5 transition-colors hover:text-foreground"
+                  // Confirmed before it runs: the hand-placed order is work,
+                  // it is shared with the whole project, and clearing it
+                  // cannot be undone from here.
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setResetGroup({
+                      label: group.label,
+                      displayLabel,
+                      writes: planFileOrderReset(group.files),
+                    })
+                  }}
+                  aria-label={t("nav.fileList.resetOrder", { group: displayLabel })}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </button>
+              </AppTooltip>
+            )
             return (
               <div
                 key={group.label}
@@ -380,34 +406,19 @@ export function ExpandableFileList({
                         </button>
                       </AppTooltip>
                     )}
-                    {canResetGroup && !isEditingCorpus && (
-                      <AppTooltip content={t("nav.fileList.resetOrder", { group: displayLabel })} side="right">
-                        <button
-                          type="button"
-                          className="rounded-md p-0.5 transition-colors hover:text-foreground"
-                          // Confirmed before it runs: the hand-placed order is
-                          // work, it is shared with the whole project, and
-                          // clearing it cannot be undone from here.
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setResetGroup({
-                              label: group.label,
-                              displayLabel,
-                              writes: planFileOrderReset(group.files),
-                            })
-                          }}
-                          aria-label={t("nav.fileList.resetOrder", { group: displayLabel })}
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                        </button>
-                      </AppTooltip>
-                    )}
+                    {canResetGroup && !isEditingCorpus && resetOrderButton}
                   </div>
                 )}
-                {!isCollapsed && isRefusing && (
+                {!showHeader && canResetGroup && (
+                  <div className="flex justify-end px-1 pb-1 text-[10px] text-muted-foreground">
+                    {resetOrderButton}
+                  </div>
+                )}
+                {isRefusing && (
                   // The refusal has to be visible, not just a cursor shape:
                   // a drop that silently does nothing is indistinguishable
-                  // from a drop that failed.
+                  // from a drop that failed. Shown even on a collapsed group,
+                  // where there are no rows to carry the message otherwise.
                   <p
                     role="status"
                     className="mx-1 mb-1 rounded-md bg-muted px-2 py-1 text-[10px] leading-snug text-muted-foreground"

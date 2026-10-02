@@ -275,6 +275,33 @@ describe("reordering is held back while the list is filtered", () => {
   })
 })
 
+describe("a project whose files are all ungrouped", () => {
+  // It shows no group header at all, so the Reset control cannot live only
+  // inside the header — that project could be given an order and then have
+  // no way back to the automatic one.
+  const UNGROUPED = [
+    file("notes", { sortIndex: 0 }),
+    file("readme", { sortIndex: SORT_INDEX_STEP }),
+  ]
+
+  it("can still be reordered, and still reset", () => {
+    renderList(UNGROUPED)
+    expect(document.querySelectorAll('[data-reorderable="true"]')).toHaveLength(2)
+    const reset = screen.getByRole("button", { name: "Reset the order of Ungrouped" })
+    fireEvent.click(reset)
+    fireEvent.click(screen.getByRole("button", { name: "Reset order" }))
+    expect(onReorderFiles.mock.calls[0][0]).toEqual([
+      { fileId: "notes", sortIndex: null },
+      { fileId: "readme", sortIndex: null },
+    ])
+  })
+
+  it("offers no reset before anything has been placed", () => {
+    renderList([file("notes"), file("readme")])
+    expect(screen.queryByRole("button", { name: "Reset the order of Ungrouped" })).toBeNull()
+  })
+})
+
 describe("a group of one", () => {
   it("offers no reorder — there is nowhere to move the file to", () => {
     renderList([file("Only", { corpusMarker: "Season 1", sortIndex: 0 })])

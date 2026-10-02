@@ -1299,6 +1299,9 @@ export async function mirrorSync(
   // or a target-only change would never trip `head > cursor`.
   const consumes = link.source_link_consumes === 'target' ? 'target' : 'source'
   const gate = link.source_link_gate === 'head' ? 'head' : 'validated'
+  // AQU-1559: read once per sync and handed to every window — the selection is
+  // a property of the link, not of a window.
+  const followedFileIds = linkFileIdsOf(link)
   let head = await laneRelevantHeadSeq(db, upstreamProjectId, consumes)
   // AQU-1005: never advance the fold cursor past an in-flight upstream
   // allocation — a late-committing upstream writer's events would otherwise be
@@ -1340,6 +1343,7 @@ export async function mirrorSync(
       upstreamProjectId,
       consumes,
       gate,
+      followedFileIds,
       sinceSeq,
       untilSeq,
       head,
@@ -1408,6 +1412,9 @@ interface MirrorWindowArgs {
   upstreamProjectId: string
   consumes: LinkConsumes
   gate: 'head' | 'validated'
+  /** AQU-1559: the upstream file ids this link follows (`linkFileIdsOf`), or
+   *  null for a whole-project link. */
+  followedFileIds: Set<string> | null
   /** Exclusive lower bound: the link's cursor when the window starts. */
   sinceSeq: number
   /** Inclusive upper bound: where the cursor stands once the window commits. */
@@ -1429,7 +1436,7 @@ interface MirrorWindowResult {
  * `untilSeq`. Everything this holds in memory is bounded by the window.
  */
 async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<MirrorWindowResult> {
-  const { downstreamProjectId, upstreamProjectId, consumes, gate, sinceSeq, untilSeq, head } = args
+  const { downstreamProjectId, upstreamProjectId, consumes, gate, followedFileIds, sinceSeq, untilSeq, head } = args
   const { cells: folded, fileIds: deltaFileIds } =
     consumes === 'target'
       ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate)
@@ -1442,7 +1449,6 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   // edit to an unpicked file a true no-op rather than a change that keeps being
   // re-folded: the fold yields nothing, so no mirror event and no
   // link.cursor.advance is emitted and nothing shows in "Upstream changes".
-  const followedFileIds = linkFileIdsOf(link)
   if (followedFileIds) {
     for (const fileId of [...deltaFileIds]) {
       if (!followedFileIds.has(fileId)) deltaFileIds.delete(fileId)

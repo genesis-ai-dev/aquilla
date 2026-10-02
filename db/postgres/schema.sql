@@ -624,6 +624,14 @@ CREATE INDEX IF NOT EXISTS idx_cells_hidden
   ON cells(project_id, file_id)
   WHERE hidden_at IS NOT NULL;
 
+-- Cells a live link's upstream deleted (tombstoned_at). Only live-linked
+-- downstreams have any, so this indexes a small slice of the table — the set
+-- the files counter recompute leaves out of cell_count without giving up its
+-- index-only scan (migration 0126).
+CREATE INDEX IF NOT EXISTS idx_cells_tombstoned
+  ON cells(project_id, file_id)
+  WHERE tombstoned_at IS NOT NULL;
+
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,
 -- capped at 15 (the 15 key means 15+).

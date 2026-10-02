@@ -2,6 +2,7 @@ import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
+import { liveSourceSql } from './tombstoned-cells-scope'
 // AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
 // when auth-worker's per-unit assignment read started needing them. They are
 // re-exported here so every existing importer of this module keeps working and
@@ -217,8 +218,11 @@ export function fileProgressRecomputeStmt(
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
           -- CTE feeds (file, section, book) and every lane, so hiding the last
-          -- untranslated verse reads 100% instead of 90%.
+          -- untranslated verse reads 100% instead of 90%. A cell the upstream deleted
+          -- from a live link leaves the same way: its tombstoned row (and any
+          -- translation orphaned on it) stays for the review panel, but is not work.
           AND ${visibleSourceSql('s')}
+          AND ${liveSourceSql('s')}
      ), buckets AS (
        SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count,
               ${STRUCTURAL_BUCKET_SQL}
@@ -377,8 +381,11 @@ export function sectionsProgressRecomputeStmt(
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
           -- CTE feeds (file, section, book) and every lane, so hiding the last
-          -- untranslated verse reads 100% instead of 90%.
+          -- untranslated verse reads 100% instead of 90%. A cell the upstream deleted
+          -- from a live link leaves the same way: its tombstoned row (and any
+          -- translation orphaned on it) stays for the review panel, but is not work.
           AND ${visibleSourceSql('s')}
+          AND ${liveSourceSql('s')}
      )${affectedCte}, summaries AS (
        SELECT lane, 'section'::text AS scope, section_key,
               COUNT(*)::integer AS total_count,
@@ -522,8 +529,10 @@ export function fullProgressRecomputeStmts(
            LEFT JOIN audio a ON a.cell_id = s.cell_id
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1424: see the note on the other paired CTEs — parked cells leave
-            -- progress entirely, numerator and denominator together.
+            -- progress entirely, numerator and denominator together. So do cells the
+            -- upstream deleted from a live link (tombstoned_at).
             AND ${visibleSourceSql('s')}
+            AND ${liveSourceSql('s')}
        ), summaries AS (
          SELECT lane,
                 'file'::text AS scope,
@@ -680,8 +689,10 @@ export function fullProgressRecomputeStmts(
           WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
             -- AQU-1424: a section whose every cell is now parked has no surviving key,
             -- so its progress row is deleted rather than left behind at a stale count
-            -- that no later recompute would revisit.
+            -- that no later recompute would revisit. Likewise a section whose every
+            -- cell the upstream deleted.
             AND ${visibleSourceSql('source')}
+            AND ${liveSourceSql('source')}
        ), surviving_keys AS (
          SELECT 'section'::text AS scope, section_key FROM source_keys
          UNION

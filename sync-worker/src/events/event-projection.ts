@@ -28,6 +28,7 @@ import { usableCorpusMarker } from './corpus-marker'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
+import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
@@ -207,6 +208,9 @@ export function laneOfEvent(
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * None of them counts a hidden cell (AQU-1424) or a cell the upstream deleted
+ * from a live link (its tombstoned source row and any orphaned translation).
+ *
  * AQU-1083 adds the structural_* trio: the same cell/filled/approved counts
  * restricted to cells whose SOURCE row is a heading or paratext. Membership is
  * a property of the source row, but filled and approved count TARGET rows whose
@@ -267,6 +271,10 @@ function fileCountersSql(scope: FileCountersScope): string {
                       -- no cells — a real bug (AQU-1068, it broke removal outright) worth
                       -- keeping a blunt check for.
                       AND ${visibleCellIdSql('cell_id', 'f.project_id', 'f.id')}
+                      -- A cell the upstream deleted (a live link's tombstone) leaves it
+                      -- too, by the same set form and for the same plan reason. See
+                      -- tombstoned-cells-scope.ts.
+                      AND ${liveCellIdSql('cell_id', 'f.project_id', 'f.id')}
                     GROUP BY cell_id
                  ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
@@ -312,6 +320,10 @@ function fileCountersSql(scope: FileCountersScope): string {
             -- creates and the all-null row of an empty file. That empty row is what
             -- drives the counters to 0 instead of leaving them stale.
             AND ${visibleSourceSql('s')}
+            -- The same gate for a cell the upstream deleted: its tombstoned source row
+            -- and any translation orphaned on it stay in cells for the review panel,
+            -- but they are not the file's work. Same LEFT JOIN null-safety as above.
+            AND ${liveSourceSql('s')}
           GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,

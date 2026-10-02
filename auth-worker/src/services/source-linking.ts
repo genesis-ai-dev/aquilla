@@ -334,6 +334,99 @@ export async function clearLinkBackfill(env: Env, projectId: string): Promise<vo
   }
 }
 
+/**
+ * AQU-1562: the followed-file selection as the column HOLDS it, for a
+ * compare-and-set write — the same shape and the same reason as
+ * `loadLinkBackfillRaw`.
+ *
+ * Stopping a file rewrites the selection, and the mirror sync writes it too
+ * (a finished backfill moves its files in), so the write has to compare
+ * against the value it decided from. And "the column is missing" cannot be
+ * folded into "follows the whole project" here, the way `loadLinkFileIds` does
+ * it: on a database that predates migration 0127 there is nowhere to record a
+ * stopped file, so the route has to refuse rather than write a selection into
+ * a column that is not there.
+ */
+export async function loadLinkFileIdsRaw(
+  env: Env,
+  projectId: string,
+): Promise<{ ok: true; raw: string | null } | { ok: false }> {
+  if (!env.AQUILLA_PG) return { ok: false }
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_file_ids FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_file_ids: string | null }>()
+    return { ok: true, raw: row?.source_link_file_ids ?? null }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * AQU-1562: which of the upstream's files this project holds as a STOPPED copy
+ * — a file the link once followed and no longer does, still here with the
+ * source text it had when it was stopped and every translation on it.
+ *
+ * The caller needs this to say the right thing before it acts: following a
+ * stopped file again REPLACES its source text with the upstream's current text,
+ * while checking a file this project never had only adds one. Both read as an
+ * unchecked row, so the two cannot be told apart from the selection alone.
+ *
+ * Found by `deterministicDownstreamFileId`, not by name: a stopped file can be
+ * renamed on either side, and a name cannot tell a mirrored copy from a file
+ * the project imported itself (the same reasoning as the detach snapshot's).
+ * A whole-project link has stopped nothing by definition, so it answers empty
+ * without a query.
+ */
+export async function loadStoppedUpstreamFileIds(
+  env: Env,
+  projectId: string,
+  upstreamFileIds: readonly string[],
+  followed: readonly string[] | null,
+): Promise<string[]> {
+  if (!followed) return []
+  const followedSet = new Set(followed)
+  const candidates = upstreamFileIds.filter((id) => !followedSet.has(id))
+  if (candidates.length === 0) return []
+
+  const downstreamIdOf = new Map<string, string>() // downstream file id -> upstream file id
+  for (const upstreamFileId of candidates) {
+    downstreamIdOf.set(deterministicDownstreamFileId(projectId, upstreamFileId), upstreamFileId)
+  }
+  const downstreamIds = [...downstreamIdOf.keys()]
+
+  // Chunked: an upstream can hold a whole Bible and then some, and the
+  // selection cap is 5000 — more placeholders than one statement should carry.
+  const stopped: string[] = []
+  const CHUNK = 200
+  for (let i = 0; i < downstreamIds.length; i += CHUNK) {
+    const chunk = downstreamIds.slice(i, i + CHUNK)
+    const placeholders = chunk.map(() => "?").join(", ")
+    try {
+      const { results } = await env.AQUILLA_PG.prepare(
+        `SELECT id FROM files
+           WHERE project_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`,
+      )
+        .bind(projectId, ...chunk)
+        .all<{ id: string }>()
+      for (const row of results ?? []) {
+        const upstreamFileId = downstreamIdOf.get(row.id)
+        if (upstreamFileId) stopped.push(upstreamFileId)
+      }
+    } catch {
+      // A read that fails answers "none stopped": the caller then describes a
+      // check as a plain add, which understates what it does rather than
+      // promising something that will not happen.
+      return []
+    }
+  }
+  // The upstream's own order, as every other file list here is.
+  const stoppedSet = new Set(stopped)
+  return upstreamFileIds.filter((id) => stoppedSet.has(id))
+}
+
 /** AQU-1560: the upstream's current (non-deleted) file ids. */
 export async function loadUpstreamFileIds(env: Env, upstreamProjectId: string): Promise<string[]> {
   const { results } = await env.AQUILLA_PG.prepare(

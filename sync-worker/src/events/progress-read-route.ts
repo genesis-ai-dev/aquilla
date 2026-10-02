@@ -122,12 +122,19 @@ export interface SectionProgressDetailResponse {
     recorded: boolean
     audioValidated: boolean
     /**
-     * AQU-1493: a line with no verse reference of its own, listed in the
-     * chapter it is counted with — the chapter of the line above it, or for a
-     * heading the verse below it (see inheritedKeysSql). Its `ref` is ''.
-     * Absent on every other verse.
+     * AQU-1493: a line added in the editor, with no verse reference of its
+     * own, listed in the chapter it is counted with: the chapter of the line
+     * above it (see inheritedKeysSql). Its `ref` is ''. Absent on every other
+     * verse, and on a heading, which carries `structural` instead (`s6`).
      */
     unnumbered?: boolean
+    /**
+     * AQU-1493: a heading or title line (a `heading`/`paratext` cell, with or
+     * without a reference of its own), so the chapter card can label its chip
+     * "Heading" rather than "Unnumbered line" or a USFM id like "1:s1:1".
+     * Absent on every other verse, and on every body before ETag shape `s6`.
+     */
+    structural?: boolean
   }>
 }
 
@@ -732,6 +739,7 @@ export async function handleProgressReadRequest(
         `${INHERITED_KEYS_WITH}
          SELECT s.cell_id,
                 s.canonical_ref,
+                ${structuralPredicateSql('s')} AS structural,
                 ${INHERITED_COLUMNS},
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count,
@@ -762,6 +770,7 @@ export async function handleProgressReadRequest(
       ).all<{
         cell_id: string
         canonical_ref: string | null
+        structural: boolean | null
         inherited_key: string | null
         place_ref: string | null
         inherited_depth: number | string | null
@@ -811,7 +820,11 @@ export async function handleProgressReadRequest(
     // of take_signed changed under clients holding an `s3` body: same field,
     // same type, different question — the one kind of change a revision can
     // never express. `s5` (AQU-1493): the list gained its unnumbered lines.
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s5${structuralTag}${laneTag}"`
+    // `s6` (AQU-1493): headings count with the verse below them, so the same
+    // revision now lists different lines, and each heading carries `structural`
+    // instead of `unnumbered`. The client cache is durable, so without the bump
+    // a chapter looked at before the deploy keeps its old list.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:s6${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -830,7 +843,11 @@ export async function handleProgressReadRequest(
           validated: Number(row.endorsement_count) >= validationCount,
           recorded: row.has_take,
           audioValidated: row.take_signed,
-          ...(row.canonical_ref ? {} : { unnumbered: true }),
+          // A heading is labelled as a heading wherever it counts, and is
+          // never one of the "unnumbered lines" (lines added in the editor).
+          ...(row.structural
+            ? { structural: true }
+            : row.canonical_ref ? {} : { unnumbered: true }),
         })),
     }
     return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })

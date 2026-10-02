@@ -737,7 +737,11 @@ function PlanChapterCard({
     : []
   const fade = useScrollFade(rowRef, short.length)
   const firstCellId = verses?.status === "ready" ? verses.verses[0]?.cellId ?? null : null
-  const unnumbered = verses?.status === "ready" ? verses.verses.filter((v) => v.unnumbered).length : 0
+  // Lines added in the editor only. A heading is never one of them; the
+  // `structural` check also covers a worker mid-deploy that still flags it.
+  const unnumbered = verses?.status === "ready"
+    ? verses.verses.filter((v) => v.unnumbered && !v.structural).length
+    : 0
 
   return (
     <div
@@ -826,13 +830,16 @@ function PlanChapterCard({
               // Text in the STATUS azure: `text-primary` is the pale accent
               // tuned for button fills, and on a chip this small it washed out.
               // AQU-1493: a line with no reference has no number to print, so
-              // its chip says what it is in words and grows to fit them.
-              className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
+              // its chip says what it is in words and grows to fit them. So
+              // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
+              className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
               onClick={() => onOpenCell?.(v.cellId)}
             >
-              {v.unnumbered
-                ? t("org.projectOverview.plan.unnumberedLine")
-                : verseChipLabel(v.ref, section.key)}
+              {v.structural
+                ? t("org.projectOverview.plan.headingLine")
+                : v.unnumbered
+                  ? t("org.projectOverview.plan.unnumberedLine")
+                  : verseChipLabel(v.ref, section.key)}
             </button>
           ))}
         </div>

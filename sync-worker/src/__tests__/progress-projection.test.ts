@@ -296,16 +296,19 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s5"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s6"')
 
     const notHonoured = async (candidate: string) => (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}`, 'If-None-Match': candidate },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!.status
 
     // A client from before shape markers existed at all.
-    expect(await notHonoured(etag.replace(':s5', ''))).toBe(200)
-    // AQU-1493: nor one from before the list carried its unnumbered lines.
-    expect(await notHonoured(etag.replace(':s5', ':s4'))).toBe(200)
+    expect(await notHonoured(etag.replace(':s6', ''))).toBe(200)
+    // AQU-1493: nor one from before the list carried its unnumbered lines,
+    expect(await notHonoured(etag.replace(':s6', ':s4'))).toBe(200)
+    // nor one from before headings moved to the verse below them and were
+    // flagged `structural` rather than `unnumbered`.
+    expect(await notHonoured(etag.replace(':s6', ':s5'))).toBe(200)
     // AQU-490: and one from the shape immediately before this, which is the
     // live case at deploy. `take_signed` kept its name and its type and
     // changed its question — nothing else in the key moves for that.

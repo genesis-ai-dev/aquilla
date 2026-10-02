@@ -67,8 +67,15 @@ export interface SectionProgressDetailResponse {
      * AQU-1493: a line with no verse reference of its own (`ref` is ''),
      * listed in the chapter it is counted with — the chapter of the line above
      * it. Absent on every numbered verse, and from a worker before `s5`.
+     * From `s6` also absent on a heading (see `structural`).
      */
     unnumbered?: boolean
+    /**
+     * AQU-1493: a heading or title line (with or without a reference), counted
+     * in the chapter of the verse below it. Absent on every other verse, and
+     * from a worker before `s6`.
+     */
+    structural?: boolean
   }>
 }
 

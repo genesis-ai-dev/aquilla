@@ -1479,6 +1479,7 @@ export const org = defineNamespace({
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
     "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
+    "org.projectOverview.plan.headingLine": "Heading",
     "org.projectOverview.plan.unnumberedInChapter": plural({
       one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
       other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
@@ -3248,6 +3249,11 @@ export const org = defineNamespace({
       "org.projectOverview.plan.unnumberedLine": {
         description:
           "Chip in the plan inspector's chapter card for a line that has no verse reference — usually one added by hand in the editor — where a numbered verse's chip would print '12:4'. The line counts with the chapter of the line above it. It may already hold text, so do not call it empty.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingLine": {
+        description:
+          "Chip in the plan inspector's chapter card for a heading or title line, such as 'The Creation' or a book title, where a numbered verse's chip would print '12:4'. Opens that line in the editor.",
         maxLength: 20,
       },
       "org.projectOverview.plan.unnumberedInChapter": {

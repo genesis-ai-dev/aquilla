@@ -606,6 +606,7 @@ describe("the chapter card", () => {
     ref: string,
     over: Partial<{
       filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean; unnumbered: boolean
+      structural: boolean
     }> = {},
   ) => ({ cellId, ref, filled: true, validated: true, ...over })
 
@@ -715,6 +716,51 @@ describe("the chapter card", () => {
     // to sit whether or not anyone had asked.
     expect(screen.getByTestId("plan-chapter-detail")).toContainElement(screen.getByTestId("plan-chapter-unnumbered"))
     expect(screen.getAllByTestId("plan-chapter-unnumbered")).toHaveLength(1)
+  })
+
+  it("labels a heading as a heading where it sits, and opens it (AQU-1493)", async () => {
+    // "The Seventh Day" counts with 2:1 below it and the worker lists it first.
+    // A USFM heading's own ref ("GEN 2:s1:1") is jargon, so it reads "Heading"
+    // as well; neither is one of the chapter's unnumbered lines.
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 4, filledCount: 1, validatedCount: 1 })],
+      [
+        verse("h2", "", { filled: false, validated: false, structural: true }),
+        verse("s1", "GEN 2:s1:1", { filled: false, validated: false, structural: true }),
+        verse("g21", "GEN 2:1"),
+        verse("g22", "GEN 2:2", { filled: false, validated: false }),
+      ],
+      { onOpenCell },
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Heading", "Heading", "2:2"])
+    // A word chip grows to fit its word; a verse chip keeps its fixed width.
+    expect(screen.getByTestId("plan-verse-chip-h2").className).toContain("px-2")
+    expect(screen.getByTestId("plan-verse-chip-h2").className).not.toContain("w-[46px]")
+    expect(screen.getByTestId("plan-verse-chip-g22").className).toContain("w-[46px]")
+    fireEvent.click(screen.getByTestId("plan-verse-chip-h2"))
+    expect(onOpenCell).toHaveBeenCalledWith("h2")
+    expect(screen.queryByTestId("plan-chapter-unnumbered")).toBeNull()
+  })
+
+  it("counts only added lines in the unnumbered note, never a heading (AQU-1493)", async () => {
+    // A mixed-version deploy could still flag a heading `unnumbered`; the
+    // `structural` flag wins.
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 4, filledCount: 4, validatedCount: 2 })],
+      [
+        verse("h2", "", { structural: true }),
+        verse("hx", "", { structural: true, unnumbered: true }),
+        verse("x2", "", { unnumbered: true }),
+        verse("g21", "GEN 2:1"),
+      ],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it’s counted with this chapter.",
+    )
   })
 
   it("says nothing about unnumbered lines on a chapter without them", async () => {

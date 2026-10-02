@@ -3030,6 +3030,7 @@ export const id: Catalog = {
   "org.projectOverview.plan.sectionCount": {"forms":{"other":"{count} bagian"},"countVar":"count"},
   "org.projectOverview.plan.chaptersShort": {"forms":{"other":"kurang {count} pasal"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Baris tanpa nomor",
+  "org.projectOverview.plan.headingLine": "Judul",
   "org.projectOverview.plan.unnumberedInChapter": {"forms":{"other":"{count} baris tanpa nomor di sini tidak memiliki referensi ayat; baris tersebut dihitung bersama pasal ini."},"countVar":"count"},
   "org.projectOverview.plan.chaptersComplete": "{done} dari {total} rampung",
   "org.projectOverview.plan.gridLegendComplete": "semua rampung",

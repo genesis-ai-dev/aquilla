@@ -40,6 +40,12 @@ export interface ShortVerse {
    * words — see `org.projectOverview.plan.unnumberedLine`.
    */
   unnumbered?: boolean
+  /**
+   * AQU-1493: a heading or title line, counted with the verse below it. Its
+   * chip reads "Heading" (`org.projectOverview.plan.headingLine`) whatever its
+   * ref, and it is never one of the chapter's unnumbered lines.
+   */
+  structural?: boolean
 }
 
 /**

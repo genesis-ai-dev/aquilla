@@ -3014,6 +3014,7 @@ export const fr: Catalog = {
   "org.projectOverview.plan.chapterCount": {"forms":{"one":"{count} chapitre","many":"{count} chapitres","other":"{count} chapitres"},"countVar":"count"},
   "org.projectOverview.plan.chaptersShort": {"forms":{"one":"{count} chapitre incomplet","many":"{count} chapitres incomplets","other":"{count} chapitres incomplets"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Ligne sans numéro",
+  "org.projectOverview.plan.headingLine": "Titre",
   "org.projectOverview.plan.unnumberedInChapter": {"forms":{"one":"{count} ligne sans numéro ici n’a pas de référence de verset ; elle est comptée avec ce chapitre.","many":"{count} lignes sans numéro ici n’ont pas de référence de verset ; elles sont comptées avec ce chapitre.","other":"{count} lignes sans numéro ici n’ont pas de référence de verset ; elles sont comptées avec ce chapitre."},"countVar":"count"},
   "org.projectOverview.plan.chaptersComplete": "{done} sur {total} terminés",
   "org.projectOverview.plan.gridLegendComplete": "tout terminé",

@@ -556,4 +556,40 @@ describe("the plan's readers walk an added line where it sits (AQU-1493)", () =>
       ["j22", "JON 2:2", false],
     ])
   })
+
+  it("marks a heading as a heading, never as an unnumbered line, with or without a reference", async () => {
+    // The chapter card labels a structural chip "Heading" and leaves it out of
+    // its "unnumbered lines" note, which is about lines added in the editor.
+    const lines = [
+      ...GENESIS.slice(0, 2),
+      { id: "s1", ref: "GEN 1:s1:1", type: "heading" },
+      ...GENESIS.slice(2),
+    ]
+    const { db } = await makeTestDb({ files, project_settings: settings, cells: chain(lines) })
+    await recompute(db)
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const flags = async (sectionKey: string) => {
+      const url = `https://worker/api/v1/projects/${P}/files/${F}/progress/sections/${encodeURIComponent(sectionKey)}`
+      const res = (await handleProgressReadRequest(new Request(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+      const body = await res.json() as SectionProgressDetailResponse
+      return body.verses.map((v) => [v.cellId, v.structural ?? false, v.unnumbered ?? false])
+    }
+    // Sorted by id: where a USFM heading id like "1:s1:1" sorts among the
+    // verses is the reference comparator's business, not this flag's.
+    expect((await flags("GEN 1")).sort()).toEqual([
+      ["g11", false, false],
+      ["g12", false, false],
+      ["h1", true, false],
+      ["s1", true, false],
+      ["x1", false, true],
+    ])
+    expect(await flags("GEN 2")).toEqual([
+      ["h2", true, false],
+      ["x2", false, true],
+      ["g21", false, false],
+      ["g22", false, false],
+    ])
+  })
 })

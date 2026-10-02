@@ -131,6 +131,37 @@ describe("the live handler and the rebuild projection agree", () => {
   }
 })
 
+// AQU-1569 asks that renaming a placed file keep its position, and that
+// trashing and restoring one bring it back. Neither needed code: those
+// projections write named columns and never touch `meta`. This is the guard
+// for that — the day one of them starts rewriting meta, every hand-placed
+// order in every project quietly resets.
+describe("a placement survives the other file-level events", () => {
+  function sqlFor(kind: "file.rename" | "file.delete" | "file.restore", payload: unknown) {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      { ...persisted(null), kind, payload } as PersistedEvent,
+      [],
+    )
+    return recorded.map((r) => r.sql).join(" ")
+  }
+
+  it("file.rename rewrites the name, not meta", () => {
+    const sql = sqlFor("file.rename", { name: "Finale" })
+    expect(sql).toContain("SET name = ?")
+    expect(sql).not.toContain("meta")
+  })
+
+  it("file.delete and file.restore only move deleted_at", () => {
+    for (const kind of ["file.delete", "file.restore"] as const) {
+      const sql = sqlFor(kind, {})
+      expect(sql, kind).toContain("deleted_at")
+      expect(sql, kind).not.toContain("meta")
+    }
+  })
+})
+
 describe("usableSortIndex", () => {
   it("accepts any finite number, including 0, negatives and fractions", () => {
     expect(usableSortIndex(0)).toBe(0)

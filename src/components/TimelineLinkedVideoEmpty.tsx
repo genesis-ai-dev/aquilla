@@ -9,8 +9,10 @@
 // timeline, so that is where this points.
 //
 // Uploading the original recording is still offered, because a recording with
-// the same timing as the linked video does produce rows for this file. A
-// viewer gets the sentence and nothing else.
+// the same timing as the linked video does produce rows for this file. It is
+// stored as the file's source audio, and a YouTube video keeps its own sound
+// until the person picks the recording. Only people who can add rows and set
+// source audio get the offer; a viewer gets the sentence and nothing else.
 
 import { useState } from "react"
 import { Clapperboard } from "lucide-react"
@@ -129,7 +131,9 @@ export function TimelineLinkedVideoEmpty({
             />
           </Button>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            {t("editor.media.linkedVideoUploadHint")}
+            {/* AQU-1565 follow-up: only a YouTube picture keeps its own sound
+                after an upload and offers the sound menu to switch. */}
+            {t(isYouTube ? "editor.media.linkedVideoUploadHint" : "editor.media.linkedVideoUploadHintGeneric")}
           </p>
         </div>
       )}

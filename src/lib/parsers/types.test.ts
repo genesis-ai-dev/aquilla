@@ -180,4 +180,20 @@ describe("resolveFileTimingMode", () => {
     expect(resolveFileTimingMode(undefined, undefined)).toBe("dubbing")
     expect(resolveFileTimingMode({ type: "audio" }, {})).toBe("dubbing")
   })
+  // AQU-1565 follow-up: a file timed to a linked YouTube video resolves to
+  // Original timing however Free timing reached it, or the Media view would
+  // hide the video. Same three ways back in as a subtitle file.
+  it("a file timed to a linked YouTube video ignores its own and the project's audioFirst", () => {
+    const opts = { timedToLinkedVideo: true }
+    expect(resolveFileTimingMode({ type: "video", timingMode: "audioFirst" }, null, opts)).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
+  })
+
+  it("without the flag a video file keeps Free timing exactly as before", () => {
+    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
+    expect(
+      resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, { timedToLinkedVideo: false }),
+    ).toBe("audioFirst")
+  })
 })

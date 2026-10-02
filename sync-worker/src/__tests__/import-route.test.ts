@@ -221,6 +221,8 @@ describe('POST /import — server_seq is race-safe', () => {
       cell_id: 'media-cell-1',
       audio_id: 'audio-1.wav',
       selected: 1,
+      // No role on the attachment: a dub, exactly as before AQU-1565.
+      role: 'dub',
     })
 
     expect((await handleBulkImportRequest(retry, makeEnv(db)))?.status).toBe(200)
@@ -274,6 +276,8 @@ describe('POST /import — server_seq is race-safe', () => {
     { timings: [{ word: 'bad', t0: 2, t1: 1, start: 0, end: 3 }] },
     { transcription: 42 },
     { slot: 'generatedVoice', transcription: 'Source wording' },
+    // AQU-1565 follow-up: only the two roles the projection knows.
+    { role: 'narration' },
   ])('rejects malformed media metadata %j before revealing the staged file', async invalidMetadata => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
@@ -313,6 +317,60 @@ describe('POST /import — server_seq is race-safe', () => {
     expect(await response?.text()).toBe('invalid media attachment')
     expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
     expect(await rows('cell_audio')).toHaveLength(0)
+  })
+
+  it("stores an attachment marked role source as the file's source audio (AQU-1565)", async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    expect((await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-4', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-4',
+        cells: [{ id: 'source-media-4', cellId: 'media-cell-4', value: 'recording.wav', medium: 'media' }],
+      }),
+    }), makeEnv(db)))?.status).toBe(200)
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '1', NULL, 'recording.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'audio-4.wav', '{}'::jsonb)`,
+    ).bind(
+      '01900000-0000-7000-8000-000000000104',
+      PROJECT_ID,
+      'c'.repeat(64),
+      'projects/project-race/files/file-race/audio/audio-4.wav',
+      FILE_ID,
+    ).run()
+
+    const response = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-4',
+        attachments: [{
+          id: 'media-attach-4',
+          cellId: 'media-cell-4',
+          audioId: 'audio-4.wav',
+          url: 'frontier-audio://audio-4.wav',
+          slot: 'recording',
+          role: 'source',
+        }],
+      }),
+    }), makeEnv(db))
+
+    expect(response?.status).toBe(200)
+    expect((await rows<any>('cell_audio'))[0]).toMatchObject({ cell_id: 'media-cell-4', role: 'source' })
+    // The event log carries it too, so a projection rebuild agrees.
+    const event = (await rows<any>('events')).find((e) => e.id === 'media-attach-4')
+    expect(JSON.parse(event.payload).role).toBe('source')
   })
 
   it('rejects a bulk target that is not paired to a source parent in the same chunk', async () => {

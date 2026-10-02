@@ -932,6 +932,15 @@ export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | 
 export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+  opts?: {
+    /**
+     * AQU-1565 follow-up: the file is timed to a linked YouTube video. Its
+     * rows run to the video's clock, so, as for a subtitle import, there is
+     * nothing for Free timing to fit and the Media view must always show the
+     * video. A flag rather than a URL test so this module stays import-free.
+     */
+    timedToLinkedVideo?: boolean
+  },
 ): AudioTimingMode {
   // AQU-646: Free timing does not exist for subtitle imports — their cues are
   // already timed to a video, so laying them end to end has nothing to fit.
@@ -946,6 +955,9 @@ export function resolveFileTimingMode(
   // those clients for no gain. A stray "audioFirst" on a subtitle file is
   // simply inert from here on — nothing migrates it away.
   if (isSubtitleImportFile(file)) return "dubbing"
+  // Withdrawn at resolution for the same three reasons as above: a stored
+  // mode, the legacy project setting and an older client all stay inert.
+  if (opts?.timedToLinkedVideo) return "dubbing"
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts

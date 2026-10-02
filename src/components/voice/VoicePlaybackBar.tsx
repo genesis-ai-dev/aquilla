@@ -22,6 +22,7 @@ import {
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { usePlaybackSource } from "@/lib/audio/playback-source"
 import { useVideoController } from "@/lib/timeline/video-controller"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -97,10 +98,15 @@ export function VoicePlaybackBar({
   // drove this bar).
   const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
   const anyCellClockIsFileTime = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  // AQU-1565 follow-up: a YouTube picture keeps its own sound unless the person
+  // picked the uploaded recording. The same hook the pane and the workspace
+  // read, so the bar never drives a different engine from the one sounding.
+  const playbackSource = usePlaybackSource(fileId, coreMediaUrl)
   const transport = useTransportForFile({
     cellIds,
     coreMediaUrl,
     anyCellClockIsFileTime,
+    playbackSource,
     paneOnScreen: videoPaneOnScreen,
     timelineDurationSec,
     virtualSoundingCellId,

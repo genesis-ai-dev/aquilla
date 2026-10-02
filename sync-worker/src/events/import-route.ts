@@ -176,6 +176,11 @@ interface ImportAudioAttachment {
   trimEndMs?: number
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
   transcription?: string
+  /** AQU-1565 follow-up: `'source'` for the shared programme audio a media
+   *  import attaches to every row. Absent is a dub, as before. The route is
+   *  already Project Lead+ (source import), the same floor authorize.ts sets
+   *  for a `role: 'source'` attach from the outbox. */
+  role?: 'dub' | 'source'
 }
 
 interface ImportBody {
@@ -450,6 +455,7 @@ export async function handleBulkImportRequest(
           || !validImportTimings(attachment.timings)
           || (attachment.transcription !== undefined &&
             (typeof attachment.transcription !== 'string' || attachment.slot !== 'recording'))
+          || (attachment.role !== undefined && attachment.role !== 'dub' && attachment.role !== 'source')
           || (
             attachment.trimStartMs !== undefined
             && attachment.trimEndMs !== undefined
@@ -479,6 +485,7 @@ export async function handleBulkImportRequest(
             ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
             ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
             ...(attachment.transcription !== undefined ? { transcription: attachment.transcription } : {}),
+            ...(attachment.role !== undefined ? { role: attachment.role } : {}),
           },
           clientTs,
           serverTs: eventTs++,

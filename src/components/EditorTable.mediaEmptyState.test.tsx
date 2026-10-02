@@ -61,6 +61,9 @@ function renderTable(opts: {
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
   onOpenMediaView?: () => void
   project?: ProjectRecord
+  /** AQU-1565 follow-up: false = the workspace withheld the upload handlers,
+   *  as it does below Project Lead (the source-audio floor). */
+  withAttach?: boolean
 } = {}) {
   const qc = new QueryClient()
   return render(
@@ -84,8 +87,8 @@ function renderTable(opts: {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           orderedBy="time"
-          onAttachMediaFile={async () => {}}
-          onAttachMediaUrl={async () => {}}
+          onAttachMediaFile={opts.withAttach === false ? undefined : async () => {}}
+          onAttachMediaUrl={opts.withAttach === false ? undefined : async () => {}}
           linkedVideoEmptyState={opts.linkedVideoEmptyState ?? null}
           onOpenMediaView={opts.onOpenMediaView}
         />
@@ -123,7 +126,33 @@ describe("EditorTable — empty time-ordered file", () => {
     open.click()
     expect(onOpenMediaView).toHaveBeenCalledTimes(1)
     expect(screen.getByText(/Have the original recording\?/)).toBeInTheDocument()
-    expect(screen.getByText(/same timing as the linked video/)).toBeInTheDocument()
+    // AQU-1565 follow-up: the caveat says the video keeps its own sound and
+    // where to switch to the recording (the sound menu on the video).
+    expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
+    expect(screen.getByText(/keeps playing with its own sound/)).toBeInTheDocument()
+    expect(screen.getByText(/sound menu on the video/)).toBeInTheDocument()
+  })
+
+  it("a non-YouTube picture's caveat has no sound menu to point to", async () => {
+    renderTable({ linkedVideoEmptyState: { isYouTube: false, captionTrackNames: [] } })
+    expect(await screen.findByText(/same timing as the linked video/)).toBeInTheDocument()
+    expect(screen.queryByText(/sound menu/)).toBeNull()
+  })
+
+  // AQU-1565 follow-up: the upload is stored as the file's source audio, which
+  // the server takes only from Project Lead up, so the workspace withholds the
+  // handlers below that. Nothing that would fail may be offered.
+  it("offers no upload when the workspace withholds it (a contributor)", async () => {
+    renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTrackNames: [] }, withAttach: false })
+    await screen.findByTestId("linked-video-empty")
+    expect(screen.queryByText("Choose media file")).toBeNull()
+    expect(screen.queryByText(/Have the original recording\?/)).toBeNull()
+  })
+
+  it("a file with no linked video offers no attach prompt either, without the handlers", async () => {
+    renderTable({ withAttach: false })
+    await screen.findByText("No media segments yet")
+    expect(screen.queryByLabelText("Media URL")).toBeNull()
   })
 
   // Repro step 6: under the timeline, "open the Media view" is a button to

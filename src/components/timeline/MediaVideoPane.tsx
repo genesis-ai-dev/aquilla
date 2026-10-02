@@ -48,6 +48,8 @@ import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
+import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
+import { recordingDrivesPlayback, setPlaybackSource, usePlaybackSource } from "@/lib/audio/playback-source"
 import { videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
@@ -244,7 +246,20 @@ export function MediaVideoPane({
    * — and then every tick fails the file-time test and pauses the picture, so
    * the user gets a frozen first frame, no controls, and no way to start it.
    */
-  const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  const recordingCell = useMemo(() => cells.find((c) => queueClockIsFileTime(c)), [cells])
+  /**
+   * AQU-1565 follow-up: having a recording is necessary for slaving, no longer
+   * sufficient. A YouTube picture keeps its own sound and drives itself until
+   * the person picks the uploaded recording (`playback-source.ts`); a streamed
+   * film defaults to the recording, which is the arrangement it always had.
+   */
+  const playbackSource = usePlaybackSource(fileId, src)
+  const slaved = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  /** The sound menu exists only where there is a choice to make: a YouTube
+   *  picture over a file that also carries an uploaded recording. */
+  const offerSoundSource = youTube && recordingCell != null
+  const recordingName = recordingCell?.original.trim() || null
+  const [soundMenuOpen, setSoundMenuOpen] = useState(false)
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
@@ -1228,17 +1243,27 @@ export function MediaVideoPane({
         data-testid="video-audio-overlay"
         className={cn(
           "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
-          modeRevealed || audioMenuOpen
+          modeRevealed || audioMenuOpen || soundMenuOpen
             ? "opacity-100"
             : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
         )}
       >
-        <VideoAudioPicker
-          tracks={stream.audioTracks}
-          activeLang={stream.activeAudioLang}
-          onChange={chooseAudioLanguage}
-          onOpenChange={setAudioMenuOpen}
-        />
+        <div className="flex items-center gap-1.5">
+          {offerSoundSource && (
+            <VideoSoundSourcePicker
+              value={playbackSource}
+              recordingName={recordingName}
+              onChange={(next) => setPlaybackSource(fileId, next)}
+              onOpenChange={setSoundMenuOpen}
+            />
+          )}
+          <VideoAudioPicker
+            tracks={stream.audioTracks}
+            activeLang={stream.activeAudioLang}
+            onChange={chooseAudioLanguage}
+            onOpenChange={setAudioMenuOpen}
+          />
+        </div>
       </div>
       {/* NO MUTE BUTTON ON THE PICTURE. It was here for a few hours on
           2026-08-14 and came straight back off (Sam): the playback bar already

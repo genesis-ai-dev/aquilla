@@ -55,6 +55,7 @@ vi.mock("youtube-video-element", () => {
 })
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
+import { __resetPlaybackSourceForTests, playbackSourceKey } from "@/lib/audio/playback-source"
 import {
   getVideoBuffering,
   getVideoSoundingCellId,
@@ -1042,5 +1043,53 @@ describe("a YouTube link", () => {
   it("a direct media file still uses <video>", () => {
     renderPane({ src: "https://cdn/episode.mp4" })
     expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
+  })
+})
+
+// AQU-1565 follow-up. WHY: uploading the original recording to a file linked
+// to a YouTube video made the recording the master: the picture went silent
+// and followed the upload. Sam: the video keeps its own sound and picture by
+// default, and the recording plays only when the person picks it.
+describe("a YouTube link over an uploaded recording", () => {
+  const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+  afterEach(() => {
+    localStorage.removeItem(playbackSourceKey("f1"))
+    __resetPlaybackSourceForTests()
+  })
+
+  it("keeps playing the video with its own sound by default", () => {
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+    expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    expect(screen.getByTestId("video-sound-source-picker")).toHaveAttribute("data-sound-source", "video")
+  })
+
+  it("follows the recording once the person picks it, and remembers the pick", async () => {
+    renderPane({ src: YT })
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    const option = await screen.findByTestId("video-sound-source-recording")
+    // The recording is named from its rows, so the person knows which one.
+    expect(option).toHaveTextContent("episode-12.mp3")
+    fireEvent.click(option)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    expect(localStorage.getItem(playbackSourceKey("f1"))).toBe("recording")
+  })
+
+  it("starts on the recording when that was the stored choice", () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+  })
+
+  it("offers no sound menu when there is no recording to choose", () => {
+    render(<MediaVideoPane src={YT} fileId="f1" cells={[cell({ id: "s1", medium: "text", original: "Line one" })]} />)
+    expect(screen.queryByTestId("video-sound-source-picker")).toBeNull()
+  })
+
+  it("leaves a streamed film exactly as it was: the recording drives, no menu", () => {
+    renderPane({ src: "https://cdn/episode.webm" })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    expect(screen.queryByTestId("video-sound-source-picker")).toBeNull()
   })
 })

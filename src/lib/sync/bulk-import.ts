@@ -159,6 +159,9 @@ export interface StagedAudioAttachment {
   timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
   /** Supplied wording for a source media segment. */
   transcription?: string
+  /** AQU-1565 follow-up: `"source"` for the shared programme audio an import
+   *  attaches to every media row, so it is never counted as a dub. */
+  role?: "dub" | "source"
 }
 
 export interface PublishStagedImportArgs {

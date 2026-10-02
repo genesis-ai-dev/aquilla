@@ -530,6 +530,7 @@ describe("bulkUploadSource", () => {
         url: "frontier-audio://audio-1.wav",
         slot: "recording",
         mimeType: "audio/wav",
+        role: "source",
       }],
       getToken: async () => "tok",
       fetchImpl: fetchMock,
@@ -554,6 +555,8 @@ describe("bulkUploadSource", () => {
         id: expect.any(String),
         cellId: "cell-0",
         audioId: "audio-1.wav",
+        // AQU-1565 follow-up: the role reaches the server untouched.
+        role: "source",
       }],
     })
   })

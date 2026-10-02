@@ -222,8 +222,14 @@ export const editor = defineNamespace({
     "editor.media.openMediaView": "Open Media view",
     "editor.media.linkedVideoUpload":
       "Have the original recording? Drag & drop the audio or video here, or",
+    // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
+    // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The recording has to run to the same timing as the linked video — its " +
+      "The recording has to run to the same timing as the video. Its segments " +
+      "become this file's rows. The video keeps playing with its own sound; to " +
+      "hear the recording instead, pick it from the sound menu on the video.",
+    "editor.media.linkedVideoUploadHintGeneric":
+      "The recording has to run to the same timing as the linked video. Its " +
       "segments become this file's rows.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
@@ -900,6 +906,12 @@ export const editor = defineNamespace({
     "editor.timeline.audioTrackSearchAria": "Search languages",
     "editor.timeline.audioTrackNoMatch": "No language by that name.",
     "editor.timeline.audioTrackFilmAudio": "Film audio",
+    // AQU-1565 follow-up: which sound plays under a YouTube picture.
+    "editor.timeline.soundSourceTrigger": "Sound: {source}",
+    "editor.timeline.soundSourceHeading": "Sound",
+    "editor.timeline.soundSourceVideo": "The video's own sound",
+    "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
+    "editor.timeline.soundSourceRecordingUnnamed": "Uploaded recording",
     "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
     "editor.timeline.pairedClickToUnpair": "Paired · click to unpair",
     "editor.timeline.clickToPair": "Click to pair with the selected chip",
@@ -2757,9 +2769,53 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoUploadHint": {
         description:
-          "Caveat under that offer. The uploaded recording is cut into this file's " +
-          "rows by its own timings, so a recording that runs to a different " +
-          "timing than the linked video would put the rows out of step with it.",
+          "Caveat under that offer, for a YouTube video. The uploaded recording is " +
+          "cut into this file's rows by its own timings, so a recording that runs " +
+          "to a different timing than the video would put the rows out of step " +
+          "with it. The last sentence says the video keeps its own sound after the " +
+          "upload; 'sound menu' is the speaker icon in the video's bottom-right " +
+          "corner (editor.timeline.soundSourceHeading).",
+      },
+      "editor.media.linkedVideoUploadHintGeneric": {
+        description:
+          "The same caveat for a linked video that is not on YouTube, where there " +
+          "is no sound menu: the uploaded recording becomes what plays.",
+      },
+      "editor.timeline.soundSourceTrigger": {
+        description:
+          "Tooltip and accessible name of the speaker icon in a YouTube video's " +
+          "bottom-right corner, on a file that also has an uploaded recording. " +
+          "Says which sound is playing under the picture now.",
+        placeholders: {
+          source:
+            "The current choice, exactly as listed in the menu: " +
+            "editor.timeline.soundSourceVideo or editor.timeline.soundSourceRecording.",
+        },
+      },
+      "editor.timeline.soundSourceHeading": {
+        description:
+          "Heading of that menu: which sound plays with the video. A noun, as in " +
+          "audio, not a verb.",
+        maxLength: 20,
+      },
+      "editor.timeline.soundSourceVideo": {
+        description:
+          "Menu choice: play the YouTube video with its own soundtrack. The default.",
+        maxLength: 40,
+      },
+      "editor.timeline.soundSourceRecording": {
+        description:
+          "Menu choice: play the recording the user uploaded to this file instead " +
+          "of the video's own sound. The video is then silent and follows the " +
+          "recording.",
+        placeholders: {
+          name: "The uploaded recording's file name, e.g. episode.wav. Left as is.",
+        },
+      },
+      "editor.timeline.soundSourceRecordingUnnamed": {
+        description:
+          "The same choice when the recording has no file name to show.",
+        maxLength: 40,
       },
       "editor.footnotes.label": {
         description:

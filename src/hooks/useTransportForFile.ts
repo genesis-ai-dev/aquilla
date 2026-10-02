@@ -22,6 +22,7 @@ import {
   useVideoVolume,
 } from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
+import { recordingDrivesPlayback, type PlaybackSource } from "@/lib/audio/playback-source"
 import {
   useVirtualClockPlaying,
   useVirtualClockRate,
@@ -49,6 +50,12 @@ export interface UseTransportForFileArgs {
   timelineDurationSec?: number
   /** The line the playhead is on, over the cells that actually hold takes. */
   virtualSoundingCellId?: string | null
+  /**
+   * AQU-1565 follow-up: which sound the person chose for this file. With
+   * `"video"`, a recording does not take the transport off a picture that is
+   * on screen. Absent reads as `"recording"`, which is the old rule exactly.
+   */
+  playbackSource?: PlaybackSource
 }
 
 /**
@@ -65,6 +72,7 @@ export function useTransportForFile({
   paneOnScreen,
   timelineDurationSec = 0,
   virtualSoundingCellId = null,
+  playbackSource = "recording",
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -74,7 +82,11 @@ export function useTransportForFile({
   const rate = useVideoRate()
   const volume = useVideoVolume()
   const buffering = useVideoBuffering()
-  const ownedByVideo = videoOwnsFile(coreMediaUrl, anyCellClockIsFileTime, paneOnScreen)
+  const ownedByVideo = videoOwnsFile(
+    coreMediaUrl,
+    recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
+    paneOnScreen,
+  )
   // Unconditional, like the video's — these are cheap module subscriptions, and
   // the CHOICE is made in the pure selector, so a file gaining or losing its
   // picture can never change the number of hooks called.
@@ -84,6 +96,11 @@ export function useTransportForFile({
   const virtualVolume = useVirtualClockVolume()
   // Reads `ownedByVideo`, not `coreMediaUrl`: a film whose pane is off screen
   // has nothing to drive, so the virtual clock is correct there.
+  //
+  // The RAW recording test on purpose, not the chosen source: with the pane
+  // off screen and "the video's own sound" chosen there is still a real
+  // recording to play, and the queue is the right player for it. A silent
+  // virtual playhead would not be.
   const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec)
 
   return useMemo(

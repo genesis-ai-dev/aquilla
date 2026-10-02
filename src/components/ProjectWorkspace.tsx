@@ -174,6 +174,8 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
+import { recordingDrivesPlayback, usePlaybackSource } from "@/lib/audio/playback-source"
+import { youTubeVideoId } from "@/lib/video/youtube"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
@@ -269,7 +271,7 @@ import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canAttachSourceAudio, canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -2374,6 +2376,10 @@ export function ProjectWorkspace() {
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
+  // AQU-1565 follow-up: a file linked to a YouTube video is timed to that
+  // video, so Free timing is withdrawn for it exactly as for a subtitle file,
+  // and the Media view always shows the video.
+  const timedToLinkedVideo = youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
     if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
@@ -2927,6 +2933,19 @@ export function ProjectWorkspace() {
    * decides who is OFFERED an import, that decides who may move a timing.
    */
   const canManageSources = (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  /**
+   * AQU-1565 follow-up: who may upload or link the original recording into an
+   * empty time-ordered file. The clip is stored as the file's source audio,
+   * which is Project Lead and up on the server (authorize.ts), the same floor
+   * as the import that would otherwise bring that recording in.
+   *
+   * NOT the Add-line gate (`canEditLines`), although the plan named it: that
+   * tier is OFF until a project opts in, so it would have taken the upload away
+   * from every maintainer on every project that never touched the setting. The
+   * upload is an import of the file's own media, like diarization and the
+   * audio-cue re-import the tier deliberately does not govern.
+   */
+  const canUploadSourceMedia = canAttachSourceAudio(project?.syncRole?.level ?? null)
 
   // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
   // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
@@ -3243,7 +3262,11 @@ export function ProjectWorkspace() {
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      if (url && resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst") {
+      // Resolved against the NEW link: a YouTube link withdraws Free timing,
+      // so there is no switch-back to warn about.
+      if (url && resolveFileTimingMode(activeFile, project ?? undefined, {
+        timedToLinkedVideo: youTubeVideoId(url) != null,
+      }) === "audioFirst") {
         setPendingVideoUrl(url)
         return
       }
@@ -10354,7 +10377,7 @@ export function ProjectWorkspace() {
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
   // timing in Project Settings keep it), else Original timing.
-  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
+  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, { timedToLinkedVideo })
   // AQU-646 stage 2: which rows a file derives is a question about the file,
   // and this is the only place that can answer it — tracks.ts is deliberately
   // import-free, so what it knows about a file arrives as this flat context
@@ -10615,6 +10638,15 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
   }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
+  const anyCellClockIsFileTime = useMemo(
+    () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    [audioMergedCells],
+  )
+  // AQU-1565 follow-up: a recording no longer takes the transport off a
+  // YouTube picture by merely existing. The person picks it in the video's
+  // sound menu; until then the video plays with its own sound. Read through the
+  // same store as the pane and the playback bar, so all three agree.
+  const playbackSource = usePlaybackSource(activeFileId, activeFile?.coreMediaUrl)
   /**
    * Does the PICTURE own this file's transport?
    *
@@ -10632,10 +10664,10 @@ export function ProjectWorkspace() {
     () =>
       videoOwnsFile(
         activeFile?.coreMediaUrl,
-        audioMergedCells.some((c) => queueClockIsFileTime(c)),
+        recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
         showVideoPane,
       ),
-    [activeFile?.coreMediaUrl, audioMergedCells, showVideoPane],
+    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane],
   )
 
   // AQU-646 round 5: DUBS OVER THE PICTURE.
@@ -10696,9 +10728,11 @@ export function ProjectWorkspace() {
       ),
     [dubDriverCells],
   )
+  // The RAW recording test, not the chosen source: with the pane off screen a
+  // real recording is still the right thing to play (see useTransportForFile).
   const virtualIsTransport = virtualOwnsFile(
     videoIsTransport,
-    audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    anyCellClockIsFileTime,
     timelineDurationSec,
   )
   useEffect(() => {
@@ -10801,7 +10835,7 @@ export function ProjectWorkspace() {
       // picker that could have asked for it is not rendered for one. Silent
       // because it is unreachable from the UI — this exists so no future
       // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && isSubtitleFile) return
+      if (mode === "audioFirst" && (isSubtitleFile || timedToLinkedVideo)) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -10822,7 +10856,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, timedToLinkedVideo, applyTimingMode],
   )
   /**
    * Persist a dragged (or Alt+Arrow'd) track order: overlay first so the row
@@ -13410,7 +13444,7 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    hideTimingMode={isSubtitleFile}
+                    hideTimingMode={isSubtitleFile || timedToLinkedVideo}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns
                     // the header it portals into the table column's slot.
@@ -13725,8 +13759,11 @@ export function ProjectWorkspace() {
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
-            onAttachMediaFile={handleAttachMediaFile}
-            onAttachMediaUrl={handleAttachMediaUrl}
+            // AQU-1565 follow-up: the clip becomes the file's SOURCE audio,
+            // which the server takes only from Project Lead up. Withheld below
+            // that, so nobody is offered an upload that is certain to fail.
+            onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
+            onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
             linkedVideoEmptyState={linkedVideoEmptyState}
             onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
             onCellCommitted={handleCellCommitted}

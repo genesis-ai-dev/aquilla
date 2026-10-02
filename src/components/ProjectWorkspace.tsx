@@ -5670,6 +5670,12 @@ export function ProjectWorkspace() {
     cellsVersion: cellStoreVersion,
   })
   const referenceBlockFor = referenceBible.blockFor
+  const referenceBibleCheckContext = useMemo(
+    () => (referenceBible.checkContext ? { referenceBible: referenceBible.checkContext } : undefined),
+    [referenceBible.checkContext],
+  )
+  const ensureReferenceVersesLoaded = referenceBible.ensureLoaded
+  const currentReferenceCheckContext = referenceBible.currentCheckContext
 
   const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
@@ -6314,6 +6320,11 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      // AQU-1573: the active lane's reference Bible, for the "Reference Bible
+      // quotes" check. The sig changes when verses arrive, so cells checked
+      // before their verse loaded are checked again.
+      checkContext: referenceBibleCheckContext,
+      checkContextSig: referenceBible.sig,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6640,12 +6651,21 @@ export function ProjectWorkspace() {
     setCheckRunning(true)
     try {
       // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+      const cells = getActiveCells()
+      // AQU-1573: every verse the file cites must be loaded before the quote
+      // check runs, or a cited verse still in flight would read as clean. A
+      // failed lookup only means the check has fewer verses to compare.
+      await ensureReferenceVersesLoaded(cells).catch((err: unknown) => {
+        console.warn("[check] reference verses lookup failed:", err)
+      })
+      const referenceCheck = currentReferenceCheckContext()
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: getActiveCells(),
+        cells,
         rules,
         concepts: localConcepts,
         termMatching: project?.termMatching,
+        checkContext: referenceCheck ? { referenceBible: referenceCheck } : undefined,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6654,7 +6674,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching, ensureReferenceVersesLoaded, currentReferenceCheckContext])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

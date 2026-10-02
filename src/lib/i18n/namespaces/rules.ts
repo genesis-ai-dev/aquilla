@@ -46,6 +46,10 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.referenceQuoteDiffers":
+      "The quote of {refs} does not match {version} word for word",
+    "rules.infraction.builtin.referenceQuoteMissing":
+      "The source quotes {refs}, but the translation does not use the {version} wording",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -81,6 +85,9 @@ export const rules = defineNamespace({
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
+    "rules.builtin.referenceQuote.name": "Reference Bible quotes",
+    "rules.builtin.referenceQuote.description":
+      "A verse the source cites must be quoted word for word from the language's reference Bible. Vowel marks and punctuation are ignored, and a partial quote is fine.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -473,6 +480,26 @@ export const rules = defineNamespace({
           sourceCount: "How many times the source term appears in the source cell.",
           targetCount: "How many required renderings appear in the translation.",
         },
+      },
+      "rules.infraction.builtin.referenceQuoteDiffers": {
+        description:
+          "Reference Bible quotes check finding (AQU-1573), shown under the check's name in the editor and the Check file drawer: the translation quotes a Bible verse the source cites, but changes, adds or drops words inside the quote. A warning, not an error.",
+        placeholders: {
+          refs: "The cited verse reference(s) as written for readers, e.g. 'Isaiah 40:25' or 'Romans 8:28, John 3:16' — never translated.",
+          version: "The reference Bible's short name, e.g. 'Van Dyck' or 'King James Version' — never translated.",
+        },
+      },
+      "rules.infraction.builtin.referenceQuoteMissing": {
+        description:
+          "Reference Bible quotes check finding (AQU-1573): the source visibly quotes a Bible verse (in quotation marks, or with the reference in brackets after it), but the translation does not use that Bible's wording at all — it was probably translated fresh instead of copied. A warning, not an error.",
+        placeholders: {
+          refs: "The cited verse reference(s) as written for readers, e.g. 'Psalm 23:1' — never translated.",
+          version: "The reference Bible's short name, e.g. 'Van Dyck' — never translated.",
+        },
+      },
+      "rules.builtin.referenceQuote.description": {
+        description:
+          "Description of the built-in 'Reference Bible quotes' check (AQU-1573), shown under its name in the built-in checks list. 'Reference Bible' is the Bible chosen per language in Project settings; vowel marks means Arabic/Hebrew diacritics.",
       },
       "rules.infraction.builtin.placeholderIntegrity": {
         description:

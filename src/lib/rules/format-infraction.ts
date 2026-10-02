@@ -37,6 +37,15 @@ export function formatInfractionReason(infraction: RuleInfraction, t: TFunction)
     const count = infraction.reasonParams?.count ?? "0"
     return t("rules.infraction.builtin.placeholderIntegrity", { tokens, count })
   }
+  if (infraction.reason === "builtin:reference-quote") {
+    // AQU-1573: `refs` (reader labels such as "Isaiah 40:25") and `version`
+    // (the Bible's name) are data, interpolated, never translated.
+    const refs = infraction.reasonParams?.refs ?? ""
+    const version = infraction.reasonParams?.version ?? ""
+    return infraction.reasonParams?.kind === "missing"
+      ? t("rules.infraction.builtin.referenceQuoteMissing", { refs, version })
+      : t("rules.infraction.builtin.referenceQuoteDiffers", { refs, version })
+  }
   if (infraction.reason === "source-requires-target") {
     const sourceCount = infraction.reasonParams?.sourceCount ?? "1"
     const targetCount = infraction.reasonParams?.targetCount ?? "0"

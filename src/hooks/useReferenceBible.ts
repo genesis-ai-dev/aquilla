@@ -121,8 +121,24 @@ export interface ReferenceBibleCheckContext {
   versionId: string
   versionName: string
   lookup: ReferenceQuoteLookup
+  /** The explicit references in a source text, memoised per text. */
+  references: (source: string) => readonly FoundReference[]
   /** How many times the cache has filled in; a new value means new verses. */
   revision: number
+}
+
+/** The check context for a Bible as its cache stands now, or null before the server described it. */
+function checkContextFor(versionId: string): ReferenceBibleCheckContext | null {
+  const cache = cacheFor(versionId)
+  if (!cache.version) return null
+  const passages = cache.passages
+  return {
+    versionId,
+    versionName: cache.version.name,
+    lookup: (canonical) => passages.get(canonical)?.verses.map((v) => v.text),
+    references: cachedReferences,
+    revision: cache.revision,
+  }
 }
 
 export interface UseReferenceBibleOptions {
@@ -145,6 +161,12 @@ export interface UseReferenceBibleResult {
   ensureLoaded: (cells: readonly SourceTextCell[]) => Promise<void>
   /** Null until the Bible is known; changes identity only when `sig` does. */
   checkContext: ReferenceBibleCheckContext | null
+  /**
+   * The check context as the cache stands at call time. Check file awaits
+   * `ensureLoaded` and then reads this, because the render-time
+   * `checkContext` it closed over may predate the Bible being known.
+   */
+  currentCheckContext: () => ReferenceBibleCheckContext | null
   /** Changes whenever new verses arrive or the Bible changes. */
   sig: string
 }
@@ -216,16 +238,15 @@ export function useReferenceBible(options: UseReferenceBibleOptions): UseReferen
   // new revision) is what tells the quote check to re-run.
   const checkContext = useMemo<ReferenceBibleCheckContext | null>(() => {
     if (!versionId || !version) return null
-    const passages = cacheFor(versionId).passages
-    return {
-      versionId,
-      versionName: version.name,
-      lookup: (canonical) => passages.get(canonical)?.verses.map((v) => v.text),
-      revision,
-    }
+    const ctx = checkContextFor(versionId)
+    return ctx && { ...ctx, revision }
   }, [versionId, version, revision])
+  const currentCheckContext = useCallback(
+    () => (versionId ? checkContextFor(versionId) : null),
+    [versionId],
+  )
 
-  return { version, blockFor, ensureLoaded, checkContext, sig }
+  return { version, blockFor, ensureLoaded, checkContext, currentCheckContext, sig }
 }
 
 /** TEST-ONLY: forget every cached Bible and reference. */

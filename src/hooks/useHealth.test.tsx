@@ -483,3 +483,51 @@ describe("health rule input cache", () => {
     expect(result.current.infractions.get("a")).toHaveLength(1)
   })
 })
+
+// AQU-1573: the "Reference Bible quotes" check reads the lane's Bible from the
+// check context; verses arriving must re-check cells already cached as clean.
+describe("useHealth — check context (reference Bible quotes)", () => {
+  const quoteRule: TranslationRule = {
+    id: "builtin:reference-quote", name: "Reference Bible quotes", description: "", severity: "minor",
+    source: "algorithmic", scope: "project", enabled: true, createdAt: "1970-01-01T00:00:00.000Z",
+    check: { type: "builtin", checkId: "reference-quote" },
+  }
+  const verse = "For God so loved the world, that he gave his only begotten Son"
+  const quoting = {
+    ...cell("a", "For God so loved the whole world, that he gave his only begotten Son"),
+    original: "\"For God so loved the world\" (John 3:16)",
+  }
+
+  it("re-checks cached cells when the context signature changes, and only then", () => {
+    const loaded = new Map<string, string[]>()
+    const checkContext = {
+      referenceBible: { versionName: "King James Version", lookup: (canonical: string) => loaded.get(canonical) },
+    }
+    const cells = new Map([["f", [quoting]]])
+    const rules = [quoteRule]
+    let sig = "eng-kjv:ready:0"
+    const { result, rerender } = renderHook(() => useHealth(cells, rules, { checkContext, checkContextSig: sig }))
+    // The verse has not loaded: no false warning.
+    expect(result.current.infractions.get("a")).toBeUndefined()
+
+    loaded.set("JHN 3:16", [verse])
+    vi.mocked(checkRulesForCell).mockClear()
+    rerender()
+    // Same signature: the cached "clean" stands, nothing is re-checked.
+    expect(checkRulesForCell).not.toHaveBeenCalled()
+    expect(result.current.infractions.get("a")).toBeUndefined()
+
+    sig = "eng-kjv:ready:1"
+    rerender()
+    expect(checkRulesForCell).toHaveBeenCalledTimes(1)
+    const [inf] = result.current.infractions.get("a")!
+    expect(inf.reason).toBe("builtin:reference-quote")
+    expect(inf.reasonParams).toEqual({ kind: "differs", refs: "John 3:16", version: "King James Version" })
+  })
+
+  it("finds nothing without a context (a lane with no reference Bible)", () => {
+    const cells = new Map([["f", [quoting]]])
+    const { result } = renderHook(() => useHealth(cells, [quoteRule]))
+    expect(result.current.infractions.size).toBe(0)
+  })
+})

@@ -40745,7 +40745,11 @@
     "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
     "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
     "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
-    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911",
+    "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
+    "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
+    "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
+    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47323,7 +47327,11 @@
     "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
     "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
     "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
-    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911",
+    "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
+    "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
+    "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
+    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53812,6 +53820,10 @@
     "projectSettings.referenceBible.loading": "eb57c7ffe59bc1f6",
     "projectSettings.referenceBible.loadFailed": "d3ba1c634b4121d5",
     "projectSettings.referenceBible.selectLabel": "ae5be364127e6a2b",
-    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911"
+    "projectSettings.referenceBible.saveFailed": "5e87617a0c65f911",
+    "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
+    "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
+    "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
+    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
   }
 }

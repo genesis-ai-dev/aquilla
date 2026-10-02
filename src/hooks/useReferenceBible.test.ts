@@ -176,4 +176,22 @@ describe("useReferenceBible", () => {
     expect(block).toContain("King James Version (English)")
     expect(block).toContain("eng-kjv text")
   })
+
+  it("hands Check file a context read at call time, after the verses it awaited arrive", async () => {
+    serve()
+    // No cells to prefetch: the render-time context stays null until Check
+    // file asks for the file's verses itself.
+    const { result } = hook("arb-vandyck")
+    expect(result.current.checkContext).toBeNull()
+    expect(result.current.currentCheckContext()).toBeNull()
+    await act(async () => {
+      await result.current.ensureLoaded([ISAIAH])
+    })
+    const ctx = result.current.currentCheckContext()!
+    expect(ctx.versionName).toBe("Van Dyck")
+    expect(ctx.lookup("ISA 40:25")).toEqual(VERSES["ISA 40:25"])
+    // The memoised reference finder the check uses per source text.
+    expect(ctx.references(ISAIAH.original).map((f) => f.canonical)).toEqual(["ISA 40:25"])
+    expect(ctx.references(ISAIAH.original)).toBe(ctx.references(ISAIAH.original))
+  })
 })

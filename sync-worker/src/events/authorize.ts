@@ -15,9 +15,9 @@ import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 import { visibleLaneTags } from '../../../src/lib/lanes/read-wall'
-import { laneTagForArchiveCheck } from '../../../src/lib/lanes/archived-lane'
+import { laneTagForArchiveCheck, writesLaneRow } from '../../../src/lib/lanes/archived-lane'
 import { loadLaneGrants } from '../../../db/shared/lane-visibility'
-import { refusalForArchivedLane } from './archived-lane'
+import { refusalForArchivedLane, targetLaneRowExists } from './archived-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -195,7 +195,7 @@ export class AuthorizedEvent<K extends EventKind = EventKind> {
 
 export type AuthorizeResult<K extends EventKind> =
   | { ok: true; event: AuthorizedEvent<K> }
-  | { ok: false; status: 400 | 401 | 403 | 500; reason: string }
+  | { ok: false; status: 400 | 401 | 403 | 422 | 500; reason: string }
 
 /**
  * Type guard that handlers MUST use to validate input. Checking
@@ -403,6 +403,19 @@ export async function authorize<K extends EventKind>(
     })
     const archived = await refusalForArchivedLane(db, raw.projectId, archiveTag, settings, visible)
     if (archived) return { ok: false, status: 403, reason: archived }
+    // AQU-1532: a cell or validator write whose lane tag has no lane row
+    // would project a NULL lane_id and fail the whole batch as a 500. Refuse
+    // it here with a reason the caller can act on.
+    if (
+      writesLaneRow(raw.kind) &&
+      !(await targetLaneRowExists(db, raw.projectId, archiveTag, settings))
+    ) {
+      return {
+        ok: false,
+        status: 422,
+        reason: `unknown lane "${archiveTag}"; register it in settings.targetLanes`,
+      }
+    }
   }
 
   // AQU-1037: assignment events replace their historical static

@@ -847,11 +847,17 @@ describe("worker deployment environment contract", () => {
 
   it("installs Chromium before running IDML browser conformance in CI", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
-    const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
+    const installBrowser = workflow.indexOf("uses: ./.github/actions/playwright-chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+
+    // The shared action caches the browser and installs Chromium's system
+    // libraries only when it cannot start without them (apt is the slow step).
+    const action = readRepoFile(".github", "actions", "playwright-chromium", "action.yml")
+    expect(action).toContain("pnpm exec playwright install chromium")
+    expect(action).toContain("pnpm exec playwright install-deps chromium")
   })
 })
 

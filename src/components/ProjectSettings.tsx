@@ -1767,6 +1767,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             sourceLinkUpstreamFileCount={project.sourceLinkUpstreamFileCount}
             onDetached={refresh}
             onSynced={refresh}
+            onFilesAdded={refresh}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}

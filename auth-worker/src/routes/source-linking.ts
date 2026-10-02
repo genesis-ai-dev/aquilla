@@ -7,6 +7,8 @@
 // on the projects table. Sub-paths:
 //
 //   POST   /:projectId/link-source        link to upstream  (project_lead+)
+//   POST   /:projectId/link-source/files  add upstream files to a live
+//                                         fixed-list link   (project_lead+)
 //   POST   /:projectId/detach-source      clear upstream    (project_lead+)
 //   DELETE /:projectId                    blocked-if-downstreams owner-only
 //
@@ -25,13 +27,21 @@ import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
 import {
   chainContains,
+  clearLinkBackfill,
   emitLinkSourceEvent,
   listDownstreamProjects,
+  loadLinkBackfillRaw,
   loadProjectWithSource,
   loadLinkFileIds,
+  loadUpstreamFileIds,
   snapshotSourceCells,
   triggerLinkSeedSync,
 } from "../services/source-linking"
+import {
+  mergeSourceLinkBackfill,
+  parseSourceLinkBackfill,
+  serializeSourceLinkBackfill,
+} from "../../../db/shared/source-link-backfill"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
@@ -190,6 +200,11 @@ sourceLinking.post(
       }
     }
 
+    // AQU-1560: a re-link is a fresh answer to "which files", like the
+    // selection above — files that were part-way into the OLD link must not
+    // carry over into this one.
+    await clearLinkBackfill(c.env, projectId)
+
     // Emit the durable event. 1A's projector consumes this kind.
     await emitLinkSourceEvent(c.env, {
       projectId,
@@ -238,6 +253,131 @@ sourceLinking.post(
       // call failed) and may fall back to its own self-heal trigger.
       seeded,
     })
+  },
+)
+
+// ──────────────────────────────────────────────────────────────────────────
+// POST /:projectId/link-source/files  (AQU-1560)
+//
+// Add more of the upstream's files to an existing live link that follows a
+// fixed list (AQU-1559), without detaching and re-linking. Body:
+// `{ fileIds: [<upstream file id>, …] }`.
+//
+// A file added late has to arrive WHOLE — the link's cursor is already past
+// most of its history — so this does not touch the link's selection itself. It
+// records the files as a pending addition (`projects.source_link_backfill`) and
+// runs the mirror sync, which replays those files' upstream history and only
+// then moves them into the selection (sync-worker events/link-sync.ts,
+// runBackfill). If every upstream file is linked afterwards, the link becomes
+// a whole-project one (AQU-1559's rule).
+//
+// `complete: false` means the addition is recorded but the files have not all
+// arrived yet (the sync failed, or ran out of rounds). Nothing is half-added in
+// the meantime: the files are not part of the link and not in the file list
+// until they are complete. Calling again with the same files resumes the
+// replay where it stopped, and so does any later sync of the link.
+// ──────────────────────────────────────────────────────────────────────────
+
+const addLinkFilesSchema = z.object({
+  // Same bounds as the link request's own `fileIds`.
+  fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000),
+})
+
+sourceLinking.post(
+  "/:projectId/link-source/files",
+  authMiddleware,
+  zValidator("json", addLinkFilesSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const { fileIds } = c.req.valid("json")
+
+    const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
+    if (!role) return c.json({ error: "not found or no access" }, 403)
+    if (role.level < LINK_MIN_ROLE) {
+      return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
+    }
+
+    const project = await loadProjectWithSource(c.env, projectId)
+    if (!project) return c.json({ error: "project not found" }, 404)
+    const upstreamId = project.source_project_id
+    if (!upstreamId) return c.json({ error: "project is not linked to a source" }, 409)
+    // A one-time clone never syncs, so there is no replay to bring a file in
+    // with — and a legacy link with no recorded mode is not mirrored either.
+    if (project.source_link_mode !== "live") {
+      return c.json({ error: "only a live link can have files added" }, 409)
+    }
+
+    // The same check the link itself makes ([Pen test] AQU authz review):
+    // adding files copies more of the upstream into this project, so the caller
+    // must still be able to see the upstream now, not just when it was linked.
+    const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, upstreamId)
+    if (!sourceRole) {
+      return c.json({ error: "not found or no access to source project" }, 403)
+    }
+
+    // A whole-project link already follows every upstream file, and files the
+    // upstream gains arrive on their own: there is nothing to add.
+    const followed = await loadLinkFileIds(c.env, projectId)
+    if (!followed) {
+      return c.json({ projectId, added: [], fileIds: null, complete: true })
+    }
+
+    // Only the upstream's current files, and only ones not already followed.
+    // An id that is neither is ignored rather than refused — the list the
+    // client sent was read a moment ago, and the upstream can change.
+    const upstreamFileIds = new Set(await loadUpstreamFileIds(c.env, upstreamId))
+    const followedSet = new Set(followed)
+    const added = [...new Set(fileIds)].filter((id) => upstreamFileIds.has(id) && !followedSet.has(id))
+    if (added.length === 0) {
+      return c.json({ projectId, added: [], fileIds: followed, complete: true })
+    }
+
+    // Record the addition, folded into anything already pending. A
+    // compare-and-set against the column as read, because the mirror sync
+    // writes it too (its replay progress) and may be running right now; a lost
+    // race re-reads and folds again.
+    let recorded = false
+    for (let attempt = 0; attempt < 3 && !recorded; attempt++) {
+      const current = await loadLinkBackfillRaw(c.env, projectId)
+      if (!current.ok) {
+        // A database that predates migration 0128 cannot hold the addition.
+        console.error(`link-source/files: source_link_backfill unreadable for ${projectId}`)
+        return c.json({ error: "adding files is not available yet" }, 503)
+      }
+      const next = serializeSourceLinkBackfill(
+        mergeSourceLinkBackfill(parseSourceLinkBackfill(current.raw), added),
+      )
+      try {
+        const res = await c.env.AQUILLA_PG.prepare(
+          `UPDATE projects SET source_link_backfill = ?
+            WHERE id = ? AND source_link_backfill IS NOT DISTINCT FROM ?`,
+        )
+          .bind(next, projectId, current.raw)
+          .run()
+        recorded = Number(res.meta?.changes ?? 0) > 0
+      } catch (err) {
+        console.error("link-source/files UPDATE failed:", err)
+        return c.json({ error: "could not add files" }, 500)
+      }
+    }
+    if (!recorded) return c.json({ error: "the link changed while adding files; try again" }, 409)
+
+    // Bring them in. The sync route keeps going until the link is caught up,
+    // which here means the replay has finished and the files have joined.
+    await triggerLinkSeedSync(c.env, projectId)
+
+    // Read the outcome back rather than trusting the sync's answer: a sync
+    // that another trigger ran (or finished) in between is just as good.
+    const after = await loadLinkFileIds(c.env, projectId)
+    const pending = await loadLinkBackfillRaw(c.env, projectId)
+    const stillPending = pending.ok ? parseSourceLinkBackfill(pending.raw) : null
+    const afterSet = after ? new Set(after) : null
+    const complete =
+      !stillPending?.fileIds.some((id) => added.includes(id)) &&
+      added.every((id) => afterSet === null || afterSet.has(id))
+
+    return c.json({ projectId, added, fileIds: after, complete })
   },
 )
 
@@ -317,6 +457,9 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
       return c.json({ error: "detach failed" }, 500)
     }
   }
+
+  // AQU-1560: a pending addition was for the link that just ended.
+  await clearLinkBackfill(c.env, projectId)
 
   // 1) Durable link-source event with null payload.
   await emitLinkSourceEvent(c.env, {

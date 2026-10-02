@@ -211,6 +211,51 @@ export async function linkProjectSource(
   return (await res.json()) as LinkProjectSourceResult
 }
 
+export interface AddLinkedSourceFilesResult {
+  /** The upstream file ids this request added — the requested ones the link
+   *  did not already follow and the upstream still has. Empty = nothing new. */
+  added: string[]
+  /** The link's selection afterwards. null = it follows the whole project,
+   *  which is what adding the last unlinked file makes it. */
+  fileIds: string[] | null
+  /** false = the addition is recorded but the files have not all arrived yet.
+   *  Nothing is half-added meanwhile (the files are not part of the link until
+   *  they are complete), and calling again with the same files resumes. */
+  complete: boolean
+}
+
+/**
+ * AQU-1560: add more of the upstream's files to this project's live link,
+ * without detaching and re-linking. Each file arrives with its complete
+ * current source, not only changes made from now on — the server replays its
+ * upstream history before the file joins the link, and answers once that has
+ * run. project_lead(500)+ on this project, server-enforced. Throws `UserError`
+ * on non-2xx.
+ */
+export async function addLinkedSourceFiles(
+  jwt: string,
+  projectId: string,
+  /** UPSTREAM file ids, as the link-source preview lists them. Non-empty. */
+  fileIds: string[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<AddLinkedSourceFilesResult> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/files`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ fileIds }),
+    },
+  )
+  if (!res.ok) {
+    throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  }
+  return (await res.json()) as AddLinkedSourceFilesResult
+}
+
 /**
  * AQU-476/QA-BUG-1: client-side seed self-heal for `mode: 'live'` links.
  * `linkProjectSource` already triggers this server-side and awaits it — this

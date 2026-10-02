@@ -220,6 +220,8 @@ export interface SourceLinkProject {
   id: string
   name: string
   source_project_id: string | null
+  /** AQU-1560: 'live' | 'clone', or null for a legacy link (see SourceLinkMode). */
+  source_link_mode: string | null
   archived_at: string | null
 }
 
@@ -287,6 +289,61 @@ export function parseLinkFileIds(raw: string | null | undefined): string[] | nul
   return ids.length > 0 ? ids : null
 }
 
+/**
+ * AQU-1560: the link's pending addition (`projects.source_link_backfill`,
+ * migration 0128), read in a statement of its own for the same reason as
+ * `loadLinkFileIds`.
+ *
+ * Unlike the selection, "the column is missing" is NOT folded into "nothing
+ * pending": the add route has to tell the two apart, because it cannot record
+ * an addition on a database that predates the column. `{ ok: false }` is that
+ * case; `raw` is the column exactly as stored, for the compare-and-set write.
+ */
+export async function loadLinkBackfillRaw(
+  env: Env,
+  projectId: string,
+): Promise<{ ok: true; raw: string | null } | { ok: false }> {
+  if (!env.AQUILLA_PG) return { ok: false }
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_backfill FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_backfill: string | null }>()
+    return { ok: true, raw: row?.source_link_backfill ?? null }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * AQU-1560: clear any pending addition. A re-link (to any upstream) and a
+ * detach both end the link the addition was for. Best-effort and on its own:
+ * a database that predates migration 0128 has nothing to clear, and neither
+ * operation should fail over it.
+ */
+export async function clearLinkBackfill(env: Env, projectId: string): Promise<void> {
+  try {
+    await env.AQUILLA_PG.prepare(
+      "UPDATE projects SET source_link_backfill = NULL WHERE id = ? AND source_link_backfill IS NOT NULL",
+    )
+      .bind(projectId)
+      .run()
+  } catch {
+    // Column absent: nothing pending.
+  }
+}
+
+/** AQU-1560: the upstream's current (non-deleted) file ids. */
+export async function loadUpstreamFileIds(env: Env, upstreamProjectId: string): Promise<string[]> {
+  const { results } = await env.AQUILLA_PG.prepare(
+    "SELECT id FROM files WHERE project_id = ? AND deleted_at IS NULL",
+  )
+    .bind(upstreamProjectId)
+    .all<{ id: string }>()
+  return (results ?? []).map((r) => r.id)
+}
+
 /** AQU-476: link mode/consumes/gate — see the linked-projects design spec §2. */
 export type SourceLinkMode = "clone" | "live"
 export type SourceLinkConsumes = "source" | "target"
@@ -302,7 +359,7 @@ export async function loadProjectWithSource(
   projectId: string,
 ): Promise<SourceLinkProject | null> {
   return env.AQUILLA_PG.prepare(
-    `SELECT id, name, source_project_id, archived_at
+    `SELECT id, name, source_project_id, source_link_mode, archived_at
        FROM projects WHERE id = ?`,
   )
     .bind(projectId)

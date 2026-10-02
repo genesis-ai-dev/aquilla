@@ -182,6 +182,12 @@ CREATE TABLE projects (
     -- arrive, and detach copies only them. TEXT, parsed in JS, degrading to
     -- "whole project" on a malformed blob.
     source_link_file_ids TEXT,
+    -- AQU-1560: upstream files being added to this link (migration 0128). NULL =
+    -- nothing pending. A JSON object {"fileIds": [<upstream file id>…],
+    -- "doneSeq": <upstream seq>}: the mirror sync replays those files' upstream
+    -- history up to the cursor, then moves them into source_link_file_ids and
+    -- clears this, in one statement.
+    source_link_backfill TEXT,
     -- AQU-507: designated Project Manager (attribution, distinct from the
     -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
     -- so removing a user never orphans the row. (migration 0072)

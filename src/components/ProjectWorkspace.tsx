@@ -15,7 +15,7 @@ import {
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
-import { deriveLinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import { captionsBecomeRows, deriveLinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
 import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
@@ -132,7 +132,10 @@ import {
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
-import { importTimelineTextTrack } from "@/lib/import/timeline-text"
+import {
+  createCaptionRowsImporter, createTrackRowsPromoter, importTimelineTextTrack,
+  isRowsAlreadyThereRefusal,
+} from "@/lib/import/timeline-text"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import {
@@ -352,6 +355,9 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
+import { captionTrackDestinations } from "@/lib/import/caption-destinations"
+import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
+import type { MediaTextSource } from "@/lib/import/media-cues"
 import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
@@ -3346,7 +3352,7 @@ export function ProjectWorkspace() {
     siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
-  const timelineTextRefreshRef = useRef<(fileId: string) => void>(() => {})
+  const timelineTextRefreshRef = useRef<(fileId?: string) => void>(() => {})
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
   // chips too, not only the subtitle rows — Sam's original ruling on the lock.
   // Same event the re-import reconcile emits (`cell.retime` against the hidden
@@ -3533,6 +3539,18 @@ export function ProjectWorkspace() {
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
   const [captionDialogFileId, setCaptionDialogFileId] = useState<string | null>(null)
+  /** AQU-1566: whether that dialog adds the captions as the file's rows. Fixed
+   *  when it opens, so the rows that a successful save brings in cannot flip
+   *  the dialog to track mode under the person's cursor. */
+  const [captionDialogRows, setCaptionDialogRows] = useState(false)
+  const captionRowsImportersRef = useRef(
+    new WeakMap<MediaTextSource, ReturnType<typeof createCaptionRowsImporter>>())
+  /** AQU-1566: the caption track awaiting "Use as this file's rows"
+   *  confirmation, with the one promoter (ids minted once) that confirmation
+   *  writes through, so a retry after a lost response is a no-op. */
+  const [pendingTrackRows, setPendingTrackRows] = useState<{
+    fileId: string; trackName: string; promote: () => Promise<void>
+  } | null>(null)
   const [alignmentDialogFileId, setAlignmentDialogFileId] = useState<string | null>(null)
   /** AQU-1139: the file the Extract-subtitles dialog was opened FOR, not a bare
    *  boolean — a confirmation has to be about the file the report was read
@@ -3561,6 +3579,7 @@ export function ProjectWorkspace() {
     closeCueLinkDrawer()
     setCharacterCheckOpen(false)
     setCaptionDialogFileId(null)
+    setPendingTrackRows(null)
   }, [activeFileId, closeCueLinkDrawer])
   /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
    *  a mode — three at once would be a mess nobody asked for. */
@@ -10411,11 +10430,15 @@ export function ProjectWorkspace() {
   // count — which is why the empty table kept insisting a captioned linked
   // video had no media at all. Derived tracks (the file's own cells) carry no
   // contentFileId and are deliberately not listed here.
-  const attachedCaptionTrackNames = useMemo(
+  //
+  // AQU-1566: only a SOURCE caption track can become the file's rows (the
+  // server copies one source caption file); a target-text track is named and
+  // never offered.
+  const attachedCaptionTracks = useMemo(
     () => serverTimelineTracks
       .filter(track => Boolean(track.contentFileId)
         && (track.kind === "source-subtitles" || track.kind === "target-subtitles"))
-      .map(track => track.name),
+      .map(track => ({ id: track.id, name: track.name, canBecomeRows: track.kind === "source-subtitles" })),
     [serverTimelineTracks],
   )
   const linkedVideoEmptyState = useMemo(
@@ -10423,10 +10446,59 @@ export function ProjectWorkspace() {
       orderedBy: activeFile ? fileOrderedBy(activeFile) : undefined,
       cellCount: cellSummaries.length,
       coreMediaUrl: activeFile?.coreMediaUrl,
-      captionTrackNames: attachedCaptionTrackNames,
+      captionTracks: attachedCaptionTracks,
     }),
-    [activeFile, cellSummaries.length, attachedCaptionTrackNames],
+    [activeFile, cellSummaries.length, attachedCaptionTracks],
   )
+  // AQU-1566 (Sam's option b): on that file the first captions become its OWN
+  // rows, the same as captions added at import time. Decided only once the
+  // rows have loaded cleanly; until then a caption file goes to a track, as
+  // on any other file. Maintainer-only, and NOT behind the track-editing
+  // switch (Sam's ruling), so the Text view's empty state, the timeline's
+  // Attach captions and a caption track's menu all read this one answer.
+  const captionRowsMode = captionsBecomeRows(linkedVideoEmptyState, {
+    loading: cellsLoading, failed: Boolean(cellsError),
+  })
+  const offerCaptionRows = captionRowsMode && canManageSources
+  const openCaptionDialog = useCallback((fileId: string) => {
+    setCaptionDialogRows(captionRowsMode)
+    setCaptionDialogFileId(fileId)
+  }, [captionRowsMode])
+  const handleAttachCaptionsAsRows = useCallback(() => {
+    if (activeFileId) openCaptionDialog(activeFileId)
+  }, [activeFileId, openCaptionDialog])
+  /** After the file's rows change shape: the file itself (it is a subtitle
+   *  file now), its rows, and the timeline's caption tracks. */
+  const refreshAfterCaptionRows = useCallback(async () => {
+    await refresh()
+    revalidateCells()
+    timelineTextRefreshRef.current?.()
+  }, [refresh, revalidateCells])
+  const requestUseTrackAsRows = useCallback((trackId: string) => {
+    const track = serverTimelineTracks.find(candidate => candidate.id === trackId)
+    if (!project?.id || !activeFileId || !track?.contentFileId) return
+    const promote = createTrackRowsPromoter({
+      projectId: project.id, fileId: activeFileId, trackId, contentFileId: track.contentFileId,
+      getToken: getTokenForFile,
+    })
+    setPendingTrackRows({
+      fileId: activeFileId,
+      trackName: track.name,
+      promote: async () => {
+        try {
+          await promote()
+        } catch (cause) {
+          // Someone else gave the file rows meanwhile: show them, and say so.
+          if (isRowsAlreadyThereRefusal(cause)) {
+            void refreshAfterCaptionRows()
+            throw new Error(t("importExport.captionTrack.rowsExist"), { cause })
+          }
+          throw new Error(t("editor.timeline.useAsRowsFailed"), { cause })
+        }
+        await refreshAfterCaptionRows()
+      },
+    })
+  }, [serverTimelineTracks, project?.id, activeFileId, getTokenForFile, refreshAfterCaptionRows, t])
   // The Media view renders the same table under the timeline, where "open the
   // Media view" would be a button to where you already are.
   const handleOpenMediaView = useCallback(() => switchLens("audio"), [switchLens])
@@ -13387,8 +13459,10 @@ export function ProjectWorkspace() {
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
                     canImportAudioVtt={canManageSources}
                     onRequestImportCaptions={canManageSources && activeFile
-                      ? () => setCaptionDialogFileId(activeFile.id) : undefined}
-                    canImportCaptions={canEditTracks}
+                      ? () => openCaptionDialog(activeFile.id) : undefined}
+                    // AQU-1566: on a linked video with no rows the captions
+                    // become its rows, which needs no track-editing switch.
+                    canImportCaptions={captionRowsMode ? canManageSources : canEditTracks}
                     onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
                       ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
                     canAlignScript={canEditTracks}
@@ -13499,6 +13573,9 @@ export function ProjectWorkspace() {
                     // Colour rides the same clearance alone (Sam, 2026-09-26):
                     // how a track looks, not what the timeline holds.
                     onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
+                    // AQU-1566: a caption track already on an empty linked
+                    // video becomes its rows. Maintainer, no switch.
+                    onPromoteTrackToRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
                     trackEditing={
                       canEditTracks
                         ? {
@@ -13766,6 +13843,10 @@ export function ProjectWorkspace() {
             onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
             linkedVideoEmptyState={linkedVideoEmptyState}
             onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
+            // AQU-1566: Attach captions in place, and Use (track) as this
+            // file's rows, for maintainers on an empty linked video only.
+            onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
+            onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -14642,26 +14723,66 @@ export function ProjectWorkspace() {
         }}
       />
       {captionDialogFileId && activeFile?.id === captionDialogFileId && project && (
-        <ImportTimelineTextDialog key={captionDialogFileId}
-          projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
-          tracks={serverTimelineTracks.filter(track =>
-            track.kind === "source-subtitles" || track.kind === "target-subtitles",
-          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
-            segmentCount: track.contentFileId
-              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
-                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
-              : cellsLoading ? null : cellSummaries.length,
-          }))}
-          onCancel={() => setCaptionDialogFileId(null)}
-          onConfirm={async input => {
-            if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
-            await importTimelineTextTrack({
-              ...input, projectId: project.id, anchorFileId: captionDialogFileId,
-              durationMs: captionMediaDurationMs, getToken: getTokenForFile,
-            })
-            await refresh()
-          }}
-        />
+        captionDialogRows ? (
+          // AQU-1566 (Sam's option b): the captions become this linked video's
+          // own rows. One staged file and one receipt per reviewed preview,
+          // so pressing again after a failure never writes twice.
+          <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
+            projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            onCancel={() => setCaptionDialogFileId(null)}
+            onConfirm={async input => {
+              if (!canManageSources) throw new Error(t("importExport.captionTrack.saveFailed"))
+              // Keyed on the reviewed captions themselves: pressing again
+              // with the same review reuses the staged file and receipt, while
+              // an edit after a failure is new content and a new import.
+              const importers = captionRowsImportersRef.current
+              const importer = importers.get(input.source) ?? createCaptionRowsImporter({
+                projectId: project.id, fileId: captionDialogFileId, source: input.source,
+                getToken: getTokenForFile, signal: input.signal,
+              })
+              importers.set(input.source, importer)
+              try {
+                await importer()
+              } catch (cause) {
+                if (isRowsAlreadyThereRefusal(cause)) {
+                  void refreshAfterCaptionRows()
+                  throw new Error(t("importExport.captionTrack.rowsExist"), { cause })
+                }
+                throw cause
+              }
+              await refreshAfterCaptionRows()
+            }}
+          />
+        ) : (
+          <ImportTimelineTextDialog key={captionDialogFileId}
+            projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            // AQU-1566: once the file has rows, its own Source text and Target
+            // text rows are not something a caption file may replace.
+            tracks={captionTrackDestinations(serverTimelineTracks.filter(track =>
+              track.kind === "source-subtitles" || track.kind === "target-subtitles",
+            ), cellSummaries.length > 0).map(track => ({
+              id: track.id, name: track.name, contentFileId: track.contentFileId,
+              segmentCount: track.contentFileId
+                ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                  ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+                : cellsLoading ? null : cellSummaries.length,
+            }))}
+            onCancel={() => setCaptionDialogFileId(null)}
+            onConfirm={async input => {
+              if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
+              await importTimelineTextTrack({
+                ...input, projectId: project.id, anchorFileId: captionDialogFileId,
+                durationMs: captionMediaDurationMs, getToken: getTokenForFile,
+              })
+              await refresh()
+            }}
+          />
+        )
+      )}
+      {pendingTrackRows && pendingTrackRows.fileId === activeFileId && (
+        <UseTrackAsRowsDialog trackName={pendingTrackRows.trackName}
+          onConfirm={pendingTrackRows.promote}
+          onCancel={() => setPendingTrackRows(null)} />
       )}
       {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
         && project && alignmentClipUrl && (

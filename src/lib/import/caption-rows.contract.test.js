@@ -7,6 +7,7 @@ import {
   createCaptionRowsImporter,
   createTrackRowsPromoter,
   importTimelineTextTrack,
+  isRowsAlreadyThereRefusal,
 } from './timeline-text'
 import { createYouTubeCaptionCommit } from './youtube-caption-commit'
 import { prepareYouTubeCaptionImport, prepareYouTubePictureImport } from './youtube-captions'
@@ -152,9 +153,15 @@ describe('captions attached to an empty linked video become its rows', () => {
         url: URL_, name: 'Episode one' }), h.ctx)()
       await createCaptionRowsImporter({ projectId: 'p', fileId: linked.ref.id,
         source: srtSource().source, getToken: h.getToken, fetchImpl: h.fetchImpl })()
-      await expect(createCaptionRowsImporter({ projectId: 'p', fileId: linked.ref.id,
-        source: srtSource().source, getToken: h.getToken, fetchImpl: h.fetchImpl })())
-        .rejects.toThrow(/409.*already has rows/)
+      const refusal = await createCaptionRowsImporter({ projectId: 'p', fileId: linked.ref.id,
+        source: srtSource().source, getToken: h.getToken, fetchImpl: h.fetchImpl })()
+        .then(() => null, error => error)
+      expect(refusal?.message).toMatch(/409.*already has rows/)
+      // The Text view turns exactly this refusal into "already has rows,
+      // reload to see them"; anything else keeps its own message.
+      expect(isRowsAlreadyThereRefusal(refusal)).toBe(true)
+      expect(isRowsAlreadyThereRefusal(new Error('Import publication failed (HTTP 409): '
+        + 'that caption track changed, reload and try again'))).toBe(false)
       expect(await h.rows(linked.ref.id)).toHaveLength(2)
     } finally { await h.store.close() }
   }, 30_000)

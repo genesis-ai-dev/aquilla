@@ -8,6 +8,12 @@
 // file is missing is CAPTIONS, and captions are attached on the Media view's
 // timeline, so that is where this points.
 //
+// AQU-1566 (Sam's option b): the first captions on such a file become its OWN
+// rows, the same as captions added at import time. So a maintainer gets
+// "Attach captions" right here (no track-editing switch needed), and a file
+// that already has a caption track on its timeline (made before this) gets one
+// "Use (track) as this file's rows" button per track.
+//
 // Uploading the original recording is still offered, because a recording with
 // the same timing as the linked video does produce rows for this file. It is
 // stored as the file's source audio, and a YouTube video keeps its own sound
@@ -21,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { LinkedVideoCaptionTrack } from "@/lib/editor/linked-video-empty-state"
 
 /** Same audio/video extensions TimelineAddMedia and the Import dialog take. */
 const MEDIA_FILE_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
@@ -30,18 +37,25 @@ interface TimelineLinkedVideoEmptyProps {
   isYouTube: boolean
   /** Caption tracks already on this file's timeline. Non-empty ⇒ the file has
    *  captions, so the copy names them instead of claiming it has none. */
-  captionTrackNames: readonly string[]
+  captionTracks: readonly LinkedVideoCaptionTrack[]
   /** Upload the original recording as this file's media. Absent ⇒ read-only. */
   onAttachFile?: (file: File) => Promise<void>
   /** Switch this file to the Media view. Absent when already there. */
   onOpenMediaView?: () => void
+  /** AQU-1566: open the caption dialog in rows mode. Absent below maintainer. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: turn an attached caption track into this file's rows (the
+   *  workspace asks first). Absent below maintainer. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
 }
 
 export function TimelineLinkedVideoEmpty({
   isYouTube,
-  captionTrackNames,
+  captionTracks,
   onAttachFile,
   onOpenMediaView,
+  onAttachCaptions,
+  onUseCaptionTrackAsRows,
 }: TimelineLinkedVideoEmptyProps) {
   const t = useT()
   const [busy, setBusy] = useState(false)
@@ -66,11 +80,16 @@ export function TimelineLinkedVideoEmpty({
     }
   }
 
-  const description = captionTrackNames.length > 0
+  const description = captionTracks.length > 0
     ? t("editor.media.linkedVideoCaptionsOn", {
-      tracks: captionTrackNames.join(", "),
+      tracks: captionTracks.map(track => track.name).join(", "),
     })
-    : t("editor.media.linkedVideoNoCaptions")
+    // Only someone who can attach is told that attaching makes rows; everyone
+    // else keeps the sentence that says where captions live.
+    : t(onAttachCaptions ? "editor.media.linkedVideoAttachHint" : "editor.media.linkedVideoNoCaptions")
+  const promotable = onUseCaptionTrackAsRows
+    ? captionTracks.filter(track => track.canBecomeRows)
+    : []
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-10" data-testid="linked-video-empty">
@@ -104,10 +123,34 @@ export function TimelineLinkedVideoEmpty({
               {t(isYouTube ? "editor.media.linkedVideoTitle" : "editor.media.linkedVideoTitleGeneric")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-            {onOpenMediaView && (
-              <Button variant="outline" className="mt-3" onClick={onOpenMediaView}>
-                {t("editor.media.openMediaView")}
-              </Button>
+            {promotable.length > 0 && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                {promotable.map(track => (
+                  <Button key={track.id} onClick={() => onUseCaptionTrackAsRows?.(track.id)}>
+                    {t("editor.media.useTrackAsRows", { track: track.name })}
+                  </Button>
+                ))}
+                {/* Only worth saying when there is another track to stay. */}
+                {captionTracks.length > 1 && (
+                  <p className="text-xs text-muted-foreground">{t("editor.media.useTrackAsRowsHint")}</p>
+                )}
+              </div>
+            )}
+            {(onAttachCaptions || onOpenMediaView) && (
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {onAttachCaptions && (
+                  // Primary until a track is there to promote; then that is
+                  // the main way in and this is the alternative.
+                  <Button variant={promotable.length > 0 ? "outline" : "default"} onClick={onAttachCaptions}>
+                    {t("importExport.captionTrack.attach")}
+                  </Button>
+                )}
+                {onOpenMediaView && (
+                  <Button variant="outline" onClick={onOpenMediaView}>
+                    {t("editor.media.openMediaView")}
+                  </Button>
+                )}
+              </div>
             )}
           </>
         )}

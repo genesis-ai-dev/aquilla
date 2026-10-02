@@ -4417,3 +4417,94 @@ describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in s
     expect(scroll.scrollTop).toBe(30)
   })
 })
+
+// ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
+//
+// The workspace decides WHEN these are on offer (a maintainer, a linked video,
+// rows loaded and none there); these pin what the timeline does with that
+// answer: the caption track's menu, Attach captions without the track-editing
+// switch, and a viewer seeing nothing that writes.
+describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const tracks = deriveTracksForFile({ trackOverrides: {
+    "ep-captions": { kind: "source-subtitles", name: "Episode captions", contentFileId: "cue-file" },
+    "fr-captions": { kind: "target-subtitles", name: "French captions", contentFileId: "fr-file" },
+  } })
+  const base = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: [] as CellData[],
+    onRetimeSubtitle: () => {}, tracks, textTrackCells: {},
+  }
+  // A maintainer always has the reorder grip, which is what marks the rows.
+  const menuBase = { ...base, onReorderTrack: vi.fn() }
+  const gutterRow = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
+    .querySelectorAll<HTMLElement>("[data-tl-track-row]")]
+    .find(row => row.textContent?.includes(name))!
+
+  it("offers Use as this file's rows on a source caption track with content, and nothing writes until confirmed upstream", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    // First item, above Rename.
+    const items = screen.getAllByRole("menuitem")
+    expect(items[0]).toHaveTextContent("Use as this file's rows")
+    expect(screen.getByText("Rename")).toBeTruthy()
+    fireEvent.click(items[0])
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("never offers it on a target-text track or on a row with no captions of its own", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("French captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is absent without the callback (a file with rows, or below maintainer)", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is enough on its own to give the caption track a menu, and only that track", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Use as this file's rows" }))
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("enables Attach captions without the track-editing switch when the workspace says so", () => {
+    const attach = vi.fn()
+    render(<TimelineEditor {...base} onRequestImportCaptions={attach} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).not.toHaveAttribute("data-disabled")
+    expect(screen.queryByText("Enable track editing in Project Settings")).toBeNull()
+    fireEvent.click(item)
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("still asks for the switch for a timeline-only track (a file with rows)", () => {
+    render(<TimelineEditor {...base} onRequestImportCaptions={vi.fn()} canImportCaptions={false}
+      onRequestImportCharacters={() => {}} canImportCharacters />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    expect(screen.getByRole("menuitem", { name: /Attach captions/ })).toHaveAttribute("data-disabled")
+    expect(screen.getByText("Enable track editing in Project Settings")).toBeTruthy()
+  })
+
+  // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
+  // the workspace hands a viewer is exactly this (every setup row present but
+  // not theirs, no track callbacks), and none of it may surface.
+  it("gives a viewer no Sources menu, no Add track and no track menu", () => {
+    render(<TimelineEditor {...base}
+      onRequestLinkVideo={() => {}} canLinkVideo={false}
+      onRequestImportAudioVtt={() => {}} canImportAudioVtt={false}
+      onRequestImportCharacters={() => {}} canImportCharacters={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
+    expect(screen.queryByTestId("tl-add-track")).toBeNull()
+    expect(document.querySelector('[data-testid^="tl-track-menu-"]')).toBeNull()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+})

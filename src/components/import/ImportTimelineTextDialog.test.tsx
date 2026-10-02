@@ -73,3 +73,40 @@ describe("attaching a caption track", () => {
     expect(screen.getByRole("checkbox")).not.toBeChecked()
   })
 })
+
+// AQU-1566 (option b): on a linked video with no rows the same dialog adds the
+// captions as the file's own rows. Nothing about a track is asked.
+describe("adding captions as a linked video's rows", () => {
+  it("asks for no destination or name and confirms with the reviewed captions only", async () => {
+    const confirm = vi.fn(async () => {})
+    const cancel = vi.fn()
+    render(<ImportTimelineTextDialog mode="rows" projectId="p" mediaName="Film"
+      onConfirm={confirm} onCancel={cancel} />)
+    expect(screen.getByText(/become this file's rows, ready to translate/)).toBeInTheDocument()
+    await choose()
+    expect(screen.queryByLabelText("Destination track")).toBeNull()
+    expect(screen.queryByLabelText("Track name")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add caption track" })).toBeNull()
+    fireEvent.change(screen.getByLabelText("Segment 1 wording"), { target: { value: "Reviewed wording" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add captions as rows" }))
+    await waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+    expect(confirm).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      source: expect.objectContaining({ artifact: { name: "captions.srt", format: "srt", bytes },
+        cues: [expect.objectContaining({ original: "Reviewed wording" })] }),
+    })
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+  })
+
+  it("keeps the review open with the reason when the rows cannot be added", async () => {
+    const cancel = vi.fn()
+    render(<ImportTimelineTextDialog mode="rows" projectId="p" mediaName="Film"
+      onConfirm={async () => { throw new Error("This file already has rows. Reload to see them.") }}
+      onCancel={cancel} />)
+    await choose()
+    fireEvent.click(screen.getByRole("button", { name: "Add captions as rows" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("This file already has rows. Reload to see them.")
+    expect(cancel).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Segment 1 wording")).toHaveValue("Supplied wording")
+  })
+})

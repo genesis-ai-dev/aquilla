@@ -21,22 +21,37 @@ export interface CaptionTrackDestination {
 }
 export type CaptionTrackConfirmation = Pick<ImportTimelineTextTrackArgs,
   "source" | "name" | "trackId" | "overwrite" | "signal">
-interface Props {
+/** AQU-1566: what "Add captions as rows" hands back. There is no track to name
+ *  or replace: the captions become the file's own rows. */
+export type CaptionRowsConfirmation = Pick<ImportTimelineTextTrackArgs, "source" | "signal">
+interface CommonProps {
   projectId: string
   mediaName: string
   durationMs?: number
-  tracks: readonly CaptionTrackDestination[]
-  onConfirm(input: CaptionTrackConfirmation): Promise<void>
   onCancel(): void
 }
+type Props = CommonProps & ({
+  /** A timeline-only caption track (the default). */
+  mode?: "track"
+  tracks: readonly CaptionTrackDestination[]
+  onConfirm(input: CaptionTrackConfirmation): Promise<void>
+} | {
+  /** AQU-1566 (option b): a linked video with no rows takes these captions as
+   *  its own rows, so there is no destination or name to choose. */
+  mode: "rows"
+  onConfirm(input: CaptionRowsConfirmation): Promise<void>
+})
 const NEW_TRACK = "$new-track"
+const NO_TRACKS: readonly CaptionTrackDestination[] = []
 
 /** The default is always a new track. Existing content requires both a named
  * destination and counted consent; a failed save keeps all reviewed edits.
+ * In rows mode the same pick-and-review flow ends in "Add captions as rows".
  */
-export function ImportTimelineTextDialog({
-  projectId, mediaName, durationMs, tracks, onConfirm, onCancel,
-}: Props) {
+export function ImportTimelineTextDialog(props: Props) {
+  const { projectId, mediaName, durationMs, onCancel } = props
+  const rows = props.mode === "rows"
+  const tracks = props.mode === "rows" ? NO_TRACKS : props.tracks
   const t = useT()
   const [source, setSource] = useState<MediaTextSource>()
   const [name, setName] = useState("")
@@ -54,8 +69,8 @@ export function ImportTimelineTextDialog({
   const consent = Boolean(selected && consentSnapshot
     && consentSnapshot.contentFileId === (selected.contentFileId ?? null)
     && consentSnapshot.segmentCount === selected.segmentCount)
-  const canConfirm = Boolean(name.trim()) && name.length <= 120
-    && (!replacing || (consent && selected && selected.segmentCount !== null))
+  const canConfirm = rows || (Boolean(name.trim()) && name.length <= 120
+    && (!replacing || (consent && selected && selected.segmentCount !== null)))
 
   async function read(file: File) {
     const format = detectFileType(file.name)
@@ -89,7 +104,8 @@ export function ImportTimelineTextDialog({
     setBusy(true)
     setError(undefined)
     try {
-      await onConfirm({ source: reviewed, name: name.trim(), signal: pending.signal,
+      if (props.mode === "rows") await props.onConfirm({ source: reviewed, signal: pending.signal })
+      else await props.onConfirm({ source: reviewed, name: name.trim(), signal: pending.signal,
         trackId: replacing ? selected?.id : undefined,
         overwrite: replacing && selected && selected.segmentCount !== null ? {
           contentFileId: selected.contentFileId ?? null, segmentCount: selected.segmentCount,
@@ -105,7 +121,8 @@ export function ImportTimelineTextDialog({
   }
 
   const title = t("importExport.captionTrack.title", { name: mediaName })
-  const description = t("importExport.captionTrack.description")
+  const description = t(rows ? "importExport.captionTrack.rowsDescription"
+    : "importExport.captionTrack.description")
   if (!source) return <Dialog open onOpenChange={open => { if (!open) cancel() }}>
     <DialogContent>
       <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
@@ -123,37 +140,40 @@ export function ImportTimelineTextDialog({
   return <MediaImportPreviewDialog mediaName={mediaName}
     sources={[{ id: "captions", label: source.artifact?.name ?? name, source }]}
     durationMs={durationMs} allowAutomatic={false} title={title} description={description}
-    confirmLabel={t(replacing ? "importExport.captionTrack.replace" : "importExport.captionTrack.add")}
+    confirmLabel={t(rows ? "importExport.captionTrack.addAsRows"
+      : replacing ? "importExport.captionTrack.replace" : "importExport.captionTrack.add")}
     canConfirm={canConfirm} busy={busy} onConfirm={reviewed => void confirm(reviewed)} onCancel={cancel}>
-    <Field><FieldLabel htmlFor="caption-destination">{t("importExport.captionTrack.destination")}</FieldLabel>
-      <select id="caption-destination" value={destination} disabled={busy}
-        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-        onChange={event => {
-          setDestination(event.target.value)
-          setConsentSnapshot(null)
-          const target = tracks.find(track => track.id === event.target.value)
-          if (target) setName(target.name)
-        }}>
-        <option value={NEW_TRACK}>{t("importExport.captionTrack.new")}</option>
-        {tracks.map(track => <option key={track.id} value={track.id} disabled={track.segmentCount === null}>
-          {track.name}
-        </option>)}
-      </select>
-    </Field>
-    <Field><FieldLabel htmlFor="caption-track-name">{t("importExport.captionTrack.name")}</FieldLabel>
-      <Input id="caption-track-name" value={name} maxLength={120} disabled={busy}
-        onChange={event => setName(event.target.value)} />
-    </Field>
-    {replacing && selected && selected.segmentCount !== null && <>
-      <p>{t("importExport.captionTrack.overwrite", { count: selected.segmentCount })}</p>
-      <Field orientation="horizontal"><Checkbox id="caption-overwrite-consent" checked={consent}
-        disabled={busy} onCheckedChange={checked => setConsentSnapshot(
-          checked && selected.segmentCount !== null ? {
-            contentFileId: selected.contentFileId ?? null, segmentCount: selected.segmentCount,
-          } : null,
-        )} />
-        <FieldLabel htmlFor="caption-overwrite-consent">{t("importExport.captionTrack.consent")}</FieldLabel>
+    {!rows && <>
+      <Field><FieldLabel htmlFor="caption-destination">{t("importExport.captionTrack.destination")}</FieldLabel>
+        <select id="caption-destination" value={destination} disabled={busy}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          onChange={event => {
+            setDestination(event.target.value)
+            setConsentSnapshot(null)
+            const target = tracks.find(track => track.id === event.target.value)
+            if (target) setName(target.name)
+          }}>
+          <option value={NEW_TRACK}>{t("importExport.captionTrack.new")}</option>
+          {tracks.map(track => <option key={track.id} value={track.id} disabled={track.segmentCount === null}>
+            {track.name}
+          </option>)}
+        </select>
       </Field>
+      <Field><FieldLabel htmlFor="caption-track-name">{t("importExport.captionTrack.name")}</FieldLabel>
+        <Input id="caption-track-name" value={name} maxLength={120} disabled={busy}
+          onChange={event => setName(event.target.value)} />
+      </Field>
+      {replacing && selected && selected.segmentCount !== null && <>
+        <p>{t("importExport.captionTrack.overwrite", { count: selected.segmentCount })}</p>
+        <Field orientation="horizontal"><Checkbox id="caption-overwrite-consent" checked={consent}
+          disabled={busy} onCheckedChange={checked => setConsentSnapshot(
+            checked && selected.segmentCount !== null ? {
+              contentFileId: selected.contentFileId ?? null, segmentCount: selected.segmentCount,
+            } : null,
+          )} />
+          <FieldLabel htmlFor="caption-overwrite-consent">{t("importExport.captionTrack.consent")}</FieldLabel>
+        </Field>
+      </>}
     </>}
     {error && <FieldError>{error}</FieldError>}
   </MediaImportPreviewDialog>

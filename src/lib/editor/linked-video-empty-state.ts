@@ -21,16 +21,27 @@ export interface LinkedVideoEmptyStateInput {
   cellCount: number
   /** The file's linked picture — the YouTube watch page for a linked import. */
   coreMediaUrl: string | null | undefined
-  /** Caption tracks attached to this file's timeline, by name. These carry
-   *  their OWN content file, so they never show up in `cellCount`: that is
-   *  the whole reason the old copy kept insisting the file had no media. */
-  captionTrackNames: readonly string[]
+  /** Caption tracks attached to this file's timeline. These carry their OWN
+   *  content file, so they never show up in `cellCount`: that is the whole
+   *  reason the old copy kept insisting the file had no media. */
+  captionTracks: readonly LinkedVideoCaptionTrack[]
+}
+
+/** AQU-1566: one attached caption track, as the empty state names (and may
+ *  offer to turn into this file's rows) it. */
+export interface LinkedVideoCaptionTrack {
+  id: string
+  name: string
+  /** A source caption track with its own content: the only kind the server
+   *  will copy into the file's rows. A target-text track is named but never
+   *  offered. */
+  canBecomeRows: boolean
 }
 
 export interface LinkedVideoEmptyState {
   /** The link is a YouTube video, so the copy may name it as one. */
   isYouTube: boolean
-  captionTrackNames: readonly string[]
+  captionTracks: readonly LinkedVideoCaptionTrack[]
 }
 
 /**
@@ -47,6 +58,25 @@ export function deriveLinkedVideoEmptyState(
   if (!url) return null
   return {
     isYouTube: youTubeVideoId(url) !== null,
-    captionTrackNames: input.captionTrackNames,
+    captionTracks: input.captionTracks,
   }
+}
+
+/**
+ * AQU-1566 (Sam's option b): does a caption file attached to this file become
+ * its OWN rows, rather than a timeline-only track? Yes for exactly the file the
+ * empty state above is for: a linked video with no rows. Later captions, on a
+ * file that has rows, stay timeline tracks.
+ *
+ * "No rows" is believed only once the rows have loaded, and loaded cleanly. An
+ * empty list while they load (or after a failed read) is not an answer, and
+ * guessing "rows" there would route a second caption file into a promotion the
+ * server refuses. The server refuses a file with rows anyway; this keeps the
+ * dialog from offering the wrong thing in the first place.
+ */
+export function captionsBecomeRows(
+  emptyState: LinkedVideoEmptyState | null,
+  rows: { loading: boolean; failed: boolean },
+): boolean {
+  return emptyState !== null && !rows.loading && !rows.failed
 }

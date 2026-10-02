@@ -518,6 +518,13 @@ export interface TimelineEditorProps {
    */
   onSetTrackColor?(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
   /**
+   * AQU-1566 (Sam's option b): turn this caption track into the file's own
+   * rows. The workspace passes it only on a linked video with no rows, to a
+   * maintainer, and asks for confirmation before anything is written. Like
+   * rename it is NOT part of `trackEditing`: it needs no track-editing switch.
+   */
+  onPromoteTrackToRows?(trackId: string): void
+  /**
    * …and everything that RESTRUCTURES the timeline. Present only when the
    * caller has both maintainer clearance and the project's `allowTrackEditing`
    * setting.
@@ -1101,6 +1108,7 @@ export function TimelineEditor({
   onRetimeTextTrack,
   onReorderTrack,
   onRenameTrack,
+  onPromoteTrackToRows,
   onSetTrackColor,
   trackEditing,
 }: TimelineEditorProps) {
@@ -1206,7 +1214,7 @@ export function TimelineEditor({
   /** Is there anything to put in a track's menu at all? With neither rename
    *  clearance nor the editing setting there is not, and the row renders
    *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1315,6 +1323,7 @@ export function TimelineEditor({
         canRename: Boolean(onRenameTrack),
         canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
+        canPromote: Boolean(onPromoteTrackToRows),
       }),
     )
   }
@@ -1390,6 +1399,7 @@ export function TimelineEditor({
       t,
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
       onSetColor: onSetTrackColor,
+      onPromote: onPromoteTrackToRows,
       editing: trackEditing
         ? {
             onLeaveFolder: trackEditing.onLeaveFolder,

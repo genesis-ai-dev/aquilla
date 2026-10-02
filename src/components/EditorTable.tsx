@@ -791,6 +791,13 @@ interface EditorTableProps {
   /** Switch this file to the Media view from that empty state. Absent when the
    *  table is already rendering under the timeline. */
   onOpenMediaView?: () => void
+  /** AQU-1566: on that empty state, attach a caption file that becomes this
+   *  file's rows. The workspace passes it only to maintainers, and only once
+   *  the rows have loaded and there are none. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: on that empty state, turn a caption track already on the
+   *  timeline into this file's rows (the workspace confirms first). Same gate. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1034,6 +1041,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
+  onAttachCaptions, onUseCaptionTrackAsRows,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -3025,9 +3033,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex-1">
             <TimelineLinkedVideoEmpty
               isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              captionTracks={linkedVideoEmptyState.captionTracks}
               onAttachFile={canEdit ? onAttachMediaFile : undefined}
               onOpenMediaView={onOpenMediaView}
+              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
+              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
             />
           </div>
         ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (

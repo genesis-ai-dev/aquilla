@@ -219,3 +219,12 @@ export function createTrackRowsPromoter(args: PromoteTrackToRowsArgs) {
 export function promoteTimelineTrackToRows(args: PromoteTrackToRowsArgs): Promise<void> {
   return createTrackRowsPromoter(args)()
 }
+
+/** AQU-1566: the server refused a promotion because the linked video already
+ *  has rows (someone else got there first, or the rows had not loaded). The
+ *  caller shows those rows and says so instead of a raw HTTP error. Matches the
+ *  refusal text of `import-caption-promotion.ts`. */
+export function isRowsAlreadyThereRefusal(error: unknown): boolean {
+  return error instanceof Error && /\(HTTP 409\)/.test(error.message)
+    && error.message.includes("this file already has rows")
+}

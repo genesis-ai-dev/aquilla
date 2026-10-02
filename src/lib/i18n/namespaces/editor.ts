@@ -231,6 +231,14 @@ export const editor = defineNamespace({
     "editor.media.linkedVideoUploadHintGeneric":
       "The recording has to run to the same timing as the linked video. Its " +
       "segments become this file's rows.",
+    // AQU-1566 (option b): on such a file the first captions attached become
+    // its OWN rows, so a maintainer gets the action in place, and a caption
+    // track that is already on the timeline can be turned into the rows.
+    "editor.media.linkedVideoAttachHint":
+      "No captions on this video yet. Attach a caption file (VTT, SRT or SBV) " +
+      "and its captions become this file's rows, ready to translate.",
+    "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
+    "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -1006,6 +1014,15 @@ export const editor = defineNamespace({
       one: "Delete {count} track",
       other: "Delete {count} tracks",
     }),
+    // AQU-1566: a caption track on a linked video with no rows can become the
+    // file's rows. It asks first, because the track leaves the timeline.
+    "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    "editor.timeline.useAsRowsTitle": "Use {track} as this file's rows?",
+    "editor.timeline.useAsRowsBody":
+      "Its captions become rows you can translate in the Text view. The track " +
+      "leaves the timeline and its captions show in the Source text row instead.",
+    "editor.timeline.useAsRowsConfirm": "Use as rows",
+    "editor.timeline.useAsRowsFailed": "Couldn't use this track as the file's rows.",
     "editor.timeline.trackAdd": "Add track",
     "editor.timeline.trackAddTrack": "Audio track",
     "editor.timeline.trackAddFolder": "Folder",
@@ -2780,6 +2797,60 @@ export const editor = defineNamespace({
         description:
           "The same caveat for a linked video that is not on YouTube, where there " +
           "is no sound menu: the uploaded recording becomes what plays.",
+      },
+      "editor.media.linkedVideoAttachHint": {
+        description:
+          "Line under the linked-video empty state's heading, shown to a maintainer " +
+          "when the file has no captions yet. Attaching a caption file (the next " +
+          "button, 'Attach captions') turns its timed lines into this file's own " +
+          "rows, which is what the translator then works on. VTT, SRT and SBV are " +
+          "file formats; keep them as they are.",
+      },
+      "editor.media.useTrackAsRows": {
+        description:
+          "Button in the same empty state, one per caption track already on the " +
+          "Media view's timeline. Pressing it (after a confirmation) copies that " +
+          "track's captions into this file as its rows, ready to translate.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+        maxLength: 60,
+      },
+      "editor.media.useTrackAsRowsHint": {
+        description:
+          "Note under those buttons when there is more than one caption track: " +
+          "only the chosen track becomes rows, the others stay on the timeline.",
+      },
+      "editor.timeline.trackUseAsRows": {
+        description:
+          "Item in a caption track's right-click menu on the Media view's " +
+          "timeline, offered only on a linked video that has no rows yet. It turns " +
+          "this track's captions into the file's own rows (after a confirmation).",
+        maxLength: 32,
+      },
+      "editor.timeline.useAsRowsTitle": {
+        description:
+          "Heading of the confirmation that item opens. A question; the answer " +
+          "buttons are 'Cancel' and editor.timeline.useAsRowsConfirm.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+      },
+      "editor.timeline.useAsRowsBody": {
+        description:
+          "Body of that confirmation. 'Text view' and 'Source text' must match the " +
+          "view switcher's Text tab and the timeline row named Source text. The " +
+          "track disappears from the timeline because its captions are now the " +
+          "file's rows, which the Source text row draws.",
+      },
+      "editor.timeline.useAsRowsConfirm": {
+        description: "Confirm button of that confirmation. Short imperative.",
+        maxLength: 24,
+      },
+      "editor.timeline.useAsRowsFailed": {
+        description:
+          "Error shown in that confirmation when the change could not be saved " +
+          "(for example the track changed meanwhile). The dialog stays open.",
       },
       "editor.timeline.soundSourceTrigger": {
         description:

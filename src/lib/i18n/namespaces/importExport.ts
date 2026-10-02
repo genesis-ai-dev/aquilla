@@ -28,6 +28,13 @@ export const importExport = defineNamespace({
     "importExport.captionTrack.replace": "Overwrite caption track",
     "importExport.captionTrack.invalidFile": "Choose a VTT, SRT, or SBV caption file.",
     "importExport.captionTrack.saveFailed": "Couldn't save this caption track.",
+    // AQU-1566: on a linked video with no rows the same dialog adds the
+    // captions as the file's own rows, so it asks for no track.
+    "importExport.captionTrack.rowsDescription":
+      "These captions become this file's rows, ready to translate. Check their " +
+      "wording and timing first.",
+    "importExport.captionTrack.addAsRows": "Add captions as rows",
+    "importExport.captionTrack.rowsExist": "This file already has rows. Reload to see them.",
     "importExport.mediaPreview.title": "Import {name}",
     "importExport.mediaPreview.description": "Review wording and timing before importing. Your original files are preserved.",
     "importExport.mediaPreview.textSource": "Text source",
@@ -1308,6 +1315,24 @@ export const importExport = defineNamespace({
         placeholders: {
           name: "Filename of the media the captions attach to — literal data, not translated.",
         },
+      },
+      "importExport.captionTrack.rowsDescription": {
+        description:
+          "Subtitle of the Attach captions dialog when the file is a linked video " +
+          "with no rows yet: the chosen caption file's timed lines become the " +
+          "file's own rows instead of a timeline track. The review screen that " +
+          "follows lets the person correct wording and timing.",
+      },
+      "importExport.captionTrack.addAsRows": {
+        description:
+          "Confirm button of that dialog in the same case. Replaces " +
+          "importExport.captionTrack.add.",
+        maxLength: 32,
+      },
+      "importExport.captionTrack.rowsExist": {
+        description:
+          "Error in that dialog when someone else gave the file rows meanwhile, so " +
+          "these captions cannot become its rows. Reloading shows those rows.",
       },
       "importExport.captionTrack.overwrite": {
         description:

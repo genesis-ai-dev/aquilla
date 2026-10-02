@@ -857,3 +857,29 @@ describe("useOrgSettings — allowBulkValidateAiDrafts is opt-in", () => {
     expect(garbage.result.current.allowBulkValidateAiDrafts).toBe(false)
   })
 })
+
+// A setting changed in another tab used to reach an open editor only on reload,
+// so turning bulk validation of AI drafts OFF left the open editor offering it.
+describe("useOrgSettings — re-reads when the tab comes back", () => {
+  it("fetches again on return, but not more than once per 10 seconds", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000)
+    mockFetchResponse = makeResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const fetches = () => vi.mocked(restClient.fetchOrgSettings).mock.calls.length
+    const first = fetches()
+
+    // Straight back: too soon to ask again.
+    now.mockReturnValue(1_005_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    expect(fetches()).toBe(first)
+
+    // Later, the org turned the setting on elsewhere; returning picks it up.
+    mockFetchResponse = { ...makeResponse(), version: 2, settings: { allowBulkValidateAiDrafts: true } }
+    now.mockReturnValue(1_020_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.allowBulkValidateAiDrafts).toBe(true))
+    expect(fetches()).toBe(first + 1)
+    now.mockRestore()
+  })
+})

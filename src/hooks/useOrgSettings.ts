@@ -329,6 +329,9 @@ export interface UseOrgSettings {
  * @param projectRoleLevel  Caller's project-resolved role (AD-12 max-wins). Used for canExport.
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
+/** How often returning to the tab may re-read org settings (see the effect). */
+const REFETCH_ON_RETURN_MS = 10_000
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -373,8 +376,10 @@ export function useOrgSettings(
     return next
   }, [])
 
+  const lastFetchAtRef = useRef(0)
   const refresh = useCallback(async (): Promise<OrgSettingsResponse | null> => {
     if (!orgId || !jwt) return null
+    lastFetchAtRef.current = Date.now()
     const got = await fetchOrgSettings(jwt, orgId)
     if (!aliveRef.current) return null
     writeServer(got)
@@ -408,6 +413,27 @@ export function useOrgSettings(
     void refresh().then(() => { if (!alive) return }).catch(() => {})
     return () => { alive = false }
   }, [orgId, refresh, writeServer])
+
+  // Re-read when the tab comes back into view. The sibling sync above only
+  // reaches instances in THIS tab, so a setting changed in another tab — or
+  // by another maintainer — reached an open editor only on reload: turning
+  // bulk validation of AI drafts OFF left an already-open editor still
+  // offering it. At most once per REFETCH_ON_RETURN_MS, so tabbing back and
+  // forth does not hammer the endpoint.
+  useEffect(() => {
+    if (!orgId || typeof document === "undefined") return
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return
+      if (Date.now() - lastFetchAtRef.current < REFETCH_ON_RETURN_MS) return
+      void refresh().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onReturn)
+    window.addEventListener("focus", onReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn)
+      window.removeEventListener("focus", onReturn)
+    }
+  }, [orgId, refresh])
 
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE

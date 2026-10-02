@@ -15,7 +15,8 @@
 //      link has the upstream's whole history in its delta, and holding that
 //      in memory at once ran the ProjectSync DO out of its 128 MB). Steps 4–7
 //      run per window, each window folded to latest-per-cell (a seq window,
-//      not per-event work).
+//      not per-event work). An event the upstream rejected — a stale sibling
+//      that lost its cell's head compare-and-swap — is skipped (AQU-1574).
 //   4. For each new upstream file: emit file.mirror.
 //   5. For each folded cell: hash-equal → skip (no event, no write);
 //      upstream-deleted → tombstone mirror, for a row the downstream holds
@@ -58,8 +59,10 @@ import {
   buildEventProjectionStmts,
   contentHash,
   fileCountersRecomputeStmt,
+  isChainArbitrated,
   type PersistedEvent,
 } from './event-projection'
+import { ChainHeadReplay } from './chain-head-replay'
 import { buildBulkEventInsertStmt, buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
@@ -308,9 +311,134 @@ interface UpstreamDeltaRow {
   id: string
   file_id: string | null
   cell_id: string | null
+  parent_id: string | null
   kind: string
   payload: string
   server_seq: number
+}
+
+/**
+ * AQU-1574: every kind that can move a cell's head on each side, whether or not
+ * the fold mirrors it. A reorder moves the head without being a lane kind, and
+ * an edit chained on it is the winner; a source mirror moves a chain upstream's
+ * head (see ChainHeadReplay).
+ */
+const CHAIN_REPLAY_KINDS = {
+  source: ['source.cell.create', 'source.cell.commit', 'source.cell.delete', 'source.cell.reorder', 'source.cell.mirror'],
+  target: ['target.cell.create', 'target.cell.commit', 'target.cell.delete', 'target.cell.reorder'],
+} as const
+
+interface ReplayedChainEvent {
+  id: string
+  fileId: string
+  cellId: string
+  kind: string
+  seq: number
+  /** `source.cell.mirror` only: the mirror tombstones the cell (AQU-1567). */
+  mirrorDeleted: boolean
+  /** False for a stale sibling: logged upstream, never applied there. */
+  won: boolean
+}
+
+/**
+ * AQU-1574: the upstream's head compare-and-swap (AQU-1154), replayed over the
+ * whole chain history (`server_seq <= untilSeq`) of `cellKeys` on one side,
+ * with every event marked won or lost.
+ *
+ * A stale sibling is in `events` exactly like the edit that beat it — both got
+ * a 200 — so the log alone cannot say which one the upstream shows. Whether an
+ * event won depends on the cell's head when it landed, and that head is
+ * usually older than the window (the cell arrived on an earlier sync), so the
+ * replay starts at the cell's beginning rather than the window's.
+ *
+ * Reads the event LOG, never the upstream's `cells` rows (a projection rebuild
+ * empties and refills them — see deletedByHead), and of each payload only the
+ * lane and a mirror's seq and tombstone flag, never the text. Rows arrive per
+ * chunk of cells, each chunk in seq order; the replay keys every head by cell,
+ * so a cell's events only need to be in order among themselves.
+ */
+async function replayUpstreamChains(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  cellKeys: readonly CellKey[],
+  side: 'source' | 'target',
+  untilSeq: number,
+): Promise<ReplayedChainEvent[]> {
+  if (cellKeys.length === 0) return []
+  const kindList = CHAIN_REPLAY_KINDS[side].map((k) => `'${k}'`).join(', ')
+  const rows = await selectByCellKeys<{
+    id: string
+    file_id: string
+    cell_id: string
+    parent_id: string | null
+    kind: string
+    server_seq: number | string
+    target_lang: string | null
+    mirror_seq: number | string | null
+    mirror_deleted: boolean
+  }>(
+    db,
+    cellKeys,
+    [upstreamProjectId, untilSeq],
+    (placeholders) =>
+      `SELECT id, file_id, cell_id, parent_id, kind, server_seq,
+              CASE WHEN jsonb_typeof(p -> 'targetLang') = 'string' THEN p ->> 'targetLang' END AS target_lang,
+              CASE WHEN jsonb_typeof(p -> 'upstream' -> 'seq') = 'number'
+                   THEN (p -> 'upstream' ->> 'seq')::double precision END AS mirror_seq,
+              COALESCE((p ->> 'deleted') = 'true', FALSE) AS mirror_deleted
+         FROM events
+        CROSS JOIN LATERAL (
+          SELECT CASE WHEN kind = 'source.cell.mirror' OR kind LIKE 'target.%' THEN payload::jsonb END AS p
+        ) chain_fields
+        WHERE project_id = ? AND server_seq <= ? AND kind IN (${kindList})
+          AND (file_id, cell_id) IN (${placeholders})
+        ORDER BY server_seq ASC`,
+  )
+  const replay = new ChainHeadReplay()
+  return rows.map((r) => ({
+    id: r.id,
+    fileId: r.file_id,
+    cellId: r.cell_id,
+    kind: r.kind,
+    seq: Number(r.server_seq),
+    mirrorDeleted: r.mirror_deleted === true,
+    won: replay.apply({
+      id: r.id,
+      kind: r.kind,
+      fileId: r.file_id,
+      cellId: r.cell_id,
+      parentId: r.parent_id,
+      payload: {
+        targetLang: r.target_lang,
+        upstream: { seq: r.mirror_seq == null ? null : Number(r.mirror_seq) },
+      },
+    }),
+  }))
+}
+
+/**
+ * AQU-1574: the ids of a window's events that lost the head compare-and-swap.
+ * Only cells with a chain-arbitrated event in the window are replayed, so a
+ * window of hides, retimes, validations or mirrors reads nothing more.
+ */
+async function staleInWindow(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  rows: readonly UpstreamDeltaRow[],
+  side: 'source' | 'target',
+  sinceSeq: number,
+  untilSeq: number,
+): Promise<Set<string>> {
+  const keys = new Map<string, CellKey>()
+  for (const row of rows) {
+    if (!row.file_id || !row.cell_id || !isChainArbitrated(row.kind, row.parent_id)) continue
+    keys.set(`${row.file_id}\0${row.cell_id}`, { fileId: row.file_id, cellId: row.cell_id })
+  }
+  const stale = new Set<string>()
+  for (const e of await replayUpstreamChains(db, upstreamProjectId, [...keys.values()], side, untilSeq)) {
+    if (!e.won && e.seq > sinceSeq) stale.add(e.id)
+  }
+  return stale
 }
 
 interface FoldedCell {
@@ -446,13 +574,20 @@ async function loadDelta(
   const fileFilter = fileFilterSql(onlyFileIds)
   const { results } = await db
     .prepare(
-      `SELECT id, file_id, cell_id, kind, payload, server_seq
+      `SELECT id, file_id, cell_id, parent_id, kind, payload, server_seq
        FROM events
        WHERE project_id = ? AND server_seq > ? AND server_seq <= ? AND kind IN (${kindList})${fileFilter.sql}
        ORDER BY server_seq ASC`,
     )
     .bind(upstreamProjectId, sinceSeq, untilSeq, ...fileFilter.binds)
     .all<UpstreamDeltaRow>()
+
+  // AQU-1574: a create, commit or delete the upstream REJECTED — a stale
+  // sibling that lost its cell's head compare-and-swap to a concurrent edit —
+  // is logged and 200-accepted like any other, but the upstream never shows it.
+  // Folded in seq order it overwrote the edit that beat it, and the downstream
+  // kept the losing text for good once the cursor moved past it.
+  const stale = await staleInWindow(db, upstreamProjectId, results, 'source', sinceSeq, untilSeq)
 
   const cells = new Map<string, FoldedCell>()
   const fileIds = new Set<string>()
@@ -477,7 +612,7 @@ async function loadDelta(
   for (const row of results) {
     if (!row.file_id) continue
     fileIds.add(row.file_id)
-    if (!row.cell_id) continue
+    if (!row.cell_id || stale.has(row.id)) continue
     const key = `${row.file_id}\0${row.cell_id}`
     let payload: Record<string, unknown>
     try {
@@ -740,7 +875,7 @@ async function loadUpstreamTargetDelta(
   const fileFilter = fileFilterSql(onlyFileIds)
   const { results } = await db
     .prepare(
-      `SELECT id, file_id, cell_id, kind, payload, server_seq
+      `SELECT id, file_id, cell_id, parent_id, kind, payload, server_seq
        FROM events
        WHERE project_id = ? AND server_seq > ? AND server_seq <= ?
          AND kind IN ('target.cell.commit', 'cell.validate', 'cell.unvalidate')${fileFilter.sql}
@@ -748,6 +883,8 @@ async function loadUpstreamTargetDelta(
     )
     .bind(upstreamProjectId, sinceSeq, untilSeq, ...fileFilter.binds)
     .all<UpstreamDeltaRow>()
+  // AQU-1574: the source fold's defect, one lane over — see loadDelta.
+  const stale = await staleInWindow(db, upstreamProjectId, results, 'target', sinceSeq, untilSeq)
 
   const states = new Map<string, UpstreamTargetState>()
   // Every cell touched by ANY target-lane event this window, independent of
@@ -784,6 +921,10 @@ async function loadUpstreamTargetDelta(
     ) {
       continue
     }
+    // AQU-1574: a translation the upstream rejected (it lost the head
+    // compare-and-swap) changed nothing there either — it neither folds nor
+    // marks the cell touched.
+    if (stale.has(row.id)) continue
     touchedKeys.add(key)
 
     if (row.kind === 'target.cell.commit') {
@@ -1230,7 +1371,24 @@ async function deletedByHead(
           AND (file_id, cell_id) IN (${placeholders})
         ORDER BY file_id, cell_id, server_seq DESC`,
   )
-  for (const r of rows) if (r.deleted) gone.add(`${r.file_id}\0${r.cell_id}`)
+  const doomed = rows.filter((r) => r.deleted).map((r) => ({ fileId: r.file_id, cellId: r.cell_id }))
+  if (doomed.length === 0) return gone
+
+  // AQU-1574: the delete that decided it may be one the upstream REJECTED (it
+  // lost the cell's head compare-and-swap to a concurrent edit). Counted, it
+  // held the cell back here and the later window then skipped the stale delete
+  // too — so the cell never arrived at all. Those cells are re-decided by the
+  // last existence change the upstream actually applied. Only a delete needs
+  // the check: a create the replay rejects means the cell already existed.
+  const deletedAtHead = new Map<string, boolean>()
+  for (const e of await replayUpstreamChains(db, upstreamProjectId, doomed, 'source', head)) {
+    if (!e.won || e.seq <= afterSeq) continue
+    const key = `${e.fileId}\0${e.cellId}`
+    if (e.kind === 'source.cell.create') deletedAtHead.set(key, false)
+    else if (e.kind === 'source.cell.delete') deletedAtHead.set(key, true)
+    else if (e.kind === 'source.cell.mirror') deletedAtHead.set(key, e.mirrorDeleted)
+  }
+  for (const [key, deleted] of deletedAtHead) if (deleted) gone.add(key)
   return gone
 }
 

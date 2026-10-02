@@ -354,7 +354,13 @@ describe("mirrorSync — statement size does not grow with the upstream (AQU-154
         [DOWNSTREAM],
       )
       expect(blank.rows).toHaveLength(0)
-      expect(tracker.sizes).toEqual(firstSync)
+      // No statement bigger than the first sync's chunked ones. Not `toEqual`:
+      // the first sync also replays its creates' chains (AQU-1574 — two
+      // leading binds per chunk, so one value more than this window's lookups),
+      // and a window of hides has no chain event to replay.
+      expect(tracker.sizes.eventsInsert).toBe(firstSync.eventsInsert)
+      expect(tracker.sizes.cellKeyLookup).toBeGreaterThan(0)
+      expect(tracker.sizes.cellKeyLookup).toBeLessThanOrEqual(firstSync.cellKeyLookup)
     } finally {
       await t.close()
     }

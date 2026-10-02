@@ -638,6 +638,30 @@ export const projectSettings = defineNamespace({
       },
       "total",
     ),
+    // AQU-1560: "Choose files" — add more of the upstream's files to a live
+    // link that follows a fixed list, without detaching and re-linking.
+    // Already-linked files are shown checked and locked (unlinking one is a
+    // later slice). The dialog reuses the link flow's count sentence, scope
+    // notes and same-name warning, so the two read the same.
+    "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
+    "projectSettings.sourceLink.chooseFilesDescription":
+      "Files this link already follows are checked. Check more of the source " +
+      "project's files to add them here: each arrives with its complete source, " +
+      "and receives the source project's changes from then on.",
+    "projectSettings.sourceLink.chooseFilesLoading": "Loading the source project's files…",
+    "projectSettings.sourceLink.chooseFilesLoadError":
+      "Couldn't load the source project's file list. Nothing has been changed.",
+    "projectSettings.sourceLink.chooseFilesLinkedBadge": "already linked",
+    "projectSettings.sourceLink.chooseFilesAllLinked":
+      "This link follows every file in the source project, and files it adds " +
+      "later arrive here on their own. There is nothing to add.",
+    "projectSettings.sourceLink.chooseFilesNoneChecked": "Check a file above to add it to this link.",
+    "projectSettings.sourceLink.chooseFilesAddButton": "Add files",
+    "projectSettings.sourceLink.chooseFilesAddingButton": "Adding files…",
+    "projectSettings.sourceLink.chooseFilesIncomplete":
+      "The files didn't finish arriving, so they haven't been added to the link " +
+      "yet. Try again to finish bringing them in.",
     // AQU-1544: a live link that has never brought anything through.
     "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
     "projectSettings.sourceLink.notSyncedNote":
@@ -1731,6 +1755,34 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesButton": {
+        description:
+          "Button on the Source link card (Project Settings) that opens a list of the " +
+          "upstream project's files, to add more of them to this project's link. A " +
+          "verb phrase: 'choose' as in pick.",
+      },
+      "projectSettings.sourceLink.chooseFilesTitle": {
+        description:
+          "Title of the dialog listing the upstream project's files with checkboxes. " +
+          "Files already linked are checked and cannot be unchecked; the rest can be " +
+          "checked to add them.",
+      },
+      "projectSettings.sourceLink.chooseFilesLinkedBadge": {
+        description:
+          "Small label beside a file in that list that this project already receives " +
+          "from the upstream, explaining why its checkbox is checked and locked.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddButton": {
+        description:
+          "The dialog's confirm button: brings the checked files into this project. " +
+          "The sentence above it states how many.",
+      },
+      "projectSettings.sourceLink.chooseFilesIncomplete": {
+        description:
+          "Error under the list when the files could not all be brought in. Nothing " +
+          "is half-added: the files are not in the project yet, and pressing the " +
+          "button again resumes.",
       },
       "projectSettings.sourceLink.notSyncedBadge": {
         description:

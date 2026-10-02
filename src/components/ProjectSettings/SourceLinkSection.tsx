@@ -22,6 +22,11 @@
 // upstream gains later, a fixed-list one does not, and after a reload the card is
 // the only place that distinction is visible.
 //
+// AQU-1560: a live link also offers "Choose files" to Project Leads — the
+// upstream's file list with the followed files locked, to add more of them
+// (ChooseLinkedFilesDialog). Not on a clone, which never syncs, nor on a legacy
+// link with no recorded mode, which the sync engine does not mirror.
+//
 // AQU-1544: a live link whose cursor is still 0 has never brought anything
 // through. Until this slice it rendered exactly like a healthy one ("Live",
 // "cursor: 0"), so a link whose first sync failed was indistinguishable from
@@ -49,6 +54,7 @@ import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import { runLinkSync } from "@/lib/sync/archive"
 import { clearLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
+import { ChooseLinkedFilesDialog } from "./ChooseLinkedFilesDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
@@ -77,6 +83,9 @@ export interface SourceLinkSectionProps {
   /** AQU-1544: called after a "Sync now" that worked, so the parent can
    *  refresh the project record and pick up the advanced cursor. */
   onSynced?: () => void
+  /** AQU-1560: called once files added through "Choose files" are in, so the
+   *  parent can refresh the project record (the scope badge, the file list). */
+  onFilesAdded?: () => void
   /** The caller's resolved role level on this project. */
   roleLevel: number | null
 }
@@ -95,6 +104,7 @@ export function SourceLinkSection({
   sourceLinkUpstreamFileCount,
   onDetached,
   onSynced,
+  onFilesAdded,
   roleLevel,
 }: SourceLinkSectionProps) {
   const t = useT()
@@ -103,6 +113,7 @@ export function SourceLinkSection({
   const [confirmInput, setConfirmInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chooseFilesOpen, setChooseFilesOpen] = useState(false)
 
   // AQU-1544: "idle" until the user presses Sync now. "empty" is a sync that
   // worked and had nothing to bring, which on a never-synced link means the
@@ -285,7 +296,19 @@ export function SourceLinkSection({
               {t("projectSettings.sourceLink.roleGateNote")}
             </p>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {/* AQU-1560: same role floor as detach (project_lead), and shown
+                disabled below it the same way — the server refuses it too. */}
+            {sourceLinkMode === "live" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canDetach || !session}
+                onClick={() => setChooseFilesOpen(true)}
+              >
+                {t("projectSettings.sourceLink.chooseFilesButton")}
+              </Button>
+            )}
             <Button
               variant="destructive"
               size="sm"
@@ -301,6 +324,17 @@ export function SourceLinkSection({
           </div>
         </CardContent>
       </Card>
+
+      {sourceLinkMode === "live" && canDetach && (
+        <ChooseLinkedFilesDialog
+          projectId={projectId}
+          sourceProjectId={sourceProjectId}
+          followedFileIds={sourceLinkFileIds}
+          open={chooseFilesOpen}
+          onOpenChange={setChooseFilesOpen}
+          onAdded={() => onFilesAdded?.()}
+        />
+      )}
 
       <Dialog
         open={dialogOpen}

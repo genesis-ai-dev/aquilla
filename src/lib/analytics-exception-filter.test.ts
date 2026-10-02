@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   dropNoisyExceptions,
+  installResizeObserverNoiseGuard,
   isResizeObserverLoopMessage,
   type FilterableCaptureEvent,
 } from "./analytics-exception-filter"
@@ -158,5 +159,22 @@ describe("the before_send chain (AQU-1572 + OPS-29)", () => {
     expect(out?.properties?.$exception_list).toEqual([
       expect.objectContaining({ type: "Error", value: "boom" }),
     ])
+  })
+})
+
+describe("installResizeObserverNoiseGuard", () => {
+  it("keeps the ResizeObserver warning from later error handlers, and nothing else", () => {
+    const target = new EventTarget() as unknown as Window
+    installResizeObserverNoiseGuard(target)
+    // Stands in for posthog-js's onerror wrapper, registered after the guard.
+    const later = vi.fn()
+    target.addEventListener("error", later)
+
+    target.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop completed with undelivered notifications." }))
+    target.dispatchEvent(new ErrorEvent("error", { message: "ResizeObserver loop limit exceeded" }))
+    expect(later).not.toHaveBeenCalled()
+
+    target.dispatchEvent(new ErrorEvent("error", { message: "TypeError: x is undefined" }))
+    expect(later).toHaveBeenCalledTimes(1)
   })
 })

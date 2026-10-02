@@ -32,6 +32,31 @@ export function isResizeObserverLoopMessage(message: unknown): boolean {
   return typeof message === "string" && RESIZE_OBSERVER_LOOP.test(message)
 }
 
+/**
+ * Stop the ResizeObserver loop warning before PostHog's error handler sees it.
+ *
+ * Dropping it in `before_send` is not enough on its own. posthog-js rate-limits
+ * exception capture per exception TYPE before `before_send` runs, and this
+ * warning is a plain "Error" — the same bucket as most real failures. A burst
+ * of it (one resizable pane can raise dozens) spent the bucket and the next
+ * real Error was skipped as rate-limited, never reaching PostHog at all
+ * (browser pass, 2026-10-02: 25 warnings, then a real Error → 0 sent).
+ *
+ * A capturing listener on window runs ahead of the `window.onerror` handler
+ * posthog-js installs, so stopping propagation here keeps the warning out of
+ * its counter. Every other error passes untouched. Install it before
+ * `posthog.init`.
+ */
+export function installResizeObserverNoiseGuard(target: Window): void {
+  target.addEventListener(
+    "error",
+    (event: ErrorEvent) => {
+      if (isResizeObserverLoopMessage(event.message)) event.stopImmediatePropagation()
+    },
+    { capture: true },
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

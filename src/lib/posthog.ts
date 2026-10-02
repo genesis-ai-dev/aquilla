@@ -1,7 +1,7 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
 import { resolveAppEnv } from "@/lib/analytics-env"
-import { dropNoisyExceptions } from "@/lib/analytics-exception-filter"
+import { dropNoisyExceptions, installResizeObserverNoiseGuard } from "@/lib/analytics-exception-filter"
 import { redactCaptureEvent } from "@/lib/analytics-redaction"
 import { resolvePosthogHost } from "@/lib/posthog-host"
 
@@ -11,6 +11,9 @@ const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
 if (typeof window !== "undefined" && KEY) {
+  // AQU-1572: ahead of init, so the benign ResizeObserver warning never reaches
+  // the exception rate limiter that real errors share (see the guard).
+  installResizeObserverNoiseGuard(window)
   posthog.init(KEY, {
     api_host: HOST,
     persistence: "localStorage+cookie",

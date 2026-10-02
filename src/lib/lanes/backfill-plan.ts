@@ -33,7 +33,21 @@ export type LaneRolePlan = {
   role: 'source' | 'target'
   /** '' for the default target lane; the tag for other target lanes; null for source. */
   legacyTag: string | null
+  /**
+   * AQU-1592: the language label this lane is for, exactly as the project
+   * settings carry it ('' when unset). This is the ONLY identity field the live
+   * writers store (`ensureProjectLaneStmts`); a display name and a language
+   * code are derived on read by src/lib/lanes/lane-display.ts.
+   */
+  language: string
+  /**
+   * LEGACY, backfill-only: the pre-AQU-1592 derived display name, including the
+   * placeholders. Read by the one-off daemon (scripts/neon-backfill-lanes.ts)
+   * which still writes the old columns; the live writers ignore it, because a
+   * name derived at write time is exactly the drift AQU-1585 is about.
+   */
   name: string
+  /** LEGACY, backfill-only: the pre-AQU-1592 write-time-derived code. */
   langCode: string | null
 }
 
@@ -73,6 +87,7 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
   plans.push({
     role: 'source',
     legacyTag: null,
+    language: srcLabel,
     name: srcLabel || SOURCE_LANE_PLACEHOLDER,
     langCode: codeForLanguageLabel(srcLabel),
   })
@@ -101,6 +116,7 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
       plans.push({
         role: 'target',
         legacyTag: '',
+        language: primaryLabel,
         name: primaryLabel || BLANK_LANE_PLACEHOLDER,
         langCode: codeForLanguageLabel(primaryLabel),
       })
@@ -108,6 +124,7 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
       plans.push({
         role: 'target',
         legacyTag: tag,
+        language: tag, // tags are language labels
         name: tag, // tags are usually already display names
         langCode: codeForLanguageLabel(tag),
       })

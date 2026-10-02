@@ -1278,16 +1278,30 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 -- implicit '' default lane. role='source' (one per project, not lane-addressable)
 -- or 'target' (one per distinct target_lang value, incl. '' = default lane).
 -- id is an opaque 8-hex app-generated value; PRIMARY KEY is (project_id, id).
--- name is NOT unique (UI disambiguates); lang_code is BCP-47 (NULL=placeholder);
 -- legacy_tag is the immutable cutover target_lang ('' for default, NULL for
 -- source) that makes rename-safe replay resolve history by tag, never by name.
 -- position / archived_at are additive (display order / soft-archive).
+--
+-- AQU-1592 — identity is "store only what the user typed":
+--   * language  — the freeform language the maintainer typed, never derived.
+--                 What the AI is told and what "same language?" comparisons
+--                 read. Nullable only until the AQU-1616 backfill fills the
+--                 rows that predate 0129 (readers fall back to `name`).
+--   * name      — OPTIONAL display override; NOT unique (the UI disambiguates).
+--                 NULL means "display the language"; the "Source" / "Untitled
+--                 lane" placeholders are derived at read time, never stored.
+--   * lang_code — OPTIONAL BCP 47 override of the code derived from `language`
+--                 ("Advanced" disclosure). NULL means derive at read time; the
+--                 derived value is never written back.
+-- Readers must go through laneDisplayName / laneLanguageCode
+-- (src/lib/lanes/lane-display.ts) rather than touching these columns directly.
 CREATE TABLE IF NOT EXISTS lanes (
     id          TEXT        NOT NULL,   -- opaque 8-hex, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
-    name        TEXT        NOT NULL,
-    lang_code   TEXT,
+    language    TEXT,                   -- 0129: freeform, required for new rows
+    name        TEXT,                   -- 0129: nullable display override
+    lang_code   TEXT,                   -- 0129: nullable BCP 47 override
     legacy_tag  TEXT,
     position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
     archived_at TIMESTAMPTZ,

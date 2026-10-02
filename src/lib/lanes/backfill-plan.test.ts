@@ -36,6 +36,7 @@ describe('planLanesForProject', () => {
     expect(source(plans)).toEqual({
       role: 'source',
       legacyTag: null,
+      language: 'English',
       name: 'English',
       langCode: 'en',
     })
@@ -44,6 +45,7 @@ describe('planLanesForProject', () => {
     expect(t[0]).toEqual({
       role: 'target',
       legacyTag: '',
+      language: 'Spanish',
       name: 'Spanish',
       langCode: 'es',
     })
@@ -62,6 +64,10 @@ describe('planLanesForProject', () => {
     expect(t[0]).toEqual({
       role: 'target',
       legacyTag: '',
+      // AQU-1592: `language` is the typed label ('' here) — the live writers
+      // store only that. `name`/`langCode` stay on the plan for the one-off
+      // backfill daemon, which still writes the pre-0129 columns.
+      language: '',
       name: BLANK_LANE_PLACEHOLDER,
       langCode: null,
     })
@@ -92,6 +98,7 @@ describe('planLanesForProject', () => {
     expect(t[1]).toEqual({
       role: 'target',
       legacyTag: 'French',
+      language: 'French',
       name: 'French',
       langCode: 'fr',
     })
@@ -150,6 +157,7 @@ describe('planLanesForProject', () => {
     expect(t.find((l) => l.legacyTag === 'fr')).toEqual({
       role: 'target',
       legacyTag: 'fr',
+      language: 'fr',
       name: 'fr',
       langCode: 'fr',
     })

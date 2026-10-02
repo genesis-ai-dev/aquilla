@@ -2166,7 +2166,11 @@ export function ProjectWorkspace() {
     const labels: Record<string, string> = {}
     for (const lane of laneRows) {
       const key = lane.legacyTag ?? ""
-      if (lane.name.trim()) labels[key] = lane.name
+      // AQU-1592: the label is the display name — the name when the user set
+      // one, else the language. A lane carrying neither has nothing to label
+      // it with, so it keeps the switcher's own fallback.
+      const label = lane.name?.trim() || lane.language?.trim() || ""
+      if (label) labels[key] = label
     }
     return labels
   }, [laneRows])

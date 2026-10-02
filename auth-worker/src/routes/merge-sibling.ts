@@ -38,6 +38,7 @@ import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { mergeSettingsArray } from "./project-settings"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
+import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
 const mergeSibling = new Hono<AuthHonoEnv>()
 
@@ -188,7 +189,11 @@ mergeSibling.post(
     const nameProblem = laneNameProblem({
       laneId: "",
       name: lane,
-      others: hostLanes.filter((row) => row.legacyTag !== lane),
+      // AQU-1592: compare against what each host lane DISPLAYS — a lane that
+      // stores only a language still shows that language, so it collides.
+      others: hostLanes
+        .filter((row) => row.legacyTag !== lane)
+        .map((row) => ({ id: row.id, name: laneDisplayName(row) })),
     })
     if (nameProblem === "duplicate") {
       return c.json({ error: `a lane named "${lane}" already exists on the host project` }, 400)

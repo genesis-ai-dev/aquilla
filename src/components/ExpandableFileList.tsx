@@ -23,6 +23,7 @@ import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
+import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -80,6 +81,12 @@ interface Props {
   canExportByOrgPolicy?: boolean
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
+  /**
+   * AQU-1531: lets another surface put the keyboard cursor in the filter box —
+   * the Agent workbench's "Choose file" button, whose only other effect (show
+   * the Files panel) is invisible when the panel is already showing.
+   */
+  filterFocus?: FileFilterFocusHandle
 }
 
 export function ExpandableFileList({
@@ -89,6 +96,7 @@ export function ExpandableFileList({
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
+  filterFocus,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -99,6 +107,14 @@ export function ExpandableFileList({
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+  // AQU-1531: the dock mounts only the active panel, so a "Choose file" click
+  // that opens this panel can only be answered from here, once the box exists.
+  const filterInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!filterFocus) return
+    filterFocus.register(() => filterInputRef.current?.focus())
+    return () => filterFocus.register(null)
+  }, [filterFocus])
   const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
   // AQU-894: see shouldDimUnassigned — false is the state that leaves every
   // row alone, and it is what an unassigned caller and a non-assigning team
@@ -149,6 +165,7 @@ export function ExpandableFileList({
             <SearchIcon />
           </InputGroupAddon>
           <InputGroupInput
+            ref={filterInputRef}
             type="text"
             role="searchbox"
             name="aquilla-file-filter-query"

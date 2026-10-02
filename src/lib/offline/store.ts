@@ -7,6 +7,7 @@ import { createStorePromise, type Adapter, type Store } from "@livestore/livesto
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
 import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
+import { checkClientSessionHead } from "./head-check"
 
 const STORE_ID = "aquilla-offline"
 
@@ -44,9 +45,14 @@ export function getOfflineStore(createAdapter: CreateOfflineAdapter = defaultCre
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
-  storePromise ??= Promise.resolve(createAdapter()).then((adapter) =>
-    createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }),
-  )
+  storePromise ??= Promise.resolve(createAdapter())
+    .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
+    .then(async (store) => {
+      // A stale client session must not take writes; hold the store back
+      // while the page reloads (see head-check.ts).
+      if ((await checkClientSessionHead(store)) === "reloading") return new Promise<never>(() => {})
+      return store
+    })
   return storePromise
 }
 

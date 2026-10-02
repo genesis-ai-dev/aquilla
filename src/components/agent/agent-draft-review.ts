@@ -17,6 +17,7 @@ import { getOutboxRecords } from "@/lib/sync/outbox"
 import { fetchProjectSettingsResult } from "@/lib/sync/project-settings"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { resolveIdmlEditorConfiguration, validateIdmlEditorCommit } from "@/lib/richtext/idml-editor"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export class DraftReviewError extends Error {
   readonly code: "stale" | "queued" | "locked" | "unavailable" | "readOnly" | "rejected"
@@ -147,7 +148,7 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
     if (invalid) throw new Error(invalid)
     const eventId = await emitTargetCellCommit({
       projectId, fileId: run.fileId, cellId: draft.cellId,
-      parentId: fresh.targetEventId ?? fresh.sourceEventId ?? null,
+      parentId: resolveTargetCommitParent({ targetEventId: fresh.targetEventId, sourceEventId: fresh.sourceEventId }),
       sourceEventId: fresh.sourceEventId,
       value: args.text, valueHtml: args.text, author: session.username, targetLang: lane,
     })

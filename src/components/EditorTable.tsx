@@ -51,6 +51,8 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
+import { v7 as uuidv7 } from "uuid"
+import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
@@ -785,7 +787,7 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** AQU-1391: called after a cell is validated, so the parent can
    *  auto-propagate the confirmed translation to repeated source segments.
    *  Fired by the explicit validate gesture and (AQU-1484) by the commit
@@ -797,6 +799,11 @@ interface EditorTableProps {
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
   repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
+  /** AQU-1578: record an editor commit as the cell's pending head BEFORE its
+   *  asynchronous outbox write, so a second commit inside that window chains
+   *  on it. Returns a release that undoes the reservation (only while it still
+   *  holds this id) when the enqueue fails. */
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -1021,6 +1028,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onValidated,
   repetitionCounts,
   getPendingTargetEventId,
+  reservePendingTargetCommit,
   onOptimisticEdit,
   cellLockHolders,
   presenceStore,
@@ -2501,6 +2509,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onValidated={onValidated}
           repetitionCounts={repetitionCounts}
           getPendingTargetEventId={getPendingTargetEventId}
+          reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
           presenceStore={presenceStore}
@@ -2669,6 +2678,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onJumpToCell,
     onOpenAudioSetup,
     getPendingTargetEventId,
+    reservePendingTargetCommit,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -3544,7 +3554,7 @@ interface MemoizedRowProps {
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
@@ -3553,6 +3563,7 @@ interface MemoizedRowProps {
    *  source. Only repeated cells appear. */
   repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -3736,7 +3747,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -3916,6 +3927,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onValidated={onValidated}
         repetitionCount={repetitionCounts?.get(cell.id)}
         getPendingTargetEventId={getPendingTargetEventId}
+        reservePendingTargetCommit={reservePendingTargetCommit}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
         presenceStore={presenceStore}
@@ -3982,7 +3994,7 @@ interface EditorRowProps {
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
@@ -3991,6 +4003,7 @@ interface EditorRowProps {
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
   repetitionCount?: number
   getPendingTargetEventId?: (cellId: string) => string | null
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -4966,7 +4979,7 @@ function EditorRow({
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
-  onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -5607,19 +5620,35 @@ function EditorRow({
     // it is wired the row-local ref must not be consulted — it would re-chain
     // on the losing id. The row-local ref only covers hosts without a
     // workspace getter.
-    const parentId =
-      (getPendingTargetEventId
-        ? getPendingTargetEventId(cell.id)
-        : pendingTargetEventIdRef.current) ??
-      cell.targetEventId ??
-      cell.sourceEventId ??
-      null
+    // AQU-1578: resolveTargetCommitParent treats the optimistic placeholder
+    // `targetEventId: ""` of a just-filled empty cell as absent, so a commit
+    // never leaves with an empty parentId.
+    const parentId = resolveTargetCommitParent({
+      pending: [
+        getPendingTargetEventId
+          ? getPendingTargetEventId(cell.id)
+          : pendingTargetEventIdRef.current,
+      ],
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    })
+    // AQU-1578: mint the id here and record it as this cell's pending head
+    // SYNCHRONOUSLY, before the asynchronous outbox write below. Recording it
+    // only after the await left a window — Tab on, Shift+Tab straight back,
+    // type — in which the next commit could not see this one, chained on the
+    // lagging projection, and was dropped by the server as a stale sibling
+    // (taking the cell's validation with it).
+    const reservedEventId = uuidv7()
+    const previousRowHead = pendingTargetEventIdRef.current
+    pendingTargetEventIdRef.current = reservedEventId
+    const releaseReservation = reservePendingTargetCommit?.(cell.id, reservedEventId, parentId)
     // AQU-538: tag the commit with the active lane. The store now renders this
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
     try {
       const eventId = await emitTargetCellCommit({
+        id: reservedEventId,
         projectId: project.id,
         fileId: cell.fileId,
         cellId: cell.id,
@@ -5630,7 +5659,6 @@ function EditorRow({
         author: username,
         targetLang: activeLane,
       })
-      pendingTargetEventIdRef.current = eventId
       lastCommittedEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
@@ -5682,13 +5710,19 @@ function EditorRow({
       }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId, parentId)
+      void onCellCommitted?.(cell.id, eventId)
       return true
     } catch (err) {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
+      // AQU-1578: the reserved head exists nowhere durable — undo it, unless a
+      // newer commit has already reserved over it.
+      releaseReservation?.()
+      if (pendingTargetEventIdRef.current === reservedEventId) {
+        pendingTargetEventIdRef.current = previousRowHead
+      }
       const msg = err instanceof Error ? err.message : t("editor.write.saveFailed")
       setWriteError(msg)
       setLocalTargetDraft(null)
@@ -5699,7 +5733,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -5998,8 +6032,9 @@ function EditorRow({
     // back by the time the control appears — without this, validating a
     // just-recorded line would silently do nothing, which is the exact failure
     // the empty commit exists to prevent.
+    // AQU-1578: firstEventId skips the optimistic placeholder `""`.
     const editEventId =
-      cell.targetEventId ?? pendingTargetEventIdRef.current ?? getPendingTargetEventId?.(cell.id) ?? null
+      firstEventId(cell.targetEventId, pendingTargetEventIdRef.current, getPendingTargetEventId?.(cell.id))
     if (!project.id || !editEventId) return false
     // AQU-538: scope the validation to the active lane. emitCellValidate/
     // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is

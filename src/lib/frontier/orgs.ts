@@ -114,6 +114,8 @@ export interface OrgSummary {
   /** True when the org is visible only via the ADMIN_EMAILS allowlist
    *  (not a genuine membership). Server appends these after real orgs. */
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace. Pinned first in the org switcher. */
+  personal?: boolean
 }
 
 export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {

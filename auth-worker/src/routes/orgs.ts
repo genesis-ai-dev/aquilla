@@ -34,6 +34,7 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
   clampTeamDirectoryLimit,
@@ -151,13 +152,19 @@ type OrgListItem = {
   name: string | null
   role: { level: number; name: string }
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace (findPersonalOrg). */
+  personal?: boolean
 }
 
-function toMemberItem(o: { id: number; name: string | null; role: number }): OrgListItem {
+function toMemberItem(
+  o: { id: number; name: string | null; role: number },
+  personalId: number | null,
+): OrgListItem {
   return {
     id: o.id,
     name: o.name,
     role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+    ...(Number(o.id) === personalId ? { personal: true } : {}),
   }
 }
 
@@ -182,10 +189,12 @@ orgs.get("/", async (c) => {
   const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
 
   const list = await listUserOrgs(c.env, user)
+  const personal = await findPersonalOrg(c.env, user.id)
+  const personalId = personal ? Number(personal.id) : null
   const memberships = q
     ? list.filter((o) => (o.name ?? "").toLowerCase().includes(q))
     : list
-  const memberItems = memberships.map(toMemberItem)
+  const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
   if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
     return c.json({ orgs: memberItems, nextCursor: null })

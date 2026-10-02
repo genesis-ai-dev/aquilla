@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { AlertTriangle, Building2, Check, Plus, SearchIcon } from "lucide-react"
+import { AlertTriangle, Building2, Check, Home, Plus, SearchIcon } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -57,6 +57,7 @@ type OrgSwitcherItem =
       roleName: string
       /** Cross-tenant visibility via ADMIN_EMAILS — not a ladder role. */
       viaPlatformAdmin?: boolean
+      personal?: boolean
     }
   | {
       kind: "guest"
@@ -75,6 +76,12 @@ function byName(a: { name: string | null }, b: { name: string | null }) {
   return (a.name ?? "").localeCompare(b.name ?? "")
 }
 
+/** The caller's personal workspace first, then alphabetical. */
+function personalFirstByName(a: OrgSummary, b: OrgSummary) {
+  if (Boolean(a.personal) !== Boolean(b.personal)) return a.personal ? -1 : 1
+  return byName(a, b)
+}
+
 // AQU-1113: an unnamed org falls back to the same translated noun the
 // breadcrumb, members page and projects page already use ("Organization") —
 // not a hardcoded English "Workspace". The personal org keeps its own *name*
@@ -88,6 +95,7 @@ function memberItem(org: OrgSummary, fallbackName: string): OrgSwitcherItem {
     label: org.name ?? fallbackName,
     roleName: org.role.name,
     viaPlatformAdmin: org.viaPlatformAdmin,
+    personal: org.personal,
   }
 }
 
@@ -104,10 +112,12 @@ function OrgMark({
   name,
   allOrgs = false,
   create = false,
+  personal = false,
 }: {
   name: string
   allOrgs?: boolean
   create?: boolean
+  personal?: boolean
 }) {
   if (create) {
     return (
@@ -136,6 +146,20 @@ function OrgMark({
         {/* color on the SVG itself — item `data-highlighted:**:text-accent-foreground`
             paints descendants light; parent color alone cannot beat that. */}
         <Building2 className="size-3 text-black!" color="#000" aria-hidden />
+      </InitialsAvatar>
+    )
+  }
+  if (personal) {
+    return (
+      <InitialsAvatar
+        name={name}
+        size="xs"
+        shape="square"
+        menuSafe
+        menuSafeColor="var(--muted-foreground)"
+        fallbackClassName="bg-muted"
+      >
+        <Home className="size-3 text-muted-foreground!" aria-hidden />
       </InitialsAvatar>
     )
   }
@@ -316,11 +340,17 @@ function OrgSwitcherOption({
       )}
       aria-selected={selected}
     >
-      <OrgMark name={item.label} allOrgs={item.kind === "all"} />
+      <OrgMark
+        name={item.label}
+        allOrgs={item.kind === "all"}
+        personal={item.kind === "member" && item.personal}
+      />
       <span className="truncate">{item.label}</span>
       <span className="flex shrink-0 items-center gap-1.5">
         {item.kind === "all" ? (
           <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
+        ) : item.kind === "member" && item.personal ? (
+          <span className={ORG_META_CLASS}>{t("org.switcher.personalWorkspace")}</span>
         ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
           <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
@@ -371,10 +401,11 @@ export function OrgSwitcher() {
   })
 
   // AQU-759: keep both member and guest lists alphabetical regardless of the
-  // order the backend returned them in (Joel: "Keep it alphabetical").
+  // order the backend returned them in (Joel: "Keep it alphabetical"). The
+  // caller's personal workspace is pinned above the alphabetical members.
   const sortedOrgs = useMemo(() => {
     const source = catalogEnabled ? catalog.orgs : orgs
-    return [...source].sort(byName)
+    return [...source].sort(personalFirstByName)
   }, [catalogEnabled, catalog.orgs, orgs])
   const sortedGuestOrgs = useMemo(() => [...guestOrgs].sort(byName), [guestOrgs])
 

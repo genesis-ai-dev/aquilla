@@ -26,7 +26,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
-import { locateEvents, rejectedWarnings } from './rejected-warnings'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -390,12 +390,14 @@ export async function commitCellFields(
     }
   }
 
+  // AQU-1571: a refusal names the file and line it was about.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -404,7 +406,7 @@ export async function commitCellFields(
   await stampProvenance(db, provenance, appliedIds)
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
+  warnings.push(...rejectedWarnings(rejected, where))
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,

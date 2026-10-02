@@ -61,7 +61,7 @@ import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { linkMediaTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
-import { locateEvents, rejectedWarnings } from './rejected-warnings'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
@@ -623,12 +623,15 @@ export async function commitChangesetCore(
   }
 
   // If nothing applied but the perimeter rejected events, surface the reason.
+  // AQU-1571: each refusal names the file and line it was about, the same way
+  // the receipt warnings below do when only some events are refused.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -639,7 +642,7 @@ export async function commitChangesetCore(
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
+  warnings.push(...rejectedWarnings(rejected, where))
   for (const eid of [...staleFromPerimeter, ...staleSource]) {
     warnings.push({ code: 'stale_pin', fileId: '', cellId: '', message: `event ${eid} landed stale` })
   }
@@ -903,7 +906,7 @@ export async function applyPlanImport(
       error: errorResponse(
         anyForbidden ? 'permission_denied' : 'job_failed',
         'no events were applied',
-        { rejected },
+        { rejected: locateRejections(rejected, locateEvents(allEvents)) },
       ),
     }
   }
@@ -1433,12 +1436,13 @@ async function commitLinkMedia(
 
   // Nothing applied but events were rejected — surface the reason (an observer
   // credential is 403'd by the perimeter since cell.audio.* needs CONTRIBUTOR).
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -1454,7 +1458,7 @@ async function commitLinkMedia(
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  warnings.push(...rejectedWarnings(rejected, locateEvents([...eventsByFile.values()].flat())))
+  warnings.push(...rejectedWarnings(rejected, where))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,

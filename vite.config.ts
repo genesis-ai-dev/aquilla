@@ -251,25 +251,13 @@ export default defineConfig(({ mode }) => ({
           ],
         },
       },
-      {
-        // Deliberately does NOT `extends` the root config, so none of the
-        // browser-facing Vite setup above applies here (AQU-1273).
-        //
-        // `scripts/*.mjs` are plain Node modules that package.json runs with
-        // `node`, never through a bundler — `deploy:workers-build` →
-        // `node scripts/cloudflare-stack-preview.mjs`, for instance. Under the
-        // app project they would be transformed by vite-plugin-node-polyfills,
-        // which swaps `node:crypto` and the `Buffer` global for browser shims
-        // that lack `generateKeyPairSync` and the `base64url` encoding. Testing
-        // a Node CI script against those shims asserts the wrong runtime, so
-        // these run in a plain node environment against the real built-ins.
-        test: {
-          name: "scripts-node",
-          environment: "node",
-          include: ["scripts/**/*.test.mjs"],
-          passWithNoTests: false,
-        },
-      },
+      // `scripts/*.mjs` are plain Node modules run with `node`, never through a
+      // bundler, so they are tested against the real Node built-ins — see
+      // `scripts/vitest.config.mts`. It is a SEPARATE CONFIG FILE on purpose:
+      // an inline project here shares this file's resolved `resolve.alias`, so
+      // vite-plugin-node-polyfills' browser shims reached it regardless of what
+      // the inline entry declared (AQU-1431; AQU-1273 had it inline).
+      "./scripts/vitest.config.mts",
     ],
   },
 }))

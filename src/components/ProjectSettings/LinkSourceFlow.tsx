@@ -63,6 +63,11 @@
 // sentence and the same-name warning both read the checked rows, because a file
 // that is not coming cannot clash with anything.
 //
+// AQU-1561: the list, its check-all control and its wording are now
+// `UpstreamFileChoiceList`, shared with Create New Project, which asks the
+// same question when a project is created from an upstream. The two must not
+// drift apart, so neither owns the markup.
+//
 // The two outcomes are deliberately different products, not a cosmetic
 // difference (Matthew, 2026-10-02): a whole-project link keeps receiving files
 // the upstream gains later, a fixed-list one does not. That distinction lives in
@@ -82,15 +87,19 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
+import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { LinkSeedFailedNotice } from "@/components/LinkSeedFailedNotice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import {
+  selectedClashNames,
+  summarizeFileSelection,
+} from "@/lib/sync/link-file-selection"
 import {
   loadLinkSourcePreview,
   type LinkSourcePreview,
@@ -248,29 +257,24 @@ export function LinkSourceFlow({
   // AQU-1559: what the confirm step says and sends, all read off the checked
   // rows. `previewFiles` is empty both before the preview lands and for an
   // upstream with no files — neither shows a list, and only the second links.
-  // Memoized so the clash fold below is not re-run on every render by a fresh
-  // array identity (and so the React Compiler sees a stable dependency).
+  // Memoized so the folds below are not re-run on every render by a fresh array
+  // identity (and so the React Compiler sees a stable dependency).
+  //
+  // AQU-1561: the folds moved to `lib/sync/link-source-preview.ts`, beside the
+  // row type they read, and the list itself to `UpstreamFileChoiceList`, which
+  // Create New Project renders too — the two flows ask the same question and
+  // must keep answering it the same way.
   const previewFiles = useMemo(() => preview?.files ?? [], [preview])
-  const selectedCount = previewFiles.filter((f) => selectedFileIds.has(f.id)).length
-  const allFilesSelected = previewFiles.length > 0 && selectedCount === previewFiles.length
+  const { selectedCount, allSelected: allFilesSelected, nothingSelected } = useMemo(
+    () => summarizeFileSelection(previewFiles, selectedFileIds),
+    [previewFiles, selectedFileIds],
+  )
   // Only the clashes still coming: unchecking a clashing file removes it from
   // the warning, and with no checked clash left the warning is gone.
-  const selectedClashNames = useMemo(() => {
-    const names: string[] = []
-    const seen = new Set<string>()
-    for (const f of previewFiles) {
-      if (!f.clashes || !selectedFileIds.has(f.id)) continue
-      const key = f.name.toLowerCase()
-      if (seen.has(key)) continue
-      seen.add(key)
-      names.push(f.name)
-    }
-    return names
-  }, [previewFiles, selectedFileIds])
-  // An upstream with files and nothing checked is the one state the step
-  // refuses: a link that follows no files is a mistake, not a link. An EMPTY
-  // upstream is a different situation and still links (its files arrive later).
-  const nothingSelected = previewFiles.length > 0 && selectedCount === 0
+  const clashNames = useMemo(
+    () => selectedClashNames(previewFiles, selectedFileIds),
+    [previewFiles, selectedFileIds],
+  )
 
   async function handleLink() {
     // AQU-1526: the upstream under review, not the picker's value — what gets
@@ -398,45 +402,16 @@ export function LinkSourceFlow({
                 an announcement. Rows are the upstream's own order, scrolled
                 rather than paged — an upstream can hold 66 books or more, and a
                 lead unchecking three of them should not have to hunt pages. */}
-            {previewFiles.length > 0 && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium">
-                  <Checkbox
-                    checked={allFilesSelected}
-                    // A partial pick is visually distinct from "all" — the
-                    // control is one press away from either, so it must not
-                    // read as already-all.
-                    indeterminate={selectedCount > 0 && !allFilesSelected}
-                    onCheckedChange={(checked) =>
-                      setSelectedFileIds(
-                        checked ? new Set(previewFiles.map((f) => f.id)) : new Set(),
-                      )
-                    }
-                  />
-                  {t("projectSettings.linkSource.selectAllFiles")}
-                </label>
-                <ul className="max-h-56 space-y-1 overflow-y-auto rounded border px-3 py-2">
-                  {previewFiles.map((f) => (
-                    <li key={f.id}>
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={selectedFileIds.has(f.id)}
-                          onCheckedChange={() => toggleFile(f.id)}
-                        />
-                        <span className="truncate">{f.name}</span>
-                        {/* The row's own clash marker, so the warning below
-                            names the files and this says which rows they are. */}
-                        {f.clashes && (
-                          <Badge variant="outline" className="shrink-0 text-amber-700 dark:text-amber-300">
-                            {t("projectSettings.linkSource.fileClashBadge")}
-                          </Badge>
-                        )}
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <UpstreamFileChoiceList
+              files={previewFiles}
+              selectedFileIds={selectedFileIds}
+              onToggleFile={toggleFile}
+              onToggleAll={(checked) =>
+                setSelectedFileIds(
+                  checked ? new Set(previewFiles.map((f) => f.id)) : new Set(),
+                )
+              }
+            />
             <p className="text-sm" role={nothingSelected ? "alert" : undefined}>
               {previewFiles.length === 0
                 ? t("projectSettings.linkSource.previewEmptyUpstream")
@@ -458,7 +433,7 @@ export function LinkSourceFlow({
             )}
             {/* The clash is a warning, never a refusal: the confirm
                 button below stays live beside it. */}
-            {selectedClashNames.length > 0 && (
+            {clashNames.length > 0 && (
               <div
                 role="alert"
                 className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
@@ -467,17 +442,17 @@ export function LinkSourceFlow({
                 <div className="space-y-1">
                   <p>
                     {t("projectSettings.linkSource.clashWarningHeading", {
-                      count: selectedClashNames.length,
+                      count: clashNames.length,
                     })}
                   </p>
                   <ul className="list-inside list-disc font-medium">
-                    {selectedClashNames.map((name) => (
+                    {clashNames.map((name) => (
                       <li key={name.toLowerCase()}>{name}</li>
                     ))}
                   </ul>
                   <p>
                     {t("projectSettings.linkSource.clashWarningBody", {
-                      count: selectedClashNames.length,
+                      count: clashNames.length,
                     })}
                   </p>
                 </div>

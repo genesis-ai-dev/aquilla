@@ -26,7 +26,7 @@ import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 // tests care that the batch-validate event FIRES, which is precisely what the
 // surface could not previously prove.
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
+  default: { capture: vi.fn(), captureException: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
 }))
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
@@ -935,6 +935,88 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     ])
     expect(validateButton()).toBeDisabled()
     await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * "Voice together" used to fail as an unhandled rejection with nothing on
+ * screen: the workspace handler rethrows and the bar only had try/finally.
+ * Vitest fails the run on an unhandled rejection, so these tests passing is
+ * itself the proof that the bar now catches it.
+ */
+describe("SelectionBar — Voice together failure", () => {
+  const voiceButton = () => screen.getByRole("button", { name: /^Voice together/i })
+  const translated = [
+    makeCell({ id: "cell-1", translated: "bonjour" }),
+    makeCell({ id: "cell-2", translated: "le monde" }),
+  ]
+
+  it("says what went wrong, reports it, and lets the reader try again", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    vi.mocked(posthog.captureException).mockClear()
+    const failure = new Error("Request failed (503): upstream unavailable")
+    const onVoiceTogether = vi.fn(() => Promise.reject(failure))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", { audioMode: true, onVoiceTogether })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      // The categoriser's plain words, never the raw "Request failed (503)".
+      description: expect.stringMatching(/server error/i),
+    })))
+    expect(posthog.captureException).toHaveBeenCalledWith(failure, {
+      surface: "voice-together",
+      project_id: "proj-1",
+    })
+    // Back to idle: the button works again and a second try reaches the handler.
+    await vi.waitFor(() => expect(voiceButton()).toBeEnabled())
+    fireEvent.click(voiceButton())
+    await vi.waitFor(() => expect(onVoiceTogether).toHaveBeenCalledTimes(2))
+    vi.restoreAllMocks()
+  })
+
+  // The pre-flight refusals in combined-voice.ts (signed out, too few lines,
+  // lines too long) happen before any row shows an error badge, so this toast
+  // is the only thing the reader sees. Those messages are already plain.
+  it("shows a pre-flight refusal in its own words", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error("Selected lines are too long to voice together")),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description: "Selected lines are too long to voice together",
+    })))
+    vi.restoreAllMocks()
+  })
+
+  // A toast has no "technical detail" disclosure, so a body that points at
+  // one gives way to its heading.
+  it("never points a toast reader at a technical detail it does not have", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error('Request failed (400): {"error":"bad"}')),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description: "The AI provider rejected this request",
+    })))
     vi.restoreAllMocks()
   })
 })

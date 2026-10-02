@@ -658,6 +658,7 @@ export const fr: Catalog = {
   "editor.selection.voiceUnavailable": "La synthèse vocale n'est pas disponible ici",
   "editor.selection.voiceNeedTwo": "Sélectionnez au moins deux lignes traduites",
   "editor.selection.voiceTooltip": "Vocaliser {count} lignes en un seul clip",
+  "editor.selection.voiceTogetherFailed": "Impossible de vocaliser ces lignes ensemble",
   "editor.selection.translate": "Traduire",
   "editor.selection.translateNotConfigured": "La traduction n'est pas configurée pour ce projet",
   "editor.selection.allTranslated": "Toutes les cellules sélectionnées ont déjà une traduction",

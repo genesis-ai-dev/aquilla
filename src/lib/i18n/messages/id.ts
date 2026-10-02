@@ -682,6 +682,7 @@ export const id: Catalog = {
   "editor.selection.voiceUnavailable": "Penyuaraan tidak tersedia di sini",
   "editor.selection.voiceNeedTwo": "Pilih setidaknya dua baris yang sudah diterjemahkan",
   "editor.selection.voiceTooltip": "Suarakan {count} baris sebagai satu klip",
+  "editor.selection.voiceTogetherFailed": "Tidak dapat menyuarakan baris-baris ini bersama",
   "editor.selection.translate": "Terjemahkan",
   "editor.selection.translateNotConfigured": "Penerjemahan belum dikonfigurasi untuk proyek ini",
   "editor.selection.allTranslated": "Semua sel yang dipilih sudah punya terjemahan",

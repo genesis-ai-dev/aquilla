@@ -35,6 +35,7 @@ import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { isOwnTextEdit, textValidationScope } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { categorizeAiError } from "@/lib/audio/ai-error"
 import { useFormat } from "@/lib/i18n/format"
 import {
   batchValidateTelemetry,
@@ -436,10 +437,31 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     setRunning({ kind: "voice" })
     try {
       await onVoiceTogether(selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()))
+    } catch (err) {
+      // A failed "Voice together" used to end here as an unhandled rejection
+      // with nothing on screen. The rows keep their own error badge with "Try
+      // again" (combined-voice.ts sets it); the toast is the one message for
+      // the whole run, and the only one for a failure before any row was
+      // touched (signed out, too few lines, lines too long).
+      const reason = categorizeAiError(err instanceof Error ? err.message : String(err))
+      toast.add({
+        type: "error",
+        title: t("editor.selection.voiceTogetherFailed"),
+        // A toast has no "technical detail" disclosure to point at, so the
+        // two generic bodies that send the reader there give way to their
+        // heading; the line's badge still carries the raw text.
+        description: /technical detail below/i.test(reason.body) ? reason.title : reason.body,
+      })
+      // Catching it removes the automatic `$exception` that was the only
+      // trace of this failure, so report it by hand.
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)), {
+        surface: "voice-together",
+        project_id: project.id,
+      })
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, onVoiceTogether, isBusy])
+  }, [selectedCells, onVoiceTogether, isBusy, t, project.id])
 
   const onValidate = useCallback(() => {
     if (isBusy) return

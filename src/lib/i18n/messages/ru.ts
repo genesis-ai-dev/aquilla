@@ -673,6 +673,7 @@ export const ru: Catalog = {
   "editor.selection.voiceUnavailable": "Озвучивание здесь недоступно",
   "editor.selection.voiceNeedTwo": "Выберите не менее двух переведённых строк",
   "editor.selection.voiceTooltip": "Озвучить {count} строк одним фрагментом",
+  "editor.selection.voiceTogetherFailed": "Не удалось озвучить эти строки вместе",
   "editor.selection.translate": "Перевести",
   "editor.selection.translateNotConfigured": "Перевод не настроен для этого проекта",
   "editor.selection.allTranslated": "Все выбранные ячейки уже переведены",

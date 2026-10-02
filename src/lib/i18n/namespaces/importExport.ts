@@ -1203,6 +1203,138 @@ export const importExport = defineNamespace({
         'Importing a source document into a project and exporting a translation back out — the format pickers, per-format hints, upload progress, collision handling and failure messages. Importing is the very first action a translator takes in Aquilla, so these strings are read before any other working surface.',
     },
     keys: {
+      // Timeline media import (AQU-1431) — the three dialogs that review segments
+      // against a media file before anything is saved: the shared media import
+      // preview, Attach captions, and Align script. In all of them {number} is a
+      // segment's 1-based position in the list on screen, not a stored id, so it
+      // renumbers as the reviewer removes rows.
+      "importExport.mediaPreview.embedded": {
+        description:
+          "Choice in the text-source picker of the media import preview, naming a subtitle track found inside the uploaded MP4/M4A when that track declares no language of its own.",
+        placeholders: {
+          number: "1-based position of this embedded caption track within the media file.",
+        },
+      },
+      "importExport.mediaPreview.embeddedLanguage": {
+        description:
+          "The same embedded-subtitle-track choice as mediaPreview.embedded, used when the track does declare a language. Keep the language in parentheses after the track name so the two variants line up in the picker.",
+        placeholders: {
+          number: "1-based position of this embedded caption track within the media file.",
+          language:
+            "Language tag the track declares ('en', 'spa') — literal data read from the file, not translated.",
+        },
+      },
+      "importExport.mediaPreview.title": {
+        description:
+          "Default heading of the media import preview dialog, naming the media file whose segments are being reviewed. A calling dialog may replace this heading with its own (Attach captions and Align script both do).",
+        placeholders: {
+          name: "Filename of the media being imported — literal data, not translated.",
+        },
+      },
+      "importExport.mediaPreview.segmentCount": {
+        description:
+          "Live status line under the text-source picker: how many segments the selected text source contains. Count-governed. When some segments are invalid it is followed by ' · ' and mediaPreview.needsAttention on the same line.",
+        placeholders: {
+          count:
+            "Number of segments in the selected text source; also governs the plural form.",
+        },
+      },
+      "importExport.mediaPreview.needsAttention": {
+        description:
+          "Second clause of that same status line, appended after ' · ' when some segments have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.segmentCount starts.",
+        placeholders: {
+          count:
+            "Number of segments that currently fail validation; also governs the plural form.",
+        },
+      },
+      "importExport.mediaPreview.wording": {
+        description:
+          "Label of the textarea holding one segment's text in the media import preview. Short field label, not an instruction.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.start": {
+        description:
+          "Label of the number input for one segment's start time in the media import preview. The '(seconds)' unit matters — the field takes a decimal second offset, not a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.end": {
+        description:
+          "Label of the number input for one segment's end time in the media import preview. As with mediaPreview.start, the unit is decimal seconds rather than a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.remove": {
+        description:
+          "Button that drops one segment from the import in the media import preview. Names the segment because several buttons with the same wording sit in the list.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.mediaPreview.confidence": {
+        description:
+          "Badge on a segment produced by automatic alignment, reporting how well its timings matched. The literal '%' sign follows the placeholder in the string; {percent} is the number alone.",
+        placeholders: {
+          percent: "Alignment confidence as a whole number 0–100, without the percent sign.",
+        },
+      },
+      "importExport.captionTrack.title": {
+        description:
+          "Heading of the Attach captions dialog, naming the media file the caption track will be attached to.",
+        placeholders: {
+          name: "Filename of the media the captions attach to — literal data, not translated.",
+        },
+      },
+      "importExport.captionTrack.overwrite": {
+        description:
+          "Warning above the overwrite-consent checkbox, shown once the chosen destination is an existing caption track, stating how much content replacing it would discard. Count-governed.",
+        placeholders: {
+          count:
+            "Number of segments already in the destination track; also governs the plural form.",
+        },
+      },
+      "importExport.scriptAlignment.title": {
+        description:
+          "Heading of the Align script dialog, naming the media file the pasted or uploaded script is being aligned to.",
+        placeholders: {
+          name: "Filename of the media the script aligns to — literal data, not translated.",
+        },
+      },
+      "importExport.scriptAlignment.overwrite": {
+        description:
+          "Label on the destination field of the Align script dialog, warning how much of the chosen track the aligned segments would replace.",
+        placeholders: {
+          count: "Number of segments already in the destination track.",
+        },
+      },
+      "importExport.scriptAlignment.wording": {
+        description:
+          "Label of the textarea holding one aligned segment's text in the Align script dialog. Short field label, not an instruction.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.start": {
+        description:
+          "Label of the number input for one aligned segment's start time in the Align script dialog. The unit is decimal seconds, not a timecode.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.end": {
+        description:
+          "Label of the number input for one aligned segment's end time in the Align script dialog. As with scriptAlignment.start, the unit is decimal seconds.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.coverage": {
+        description:
+          "Badge on an aligned segment reporting how much of its wording the aligner matched to the audio on its first pass. The literal '%' sign follows the placeholder in the string; {percent} is the number alone.",
+        placeholders: {
+          percent: "Initial word-match score as a whole number 0–100, without the percent sign.",
+        },
+      },
+      "importExport.scriptAlignment.review": {
+        description:
+          "Label of the checkbox a reviewer ticks to confirm a low-confidence aligned segment, which is what releases the dialog's Use button. First person on purpose — the reviewer is attesting, not being instructed.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
+      "importExport.scriptAlignment.listen": {
+        description:
+          "Button that plays back just one segment's span of the media from the Align script dialog, so the reviewer can hear what the timings cover.",
+        placeholders: { number: "1-based position of the segment in the list on screen." },
+      },
       "importExport.result.reportImportedCount": {
         description:
           "Plain-text clipboard report: how many items imported successfully, interpolated into reportHeader.",

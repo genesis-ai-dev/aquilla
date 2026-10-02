@@ -13,6 +13,11 @@
 // reviews what the link will add (count + same-named-file warning) and a second
 // press links. These tests go through that step rather than around it — the
 // whole point of the slice is that nothing links straight off the picker.
+//
+// AQU-1528 added the corpus question between the pick and the review: "Its
+// Source" (sibling case) or "One of its Targets" (chain case), neither
+// preselected. So `pick()` below answers it, and the cases that are about the
+// question itself live in their own describe at the bottom.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
@@ -76,9 +81,21 @@ function renderSection(roleLevel: number | null = 700) {
 const linkButton = () => screen.getByRole("button", { name: "Link source project" })
 const reviewButton = () => screen.getByRole("button", { name: "Review what will be added" })
 
-async function pick(user: ReturnType<typeof userEvent.setup>, name: string) {
+const corpusRadio = (which: "source" | "target") =>
+  screen.getByRole("radio", {
+    name: which === "source" ? /^Its Source/i : /^One of its Targets/i,
+  })
+
+async function pick(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  // AQU-1528: the corpus is a required answer, so every path through the flow
+  // gives one. "source" keeps the pre-AQU-1528 cases posting what they pinned.
+  corpus: "source" | "target" = "source",
+) {
   await user.click(screen.getByRole("combobox", { name: "Source project" }))
   await user.click(await screen.findByRole("option", { name }))
+  await user.click(corpusRadio(corpus))
   // AQU-1526: the pick alone links nothing — it opens the confirm step.
   await user.click(reviewButton())
   await waitFor(() => expect(screen.queryByRole("button", { name: "Review what will be added" })).toBeNull())
@@ -365,5 +382,140 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
     expect(reviewButton()).toBeTruthy()
     expect(linkProjectSource).not.toHaveBeenCalled()
     expect(onLinked).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1528 — the corpus question. Before this slice the flow hard-coded
+// consumes='source', so the CHAIN case (this project translates one of the
+// upstream's TRANSLATIONS, e.g. French → Chaluba) was reachable only while
+// creating a project: a team that decided on it afterwards had to delete and
+// rebuild the downstream project, which is the workaround AQU-1010 exists to
+// remove. These tests pin that the flow asks, that it refuses to guess, and
+// that each answer reaches the server as the link shape it means.
+describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
+  // WHY: the two answers build different products — a sibling translation of
+  // the same original vs. a link onto the upstream's output. A default would
+  // silently build one of them, so the flow has to ask and has to wait, and
+  // the way forward (and with it the link action, which is only reachable
+  // through it) stays shut until it has an answer.
+  it("asks which corpus after a pick and will not go forward until one is chosen", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    // Nothing to ask about before an upstream is on the table.
+    expect(screen.queryByText("Which corpus should become this project's source?")).toBeNull()
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+
+    expect(
+      screen.getByText("Which corpus should become this project's source?"),
+    ).toBeTruthy()
+    // Both offered, neither preselected.
+    expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")
+    expect(corpusRadio("target").getAttribute("aria-checked")).toBe("false")
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(corpusRadio("target"))
+    expect(reviewButton().hasAttribute("disabled")).toBe(false)
+    expect(linkProjectSource).not.toHaveBeenCalled()
+  })
+
+  // WHY: the step that was impossible on an established project. "One of its
+  // Targets" has to reach the server as consumes='target' — the shape that
+  // makes the upstream's TRANSLATIONS this project's source text. `gate` is
+  // left off on purpose: the route defaults it to 'validated', which is the
+  // "only validated upstream translations flow through" behaviour the chain
+  // case is specified to have, and is what creation sends too.
+  it("links the chain case as a live consumes-target link", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      gate: "validated",
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source", "target")
+
+    // The confirm step says which corpus, not just how many files — the count
+    // reads identically for either answer.
+    expect(await screen.findByText("consumes translations")).toBeTruthy()
+    expect(screen.getByText("gate: validated only")).toBeTruthy()
+
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+    })
+  })
+
+  // WHY: the sibling case is the one AQU-1525 shipped and the one most teams
+  // still want; adding a second option must not change what it posts or how it
+  // is described on the way in.
+  it("still links the sibling case as a live consumes-source link", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    renderSection(700)
+
+    await pick(user, "English Source", "source")
+
+    expect(await screen.findByText("consumes source")).toBeTruthy()
+    // The validated-only gate badge belongs to the chain case — a sibling link
+    // consumes the upstream's source, which has no validation gate to show.
+    expect(screen.queryByText("gate: validated only")).toBeNull()
+
+    await user.click(linkButton())
+
+    await waitFor(() =>
+      expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+        sourceProjectId: "proj-upstream",
+        mode: "live",
+        consumes: "source",
+      }),
+    )
+  })
+
+  // WHY: a Detach-then-relink is the only way to change upstream (AQU-1525's
+  // "Decisions already made"), and it must not inherit the previous answer —
+  // the corpus is exactly what someone re-linking is likely to be changing.
+  it("asks again after a successful link", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      gate: "validated",
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source", "target")
+    await user.click(linkButton())
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+
+    // Back at the picker with no upstream and no corpus carried over.
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")
+    expect(corpusRadio("target").getAttribute("aria-checked")).toBe("false")
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
   })
 })

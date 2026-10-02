@@ -12,6 +12,10 @@
  * diverge), that backing out links nothing, and that the two cases where the
  * flow cannot be used say so instead of silently vanishing.
  *
+ * AQU-1528 put the corpus question ("Its Source" / "One of its Targets") into
+ * that shared flow, so this entry point gets it for free — which is the point,
+ * and what the walk-through below asserts rather than assumes.
+ *
  * The flow's own contract — picker contents, the live/consumes-source shape it
  * posts, the cycle refusal, the seed self-heal — stays pinned where it was, in
  * `ProjectSettings/LinkSourceSection.test.tsx`. These tests are about the door.
@@ -206,6 +210,15 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
 
     await user.click(await screen.findByRole("combobox", { name: "Source project" }))
     await user.click(await screen.findByRole("option", { name: "English Source" }))
+    // AQU-1528: the corpus question is part of the shared flow, so it stands
+    // between the pick and the review here too.
+    expect(
+      screen.getByText("Which corpus should become this project's source?"),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Review what will be added" }).hasAttribute("disabled"),
+    ).toBe(true)
+    await user.click(screen.getByRole("radio", { name: /^Its Source/i }))
     await user.click(screen.getByRole("button", { name: "Review what will be added" }))
 
     // The shared preview, not a second one grown for this entry point.

@@ -4,6 +4,7 @@ import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
+import { liveSourceSql } from './tombstoned-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
 
 export interface ProgressReadEnv {
@@ -553,7 +554,10 @@ export async function readFirstOpenCell(
         -- state it is in. Unconditional, unlike the structural clause above it:
         -- that one is project policy, this one is a person taking the row out of
         -- the work, so no setting brings it back into this walk.
-        AND ${visibleSourceSql('s')}`,
+        AND ${visibleSourceSql('s')}
+        -- Nor is a line the upstream deleted from a live link: progress no longer
+        -- counts it, so a link sent there would land on work that is not there.
+        AND ${liveSourceSql('s')}`,
   ).bind(...binds).all<FirstOpenRow>()
 
   const outstanding = (r: FirstOpenRow): boolean => {
@@ -688,8 +692,10 @@ export async function handleProgressReadRequest(
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
             -- AQU-1424: and it is not one of the chapter's cells here either, so
             -- this detail read agrees with the projection's own count for the
-            -- same chapter rather than listing a row the fraction excluded.
-            AND ${visibleSourceSql('s')}`,
+            -- same chapter rather than listing a row the fraction excluded. The
+            -- same goes for a line the upstream deleted from a live link.
+            AND ${visibleSourceSql('s')}
+            AND ${liveSourceSql('s')}`,
       ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         cell_id: string
         canonical_ref: string | null

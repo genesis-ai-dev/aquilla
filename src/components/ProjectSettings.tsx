@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -57,6 +57,7 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { overlayProjectSettings } from "@/lib/sync/overlay-project-settings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import {
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -326,6 +327,42 @@ function buildBaseline(project: ProjectRecord): Baseline {
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
+}
+
+/**
+ * The baseline fields that live in the shared project-settings blob: exactly
+ * the keys handleSave writes into `sharedUpdates`. The shared-settings effect
+ * re-syncs these, and only these, once the settings GET lands.
+ */
+const SHARED_BASELINE_KEYS = [
+  "sourceLanguage",
+  "targetLanguage",
+  "validationCount",
+  "validationCountAudio",
+  "validationRoleFloor",
+  "validationNamedUsers",
+  "allowSelfValidation",
+  "validationRoleFloorAudio",
+  "validationNamedUsersAudio",
+  "allowSelfValidationAudio",
+  "cellEditingFloor",
+  "allowTrackEditing",
+  "timingLocked",
+  "harmonize_min_role",
+  "bibleResourcesEnabled",
+  "importExcludeFrontMatter",
+  "precedingTargetCells",
+  "termMatching",
+] as const satisfies readonly (keyof Baseline)[]
+
+type SharedBaselineKey = (typeof SHARED_BASELINE_KEYS)[number]
+
+/** Value equality for a baseline field: arrays and objects by content (the
+ *  same JSON comparison isDirty and handleSave use), everything else by `===`. */
+function sameSettingValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null || typeof a !== "object" || typeof b !== "object") return false
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined): boolean {
@@ -684,72 +721,91 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Seed once when the project first loads. We intentionally don't reseed on
   // every `project` identity change — background sync writes to IDB shouldn't
   // wipe the user's in-progress edits. After save/discard we reseed manually.
+  //
+  // `project` here has NO shared settings (`includeSettings: false` above), so
+  // when this page's own settings GET has already landed, seed from the record
+  // with the blob overlaid. Otherwise the shared-settings effect below settles
+  // the shared fields once the GET lands.
   useEffect(() => {
     if (!project || seededRef.current) return
-    const b = buildBaseline(project)
+    const b = buildBaseline(
+      sharedSettingsFetched ? overlayProjectSettings(project, sharedSettingsBlob ?? {}) : project,
+    )
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
-  }, [project, applyBaseline])
+  }, [project, applyBaseline, sharedSettingsFetched, sharedSettingsBlob])
 
-  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
-  // async phases — `useProject`'s minimal record resolves first WITHOUT the
-  // field (undefined), then its own `useProjectSettings` GET fills it in. If
-  // the baseline seed above (which runs on first non-null `project`) lands
-  // during that undefined window, it locks in `undefined`, and the Switch
-  // paints `resolveBibleResourcesEnabled(undefined, hasScriptureFiles)` —
-  // wrongly `true` for a scripture project whose server value is really
-  // `false`. Once THIS component's own settings hook confirms a fetch has
-  // resolved (`sharedSettingsFetched`), re-sync the seeded value to whatever
-  // `project.bibleResourcesEnabled` now holds — but only if the user hasn't
-  // already touched the switch (don't clobber an in-progress edit), and only
-  // once (matches the "seed once" contract above).
-  const bibleResourcesResyncedRef = useRef(false)
+  // Every shared field showed its DEFAULT on a direct load or reload of this
+  // page (PR1 leftover #2): this page passes `includeSettings: false` to
+  // `useProject` (it owns the editable settings hook above, and a second
+  // overlay request would be a duplicate GET), so `project` is
+  // `minimalProjectRecord`, which carries none of the shared settings and
+  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""`. The seed above runs
+  // on the first non-null `project`, usually before the settings GET lands, so
+  // it locked in defaults. Opening from the editor's gear only worked because
+  // the route modal seeds from the workspace's already-overlaid snapshot. A
+  // stored OFF that displays as ON could not even be turned ON: the toggle
+  // equalled the wrong baseline, so Save sent nothing.
+  //
+  // Two fields had their own one-off fixes before this effect replaced them:
+  // - AQU-460: Bible resources painted `resolveBibleResourcesEnabled(undefined,
+  //   hasScriptureFiles)`, wrongly `true` for a scripture project whose server
+  //   value is really `false`.
+  // - AQU-1115: the Source/Target Language fields stayed permanently EMPTY,
+  //   while the Languages card below (which reads the blob directly) showed the
+  //   right language.
+  //
+  // Once this page's own settings GET has resolved, re-sync every shared field
+  // (exactly the keys handleSave writes) from the overlaid record, once. The
+  // baseline always moves, so settling to the stored value never reads as an
+  // edit; the draft moves only where the user has not already changed it, so
+  // an in-progress edit is never stomped. Device-local fields stay out of it,
+  // which also makes this a no-op on the gear path, whose snapshot already
+  // holds the stored values. `hasFetched` fails closed (stays false on a failed
+  // GET), so a settings outage leaves the previous behaviour rather than
+  // blanking anything. Absent stays absent: the overlay skips null/undefined,
+  // so a genuinely empty language stays empty and an unset Bible-resources
+  // choice stays unset.
+  const sharedSettingsResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
-    if (bibleResourcesResyncedRef.current) return
-    bibleResourcesResyncedRef.current = true
-    if (project.bibleResourcesEnabled === baseline.bibleResourcesEnabled) return
-    setBaseline((prev) => (prev ? { ...prev, bibleResourcesEnabled: project.bibleResourcesEnabled } : prev))
-    // Only overwrite the draft value if the user hasn't diverged from the
-    // (possibly-stale) baseline yet — otherwise we'd stomp an in-progress toggle.
-    setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
-  }, [project, baseline, sharedSettingsFetched])
-
-  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
-  // project that has both set. Same two-phase shape as the AQU-460 race above,
-  // but worse: this page passes `includeSettings: false` to `useProject` (it
-  // owns the editable settings hook below, and a second overlay request would
-  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
-  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
-  // ONLY in the shared settings blob and never reach `project` at all. The
-  // baseline seed therefore didn't just *race* the real values, it could never
-  // see them, so the fields stayed blank forever. (The Languages card below
-  // looked right because it reads `sharedSettingsBlob` directly — that
-  // discrepancy is exactly what the bug report describes.)
-  //
-  // Once this page's own settings GET has resolved, re-sync both fields from
-  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
-  // settings outage leaves the previous behavior rather than blanking anything.
-  const languagesResyncedRef = useRef(false)
-  useEffect(() => {
-    if (!baseline || !sharedSettingsFetched) return
-    if (languagesResyncedRef.current) return
-    languagesResyncedRef.current = true
-    // Absent stays absent — a project with a genuinely empty language must show
-    // an empty field, never an invented default. A free-text label that isn't
-    // in the language catalog rides through verbatim.
-    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
-    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
-    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
-    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
-    // Only adopt the hydrated value where the user hasn't already typed over the
-    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
-    // the true server value must also not read as a user edit, which is why the
-    // baseline moves with it.
-    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
-    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
-  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+    if (sharedSettingsResyncedRef.current) return
+    sharedSettingsResyncedRef.current = true
+    const next = buildBaseline(overlayProjectSettings(project, sharedSettingsBlob ?? {}))
+    const draftSetters: { [K in SharedBaselineKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+      sourceLanguage: setSourceLanguage,
+      targetLanguage: setTargetLanguage,
+      validationCount: setValidationCount,
+      validationCountAudio: setValidationCountAudio,
+      validationRoleFloor: setValidationRoleFloor,
+      validationNamedUsers: setValidationNamedUsers,
+      allowSelfValidation: setAllowSelfValidation,
+      validationRoleFloorAudio: setValidationRoleFloorAudio,
+      validationNamedUsersAudio: setValidationNamedUsersAudio,
+      allowSelfValidationAudio: setAllowSelfValidationAudio,
+      cellEditingFloor: setCellEditingFloor,
+      allowTrackEditing: setAllowTrackEditing,
+      timingLocked: setTimingLocked,
+      harmonize_min_role: setHarmonizeMinRole,
+      bibleResourcesEnabled: setBibleResourcesEnabled,
+      importExcludeFrontMatter: setImportExcludeFrontMatter,
+      precedingTargetCells: setPrecedingTargetCells,
+      termMatching: setTermMatching,
+    }
+    const settled: Partial<Baseline> = {}
+    const adopt = <K extends SharedBaselineKey>(key: K) => {
+      const stale = baseline[key]
+      const stored = next[key]
+      if (sameSettingValue(stale, stored)) return
+      settled[key] = stored
+      const setDraft = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
+      setDraft((prev) => (sameSettingValue(prev, stale) ? stored : prev))
+    }
+    for (const key of SHARED_BASELINE_KEYS) adopt(key)
+    if (Object.keys(settled).length === 0) return
+    setBaseline((prev) => (prev ? { ...prev, ...settled } : prev))
+  }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 

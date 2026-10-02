@@ -27,10 +27,13 @@ import { filesForBook, type TranslationDestination } from "@/lib/import/translat
 /**
  * The language-bearing parts of an upload's header.
  *
- * `fields` hold structured values (the rest of a USFM `\id` line, a WebVTT
- * `Language:` value): a two-letter code like `fr` only counts there. `notes`
- * hold free text (`\rem` lines, the words after `WEBVTT`), where a two-letter
- * code is too often an ordinary word ("it", "no", "to") to mean anything.
+ * `fields` hold structured values: a WebVTT `Language:` value, and the
+ * code-shaped parts of a USFM `\id` line (`sty`, `en_English_ltr`). A language
+ * code like `fr` or `sty` only counts there. `notes` hold free text (`\rem`
+ * lines, the title after `WEBVTT`, the words on the `\id` line), where only a
+ * language's name counts: codes are too often ordinary words there ("it",
+ * "no", and among three-letter codes "for" = Fore, "the" = Chitwania Tharu,
+ * "dan" = Danish; AQU-1365 review).
  */
 export interface UploadHeader {
   fields: string[]
@@ -69,7 +72,15 @@ export function uploadHeaderText(fileName: string, text: string): UploadHeader {
       if (/^\\c(?:\s|$)/.test(trimmed)) break
       const id = /^\\id\s+[A-Za-z0-9]{3}(?![A-Za-z0-9])(.*)$/.exec(trimmed)
       if (id) {
-        if (id[1].trim()) header.fields.push(id[1].trim())
+        const rest = id[1].trim()
+        if (!rest) continue
+        // The words are a title ("The Book of Genesis"); a lone token or one
+        // joined by _ or - ("sty", "en_English_ltr") is a code.
+        header.notes.push(rest)
+        const tokens = rest.split(/\s+/)
+        for (const token of tokens) {
+          if (tokens.length === 1 || /[_-]/.test(token)) header.fields.push(token)
+        }
         continue
       }
       const rem = /^\\rem(?:\s+(.*))?$/.exec(trimmed)
@@ -115,9 +126,10 @@ function containsPhrase(tokens: readonly string[], phrase: readonly string[]): b
  * Every way a header might write `language`: its stored name, the names and
  * codes `languagesEqual` treats as the same, and the catalog's name and codes
  * for it (so a project whose target is "Siberian Tatar" recognises `sty`).
- * Two-letter codes are kept apart (see `UploadHeader`).
+ * A single word of up to three letters is a code (ISO 639-1/3), kept apart
+ * because it only counts in `fields` (see `UploadHeader`).
  */
-function languageForms(language: string, catalog: readonly LanguageEntry[]): { phrases: string[][]; shortCodes: Set<string> } {
+function languageForms(language: string, catalog: readonly LanguageEntry[]): { phrases: string[][]; codes: Set<string> } {
   const raw = new Set<string>(languageSurfaceForms(language))
   const folded = words(language).join(" ")
   const lower = language.trim().toLowerCase()
@@ -130,14 +142,14 @@ function languageForms(language: string, catalog: readonly LanguageEntry[]): { p
     }
   }
   const phrases: string[][] = []
-  const shortCodes = new Set<string>()
+  const codes = new Set<string>()
   for (const form of raw) {
     const parts = words(form)
     if (parts.length === 0) continue
-    if (parts.length === 1 && parts[0].length <= 2) shortCodes.add(parts[0])
+    if (parts.length === 1 && parts[0].length <= 3) codes.add(parts[0])
     else phrases.push(parts)
   }
-  return { phrases, shortCodes }
+  return { phrases, codes }
 }
 
 /**
@@ -149,14 +161,14 @@ export function languageMatcher(
   catalog: readonly LanguageEntry[] = [],
 ): (header: UploadHeader) => boolean {
   if (!language.trim()) return () => false
-  const { phrases, shortCodes } = languageForms(language, catalog)
+  const { phrases, codes } = languageForms(language, catalog)
   return (header) => {
     const fieldTokens = header.fields.map(words)
     const named = [...fieldTokens, ...header.notes.map(words)].some((tokens) =>
       phrases.some((phrase) => containsPhrase(tokens, phrase)),
     )
     if (named) return true
-    return fieldTokens.some((tokens) => tokens.some((token) => shortCodes.has(token)))
+    return fieldTokens.some((tokens) => tokens.some((token) => codes.has(token)))
   }
 }
 

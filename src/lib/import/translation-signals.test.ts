@@ -59,8 +59,16 @@ describe("uploadHeaderText", () => {
   it("reads the rest of the \\id line and \\rem lines, before the first chapter", () => {
     const text = "﻿\\id JON Siberian Tatar (test)\n\\rem Translated 2026\n\\h Jonah\n\\c 1\n\\rem not this\n\\v 1 text\n"
     expect(uploadHeaderText("JON.usfm", text)).toEqual({
-      fields: ["Siberian Tatar (test)"],
-      notes: ["Translated 2026"],
+      fields: [],
+      notes: ["Siberian Tatar (test)", "Translated 2026"],
+    })
+  })
+
+  it("takes only the code-shaped parts of the \\id line as fields", () => {
+    expect(uploadHeaderText("JON.usfm", "\\id JON sty\n\\c 1\n")).toEqual({ fields: ["sty"], notes: ["sty"] })
+    expect(uploadHeaderText("PSA.usfm", "\\id PSA EN_ULT en_English_ltr unfoldingWord Literal Text\n")).toEqual({
+      fields: ["EN_ULT", "en_English_ltr"],
+      notes: ["EN_ULT en_English_ltr unfoldingWord Literal Text"],
     })
   })
 
@@ -93,6 +101,28 @@ describe("mentionsLanguage", () => {
     expect(mentionsLanguage({ fields: ["fr"], notes: [] }, "French")).toBe(true)
     expect(mentionsLanguage({ fields: [], notes: ["fr"] }, "French")).toBe(false)
     expect(mentionsLanguage({ fields: ["Frankish"], notes: [] }, "French")).toBe(false)
+  })
+
+  // AQU-1365 review: many three-letter codes are English words. In free text
+  // they must not turn a plain source upload into "This looks like a
+  // translation".
+  it("never counts a three-letter code in free text, where it is usually a word", () => {
+    const catalog: LanguageEntry[] = [
+      { code: "for", name: "Fore" },
+      { code: "the", name: "Chitwania Tharu" },
+      { code: "dan", name: "Danish", altCode: "da" },
+      { code: "one", name: "Oneida" },
+    ]
+    const header = (text: string) => uploadHeaderText("MRK.usfm", `${text}\n\\c 1\n`)
+    expect(mentionsLanguage(header("\\id MRK\n\\rem Prepared for community checking"), "Fore", catalog)).toBe(false)
+    expect(mentionsLanguage(header("\\id MRK The Gospel of Mark"), "Chitwania Tharu", catalog)).toBe(false)
+    expect(mentionsLanguage(header("\\id MRK\n\\rem cross references to Dan 7"), "Danish", catalog)).toBe(false)
+    expect(mentionsLanguage(header("\\id MRK\n\\rem Draft one"), "Oneida", catalog)).toBe(false)
+    // As a code where a code belongs, and by name anywhere, it still counts.
+    expect(mentionsLanguage(header("\\id MRK for"), "Fore", catalog)).toBe(true)
+    expect(mentionsLanguage(header("\\id MRK the_Tharu"), "Chitwania Tharu", catalog)).toBe(true)
+    expect(mentionsLanguage(header("\\id MRK\n\\rem Danish translation"), "Danish", catalog)).toBe(true)
+    expect(mentionsLanguage(uploadHeaderText("ep.vtt", "WEBVTT\nLanguage: dan\n\n"), "Danish", catalog)).toBe(true)
   })
 })
 

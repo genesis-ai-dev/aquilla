@@ -368,6 +368,21 @@ UI chrome that used to be one smoke file per click is covered under
   `source.cell.mirror` events it received. No smoke: the downstream rows are
   already there, nothing is lost, and a regression offers work the upstream
   parked rather than destroying it.
+- An upstream delete reaches a linked project as a tombstone, and only as one
+  (AQU-1567). Like curation above it is a server contract with no UI of its own
+  in the consuming project, so it is pinned in
+  `sync-worker/src/__tests__/link-sync-tombstone-chain.test.ts` against real
+  Postgres: in `A → B → C` the cell A deleted is tombstoned in C with its text
+  kept, for a consumes-source and a consumes-target C, and a hide or a new
+  translation of it in B does not make it live in C again; an upstream restoring
+  the cell with its ORIGINAL text clears the tombstone, on one link and down a
+  chain; and a cell the downstream never held gets no row at all — create and
+  delete in one window, in different windows of one run, or as an empty
+  tombstone already sitting in B — while a later re-create still arrives and a
+  replayed window mirrors nothing. `link-sync-windowed.test.ts` pins that
+  one-event windows end in the same state. No smoke: the walk needs three
+  projects and two links, and crosses no layer the worker test does not already
+  run for real.
 - In-app feedback (AQU-1028, moved to the Help menu by AQU-1548): the Help ("?") menu's **Feedback** item opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `HelpMenu.test.tsx` for the entry point, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 - A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 

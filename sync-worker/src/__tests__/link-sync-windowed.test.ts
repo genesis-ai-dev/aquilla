@@ -159,10 +159,10 @@ async function filesOf(t: TestDb, project = DOWNSTREAM): Promise<FileSummary[]> 
 /**
  * What a downstream SHOWS for every mirrored cell, keyed by file NAME (each
  * downstream has its own deterministic file ids). A tombstoned row is reported
- * only as tombstoned: a delete that lands in a later window stamps the
- * existing row and keeps its last text, while a create+delete folded together
- * writes an empty tombstone — neither text is ever shown. Bookkeeping that is
- * allowed to differ by design (event ids, upstream_seq, timestamps) is left out.
+ * only as tombstoned: it keeps whatever text it last mirrored, and that text is
+ * never shown. (A cell created and deleted within one run leaves no row at all,
+ * however the run is windowed — AQU-1567.) Bookkeeping that is allowed to
+ * differ by design (event ids, upstream_seq, timestamps) is left out.
  */
 async function visibleState(t: TestDb, project: string): Promise<Record<string, unknown>[]> {
   const r = await t.pg.query<Record<string, unknown>>(
@@ -416,7 +416,11 @@ describe("mirrorSync — windows change nothing the downstream ends up with (AQU
       })
       expect(byId.get(`${FILE_A}-c1`)).toMatchObject({ value: "Note 1, revised", hidden: false })
       expect(byId.get(`${FILE_A}-c2`)).toMatchObject({ hidden: true })
-      expect(byId.get(`${FILE_A}-c3`)).toMatchObject({ tombstoned: true })
+      // AQU-1567: created and deleted before the downstream's first sync, so
+      // the downstream never held it — no row, not an empty tombstone. The
+      // equality above pins that one-event windows agree.
+      expect(byId.has(`${FILE_A}-c3`)).toBe(false)
+      expect(byId.has(`${FILE_B}-c2`)).toBe(false)
       expect(byId.get(`${FILE_A}-c4`)).toMatchObject({ hidden: false })
       expect(byId.get(`${FILE_A}-c5`)).toMatchObject({ value: "Note 5, revised while parked", hidden: true })
       expect(await cursorOf(t, DOWNSTREAM)).toBe(head)

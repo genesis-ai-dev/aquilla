@@ -18,7 +18,9 @@
 //      not per-event work).
 //   4. For each new upstream file: emit file.mirror.
 //   5. For each folded cell: hash-equal → skip (no event, no write);
-//      upstream-deleted → tombstone mirror; else → content mirror.
+//      upstream-deleted → tombstone mirror, for a row the downstream holds
+//      (AQU-1567: a cell it never held, or deletes before the run's head,
+//      gets no row at all); else → content mirror.
 //   6. Batch the window's mirror events through the canonical events INSERT +
 //      buildEventProjectionStmts (front-door — same projection code the live
 //      HTTP path uses), respecting BATCH_LIMIT. No statement on this path may
@@ -387,7 +389,11 @@ async function loadDelta(
       continue
     }
 
-    if (row.kind === 'source.cell.create' || row.kind === 'source.cell.mirror') {
+    if (
+      row.kind === 'source.cell.create' ||
+      // A tombstone mirror is a delete — folded with `source.cell.delete` below.
+      (row.kind === 'source.cell.mirror' && payload.deleted !== true)
+    ) {
       // AQU-1546: a `source.cell.mirror` is how a LINKED project records a cell
       // it received from ITS upstream, visibility included (see the payload
       // construction in the emit loop below). In a chain A → B → C, B's hidden
@@ -465,7 +471,14 @@ async function loadDelta(
         seq: row.server_seq,
         hidden: payload.hidden === true,
       })
-    } else if (row.kind === 'source.cell.delete') {
+    } else if (
+      row.kind === 'source.cell.delete' ||
+      // AQU-1567: the chain case again. In A → B → C, B never deletes the cell
+      // A deleted — B tombstones its row, and the only record of that is this
+      // mirror's `deleted` flag. Folded as content it reached C as an empty
+      // value on a live row: C's text blanked, and the cell counted as work.
+      (row.kind === 'source.cell.mirror' && payload.deleted === true)
+    ) {
       const prev = cells.get(key)
       cells.set(key, {
         fileId: row.file_id,
@@ -531,13 +544,14 @@ async function loadDelta(
       start_ms: number | string | null
       end_ms: number | string | null
       metadata: Record<string, unknown> | null
+      tombstoned_at: number | string | null
     }>(
       db,
       pending,
       [upstreamProjectId],
       (placeholders) =>
         `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
-                start_ms, end_ms, metadata
+                start_ms, end_ms, metadata, tombstoned_at
            FROM cells
           WHERE project_id = ? AND side = 'source' AND target_lang = ''
             AND (file_id, cell_id) IN (${placeholders})`,
@@ -549,7 +563,13 @@ async function loadDelta(
       // No live row: the cell is gone upstream. A `source.cell.delete` is the
       // event that says so and tombstones on its own — mirroring a phantom
       // here would only write an empty value over the downstream's text.
-      if (!live) continue
+      //
+      // AQU-1567: a TOMBSTONED row is gone upstream too — it is how a linked
+      // upstream (B in A → B → C) records a cell ITS upstream deleted, and the
+      // row stays on B's screen, so B's lead can still hide or show it. Read as
+      // content, that hide made the cell live again in C (a content mirror
+      // clears `tombstoned_at`). The delete already travelled as its own mirror.
+      if (!live || live.tombstoned_at != null) continue
       cells.set(key, {
         fileId: v.fileId,
         cellId: v.cellId,
@@ -749,6 +769,9 @@ async function loadUpstreamSourceStructure(
   transcription: string | null
   cameraState: string | null
   metadata: Record<string, unknown> | null
+  /** AQU-1567: the upstream source row is a tombstone (a chain upstream's
+   *  record of a cell ITS upstream deleted). */
+  tombstoned: boolean
 }>> {
   const out = new Map<string, {
     type: string | null
@@ -760,6 +783,7 @@ async function loadUpstreamSourceStructure(
     transcription: string | null
     cameraState: string | null
     metadata: Record<string, unknown> | null
+    tombstoned: boolean
   }>()
   const results = await selectByCellKeys<{
     file_id: string
@@ -773,13 +797,14 @@ async function loadUpstreamSourceStructure(
     transcription: string | null
     camera_state: string | null
     metadata: Record<string, unknown> | null
+    tombstoned_at: number | string | null
   }>(
     db,
     cellKeys,
     [upstreamProjectId],
     (placeholders) =>
       `SELECT file_id, cell_id, type, canonical_ref, anchor_cell_id, start_ms, end_ms,
-              sequence_index, transcription, camera_state, metadata
+              sequence_index, transcription, camera_state, metadata, tombstoned_at
        FROM cells
        WHERE project_id = ? AND side = 'source' AND (file_id, cell_id) IN (${placeholders})`,
   )
@@ -794,6 +819,7 @@ async function loadUpstreamSourceStructure(
       transcription: r.transcription,
       cameraState: r.camera_state,
       metadata: r.metadata,
+      tombstoned: r.tombstoned_at != null,
     })
   }
   return out
@@ -901,6 +927,14 @@ async function loadDeltaTargetConsumption(
       continue
     }
 
+    // AQU-1567: the upstream's source row is a tombstone — the cell was
+    // deleted further up the chain, and the delete has already travelled (as
+    // the branch above, in whichever window carried it). Its translation
+    // stays in the upstream for review, and a new commit or validation of it
+    // must not mirror as live text: a content mirror clears `tombstoned_at`
+    // here, bringing back a line that is gone everywhere above.
+    if (struct?.tombstoned) continue
+
     // Resolve the gated target text: prefer the in-window fold (has the
     // freshest validated bookkeeping); fall back to upstream's live current
     // state for cells whose commit predates this window.
@@ -1002,6 +1036,11 @@ interface LocalMirrorState {
    *  skip below compares against this, so a hide/show whose text did not change
    *  is not mistaken for upstream noise. */
   hidden: boolean
+  /** AQU-1567: the upstream deleted this cell and the downstream row is a
+   *  tombstone. A tombstone keeps the last text AND its content hash, so the
+   *  hash-equal skip must not apply to it — an upstream restoring the cell with
+   *  that same text would otherwise never clear the flag. */
+  tombstoned: boolean
 }
 
 /** Existing local mirror state per cell — used for the hash-equal no-op
@@ -1018,12 +1057,13 @@ async function loadLocalMirrorState(
     content_hash: string | null
     upstream_seq: number | string | null
     hidden_at: number | string | null
+    tombstoned_at: number | string | null
   }>(
     db,
     cellKeys,
     [downstreamProjectId],
     (placeholders) =>
-      `SELECT file_id, cell_id, content_hash, upstream_seq, hidden_at FROM cells
+      `SELECT file_id, cell_id, content_hash, upstream_seq, hidden_at, tombstoned_at FROM cells
        WHERE project_id = ? AND side = 'source' AND (file_id, cell_id) IN (${placeholders})`,
   )
   for (const r of results) {
@@ -1031,9 +1071,64 @@ async function loadLocalMirrorState(
       contentHash: r.content_hash,
       upstreamSeq: r.upstream_seq == null ? null : Number(r.upstream_seq),
       hidden: r.hidden_at != null,
+      tombstoned: r.tombstoned_at != null,
     })
   }
   return state
+}
+
+/**
+ * AQU-1567: of `cellKeys` (UPSTREAM file ids), the cells the upstream's lane
+ * log leaves deleted at `head`, reading only events after `afterSeq`.
+ *
+ * A downstream never gets a tombstone for a cell it did not hold — when an
+ * upstream create and delete fold into one window, the delete finds no row and
+ * emits nothing. Windows (AQU-1563) must not change that end state: a new
+ * link's first sync replays the upstream's whole history, and a cell created
+ * near the end of one window and deleted in the next would otherwise be
+ * mirrored, then tombstoned — a row that exists only because of where a window
+ * boundary fell. So before a window brings in a cell new to the downstream, it
+ * looks ahead to the run's head.
+ *
+ * The answer comes from the event LOG, never the upstream's `cells` rows: the
+ * log is immutable, while a projection rebuild empties `cells` and refills it,
+ * and a sync that read the rows mid-rebuild would skip cells that still exist —
+ * for good, since the cursor moves past their events. Only one boolean per cell
+ * comes back (the existence-changing kinds, latest first), so a chain upstream's
+ * large mirror payloads are never read into memory here.
+ *
+ * No read at all on a run's last window (`afterSeq === head`) — the only window
+ * of any sync whose delta fits in one, which is nearly every sync of an
+ * established link.
+ */
+async function deletedByHead(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  cellKeys: readonly CellKey[],
+  afterSeq: number,
+  head: number,
+): Promise<Set<string>> {
+  const gone = new Set<string>()
+  if (cellKeys.length === 0 || afterSeq >= head) return gone
+  const rows = await selectByCellKeys<{ file_id: string; cell_id: string; deleted: boolean }>(
+    db,
+    cellKeys,
+    [upstreamProjectId, afterSeq, head],
+    (placeholders) =>
+      `SELECT DISTINCT ON (file_id, cell_id) file_id, cell_id,
+              CASE kind
+                WHEN 'source.cell.delete' THEN TRUE
+                WHEN 'source.cell.mirror' THEN COALESCE((payload::jsonb ->> 'deleted') = 'true', FALSE)
+                ELSE FALSE
+              END AS deleted
+         FROM events
+        WHERE project_id = ? AND server_seq > ? AND server_seq <= ?
+          AND kind IN ('source.cell.create', 'source.cell.delete', 'source.cell.mirror')
+          AND (file_id, cell_id) IN (${placeholders})
+        ORDER BY file_id, cell_id, server_seq DESC`,
+  )
+  for (const r of rows) if (r.deleted) gone.add(`${r.file_id}\0${r.cell_id}`)
+  return gone
 }
 
 export interface MirrorSyncResult {
@@ -1194,6 +1289,7 @@ export async function mirrorSync(
       gate,
       sinceSeq,
       untilSeq,
+      head,
     })
     total.cellsMirrored += window.cellsMirrored
     total.filesMirrored += window.filesMirrored
@@ -1263,6 +1359,9 @@ interface MirrorWindowArgs {
   sinceSeq: number
   /** Inclusive upper bound: where the cursor stands once the window commits. */
   untilSeq: number
+  /** The run's (fenced) lane-relevant upstream head — where the last window
+   *  ends. Read past `untilSeq` only by `deletedByHead`. */
+  head: number
 }
 
 interface MirrorWindowResult {
@@ -1277,7 +1376,7 @@ interface MirrorWindowResult {
  * `untilSeq`. Everything this holds in memory is bounded by the window.
  */
 async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<MirrorWindowResult> {
-  const { downstreamProjectId, upstreamProjectId, consumes, gate, sinceSeq, untilSeq } = args
+  const { downstreamProjectId, upstreamProjectId, consumes, gate, sinceSeq, untilSeq, head } = args
   const { cells: folded, fileIds: deltaFileIds } =
     consumes === 'target'
       ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate)
@@ -1323,6 +1422,20 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     db,
     downstreamProjectId,
     [...folded.values()].map((c) => ({ fileId: downstreamFileIdOf.get(c.fileId) ?? deterministicDownstreamFileId(downstreamProjectId, c.fileId), cellId: c.cellId })),
+  )
+
+  // AQU-1567: cells this window would bring in for the first time but that a
+  // LATER window of the same run deletes. See deletedByHead.
+  const goneByHead = await deletedByHead(
+    db,
+    upstreamProjectId,
+    [...folded.values()].filter((c) => {
+      if (c.deleted) return false
+      const downstreamFileId = downstreamFileIdOf.get(c.fileId) ?? deterministicDownstreamFileId(downstreamProjectId, c.fileId)
+      return !localState.has(`${downstreamFileId}\0${c.cellId}`)
+    }),
+    untilSeq,
+    head,
   )
 
   const now = Date.now()
@@ -1425,7 +1538,18 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     const local = localState.get(key)
 
     if (cell.deleted) {
-      // Tombstone — always emit (idempotent via deterministic id + monotonic
+      // AQU-1567: a tombstone marks a row the downstream HOLDS. With no row
+      // there is nothing to mark — the upstream created and deleted the cell
+      // before this downstream ever mirrored it (in one window, or across two
+      // via deletedByHead: on a new link's first sync, that is every cell the
+      // upstream ever deleted).
+      // Emitting anyway inserted an empty, typeless, anchorless source row that
+      // the editor shows as a blank line at the edge of the file. A row that is
+      // already a tombstone needs nothing either. Neither skip loses anything:
+      // a later re-create of the id is a content mirror, which inserts or
+      // restores the row on its own.
+      if (!local || local.tombstoned) continue
+      // Otherwise always emit (idempotent via deterministic id + monotonic
       // guard); hash suppression doesn't apply to deletes.
       const eventId = deterministicMirrorEventId(downstreamProjectId, cell.eventId)
       const payload: EventPayloads['source.cell.mirror'] = {
@@ -1447,6 +1571,13 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       continue
     }
 
+    // AQU-1567: new to the downstream, and deleted again before the run's head
+    // — the later window's delete will find no row and skip, so the end state
+    // is no row at all, exactly as when the create and the delete share one
+    // window. Mirroring it here would leave a tombstone that only exists
+    // because of where a window boundary fell.
+    if (!local && goneByHead.has(`${cell.fileId}\0${cell.cellId}`)) continue
+
     const newHash = contentHash(cell.value)
     // AQU-1453: a hide or a show moves no text, so the hash is equal by
     // definition — suppressing on the hash alone is exactly how the visibility
@@ -1455,10 +1586,12 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // about visibility, which is "unchanged" and leaves the old rule intact.
     const visibilityUnchanged =
       cell.hidden === undefined || cell.hidden === (local?.hidden ?? false)
-    if (local && local.contentHash === newHash && visibilityUnchanged) {
+    if (local && !local.tombstoned && local.contentHash === newHash && visibilityUnchanged) {
       // No-op suppression (§5): content unchanged (e.g. whitespace-normalized
       // re-import). upstream_event_id is allowed to lag on unchanged content
-      // — §6 staleness is hash-aware, so this is harmless.
+      // — §6 staleness is hash-aware, so this is harmless. Never for a
+      // tombstone (AQU-1567): its hash is the deleted text's, so a restore
+      // carrying that text is a change, and only this mirror clears the flag.
       skippedHashEqual++
       continue
     }

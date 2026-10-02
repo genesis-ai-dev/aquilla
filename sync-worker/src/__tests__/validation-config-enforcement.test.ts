@@ -409,7 +409,12 @@ describe('cell.validate — self-validation against a hostile client (AQU-1571)'
   it('judges the lane being validated by THAT lane’s editor', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
-    await setProjectSettings(db, { allowSelfValidation: false })
+    await setProjectSettings(db, { allowSelfValidation: false, targetLanes: ['es'] })
+    // AQU-1532: a named lane takes writes only once its lane row exists.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-es', 'proj-v', 'target', 'Spanish', 'es', 'es', 2)`,
+    ).run()
     await postEvent(db, makeCommitEvent('evt-bob-es', 'bob', 'hola', 'es'), await makeToken(400, 'bob'))
 
     const bobToken = await makeToken(400, 'bob')

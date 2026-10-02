@@ -557,3 +557,20 @@ describe('telemetryAppEnv', () => {
     expect(telemetryAppEnv(undefined)).toBeUndefined()
   })
 })
+
+describe('sendReviewTelemetry on a local stack', () => {
+  it('prints what would have been sent instead of sending it', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const events = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: 'c1' }], 'api')
+    sendReviewTelemetry({ POSTHOG_KEY: '', ENVIRONMENT: 'local' }, undefined, 'alice', events)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(info).toHaveBeenCalledWith('[review-telemetry]', 'audio attached', expect.stringContaining('"method":"link"'))
+    info.mockClear()
+    // Anywhere else a blank key stays silent.
+    sendReviewTelemetry({ POSTHOG_KEY: '', ENVIRONMENT: 'production' }, undefined, 'alice', events)
+    expect(info).not.toHaveBeenCalled()
+    info.mockRestore()
+    fetchSpy.mockRestore()
+  })
+})

@@ -54,3 +54,16 @@ describe("review telemetry (AQU-1572)", () => {
     expect(props).not.toHaveProperty("duration_ms")
   })
 })
+
+describe("the dev log", () => {
+  it("keeps what was sent on window.__aqTelemetry in a dev build", () => {
+    const win = window as unknown as { __aqTelemetry?: Array<{ event: string }> }
+    win.__aqTelemetry = []
+    reportValidation({
+      medium: "text", validated: true, projectId: "p1", source: "ui",
+      cells: [{ fileId: "f1", cellId: "c1" }],
+    })
+    const logged: Array<{ event: string }> = win.__aqTelemetry ?? []
+    expect(logged.map((e) => e.event)).toEqual(["cell validated"])
+  })
+})

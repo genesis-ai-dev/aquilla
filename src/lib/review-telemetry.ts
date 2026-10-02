@@ -24,9 +24,27 @@ import {
   type ValidationEventInput,
 } from "@/lib/review-events"
 
+/** How many events the dev log keeps; old ones fall off the front. */
+const DEV_LOG_LIMIT = 200
+
+/**
+ * A dev build has no PostHog key, so `posthog.capture` goes nowhere and these
+ * events could not be checked by hand at all. In dev only, keep the last few
+ * on `window.__aqTelemetry` — type it in the console after a click to see
+ * exactly what would have been sent.
+ */
+function recordForDevtools(event: TelemetryEvent): void {
+  if (!import.meta.env.DEV || typeof window === "undefined") return
+  const win = window as unknown as { __aqTelemetry?: TelemetryEvent[] }
+  const log = win.__aqTelemetry ?? (win.__aqTelemetry = [])
+  log.push(event)
+  if (log.length > DEV_LOG_LIMIT) log.splice(0, log.length - DEV_LOG_LIMIT)
+}
+
 function send(event: TelemetryEvent | null): void {
   if (!event) return
   try {
+    recordForDevtools(event)
     posthog.capture(event.event, event.properties)
   } catch {
     // Telemetry never gets to break the action it describes.

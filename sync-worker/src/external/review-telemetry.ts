@@ -156,7 +156,15 @@ export function sendReviewTelemetry(
 ): void {
   try {
     const key = env.POSTHOG_KEY?.trim()
-    if (!key || events.length === 0) return
+    if (events.length === 0) return
+    if (!key) {
+      // A local stack has no key, so nothing could otherwise be checked by
+      // hand: print what would have gone, ids and counts only, to the stack log.
+      if (env.ENVIRONMENT === 'local') {
+        for (const e of events) console.info('[review-telemetry]', e.event, JSON.stringify(e.properties))
+      }
+      return
+    }
     const sent = postBatch(key, resolvePosthogHost(env.POSTHOG_HOST), env.ENVIRONMENT, username, events)
     ctx?.waitUntil(sent)
   } catch {

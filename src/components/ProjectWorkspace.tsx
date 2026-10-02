@@ -14,6 +14,7 @@ import {
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
+import { deriveLinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
 import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
@@ -10138,6 +10139,31 @@ export function ProjectWorkspace() {
     () => deriveTracksForFile(activeFile, trackContext),
     [activeFile, trackContext],
   )
+  // AQU-1565: caption tracks ATTACHED to this file's timeline keep their cues
+  // in their own content file, so they never show up in this file's cell
+  // count — which is why the empty table kept insisting a captioned linked
+  // video had no media at all. Derived tracks (the file's own cells) carry no
+  // contentFileId and are deliberately not listed here.
+  const attachedCaptionTrackNames = useMemo(
+    () => serverTimelineTracks
+      .filter(track => Boolean(track.contentFileId)
+        && (track.kind === "source-subtitles" || track.kind === "target-subtitles"))
+      .map(track => track.name),
+    [serverTimelineTracks],
+  )
+  const linkedVideoEmptyState = useMemo(
+    () => deriveLinkedVideoEmptyState({
+      orderedBy: activeFile ? fileOrderedBy(activeFile) : undefined,
+      cellCount: cellSummaries.length,
+      coreMediaUrl: activeFile?.coreMediaUrl,
+      captionTrackNames: attachedCaptionTrackNames,
+    }),
+    [activeFile, cellSummaries.length, attachedCaptionTrackNames],
+  )
+  // The Media view renders the same table under the timeline, where "open the
+  // Media view" would be a button to where you already are.
+  const handleOpenMediaView = useCallback(() => switchLens("audio"), [switchLens])
+
   const timelineText = useTimelineTextCells({
     projectId: project?.id ?? null,
     fileIds: serverTimelineTracks.flatMap(track => track.contentFileId ? [track.contentFileId] : []),
@@ -13435,6 +13461,8 @@ export function ProjectWorkspace() {
             onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
+            linkedVideoEmptyState={linkedVideoEmptyState}
+            onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}

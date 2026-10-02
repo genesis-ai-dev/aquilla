@@ -209,6 +209,23 @@ export const editor = defineNamespace({
       "Or paste a direct media URL — the clip streams from its source; only " +
       "timing metadata is stored.",
 
+    // — AQU-1565: a time-ordered file whose media is a LINKED video and whose
+    //   rows have not arrived yet. Its captions live on the Media view's
+    //   timeline, so none of the attach-media copy above applies.
+    "editor.media.linkedVideoTitle": "Linked to a YouTube video",
+    "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    "editor.media.linkedVideoNoCaptions":
+      "No captions on this video yet. Caption tracks are added on the Media " +
+      "view's timeline.",
+    "editor.media.linkedVideoCaptionsOn":
+      "Its captions are on the Media view's timeline, in {tracks}.",
+    "editor.media.openMediaView": "Open Media view",
+    "editor.media.linkedVideoUpload":
+      "Have the original recording? Drag & drop the audio or video here, or",
+    "editor.media.linkedVideoUploadHint":
+      "The recording has to run to the same timing as the linked video — its " +
+      "segments become this file's rows.",
+
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
     "editor.footnotes.trayRegion": "Visible footnotes",
@@ -2643,6 +2660,60 @@ export const editor = defineNamespace({
           "Explanatory line under the media URL field. The point after the dash is " +
           "reassurance about what is stored: only timing information is kept in the " +
           "project, the audio itself stays at the URL the user provided.",
+      },
+      "editor.media.linkedVideoTitle": {
+        description:
+          "Heading of the empty state for a time-ordered file whose media is a " +
+          "LINKED YouTube video rather than an uploaded clip. It replaces " +
+          "editor.media.emptyTitle for such a file, which does have media. " +
+          "'Linked' means the video stays on YouTube and only plays here.",
+        maxLength: 36,
+      },
+      "editor.media.linkedVideoTitleGeneric": {
+        description:
+          "The same heading as editor.media.linkedVideoTitle for a linked video " +
+          "that is not on YouTube, so the service cannot be named.",
+        maxLength: 30,
+      },
+      "editor.media.linkedVideoNoCaptions": {
+        description:
+          "Line under that heading when no caption track has been attached yet. " +
+          "'Captions' are the timed lines of text the translator works from. The " +
+          "Media view is the editor's video-and-timeline view; its timeline is the " +
+          "only place caption tracks are attached, which is the point of the " +
+          "sentence. Match the Media-view name used in the view switcher.",
+      },
+      "editor.media.linkedVideoCaptionsOn": {
+        description:
+          "The same line once caption tracks DO exist on this file's timeline. It " +
+          "exists so the empty table never claims the file has no captions: the " +
+          "tracks keep their text in their own files, so none of it appears as " +
+          "rows here. Names the tracks so the reader can find them.",
+        placeholders: {
+          tracks:
+            "Comma-separated names of the caption tracks attached to this file's " +
+            "timeline, in timeline order — user-authored names, left untranslated.",
+        },
+      },
+      "editor.media.openMediaView": {
+        description:
+          "Button in that empty state that switches this file to the Media view " +
+          "(the video-and-timeline view) where the linked video plays. Imperative. " +
+          "'Media view' must match the name in the view switcher.",
+        maxLength: 24,
+      },
+      "editor.media.linkedVideoUpload": {
+        description:
+          "Offer under the linked-video empty state to upload the original audio " +
+          "or video recording, which does produce rows for this file. Like " +
+          "editor.media.dropHint it ends with 'or' on purpose — the file-picker " +
+          "button follows and completes the sentence.",
+      },
+      "editor.media.linkedVideoUploadHint": {
+        description:
+          "Caveat under that offer. The uploaded recording is cut into this file's " +
+          "rows by its own timings, so a recording that runs to a different " +
+          "timing than the linked video would put the rows out of step with it.",
       },
       "editor.footnotes.label": {
         description:

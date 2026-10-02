@@ -1586,6 +1586,45 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
   return eventId
 }
 
+export interface FileReorderInput {
+  projectId: string
+  fileId: string
+  /** Hand-placed position within the file's corpus group; null clears it back
+   *  to the automatic name-derived order. See `src/lib/sidebar/file-sort-index.ts`
+   *  for the arithmetic that produces the value. */
+  sortIndex: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1569: persist a file's hand-placed position so it survives reload and
+ * reaches every other member — the order is part of the project, not a
+ * per-browser preference. File-scoped and non-chain-mutating (`parentId =
+ * null`), like `file.corpus.set`; the server projects it as a `files` UPDATE
+ * merging `sortIndex` into files.meta.
+ *
+ * A non-finite index is sent as `null` (a clear) rather than written: the
+ * value is arithmetic on floats, and persisting a NaN would give the file a
+ * position no comparator can order it by.
+ */
+export async function emitFileReorder(input: FileReorderInput): Promise<string> {
+  const usable =
+    typeof input.sortIndex === "number" && Number.isFinite(input.sortIndex)
+      ? input.sortIndex
+      : null
+  const { eventId } = await enqueueEvent({
+    kind: "file.reorder",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { sortIndex: usable },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export async function emitFileRename(input: FileRenameInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "file.rename",

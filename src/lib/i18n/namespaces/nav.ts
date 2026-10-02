@@ -308,6 +308,9 @@ export const nav = defineNamespace({
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
+    // AQU-1569: the keyboard/touch route to the same reorder the drag does.
+    "nav.fileRow.moveUp": "Move up",
+    "nav.fileRow.moveDown": "Move down",
     "nav.fileRow.notAssignedToYou": "Not assigned to you. You can still open it.",
     "nav.fileRow.notAssignedTooltip": "{name} — not assigned to you. You can still open it.",
 
@@ -322,6 +325,14 @@ export const nav = defineNamespace({
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
     "nav.fileList.jumpToTestament": "Jump to Testament",
+
+    // -- ExpandableFileList: hand-placed file order (AQU-1569) --
+    "nav.fileList.reorderHandle": "Reorder {name}",
+    "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
+    "nav.fileList.resetOrder": "Reset the order of {group}",
+    "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
+    "nav.fileList.resetOrderDescription": "The files in this group go back to the order Aquilla picks for them. Everyone on the project sees the change. Nothing else about the files is touched.",
+    "nav.fileList.resetOrderConfirm": "Reset order",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -1315,6 +1326,19 @@ export const nav = defineNamespace({
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",
       },
+      "nav.fileRow.moveUp": {
+        description:
+          "Menu item on a sidebar file row that moves the file one position earlier " +
+          "within its own corpus group (AQU-1569) \u2014 the keyboard and touch route to " +
+          "the same reorder the drag handle does. Shown only to roles that may " +
+          "reorder, and disabled on the first file in the group. Keep it short: it " +
+          "sits in a narrow row menu beside Rename and Export.",
+      },
+      "nav.fileRow.moveDown": {
+        description:
+          "Mirrors nav.fileRow.moveUp for the other direction; disabled on the last " +
+          "file in the group.",
+      },
       "nav.fileRow.notAssignedToYou": {
         description:
           "Screen-reader-only text on a dimmed file row (AQU-894), carrying the same " +
@@ -1374,6 +1398,45 @@ export const nav = defineNamespace({
           "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
           "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
           "display copy is translated.",
+      },
+      "nav.fileList.reorderHandle": {
+        description:
+          "Accessible name for the grip a Project Lead drags to move a file to a new " +
+          "position inside its own sidebar group (AQU-1569). Shown only to roles that " +
+          "may reorder. {name} is the file's own display name.",
+        placeholders: { name: "The file's display name." },
+      },
+      "nav.fileList.reorderWrongGroup": {
+        description:
+          "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
+          "group than its own, which is refused (AQU-1569). \u201cMove to corpus\u2026\u201d " +
+          "names the separate menu action that does change a file's group \u2014 keep it " +
+          "worded identically to fileDetails.moveToCorpus in this locale.",
+      },
+      "nav.fileList.resetOrder": {
+        description:
+          "Tooltip and accessible name for the control on a corpus/group header that " +
+          "discards the hand-placed file order and returns the group to the order the " +
+          "app derives from the file names (AQU-1569). Offered only when some file in " +
+          "the group has actually been placed by hand.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderTitle": {
+        description:
+          "Title of the confirmation asked before discarding a group's hand-placed " +
+          "file order. Phrased as a question.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderDescription": {
+        description:
+          "Body of that confirmation. It has to say two things: the order becomes the " +
+          "automatic one again, and the reset is shared with the whole project rather " +
+          "than being this browser's own view.",
+      },
+      "nav.fileList.resetOrderConfirm": {
+        description:
+          "The confirming button of that dialog. The cancelling button reuses " +
+          "common.cancel.",
       },
       "nav.fileList.jumpToTestament": {
         description:

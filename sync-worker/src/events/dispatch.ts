@@ -20,6 +20,7 @@ import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileCorpusSet } from './handlers/file-corpus-set'
+import { handleFileReorder } from './handlers/file-reorder'
 import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
@@ -180,6 +181,17 @@ export function dispatchEvent(
         result: handleFileCorpusSet(
           db,
           authed as AuthorizedEvent<'file.corpus.set'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
+    case 'file.reorder':
+      return {
+        ok: true,
+        result: handleFileReorder(
+          db,
+          authed as AuthorizedEvent<'file.reorder'>,
           serverTs,
           opts.serverSeq,
         ),

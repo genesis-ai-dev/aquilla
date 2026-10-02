@@ -18,6 +18,7 @@
 
 import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
+import { usableSortIndex } from "./sort-index"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { visibleLanesForRead } from "./lane-read-wall"
@@ -98,6 +99,9 @@ interface FileSummary {
   > | null
   /** Sidebar folder. Null when the file is ungrouped. */
   corpusMarker: string | null
+  /** AQU-1569: hand-placed position within the sidebar group. Null when
+   *  nobody has reordered that group — the automatic order applies. */
+  sortIndex: number | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -142,6 +146,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     aquillaImport?: { audioVtt?: { timebase?: unknown } }
     corpusMarker?: unknown
     parserVersion?: unknown
+    sortIndex?: unknown
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -167,6 +172,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     audioVttTimebase: normalizeTimebase(meta.aquillaImport?.audioVtt?.timebase),
     trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
     corpusMarker: resolveCorpusMarker(meta) ?? null,
+    sortIndex: usableSortIndex(meta.sortIndex) ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,

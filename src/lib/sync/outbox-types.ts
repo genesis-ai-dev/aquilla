@@ -69,6 +69,10 @@ export type OutboxEventKind =
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
   | "file.corpus.set"
+  // AQU-1569: the file's hand-placed position in its sidebar group
+  // (project_lead+; non-chain-mutating). Null clears it back to the automatic
+  // name-derived order.
+  | "file.reorder"
   // Soft-delete a file (project_lead+; non-chain-mutating).
   | "file.delete"
   // Restore a soft-deleted file (project_lead+; non-chain-mutating).
@@ -498,6 +502,12 @@ export interface OutboxEventPayloads {
   // Set/clear the file's sidebar corpus group. Null clears it (Ungrouped).
   "file.corpus.set": {
     corpusMarker: string | null
+  }
+  // AQU-1569: the file's hand-placed position within its corpus group, stored
+  // in files.meta.sortIndex. Fractional (a midpoint between two neighbours);
+  // null clears it, putting the file back under the automatic order.
+  "file.reorder": {
+    sortIndex: number | null
   }
   // Soft-delete a file (project_lead+). Stamps `files.deleted_at`; cells and
   // audio are retained (R2 wipe deferred). Non-chain-mutating (parentId omitted).

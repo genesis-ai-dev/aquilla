@@ -212,3 +212,103 @@ describe("groupByCorpus — file-name fallback for migrated projects (AQU-1084)"
     expect(groups[0].derived).toBe(true)
   })
 })
+
+// AQU-1569: a hand-placed order (files.meta.sortIndex, via `file.reorder`)
+// overrides the name-derived rules. The regression these tests guard is NOT
+// the new feature — it is that a project where nobody has reordered anything
+// still sorts byte-for-byte as it did before the feature existed.
+describe("groupByCorpus — hand-placed order (AQU-1569)", () => {
+  const placed = (name: string, corpusMarker: string, sortIndex?: number) => ({
+    ...f(name, corpusMarker),
+    ...(sortIndex === undefined ? {} : { sortIndex }),
+  })
+
+  it("leaves a group nobody has reordered on today's rules", () => {
+    const groups = groupByCorpus([
+      placed("Episode 1", "Season 1"),
+      placed("Episode 10", "Season 1"),
+      placed("Episode 2", "Season 1"),
+    ])
+    // Plain localeCompare, numbers and all — unchanged, deliberately.
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Episode 1", "Episode 10", "Episode 2"])
+  })
+
+  it("sorts a fully placed group by its indices, not its names", () => {
+    const groups = groupByCorpus([
+      placed("Episode 10", "Season 1", 3072),
+      placed("Episode 1", "Season 1", 0),
+      placed("Episode 3", "Season 1", 2048),
+      placed("Episode 2", "Season 1", 1024),
+    ])
+    expect(groups[0].files.map((x) => x.name))
+      .toEqual(["Episode 1", "Episode 2", "Episode 3", "Episode 10"])
+  })
+
+  it("honours a fractional midpoint between two neighbours", () => {
+    const groups = groupByCorpus([
+      placed("first", "Season 1", 0),
+      placed("last", "Season 1", 1024),
+      placed("squeezed in", "Season 1", 512),
+    ])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["first", "squeezed in", "last"])
+  })
+
+  it("puts placed files first, in placed order, and the rest in today's order after them", () => {
+    const groups = groupByCorpus([
+      placed("Alpha", "Season 1"),
+      placed("Zulu", "Season 1", 1024),
+      placed("Bravo", "Season 1"),
+      placed("Yankee", "Season 1", 0),
+    ])
+    // The two placed files keep the order a person gave them; the two nobody
+    // touched follow, alphabetically among themselves. This is what stops an
+    // imported file from scrambling a hand-ordered group.
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Yankee", "Zulu", "Alpha", "Bravo"])
+  })
+
+  it("breaks a tie between equal indices with today's comparator", () => {
+    // Two devices can mint the same midpoint; the order still has to be stable.
+    const groups = groupByCorpus([
+      placed("zeta", "Season 1", 512),
+      placed("alpha", "Season 1", 512),
+    ])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["alpha", "zeta"])
+  })
+
+  it("beats canonical book order inside OT/NT when a lead has placed the books", () => {
+    const groups = groupByCorpus([
+      { ...f("Matthew", "NT"), bookCode: "MAT", sortIndex: 1024 },
+      { ...f("Mark", "NT"), bookCode: "MRK", sortIndex: 0 },
+    ])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Mark", "Matthew"])
+  })
+
+  it("keeps canonical book order in OT/NT when no book is placed", () => {
+    const groups = groupByCorpus([
+      { ...f("Matthew", "NT"), bookCode: "MAT" },
+      { ...f("Mark", "NT"), bookCode: "MRK" },
+    ])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Matthew", "Mark"])
+  })
+
+  it("applies a placed order inside the synthetic Ungrouped bucket too", () => {
+    const groups = groupByCorpus([
+      { ...f("notes"), sortIndex: 1024 },
+      { ...f("readme"), sortIndex: 0 },
+    ])
+    expect(groups[0].label).toBe("Ungrouped")
+    expect(groups[0].files.map((x) => x.name)).toEqual(["readme", "notes"])
+  })
+
+  // The index arrives as raw JSON off the wire (files.meta), so a non-number,
+  // a NaN or an Infinity has to read as "not placed" rather than poison the
+  // sort with a comparison that is not transitive.
+  it("ignores an unusable index and falls back to today's order", () => {
+    const groups = groupByCorpus([
+      { ...f("b", "Season 1"), sortIndex: Number.NaN },
+      { ...f("a", "Season 1"), sortIndex: "7" as unknown as number },
+      { ...f("c", "Season 1"), sortIndex: Number.POSITIVE_INFINITY },
+    ])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["a", "b", "c"])
+  })
+})

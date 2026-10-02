@@ -125,6 +125,11 @@ interface FileProjection {
   hasScriptureContent?: boolean
   /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
   corpusMarker?: string
+  /** AQU-1569: hand-placed position within the file's sidebar group, from
+   *  files.meta.sortIndex. Fractional on purpose; absent until someone
+   *  reorders that group, which is what keeps an untouched project sorting
+   *  exactly as it did before the feature existed. */
+  sortIndex?: number
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -210,6 +215,7 @@ export async function loadFilesByProject(
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
     let corpusMarker: string | undefined
+    let sortIndex: number | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
@@ -235,6 +241,7 @@ export async function loadFilesByProject(
           }
           corpusMarker?: unknown
           parserVersion?: unknown
+          sortIndex?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -243,6 +250,10 @@ export async function loadFilesByProject(
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
+        // AQU-1569: only a finite number is a position. A string / NaN /
+        // Infinity in the blob reads as "never reordered" rather than being
+        // forwarded for the client's comparator to choke on.
+        if (typeof m.sortIndex === "number" && Number.isFinite(m.sortIndex)) sortIndex = m.sortIndex
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
         // `scale` is the only required field: a drift measured from the words
@@ -287,6 +298,9 @@ export async function loadFilesByProject(
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(corpusMarker ? { corpusMarker } : {}),
+      // Not a truthiness check: 0 is a perfectly ordinary position (it is what
+      // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
+      ...(sortIndex !== undefined ? { sortIndex } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),

@@ -39,7 +39,10 @@ verification. Every surface — web, identity and sync alike — runs the target
 Neon schema guard before publishing, so a deployment is one unit: a pending
 migration or schema drift stops the SPA upload too, rather than leaving the
 site on new front-end code against old Workers and an un-migrated database
-(AQU-682/AQU-1157).
+(AQU-682/AQU-1157). Each deploy job in `Manual Deploy Workers` therefore carries
+the target's `NEON_*` credentials, not just the Cloudflare pair: without them the
+guard fails closed on a missing credential instead of reporting the schema state,
+which published the SPA while neither Worker could go out (AQU-1539).
 
 **Migrate first, then deploy.** `npm run neon:apply:dev` / `neon:apply:prod`
 applies pending `db/postgres/migrations/` files to the target Neon branch; only

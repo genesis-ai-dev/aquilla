@@ -58,7 +58,8 @@ describe("AdminElevationPrompt", () => {
     fireEvent.input(input, { target: { value: "123456" } })
 
     await waitFor(() => expect(mockVerify).toHaveBeenCalledWith("jwt", "123456"))
-    expect(await screen.findByText("Verified. Try again.")).toBeInTheDocument()
+    expect(await screen.findByText("Verified")).toBeInTheDocument()
+    expect(screen.getByText("Your change wasn't saved yet. Close this and make it again.")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
     await waitFor(() => expect(isElevationRequired()).toBe(false))

@@ -1,4 +1,4 @@
--- Migration 0126 (AQU-1559): which of the upstream's files a source link follows.
+-- Migration 0127 (AQU-1559): which of the upstream's files a source link follows.
 --
 -- Until this slice a link was all-or-nothing: `source_project_id` meant "mirror
 -- every file this upstream has, including the ones it gains later". A team that

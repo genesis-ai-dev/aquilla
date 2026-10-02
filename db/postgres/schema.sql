@@ -176,7 +176,7 @@ CREATE TABLE projects (
     -- Max upstream server_seq (lane-relevant) this project has mirrored.
     source_link_cursor   BIGINT NOT NULL DEFAULT 0,
     -- AQU-1559: which of the upstream's files this link follows (migration
-    -- 0126). NULL = the whole project, including files the upstream gains
+    -- 0127). NULL = the whole project, including files the upstream gains
     -- later (every link before this slice). A JSON array of UPSTREAM file ids =
     -- a fixed list: the mirror folds only those, later upstream files do not
     -- arrive, and detach copies only them. TEXT, parsed in JS, degrading to

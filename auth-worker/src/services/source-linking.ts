@@ -238,7 +238,7 @@ export interface SourceLinkProject {
  * arrive on their own.
  *
  * Anything that is not a non-empty array of non-empty strings degrades to
- * `null`, i.e. to the whole project. The column is TEXT (see migration 0126), so
+ * `null`, i.e. to the whole project. The column is TEXT (see migration 0127), so
  * a malformed blob is possible, and the two ways to be wrong are not equal:
  * reading it as "follow everything" brings in files the lead did not pick (which
  * they can delete), while reading it as "follow nothing" would silently stop a

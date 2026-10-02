@@ -193,7 +193,7 @@ export async function loadLink(db: AquillaDb, downstreamProjectId: string): Prom
  * it existed).
  *
  * A malformed or empty blob degrades to `null`, i.e. to the whole project: the
- * column is TEXT (migration 0126), and reading it as "follow nothing" would
+ * column is TEXT (migration 0127), and reading it as "follow nothing" would
  * silently freeze a live link, while reading it as "follow everything" mirrors
  * files the lead can delete. Matches auth-worker's `parseLinkFileIds`, which
  * writes it.

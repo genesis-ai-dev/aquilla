@@ -6,7 +6,7 @@
 // hand — and because the link is live, the upstream's later files kept arriving.
 //
 // The selection is a JSON array of UPSTREAM file ids on
-// `projects.source_link_file_ids` (migration 0126); NULL is the whole-project
+// `projects.source_link_file_ids` (migration 0127); NULL is the whole-project
 // link every existing row has. These tests pin what the mirror does with each:
 //
 //   1. A subset link mirrors the picked files and nothing else.

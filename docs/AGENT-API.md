@@ -1236,3 +1236,24 @@ loaded lists none (see `docs/reference-bibles.md` for the load command).
 
 It is independent of `bibleResourcesEnabled`, which stays the Aquifer study-resource feature
 for Scripture projects. In the app, maintainers set it in Project settings → Reference Bible.
+
+**Drafting copies the cited verses.** When a source cell names a verse ("Isaiah 40:25",
+"Is 40:25", "John 3:16-18", "1 Cor. 13:4–7", "Romans 8:28; 12:1-2", "John chapter 3, verse
+16"), the verse's wording from the lane's Bible is added to the system prompt as a labelled
+block that tells the model to copy any quoted words exactly. This happens in every drafting
+path: the editor copilot (single cell, batch and its per-cell fallback, paragraph), the
+in-app agent's draft tool, and `DraftCells`. Chapter-only mentions ("Romans 8") and quotes
+with no reference are left alone. Caps: 30 verses per reference, 40 verses and 6,000
+characters of verse text per drafting call (what is left out is counted in the block).
+
+**The preview shows it.** `get_prompt_preview` / `…/prompt-preview` gain
+`parts.referenceVerses`: `{ versionId, versionName, block, passages }` where `block` is the
+exact text added to `messages[0]` and `passages` the verses it holds (`{ canonical, label,
+verses: [{ chapter, verse, text }], truncated? }`). It is `null` when the lane has no
+reference Bible, and `block` is `""` when the cell cites nothing. Two new `warnings`:
+`reference_bible_not_installed` (the setting names a Bible this server does not have; no
+verses are added) and `reference_not_found` (a cited verse is not in that Bible, e.g.
+Isaiah 40:99). This works with `bibleResourcesEnabled` off.
+
+The agent draft prompt also stopped calling every project "a scripture translation
+project": it says so only when the cells being drafted are Bible verses.

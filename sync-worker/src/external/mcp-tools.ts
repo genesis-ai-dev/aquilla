@@ -438,7 +438,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Returns not_found if the cell has no source row in this project, and ' +
       'scope_denied / permission_denied like every other read. `warnings` names anything the ' +
       'live draft call adds that a read cannot reproduce (footnote output contracts, ' +
-      'per-device provider overrides).',
+      'per-device provider overrides). parts.referenceVerses shows the verses the cell cites, ' +
+      "copied from the lane's reference Bible (PatchSettings referenceBibleVersions), and the " +
+      'MUST-copy block they become; null when the lane has no reference Bible.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -10,8 +10,10 @@
 // tells the orchestrator how much work remains.
 
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
+import { isKnownBookCode } from "../../../../../src/lib/file-labeling/bible-book-names"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
+import { loadDraftReferenceBlock } from "../reference-bible"
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
@@ -106,18 +108,38 @@ const EXAMPLES_N = 10
 const RESEARCH_RECORD_MAX_CHARS = 12_000
 const PROMPT_VERSION = "agent-draft-v3-staged-research"
 
-function groundingPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
+/** What every pass is grounded in, besides the shared context `ctx`. */
+interface Grounding {
+  examplesBlock: string
+  precedingBlock: string
+  /** AQU-1573: the cited verses from the lane's reference Bible, or "". */
+  referenceBlock: string
+  /** AQU-1573: true when some cell in the work list is a Bible verse. */
+  scripture: boolean
+}
+
+/** "MRK 4:12" / "MRK 4": a cell of a Bible book, as opposed to a sermon's own labels. */
+function isScriptureRef(ref: string | null): boolean {
+  const m = ref?.trim().match(/^([1-3A-Z][A-Z0-9]{2})\s+\d+/)
+  return !!m && isKnownBookCode(m[1])
+}
+
+function groundingPrompt(ctx: DraftGenerationContext, g: Grounding): string {
   const pair = ctx.targetLanguage
     ? `You translate${ctx.sourceLanguage ? ` from ${ctx.sourceLanguage}` : ""} into ${ctx.targetLanguage}.`
     : "You translate into the project's target language — infer it from the example pairs."
-  return `${pair} You draft for a scripture translation project.
+  // AQU-1573: a sermon or a devotional is not Scripture; telling the model it
+  // was invited it to "correct" the prose toward Bible text. Scripture work
+  // lists keep the exact wording they always had.
+  const project = g.scripture ? "a scripture translation project" : "a translation project"
+  return `${pair} You draft for ${project}.
 
 The translation pairs below are your PRIMARY source of truth: they carry this team's exact terminology, tone, register, punctuation, and stylistic conventions. This may be an ultra-low-resource language — imitate the project's own patterns above general knowledge of the language.
-${ctx.briefSummary ? `\nProject brief (honour it): ${ctx.briefSummary}\n` : ""}${examplesBlock}${precedingBlock}`
+${ctx.briefSummary ? `\nProject brief (honour it): ${ctx.briefSummary}\n` : ""}${g.examplesBlock}${g.precedingBlock}${g.referenceBlock ? `\n${g.referenceBlock}\n` : ""}`
 }
 
-function researchSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
-  return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
+function researchSystemPrompt(ctx: DraftGenerationContext, g: Grounding): string {
+  return `${groundingPrompt(ctx, g)}
 
 You are the RESEARCH pass, separate from final generation. Produce a compact evidence record, not a translation and not hidden chain-of-thought.
 
@@ -130,8 +152,8 @@ For each numbered source segment:
 Do not produce final translated segments in this pass.`
 }
 
-function draftSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
-  return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
+function draftSystemPrompt(ctx: DraftGenerationContext, g: Grounding): string {
+  return `${groundingPrompt(ctx, g)}
 
 You are the GENERATION pass. Use the separate evidence record supplied by the user as a decision aid, while treating the project evidence above as authoritative.
 
@@ -304,6 +326,20 @@ export async function generateDrafts(
           .join("\n")}\n`
       : ""
 
+  // AQU-1573: verses the work list's sources cite, from the lane's reference
+  // Bible. Both passes see them, so the research record can already say
+  // "copy ISA 40:25 from the block" and the generation pass does.
+  const grounding: Grounding = {
+    examplesBlock,
+    precedingBlock,
+    referenceBlock: await loadDraftReferenceBlock(db, {
+      projectId: ctx.projectId,
+      lane: ctx.lane,
+      sources: work.map((p) => p.source),
+    }),
+    scripture: work.some((p) => isScriptureRef(p.canonicalRef)),
+  }
+
   const instructions =
     typeof args.instructions === "string" && args.instructions.trim()
       ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
@@ -320,7 +356,7 @@ export async function generateDrafts(
     ctx,
     modelCfg,
     [
-      { role: "system", content: researchSystemPrompt(ctx, examplesBlock, precedingBlock) },
+      { role: "system", content: researchSystemPrompt(ctx, grounding) },
       { role: "user", content: `Research these ${work.length} source segments:${instructions}\n${numbered}` },
     ],
   )
@@ -343,7 +379,7 @@ export async function generateDrafts(
     ctx,
     modelCfg,
     [
-      { role: "system", content: draftSystemPrompt(ctx, examplesBlock, precedingBlock) },
+      { role: "system", content: draftSystemPrompt(ctx, grounding) },
       {
         role: "user",
         content:

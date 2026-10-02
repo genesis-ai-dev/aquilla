@@ -1612,6 +1612,7 @@ export function ProjectWorkspace() {
     applyOptimisticCellTiming,
     loadProgress: cellLoadProgress,
     isLoading: cellsLoading,
+    isRefreshing: cellsRefreshing,
     isError: cellsError,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -14294,6 +14295,7 @@ export function ProjectWorkspace() {
             activeFileId: activeFileId ?? null,
             activeFileCells: fileTargetCells,
             activeFileLoading: cellsLoading,
+            activeFileRefreshing: cellsRefreshing,
             activeFileFailed: cellsError,
             openFile: workspaceTabs.openFile,
             retryActiveFile: retryCells,

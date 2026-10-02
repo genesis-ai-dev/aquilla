@@ -13,6 +13,12 @@
  * The same subtlety applies though: the store's `isLoading` starts FALSE and
  * only flips true once its fetch gets past an async cache read, and a cache
  * paint never flips it at all. So "not loading" alone never means "loaded".
+ *
+ * A cache paint is a whole file, but possibly a stale one: a teammate may have
+ * filled lines since this device last opened it. The review decides which
+ * lines are empty (pre-ticked) and which are conflicts (need a tick) from the
+ * rows it starts with, and commits against their parents, so it waits for the
+ * store's `isRefreshing` to clear too (AQU-1365 review).
  */
 
 export interface ImportFileGate {
@@ -30,6 +36,9 @@ export interface ImportFileGateInput {
   wantedFileId: string
   activeFileId: string | null
   cellsLoading: boolean
+  /** Cached rows are on screen and the fetch bringing them up to date is
+   *  still running. Optional for callers without a cache. */
+  cellsRefreshing?: boolean
   cellsError: boolean
   cellCount: number
   /** `fileId` of the first cell in the store, which says whose rows they are. */
@@ -41,9 +50,10 @@ export interface ImportFileGateInput {
  * 1. The editor is not on the wanted file yet → waiting (and forget any load
  *    seen, since it was for another file).
  * 2. The load failed → failed.
- * 3. A load is running → waiting, and remember it was seen.
- * 4. The store holds the wanted file's rows → ready. This is the cache paint,
- *    which is a whole file and never sets `isLoading`.
+ * 3. A load is running, or cached rows are being brought up to date →
+ *    waiting, and remember a load was seen.
+ * 4. The store holds the wanted file's rows → ready. (A cache paint never
+ *    sets `isLoading`, but it does set `isRefreshing` until it is current.)
  * 5. No rows, and a load for this file was seen to finish → ready (a file that
  *    genuinely has no lines).
  * 6. Otherwise waiting: the previous file's rows are still in the store, or
@@ -61,10 +71,11 @@ export function nextImportFileGate(
     const gate = prev.file === wanted && !prev.sawLoad ? prev : { file: wanted, sawLoad: false }
     return { gate, state: "waiting" }
   }
-  const sawLoad = (prev.file === wanted && prev.sawLoad) || input.cellsLoading
+  const busy = input.cellsLoading || input.cellsRefreshing === true
+  const sawLoad = (prev.file === wanted && prev.sawLoad) || busy
   const gate = prev.file === wanted && prev.sawLoad === sawLoad ? prev : { file: wanted, sawLoad }
   if (input.cellsError) return { gate, state: "failed" }
-  if (input.cellsLoading) return { gate, state: "waiting" }
+  if (busy) return { gate, state: "waiting" }
   if (input.cellCount > 0 && input.firstCellFileId === wanted) return { gate, state: "ready" }
   if (input.cellCount === 0 && sawLoad) return { gate, state: "ready" }
   return { gate, state: "waiting" }

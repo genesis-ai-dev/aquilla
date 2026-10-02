@@ -48,11 +48,28 @@ describe("nextImportFileGate", () => {
     ])).toEqual(["waiting", "waiting", "waiting", "waiting", "ready"])
   })
 
-  it("opens on a cache paint, which never sets isLoading", () => {
+  it("waits through a cache paint until it is brought up to date", () => {
+    // A cache paint never sets isLoading, and its rows may be a week old: a
+    // teammate's lines must show as conflicts, not as empty lines to fill.
+    expect(run([
+      { cellCount: 0 },
+      { cellCount: 4, firstCellFileId: "ruth", cellsRefreshing: true },
+      { cellCount: 4, firstCellFileId: "ruth" },
+    ])).toEqual(["waiting", "waiting", "ready"])
+  })
+
+  it("opens on a whole file's rows from a host that reports no refresh", () => {
     expect(run([
       { cellCount: 0 },
       { cellCount: 4, firstCellFileId: "ruth" },
     ])).toEqual(["waiting", "ready"])
+  })
+
+  it("reports a failed refresh of cached rows instead of opening on them", () => {
+    expect(run([
+      { cellCount: 4, firstCellFileId: "ruth", cellsRefreshing: true },
+      { cellCount: 4, firstCellFileId: "ruth", cellsError: true },
+    ])).toEqual(["waiting", "failed"])
   })
 
   it("opens on a genuinely empty file once its load was seen to finish", () => {
@@ -83,6 +100,7 @@ describe("nextImportFileGate", () => {
   it("returns the same gate object when nothing changed, on every rule", () => {
     for (const step of [
       { cellsLoading: true },
+      { cellCount: 4, firstCellFileId: "ruth", cellsRefreshing: true },
       { activeFileId: "jonah" },
       { cellCount: 8, firstCellFileId: "jonah" },
       { cellCount: 4, firstCellFileId: "ruth" },

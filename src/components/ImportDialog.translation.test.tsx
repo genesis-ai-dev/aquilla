@@ -229,6 +229,39 @@ describe("AQU-1365: importing a translation", () => {
     expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
   })
 
+  // AQU-1365 review: Ruth painted from this device's week-old cache has
+  // empty lines a teammate has since filled. Matched against that paint, they
+  // would be pre-ticked "fills", committed on stale parents, and dropped by
+  // the server. The review waits for the refresh, then sees them as conflicts.
+  // It also pins where the import goes: the active lane, into Ruth's cells.
+  it("waits for a cached file to be brought up to date, then commits into that file's lines in this lane", async () => {
+    const { rerenderWith } = renderDialog({ targetLang: "tt" })
+    await chooseTranslation()
+    await pickFile("Ruth")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS, activeFileRefreshing: true })
+    expect(screen.getByText("Opening Ruth…")).toBeInTheDocument()
+
+    const filledByTeammate = RUTH_CELLS.map((cell, index) => index === 0
+      ? { ...cell, translated: "Teammate's line", targetEventId: "te-ruth-1" }
+      : cell)
+    rerenderWith({ activeFileId: "ruth", activeFileCells: filledByTeammate, activeFileRefreshing: false })
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 conflict/)).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /import 1 cell/i }))
+    })
+    await waitFor(() => expect(applyEBibleTargetImport).toHaveBeenCalledTimes(1))
+    const [matchResult, selected, ctx] = vi.mocked(applyEBibleTargetImport).mock.calls[0]
+    expect(ctx).toMatchObject({ projectId: "proj-1365", targetLang: "tt" })
+    expect(matchResult.matched.map((cell) => cell.fileId)).toEqual(["ruth", "ruth"])
+    expect([...selected]).toEqual(["ruth-2"])
+    expect(matchResult.matched.find((cell) => cell.cellId === "ruth-1")).toMatchObject({
+      hasConflict: true, parentId: "te-ruth-1",
+    })
+  })
+
   it("lets a USFM file's book choose the file while the person hasn't", async () => {
     const { translation } = renderDialog()
     await chooseTranslation()
@@ -315,7 +348,7 @@ describe("AQU-1365: importing a translation", () => {
 
   it("imports, reports it as a file-target import, and closes", async () => {
     const onOpenChange = vi.fn()
-    const { translation } = renderDialog({ onOpenChange })
+    const { translation } = renderDialog({ onOpenChange, targetLang: "tt" })
     await chooseTranslation()
     await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
     const importButton = await screen.findByRole("button", { name: /import 2 cells/i })
@@ -323,6 +356,11 @@ describe("AQU-1365: importing a translation", () => {
       fireEvent.click(importButton)
     })
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    // Into the active lane's Jonah lines, with this caller's token.
+    const [matchResult, selected, ctx] = vi.mocked(applyEBibleTargetImport).mock.calls[0]
+    expect(matchResult.matched.map((cell) => [cell.fileId, cell.cellId])).toEqual([["jonah", "jonah-1"], ["jonah", "jonah-2"]])
+    expect(selected).toEqual(new Set(["jonah-1", "jonah-2"]))
+    expect(ctx).toMatchObject({ projectId: "proj-1365", targetLang: "tt", getToken: baseProps.getToken })
     expect(translation.applyOptimisticTargetEdits).toHaveBeenCalled()
     expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
       import_type: "file-target", entry: "translation", auto_picked: false, file_count: 2,

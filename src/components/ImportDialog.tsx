@@ -176,6 +176,9 @@ export interface TranslationImportHost {
   /** The open file's lines, in display order. */
   activeFileCells: FileTargetCellRef[]
   activeFileLoading: boolean
+  /** True while the open file's rows came from the device cache and are
+   *  still being brought up to date (`useActiveCellStore.isRefreshing`). */
+  activeFileRefreshing?: boolean
   activeFileFailed: boolean
   /** Opens a file in the editor behind the dialog. */
   openFile: (fileId: string) => void
@@ -669,6 +672,7 @@ export function ImportDialog({
       wantedFileId,
       activeFileId: translation?.activeFileId ?? null,
       cellsLoading: translation?.activeFileLoading ?? false,
+      cellsRefreshing: translation?.activeFileRefreshing ?? false,
       cellsError: translation?.activeFileFailed ?? false,
       cellCount: translation?.activeFileCells.length ?? 0,
       firstCellFileId: translation?.activeFileCells[0]?.fileId,
@@ -864,6 +868,7 @@ export function ImportDialog({
   const openingFileGone = openingFileId !== null && !translationFiles.some((file) => file.id === openingFileId)
   const hostActiveFileId = translation?.activeFileId ?? null
   const hostLoading = translation?.activeFileLoading ?? false
+  const hostRefreshing = translation?.activeFileRefreshing ?? false
   const hostFailed = translation?.activeFileFailed ?? false
   const hostCellCount = translation?.activeFileCells.length ?? 0
   const hostFirstCellFileId = translation?.activeFileCells[0]?.fileId
@@ -885,6 +890,7 @@ export function ImportDialog({
         wantedFileId: openingFileId,
         activeFileId: hostActiveFileId,
         cellsLoading: hostLoading,
+        cellsRefreshing: hostRefreshing,
         cellsError: hostFailed,
         cellCount: hostCellCount,
         firstCellFileId: hostFirstCellFileId,

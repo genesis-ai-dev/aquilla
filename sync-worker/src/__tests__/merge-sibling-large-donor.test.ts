@@ -304,8 +304,11 @@ describe("mergeSibling — the per-cell writes are pipelined", () => {
       expect(result.merged).toBe(250)
       const writes = batches.filter((b) => !isFileRecompute(b.sql))
       expect(batches.length - writes.length).toBe(1) // one touched file
-      // 1 events INSERT + 2 statements per cell + 1 settle, 100 to a batch.
-      expect(writes.reduce((n, b) => n + b.sql.length, 0)).toBe(1 + 250 * 2 + 1)
+      // The whole fold is in those batches — 1 events INSERT and a lane row per
+      // cell — 100 statements to a batch, every one of them pipelined.
+      const sent = writes.flatMap((b) => b.sql)
+      expect(sent.filter((sql) => /INSERT INTO events\b/.test(sql))).toHaveLength(1)
+      expect(sent.filter((sql) => /INSERT INTO cells\b/.test(sql))).toHaveLength(250)
       expect(writes.map((b) => b.via)).toEqual(Array(writes.length).fill("batchPipelined"))
       expect(Math.max(...writes.map((b) => b.sql.length))).toBe(100)
     } finally {

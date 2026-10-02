@@ -83,11 +83,16 @@ afterEach(async () => {
   vi.stubGlobal("fetch", realFetch)
 })
 
-/** A project with the steering context the start gate requires. */
+/** A project with the steering context the start gate requires, and the
+ *  AQU-1050 release flag ON — the server now refuses every start, retry and
+ *  steering direction for a project that never opted in, so a world meant to
+ *  exercise those routes has to be a project that did. The OFF case lives in
+ *  contextual-release-gate.test.ts. */
 const READY_SETTINGS = {
   sourceLanguage: "en",
   targetLanguage: "sw",
   translationBrief: { parameters: { purpose: "Community reading" } },
+  autopilotEnabled: true,
 }
 
 /** Replace the seeded project's settings, keeping the start-gate minimum. */

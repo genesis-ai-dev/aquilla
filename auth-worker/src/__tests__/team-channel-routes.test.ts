@@ -12,8 +12,10 @@
 // without destroying the audit trail.
 //
 // Ported from auth-worker/src/__tests__/team-threads.test.ts on the AQU-1053
-// worktree branch. The release-flag cases are intentionally absent — this
-// surface ships unflagged on dev (see routes/team.ts).
+// worktree branch. The donor's PLATFORM release flag is still not ported;
+// AQU-1050 instead put POST behind dev's per-project `autopilotEnabled`
+// opt-in, so the project seeded below opts in and the refusal case lives in
+// contextual-release-gate.test.ts.
 
 import { env } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
@@ -84,6 +86,15 @@ beforeEach(async () => {
     "INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 2, 400), (?, 3, 100)",
   )
     .bind(PROJECT, PROJECT)
+    .run()
+  // AQU-1050: posting addresses the orchestrator, so it rides the release
+  // flag. Reads do not — see the archived-project case below, which is the
+  // same freeze-writes-keep-history shape.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version, updated_by)
+     VALUES (?, ?, 1, 1)`,
+  )
+    .bind(PROJECT, JSON.stringify({ autopilotEnabled: true }))
     .run()
 })
 

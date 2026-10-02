@@ -1188,6 +1188,7 @@ export function AudioRecordingModal({
       // Round 8c: the TTS take is born with its permanent name like any take.
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
+        surface: "recorder",
         label: nextTakeLabel(recordingTakes),
         // The WORDS come from the subtitle this line performs, and the VOICE
         // from that subtitle's cast assignment — neither of which the cue
@@ -1586,6 +1587,7 @@ export function AudioRecordingModal({
         // Sam, 2026-08-24: uploading is the other way audio gets onto an added
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
+        surface: "recorder",
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)

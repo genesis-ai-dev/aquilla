@@ -132,7 +132,7 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidateAudio.description": plural({
       one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
-    }),
+    }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
     // unvalidated count — untranslated cells, untouched AI drafts and cells

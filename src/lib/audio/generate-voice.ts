@@ -71,6 +71,8 @@ export interface GenerateAndAttachArgs {
    * reported on its own.
    */
   onGenerated?: (clip: GeneratedClip) => void
+  /** AQU-1572: where a clip reported on its own was asked for ("recorder"…). */
+  surface?: string
 }
 
 /**
@@ -86,7 +88,7 @@ export function describeVoice(voice: Voice): Pick<GeneratedClip, "voiceKind" | "
 
 function noteGenerated(args: GenerateAndAttachArgs, clip: GeneratedClip): void {
   if (args.onGenerated) args.onGenerated(clip)
-  else reportGeneratedClips([clip], { projectId: args.projectId, lane: args.targetLang })
+  else reportGeneratedClips([clip], { projectId: args.projectId, lane: args.targetLang, surface: args.surface })
 }
 
 export interface GenerateAndAttachResult {

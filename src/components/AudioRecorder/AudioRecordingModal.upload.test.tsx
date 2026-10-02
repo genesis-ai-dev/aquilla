@@ -191,7 +191,7 @@ describe("AudioRecordingModal — upload a file", () => {
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
     await waitFor(() => expect(telemetry.attached).toHaveBeenCalledTimes(1))
     expect(telemetry.attached).toHaveBeenCalledWith(expect.objectContaining({
-      cells: [{ fileId: "f1", cellId: "c1" }], method: "upload", source: "ui", durationMs: 1000,
+      cells: [{ fileId: "f1", cellId: "c1" }], method: "upload", source: "ui", surface: "recorder", durationMs: 1000,
     }))
     expect(telemetry.recorded).not.toHaveBeenCalled()
   })

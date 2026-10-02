@@ -55,6 +55,8 @@ export interface GenerateCellVoiceArgs {
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.onGenerated`. */
   onGenerated?: (clip: GeneratedClip) => void
+  /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
+  surface?: string
 }
 
 /**
@@ -128,6 +130,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
       ...(args.onGenerated ? { onGenerated: args.onGenerated } : {}),
+      ...(args.surface ? { surface: args.surface } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

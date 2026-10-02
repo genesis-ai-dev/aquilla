@@ -118,6 +118,8 @@ export interface AttachAudioFileArgs {
   label?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1572: where the upload came from, for telemetry ("recorder", "cell"). */
+  surface: string
 }
 
 export interface AttachAudioFileResult {
@@ -231,6 +233,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     cells: [{ fileId, cellId }],
     lane: args.targetLang,
     source: "ui",
+    surface: args.surface,
     method: "upload",
     durationMs,
   })

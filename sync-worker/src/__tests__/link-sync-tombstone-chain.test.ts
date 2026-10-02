@@ -22,6 +22,7 @@ import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { AquillaStatement } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 
 /** A → B → C: B links live to A; C links live to B. */
 const A = "proj-a-tomb"
@@ -38,6 +39,7 @@ const CT_FILE = deterministicDownstreamFileId(CT, B_FILE)
 type Kind =
   | "file.create"
   | "source.cell.create"
+  | "source.cell.commit"
   | "source.cell.delete"
   | "source.cell.visibility.set"
   | "source.cell.mirror"
@@ -69,10 +71,11 @@ async function emit(
     [projectId],
   )
   const seq = Number(seqRow.rows[0]?.next_seq ?? 1)
+  const parentId = await headParentFor(t, projectId, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, 'lead', $6, $7, $7, $7)`,
-    [id, projectId, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq],
+     VALUES ($1, 1, $2, $3, $4, $8, $5, 'lead', $6, $7, $7, $7)`,
+    [id, projectId, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -80,7 +83,7 @@ async function emit(
     projectId,
     fileId: args.fileId,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind,
     author: "lead",
     payload: args.payload,
@@ -309,7 +312,10 @@ describe("mirrorSync — a restored upstream cell is live again downstream (AQU-
       await seedA(t)
       await mirrorSync(t.db, B)
 
-      await createInA(t, 3)
+      // An edit that leaves the text as it was. Not a second create of the live
+      // cell: the upstream rejects that as a stale sibling (AQU-1574), so the
+      // fold would skip it before ever comparing hashes.
+      await emit(t, A, "source.cell.commit", { fileId: A_FILE, cellId: "c3", payload: { value: text(3) } })
       const result = await mirrorSync(t.db, B)
 
       expect(result.cellsMirrored).toBe(0)

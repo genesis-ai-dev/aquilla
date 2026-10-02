@@ -39,6 +39,7 @@ import { handleLinkSyncRequest, syncUntilCaughtUp } from "../events/link-sync-ro
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { AquillaStatement } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb, type TestDbOptions } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 import { makeTestToken } from "./helpers/auth"
 
 const UPSTREAM = "proj-upstream-windowed"
@@ -83,10 +84,11 @@ async function emitUpstream(
     [UPSTREAM],
   )
   const seq = Number(row.rows[0]?.next_seq ?? 1)
+  const parentId = await headParentFor(t, UPSTREAM, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, 'lead', $6, $7, $7, $7)`,
-    [id, UPSTREAM, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq],
+     VALUES ($1, 1, $2, $3, $4, $8, $5, 'lead', $6, $7, $7, $7)`,
+    [id, UPSTREAM, args.fileId, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -94,7 +96,7 @@ async function emitUpstream(
     projectId: UPSTREAM,
     fileId: args.fileId,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind: kind as PersistedEvent["kind"],
     author: "lead",
     payload: args.payload,
@@ -197,7 +199,7 @@ function trackDeltaReads(): { reads: DeltaRead[]; opts: TestDbOptions } {
     reads,
     opts: {
       onStatement: (sql, params) => {
-        if (/SELECT id, file_id, cell_id, kind, payload, server_seq\s+FROM events/.test(sql)) {
+        if (/SELECT id, file_id, cell_id, parent_id, kind, payload, server_seq\s+FROM events/.test(sql)) {
           reads.push({ since: Number(params[1]), until: Number(params[2]) })
         }
       },

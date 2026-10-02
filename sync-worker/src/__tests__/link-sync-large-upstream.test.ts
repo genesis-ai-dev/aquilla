@@ -235,7 +235,10 @@ describe("mirrorSync — an upstream past what one statement can carry (AQU-1543
 
       const result = await mirrorSync(t.db, DOWNSTREAM)
 
-      expect(result).toMatchObject({ ranSync: true, cellsMirrored: 6_000, filesMirrored: 2, toSeq: head })
+      // 6,002, not 6,000 (AQU-1563): the sync folds in bounded windows, and the
+      // two hidden cells were created in the first window and hidden in the
+      // last, so each window mirrors its own state of them.
+      expect(result).toMatchObject({ ranSync: true, cellsMirrored: 6_002, filesMirrored: 2, toSeq: head, more: false })
       expect(await downstreamFiles(t)).toEqual([
         { file_id: deterministicDownstreamFileId(DOWNSTREAM, FILE_B), name: "Mark", cells: 2_500, hidden: 1 },
         { file_id: deterministicDownstreamFileId(DOWNSTREAM, FILE_A), name: "Matthew", cells: 3_500, hidden: 1 },

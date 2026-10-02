@@ -40,9 +40,9 @@ import {
 } from "@/lib/sync/project-settings"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
 import {
   loadUpstreamFileChoices,
-  summarizeFileSelection,
   type LinkSourcePreviewFile,
 } from "@/lib/sync/link-source-preview"
 import { useFrontierSession } from "@/hooks/useFrontierSession"

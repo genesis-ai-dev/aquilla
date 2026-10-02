@@ -17,10 +17,8 @@ import { useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useT } from "@/lib/i18n/I18nProvider"
-import {
-  summarizeFileSelection,
-  type LinkSourcePreviewFile,
-} from "@/lib/sync/link-source-preview"
+import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
+import type { LinkSourcePreviewFile } from "@/lib/sync/link-source-preview"
 
 export interface UpstreamFileChoiceListProps {
   /** The upstream's files, in the upstream's own order. Empty renders nothing —

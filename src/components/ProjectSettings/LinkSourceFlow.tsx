@@ -97,9 +97,11 @@ import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import {
-  loadLinkSourcePreview,
   selectedClashNames,
   summarizeFileSelection,
+} from "@/lib/sync/link-file-selection"
+import {
+  loadLinkSourcePreview,
   type LinkSourcePreview,
 } from "@/lib/sync/link-source-preview"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"

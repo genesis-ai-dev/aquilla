@@ -257,9 +257,10 @@ export function LinkSourceFlow({
   // Memoized so the folds below are not re-run on every render by a fresh array
   // identity (and so the React Compiler sees a stable dependency).
   //
-  // AQU-1561: the three derivations and the list itself moved to
-  // `UpstreamFileChoiceList`, which Create New Project renders too — the two
-  // flows ask the same question and must keep answering it the same way.
+  // AQU-1561: the folds moved to `lib/sync/link-source-preview.ts`, beside the
+  // row type they read, and the list itself to `UpstreamFileChoiceList`, which
+  // Create New Project renders too — the two flows ask the same question and
+  // must keep answering it the same way.
   const previewFiles = useMemo(() => preview?.files ?? [], [preview])
   const { selectedCount, allSelected: allFilesSelected, nothingSelected } = useMemo(
     () => summarizeFileSelection(previewFiles, selectedFileIds),

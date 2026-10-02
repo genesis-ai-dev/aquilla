@@ -24,6 +24,7 @@ import {
 } from "@/lib/sync/invites"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelForTag } from "@/lib/lanes/lane-language"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
@@ -251,9 +252,17 @@ function MembersTab({ projectId }: { projectId: string }) {
         ])
         if (!alive) return
         const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
+        // AQU-1586: the scope value is still the lane TAG (that is what a
+        // member scope stores), but the label is the lane row's language —
+        // a tag can be the opaque lane id, which named nothing to the admin
+        // choosing a scope.
+        const laneRows = settingsRes?.lanes?.filter((lane) => lane.role === "target")
         setScopeLanes([
           { value: "", label: defaultLabel },
-          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
+          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({
+            value: t,
+            label: laneLabelForTag(t, laneRows),
+          })),
         ])
         if (!projectRes.ok) {
           if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)

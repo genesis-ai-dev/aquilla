@@ -2011,6 +2011,65 @@ CREATE INDEX IF NOT EXISTS team_messages_main_time
 CREATE INDEX IF NOT EXISTS team_messages_thread_time
   ON team_messages(project_id, thread_id, created_at DESC, id DESC);
 
+-- Human-expert handoffs (0126_team_handoffs.sql; AQU-1052) — the ask that
+-- runs the other way down the team channel. A contributor hits a question
+-- only a human expert can settle; the handoff records the request, who it was
+-- routed to, the accountable answer, and the explicit resume of whatever
+-- agent work was waiting on it — each with its actor and its time. The
+-- conversation lives in the channel (one `human` thread per handoff, found
+-- by team_threads.source_ref = this id); this row is the mutable state the
+-- thread cannot cheaply carry: who it is waiting on, and whether it is still
+-- open. Answering deliberately does NOT resume the dependent run — a handoff
+-- is raised by a person about work that person parked, and "stop" is a valid
+-- answer. See the migration header for the full rationale.
+CREATE TABLE IF NOT EXISTS team_handoffs (
+  id text PRIMARY KEY,                  -- uuid
+  project_id text NOT NULL,
+  thread_id text NOT NULL,
+  question text NOT NULL CHECK (char_length(question) BETWEEN 1 AND 2000),
+  -- Usernames throughout, matching team_messages.author_id for a human.
+  requested_by text NOT NULL CHECK (char_length(requested_by) BETWEEN 1 AND 128),
+  -- The contextual run blocked on this ask; NULL = a standalone question.
+  run_id text,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'answered')),
+  -- Routing is an ASSIGNMENT, not an answer: still `open`, and anyone with
+  -- the knowledge may answer it.
+  assigned_to text,
+  assigned_by text,
+  assigned_at timestamptz,
+  answer text,
+  answered_by text,
+  answered_at timestamptz,
+  resumed_by text,
+  resumed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK (char_length(id) = 36),
+  CHECK (char_length(thread_id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (run_id IS NULL OR octet_length(run_id) <= 512),
+  CHECK (answer IS NULL OR char_length(answer) BETWEEN 1 AND 2000),
+  -- Each fact is all of its columns or none of them: an actor without a time
+  -- (or the reverse) is not an inspectable record.
+  CHECK ((assigned_to IS NULL) = (assigned_at IS NULL)
+     AND (assigned_to IS NULL) = (assigned_by IS NULL)),
+  CHECK ((answer IS NULL) = (answered_by IS NULL)
+     AND (answer IS NULL) = (answered_at IS NULL)),
+  CHECK ((resumed_at IS NULL) = (resumed_by IS NULL)),
+  CHECK ((status = 'answered') = (answer IS NOT NULL)),
+  CHECK (resumed_at IS NULL OR (answer IS NOT NULL AND run_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS team_handoffs_thread
+  ON team_handoffs(thread_id);
+CREATE INDEX IF NOT EXISTS team_handoffs_project_time
+  ON team_handoffs(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS team_handoffs_open
+  ON team_handoffs(project_id, created_at ASC)
+  WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS team_handoffs_run
+  ON team_handoffs(run_id)
+  WHERE run_id IS NOT NULL;
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

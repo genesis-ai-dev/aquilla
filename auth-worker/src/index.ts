@@ -102,6 +102,7 @@ import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import teamRoutes from "./routes/team"
+import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
@@ -307,6 +308,11 @@ app.route("/api/v2/projects", contextualDecisionsRoutes)
 // one-channel agent workspace (routes/team.ts). Sibling router, same base as
 // contextual.ts; the autopilot tick writes activity into it server-side.
 app.route("/api/v2/projects", teamRoutes)
+// Human-expert handoffs — the ask that runs the other way down that channel:
+// a contributor needs a person, and the agent work waiting on the answer is
+// resumed explicitly (AQU-1052, routes/team-handoffs.ts). Sibling router,
+// same base.
+app.route("/api/v2/projects", teamHandoffRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).

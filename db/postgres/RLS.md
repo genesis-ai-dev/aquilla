@@ -38,6 +38,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `plan_units` | `rls_plan_units_project_access` | 0089 |
 | `project_settings` | `rls_project_settings_project_access` | 0034 |
 | `scene_briefs` | `rls_scene_briefs_select` / `_insert` / `_update` | 0074 |
+| `team_handoffs` | `rls_team_handoffs` | 0126 |
 | `team_messages` | `rls_team_messages` | 0122 |
 | `team_threads` | `rls_team_threads` | 0122 |
 

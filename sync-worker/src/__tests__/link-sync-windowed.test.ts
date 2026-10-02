@@ -401,12 +401,11 @@ describe("mirrorSync — windows change nothing the downstream ends up with (AQU
       expect(await visibleState(t, DOWNSTREAM)).toEqual(await visibleState(t, REFERENCE))
       expect(await filesOf(t, DOWNSTREAM)).toEqual(await filesOf(t, REFERENCE))
       // And the reference is what the history says, so equal is not "equally
-      // wrong". (Live cells only: `cell_count` also leaves out the two parked
-      // cells but, today, still counts the mirrored tombstones — the same on
-      // both sides, and not this ticket's.)
-      expect((await filesOf(t, REFERENCE)).map(({ name, cells }) => ({ name, cells }))).toEqual([
-        { name: "ACT-REV (2026)", cells: 6 },
-        { name: "ISA-MAL", cells: 2 },
+      // wrong". `cells` is every live row; `cell_count` also leaves out the two
+      // parked cells, and neither counts the mirrored tombstones.
+      expect(await filesOf(t, REFERENCE)).toEqual([
+        { name: "ACT-REV (2026)", cells: 6, cell_count: 4 },
+        { name: "ISA-MAL", cells: 2, cell_count: 2 },
       ])
       const byId = new Map((await visibleState(t, REFERENCE)).map((r) => [r.cell_id, r]))
       expect(byId.get("intro")).toMatchObject({

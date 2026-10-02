@@ -19,6 +19,8 @@ import {
 } from './commands-membership'
 import {
   previewSettingValue,
+  referenceBibleOpProblem,
+  REFERENCE_BIBLE_SETTINGS_KEY,
   resolveLanguageEditMinRole,
   resolveTermbaseEditMinRole,
   LANGUAGE_SETTINGS_KEYS,
@@ -151,6 +153,14 @@ export async function prepareProjectSetup(
   }
 
   const current = await loadProjectSettings(db, urlProjectId)
+
+  // AQU-1573: the shape passed above; the Bible must be installed and each lane
+  // key a lane of the project as this plan leaves it.
+  const referenceProblem = await referenceBibleOpProblem(db, [...ops.plain, ...ops.policy], current.settings)
+  if (referenceProblem) {
+    return fieldError('validation_failed', `settings.${REFERENCE_BIBLE_SETTINGS_KEY}`, referenceProblem)
+  }
+
   const loosening = loosensPolicy(ops.policy, current.settings)
   if (loosening.length > 0) {
     return fieldError(

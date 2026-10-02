@@ -747,6 +747,10 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1573: the Bible each target language quotes verses from (lane tag →
+   *  reference Bible id, "" = default lane; or the one-item array form). Synced
+   *  via ProjectWideSettings. Resolve with referenceBibleForLane. */
+  referenceBibleVersions?: Record<string, string> | string[]
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

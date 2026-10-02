@@ -430,6 +430,7 @@ CRUD surface with MCP bolted on.
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
 | Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
 | Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
+| Reference Bibles | `list_reference_bibles` — **implemented** (AQU-1573): the Bibles installed on the server that a project can quote verses from. REST: `GET …/reference-bibles`. Set one per target language with PatchSettings `referenceBibleVersions` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text, raw }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. Export substitutes translations into the preserved original artifact, and **re-attaches each verse's `usfmNotes` to its translation (AQU-1295)** — appended at the end of the verse, restored from `raw` where the importer captured it — so a translated verse keeps its notes instead of losing them with the replaced span. This is the one place the two importers deliberately differ and still agree on the exported file: the in-app import is lossless (markers stay in cell text and the translator edits them in place), the agent import is content-only (markers are parked in metadata and the exporter puts the notes back). **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
 | Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory`, `list_terms` (AQU-1175 — the termbase) |
@@ -1202,3 +1203,36 @@ Write patterns in the non-`u` dialect instead: explicit ranges (`[\u0400-\u04FF]
 Cyrillic, verified to work in both modes), `\uXXXX` escapes rather than `\u{...}`, and
 literal characters where you can. Then **confirm the rule fires** against a cell you know
 violates it — `read_quality` after the commit — rather than trusting the changeset receipt.
+
+## Status addendum (2026-10-02, AQU-1573 — reference Bible per target language)
+
+Partners translating sermons, devotionals or curriculum need every verse the source cites
+copied from the Bible their readers already know (Living on the Edge: Arabic sermons quote
+the Smith & Van Dyck Bible), not translated fresh. The server now holds public-domain
+reference Bibles and a project names one per target language.
+
+**Discovery.** `GET /api/v1/external/reference-bibles` (credential only, read rate limit, no
+project scope) and the MCP tool `list_reference_bibles` return the installed Bibles:
+`{ id, name, fullName, languageCode, languageName, direction, versification, printing,
+license, source, verseCount }`. The built-in set is `arb-vandyck` (Smith & Van Dyck Arabic,
+vowelled) and `eng-kjv` (King James Version, 1769). A server where the texts were never
+loaded lists none (see `docs/reference-bibles.md` for the load command).
+
+**The setting.** `referenceBibleVersions` is a top-level settings key, writable through
+`PatchSettings` and `ProjectSetup` (MAINTAINER, like every other non-language key):
+
+- The normal form is a map from lane tag to Bible id, with `""` for the default lane:
+  `{ "": "arb-vandyck", "en": "eng-kjv" }`. One Bible per lane.
+- A key that names the project's primary language (`"Arabic"`, or `"ar"` when the
+  targetLanguage is Arabic) means the default lane too.
+- The ticket's one-item array `["arb-vandyck"]` is accepted and means the default lane. A
+  longer array is rejected: use the map.
+- `{}` or `null` clears every lane. To clear one lane, write the map without it.
+- Prepare checks it live: a Bible id that is not installed, a key that is not a lane of
+  the project (judged against the settings as the same write leaves them, so registering a
+  lane and choosing its Bible in one PatchSettings works), or two keys naming the same lane
+  are `validation_failed`. ProjectSetup reports it with
+  `details.field: "settings.referenceBibleVersions"`.
+
+It is independent of `bibleResourcesEnabled`, which stays the Aquifer study-resource feature
+for Scripture projects. In the app, maintainers set it in Project settings → Reference Bible.

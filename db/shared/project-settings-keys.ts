@@ -27,11 +27,17 @@ export type SettingsValueKind =
   | 'object'
   | 'object[]'
   | 'enum'
+  | 'custom'
 
 export interface SettingsKeySpec {
   kind: SettingsValueKind
   /** Allowed values when `kind` is 'enum'. */
   values?: readonly string[]
+  /** 'custom' only: the shape as callers should read it in errors and docs. */
+  typeName?: string
+  /** 'custom' only: why `value` (never null) is not this shape, or null when it is.
+   *  Must stay pure and dependency-free like the rest of this module. */
+  validate?: (value: unknown) => string | null
 }
 
 function isPlainObject(v: unknown): boolean {
@@ -40,7 +46,9 @@ function isPlainObject(v: unknown): boolean {
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
-  return spec.kind === 'enum' ? (spec.values ?? []).map((v) => `"${v}"`).join(' | ') : spec.kind
+  if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.kind === 'custom') return spec.typeName ?? 'object'
+  return spec.kind
 }
 
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
@@ -59,7 +67,37 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return Array.isArray(value) && value.every(isPlainObject)
     case 'enum':
       return typeof value === 'string' && (spec.values ?? []).includes(value)
+    case 'custom':
+      return (spec.validate?.(value) ?? null) === null
   }
+}
+
+/**
+ * AQU-1573: shape of `referenceBibleVersions` — one reference Bible per lane.
+ * Either a map from lane tag to Bible id ("" = the default lane) or the
+ * ticket's one-item array form `[versionId]`, which means the default lane.
+ * Mirrors referenceBibleSettingShapeProblem in
+ * src/lib/reference-bible/lane-setting.ts (a parity test pins the two); it is
+ * restated here because that module imports the lane helpers and this one must
+ * stay dependency-free. Whether the ids are installed and the lanes exist is a
+ * live check at prepare (db/shared/reference-bible.ts).
+ */
+function referenceBibleVersionsProblem(value: unknown): string | null {
+  const hint = '{ laneTag: versionId } ("" is the default lane)'
+  if (Array.isArray(value)) {
+    if (value.length > 1) return `one Bible per lane — use ${hint}`
+    if (value.length === 1 && (typeof value[0] !== 'string' || !value[0].trim())) {
+      return `expected ${hint} or a one-item array [versionId]`
+    }
+    return null
+  }
+  if (!isPlainObject(value)) return `expected ${hint} or a one-item array [versionId]`
+  for (const id of Object.values(value as Record<string, unknown>)) {
+    if (typeof id !== 'string' || !id.trim()) {
+      return `every lane needs a Bible id string — leave a lane out to give it none (${hint})`
+    }
+  }
+  return null
 }
 
 /**
@@ -134,6 +172,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
   smartQuotes: { kind: 'boolean' },
+  // AQU-1573: the Bible each target language quotes verses from. Independent
+  // of bibleResourcesEnabled (the Aquifer study tools for Scripture projects).
+  referenceBibleVersions: {
+    kind: 'custom',
+    typeName: '{ [laneTag]: versionId } | [versionId]',
+    validate: referenceBibleVersionsProblem,
+  },
 
   // Structured blobs
   ttsSettings: { kind: 'object' },
@@ -163,6 +208,10 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
     return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`
   }
   if (value === null) return null
+  if (spec.kind === 'custom') {
+    const problem = spec.validate?.(value) ?? null
+    return problem ? `settings key "${key}" expects ${settingsTypeName(spec)}: ${problem}` : null
+  }
   if (!matchesSpec(spec, value)) {
     return `settings key "${key}" expects ${settingsTypeName(spec)}`
   }

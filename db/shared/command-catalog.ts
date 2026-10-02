@@ -186,6 +186,7 @@ Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` 
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
+- \`referenceBibleVersions\` (AQU-1573) picks the Bible each target language copies quoted verses from: \`{ "": "arb-vandyck", "en": "eng-kjv" }\` — one Bible per lane, \`""\` is the default lane (the project's targetLanguage, which may also be named by its language, e.g. \`"Arabic"\`). A one-item array \`["arb-vandyck"]\` means the default lane; \`{}\` or \`null\` clears every lane. Bible ids come from \`list_reference_bibles\` (REST \`GET /api/v1/external/reference-bibles\`); an id that is not installed, or a key that is not a lane of the project, is \`validation_failed\` at prepare. Independent of \`bibleResourcesEnabled\`.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,
   },
@@ -245,7 +246,7 @@ The server expands it into a fixed step order and chains the version guards ITSE
 Gotchas:
 - The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
 - Never guess these four — they come from the partner, not from you: \`settings.sourceLanguage\`, \`settings.targetLanguage\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
-- Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
+- Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a \`referenceBibleVersions\` Bible that is not installed or lane that does not exist (see PatchSettings), a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
 - Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
 - Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
 - Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.

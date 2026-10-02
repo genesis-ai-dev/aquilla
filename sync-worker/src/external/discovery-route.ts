@@ -74,6 +74,7 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/orgs': 'List the organizations this credential covers (up to 100): { id, name, role, role_source }. See "orgScopedReads".',
       'GET /api/v1/external/orgs/:orgId/projects': 'List one org’s projects. An org outside the credential’s scope returns scope_denied.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100). Optional ?orgId= narrows to one org.',
+      'GET /api/v1/external/reference-bibles': 'The reference Bibles installed on this server (AQU-1573): { id, name, fullName, languageCode, languageName, direction, versification, printing, license, source, verseCount }. A project names one per target language in the PatchSettings key referenceBibleVersions ({ laneTag: id }, "" = default lane) so drafting copies quoted verses from it instead of translating them. MCP: list_reference_bibles.',
       'GET /api/v1/external/projects/:projectId': 'One project: { id, name, org_id, archived, role, settings, settingsVersion, settingsUpdatedAt }. Read settingsVersion here before staging PatchSettings — its ifMatchVersion must equal it or prepare returns plan_stale.',
       'GET /api/v1/external/search?q=&projectIds=a,b': 'Full-text search SEVERAL projects in one call; every result carries its projectId. Optional side=source|target. See "orgScopedReads".',
       'GET /api/v1/external/commands': 'Index of every command kind you can stage. No auth needed.',

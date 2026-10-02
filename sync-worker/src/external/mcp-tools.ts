@@ -120,6 +120,19 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'list_reference_bibles',
+    description:
+      'List the reference Bibles installed on this server (AQU-1573): the texts a project ' +
+      'can copy quoted Scripture from when it translates sermons, devotionals or curriculum. ' +
+      'Each item has { id, name, fullName, languageCode, languageName, direction, ' +
+      'versification, printing, license, source, verseCount }. To make a target language ' +
+      'quote from one, patch_settings key referenceBibleVersions with { laneTag: id } ' +
+      '("" is the default lane), e.g. { "": "arb-vandyck" }; an id not listed here is ' +
+      'rejected. Independent of bibleResourcesEnabled. (REST: GET .../reference-bibles.) ' +
+      'Takes no arguments.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'get_project',
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
@@ -1198,6 +1211,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_identity_and_scope: 'read',
   list_orgs: 'read',
   list_projects: 'read',
+  list_reference_bibles: 'read',
   get_project: 'read',
   get_project_settings: 'read',
   patch_settings: 'stage',

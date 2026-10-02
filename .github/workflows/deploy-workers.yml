@@ -199,10 +199,29 @@ jobs:
         run: pnpm test
         working-directory: sync-worker
 
+      # deploy:aquilla[:dev]:sync runs the target `neon:status` itself before it
+      # publishes (AQU-682), so the Worker cannot go out past a pending
+      # migration even when it is deployed by hand rather than through
+      # schema-guard. The script fails closed without these credentials — with
+      # only the Cloudflare pair it died on a missing NEON_API_KEY instead of
+      # reporting the schema state, so this step never published while `web`,
+      # which did carry the block, published the SPA (AQU-1539).
       - name: Deploy sync-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+          NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}
+          NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
+          NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
+          NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: sweet-paper-88472094
+          NEON_PRODUCTION_BRANCH: production
+          NEON_DEV_BRANCH: dev
+          NEON_DEV_PG_HOST: ${{ secrets.NEON_DEV_PG_HOST }}
+          NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
+          NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
+          NEON_DEV_PG_PASSWORD: ${{ secrets.NEON_DEV_PG_PASSWORD }}
         run: |
           case "${{ needs.target.outputs.live_environment }}" in
             production) pnpm run deploy:aquilla:sync ;;
@@ -250,10 +269,27 @@ jobs:
       # (npm run neon:apply, which records them in the schema_migrations
       # ledger). The schema-guard job above fails this deploy if the target
       # schema is behind db/postgres/migrations/.
+      #
+      # deploy:aquilla[:dev]:auth re-runs that same read-only `neon:status`
+      # itself, so it needs the credentials the guard job has (AQU-1539) —
+      # without them it failed on a missing NEON_API_KEY and published nothing,
+      # while the `web` job published the SPA.
       - name: Deploy auth-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+          NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}
+          NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
+          NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
+          NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: sweet-paper-88472094
+          NEON_PRODUCTION_BRANCH: production
+          NEON_DEV_BRANCH: dev
+          NEON_DEV_PG_HOST: ${{ secrets.NEON_DEV_PG_HOST }}
+          NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
+          NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
+          NEON_DEV_PG_PASSWORD: ${{ secrets.NEON_DEV_PG_PASSWORD }}
         run: |
           case "${{ needs.target.outputs.live_environment }}" in
             production) pnpm run deploy:aquilla:auth ;;

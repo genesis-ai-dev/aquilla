@@ -20,6 +20,25 @@ export interface PreparedYouTubeCaptionImport {
   rawBytes?: ArrayBuffer
 }
 
+export interface PreparedYouTubePictureImport {
+  name: string
+  videoUrl: string
+  strings: TranslatableString[]
+  rawSourceFormat?: undefined
+}
+
+/** A linked picture has no downloaded media or invented caption artifact. */
+export function prepareYouTubePictureImport(input: {
+  url: string
+  name: string
+}): PreparedYouTubePictureImport {
+  const videoId = youTubeVideoId(input.url)
+  if (!videoId) throw new Error("Enter a YouTube video link.")
+  const name = input.name.trim()
+  if (!name) throw new Error("Give the linked video a name.")
+  return { name, videoUrl: `https://www.youtube.com/watch?v=${videoId}`, strings: [] }
+}
+
 /** Only the user's caption export is a source artifact. No media fetch occurs. */
 export function prepareYouTubeCaptionImport(
   input: YouTubeCaptionInput,

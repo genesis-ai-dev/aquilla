@@ -1,11 +1,11 @@
 import { emitParsedFile, type EmitParsedFileResult, type ImportContext } from "../import"
 import { publishStagedImport } from "../sync/bulk-import"
-import type { PreparedYouTubeCaptionImport } from "./youtube-captions"
+import type { PreparedYouTubeCaptionImport, PreparedYouTubePictureImport } from "./youtube-captions"
 import { v7 as uuidv7 } from "uuid"
 
 /** One preview owns one staged file. Publication retries keep that identity. */
 export function createYouTubeCaptionCommit(
-  prepared: PreparedYouTubeCaptionImport,
+  prepared: PreparedYouTubeCaptionImport | PreparedYouTubePictureImport,
   ctx: ImportContext,
 ): () => Promise<EmitParsedFileResult> {
   const publishEventId = uuidv7()
@@ -19,7 +19,7 @@ export function createYouTubeCaptionCommit(
     inFlight = (async () => {
       ctx.signal?.throwIfAborted()
       if (!staged) {
-        staged = await emitParsedFile(prepared, prepared.rawSourceFormat, {
+        staged = await emitParsedFile(prepared, prepared.rawSourceFormat ?? "video", {
           ...ctx, deferPublication: true, reimportFileIds: undefined,
         })
       }

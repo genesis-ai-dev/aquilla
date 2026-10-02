@@ -57,13 +57,44 @@ export class Workspace {
     await this.dismissSetupChecklist()
     await this.openImportDialog()
     const dialog = this.page.getByRole("dialog")
-    await dialog.getByRole("button", { name: /^YouTube video and captions/i }).click()
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Import a caption export", { exact: true }).check()
     await dialog.getByLabel("Your caption export").setInputFiles(payload)
     await dialog.getByRole("button", { name: "Preview captions" }).click()
     await expect(dialog.getByRole("button", { name: "Import captions" }))
       .toBeEnabled({ timeout: 10_000 })
     await dialog.getByRole("button", { name: "Import captions" }).click()
+    await this.waitForImportSettled()
+  }
+
+  async importYouTubePicture(url: string, name: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await dialog.getByRole("button", { name: "Link video", exact: true }).click()
+    await this.waitForImportSettled()
+  }
+
+  async previewYouTubeOriginalMedia(url: string, filePath: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Use original audio or video", { exact: true }).check()
+    await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await expect(this.page.getByRole("button", { name: "Import media and link video" }))
+      .toBeVisible({ timeout: 30_000 })
+  }
+
+  async confirmYouTubeOriginalMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Import media and link video" }).click()
     await this.waitForImportSettled()
   }
 

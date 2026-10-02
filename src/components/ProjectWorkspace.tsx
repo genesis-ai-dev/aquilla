@@ -7939,8 +7939,10 @@ export function ProjectWorkspace() {
       syncStatus: fileSyncStatus,
       cellsLoading,
       cellsError,
+      hasLinkedPicture: activeFile?.orderedBy === "time" && Boolean(activeFile.coreMediaUrl),
     }),
-    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError]
+    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError,
+      activeFile?.orderedBy, activeFile?.coreMediaUrl]
   )
 
   const showFileStats = centerSurface === "editor"

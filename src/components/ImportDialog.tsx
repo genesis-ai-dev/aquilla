@@ -884,8 +884,6 @@ type ImportOption = {
 }
 
 const POPULAR_OPTIONS: ImportOption[] = [
-  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
-    descriptionKey: "importExport.landing.youtube.description" },
   { id: "upload", titleKey: "importExport.landing.upload.title", icon: Upload,
     descriptionKey: "importExport.landing.upload.description" },
   { id: "gdrive", titleKey: "importExport.landing.gdrive.title", hintKey: "importExport.landing.gdrive.hint", icon: CloudDownload, badge: "beta",
@@ -896,6 +894,8 @@ const POPULAR_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.helloao.description" },
   { id: "spreadsheet", titleKey: "importExport.landing.spreadsheet.title", hintKey: "importExport.landing.spreadsheet.hint", icon: Table2, badge: "beta",
     descriptionKey: "importExport.landing.spreadsheet.description" },
+  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
+    descriptionKey: "importExport.landing.youtube.description" },
 ]
 
 const SPECIALIZED_OPTIONS: ImportOption[] = [

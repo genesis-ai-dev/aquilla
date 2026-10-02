@@ -257,8 +257,9 @@ test(`media and ${format} captions publish reviewed segments and playable audio`
   await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed first caption.")
   // Timeline hydration may prefetch the same bytes playback uses. Observe
   // publication onward rather than requiring a redundant GET after Play.
+  // Match the storage route, not Vite's /src/lib/audio/*.ts modules.
   const audioResponse = alice.waitForResponse(response =>
-    /\/audio\/[^/?]+/.test(response.url()) &&
+    /^\/audio\/[^/?]+/.test(new URL(response.url()).pathname) &&
     response.request().method() === "GET" &&
     response.ok(),
     { timeout: 30_000 },

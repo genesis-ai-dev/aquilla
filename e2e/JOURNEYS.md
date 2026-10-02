@@ -245,6 +245,22 @@ UI chrome that used to be one smoke file per click is covered under
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
 - AQU-1187 scripture-catalog per-book import: an eBible / Hello AO selection spanning several books emits one source file per book, each carrying `bookCode`, so the files group into OT/NT and order canonically; a single-book selection stays one file and only gains its code. Covered at the import-contract level in `src/lib/import.scripture-books.test.ts` (asserts the real `file.create` bodies, per-book originals, and the re-import collision key) plus `group-by-corpus.test.ts`. The existing `import-ebible-persists-reload.smoke.spec.ts` fixture is a three-verse Genesis corpus, i.e. the single-book path, and stays valid unchanged. The multi-book variant needs a corpus long enough to cross a book boundary (~1.5k lines, generated from the bundled vref list) — worth adding to that spec when a runnable stack is at hand; it was not added blind.
+- Linked-video empty table (AQU-1565): a time-ordered file whose media is a LINKED
+  video — a YouTube "Link video only" import (AQU-1556) — has no rows of its own, and
+  the editor's empty table used to fall through to the prompt for a file with no media
+  at all ("No media on this file yet", plus a direct-media-URL field that rejects a
+  watch page). What it says instead, what it offers, and what it withholds are covered
+  in RTL through the real EditorTable branch (`EditorTable.mediaEmptyState.test.tsx`):
+  the linked-video copy with no attach-media prompt and no URL field, the Open Media
+  view action and its absence when the table already renders under the timeline, the
+  attached caption tracks being NAMED rather than reported absent (their cues live in
+  their own content files, so the host file's row count stays at zero), a viewer
+  getting the sentence and nothing to click, and the regression guard that a file with
+  no linked video keeps the ordinary prompt, direct-URL field included. The decision
+  itself is `lib/editor/linked-video-empty-state.test.ts`. No smoke, per the rules: it
+  is an empty state in a single component, nothing is lost if it breaks, and the
+  picture-only import journey it follows is already walked by
+  `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),

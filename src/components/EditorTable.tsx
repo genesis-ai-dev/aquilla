@@ -65,6 +65,8 @@ import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
+import { TimelineLinkedVideoEmpty } from "./TimelineLinkedVideoEmpty"
+import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
@@ -769,6 +771,16 @@ interface EditorTableProps {
    *  When absent, the empty state falls back to the static hint. */
   onAttachMediaFile?: (file: File) => Promise<void>
   onAttachMediaUrl?: (url: string) => Promise<void>
+  /** AQU-1565: present when this time-ordered file has no rows but DOES have
+   *  a linked video (a YouTube "Link video only" import). The empty table then
+   *  says so and points at the Media view's timeline, where captions are
+   *  attached, instead of claiming the file has no media and offering a
+   *  direct-media-URL field that cannot take a watch page.
+   *  See `deriveLinkedVideoEmptyState`. */
+  linkedVideoEmptyState?: LinkedVideoEmptyState | null
+  /** Switch this file to the Media view from that empty state. Absent when the
+   *  table is already rendering under the timeline. */
+  onOpenMediaView?: () => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1002,7 +1014,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
-  onAttachMediaFile, onAttachMediaUrl,
+  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -2948,7 +2960,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
         // renders this table in text mode under the timeline now, and an empty
         // time-ordered file must still offer "attach a clip" there.
-        canEdit && onAttachMediaFile && onAttachMediaUrl ? (
+        // AQU-1565: a linked video IS media, so the attach-media prompt below
+        // would be lying. This file wants captions, not a clip.
+        linkedVideoEmptyState ? (
+          <div className="flex-1">
+            <TimelineLinkedVideoEmpty
+              isYouTube={linkedVideoEmptyState.isYouTube}
+              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              onAttachFile={canEdit ? onAttachMediaFile : undefined}
+              onOpenMediaView={onOpenMediaView}
+            />
+          </div>
+        ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
           <div className="flex-1">
             <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
           </div>

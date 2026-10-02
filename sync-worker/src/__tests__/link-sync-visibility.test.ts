@@ -319,3 +319,245 @@ describe("laneRelevantHeadSeq — visibility is lane-relevant (AQU-1453)", () =>
     }
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1546: AQU-1453 above made hide/show travel, but only when the hide was
+// the last thing that happened to the cell. Two other orders of events lost it,
+// and either one hands a linked project, as ordinary visible work, a cell the
+// upstream lead deliberately parked.
+//
+//   Case 1 — hidden, then edited. A hidden cell still offers "Edit source
+//     text". The fold kept ONE running state per cell and a visibility event
+//     adjusted it, so a later `source.cell.commit` replaced that state wholesale
+//     and the hidden flag went with it. The reverse order (edit, then hide) is
+//     what the AQU-1453 tests above pin, which is why this survived them.
+//
+//   Case 2 — a chain of links. In A → B → C, B's hidden cells were never hidden
+//     by anyone in B: the state lives only on the `source.cell.mirror` events B
+//     received. C's fold ignored the visibility those carry, so every cell
+//     parked in A was visible in C.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** C in an A → B → C chain: linked live to the DOWNSTREAM of the pair above. */
+const CHAINED = "proj-chained"
+const CHAINED_FILE = deterministicDownstreamFileId(CHAINED, DOWNSTREAM_FILE)
+
+async function seedChainedProject(t: TestDb): Promise<void> {
+  await t.pg.query(
+    `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode, source_link_consumes, source_link_cursor)
+     VALUES ($1, 'Chained', 1, $2, 'live', 'source', 0)`,
+    [CHAINED, DOWNSTREAM],
+  )
+}
+
+async function chainedCell(
+  t: TestDb,
+  cellId: string,
+): Promise<{ value: string; hidden: boolean } | undefined> {
+  const r = await t.pg.query<{ value: string; hidden_at: string | null }>(
+    `SELECT value, hidden_at FROM cells
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+    [CHAINED, CHAINED_FILE, cellId],
+  )
+  const row = r.rows[0]
+  if (!row) return undefined
+  return { value: row.value, hidden: row.hidden_at != null }
+}
+
+async function upstreamEdit(t: TestDb, cellId: string, value: string): Promise<void> {
+  await emitUpstream(t, "source.cell.commit", { fileId: FILE, cellId, payload: { value } })
+}
+
+describe("mirrorSync — visibility survives a later edit (AQU-1546 case 1)", () => {
+  it("hidden then edited BEFORE the link exists arrives hidden, with the edited text", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedTwoCells(t)
+      // Both happen before the downstream has ever synced, so the very first
+      // mirror window holds the create, the hide and the edit together. This is
+      // the "hidden cell information does not move over" report.
+      await upstreamHide(t, "cell-2", true)
+      await upstreamEdit(t, "cell-2", "And the earth was formless")
+
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      const cell = await downstreamCell(t, "cell-2")
+      expect(cell?.value).toBe("And the earth was formless")
+      expect(cell?.hidden).toBe(true)
+      // The cell nobody parked is still ordinary visible work.
+      expect((await downstreamCell(t, "cell-1"))?.hidden).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("hidden then edited on an EXISTING link leaves the cell hidden with the new text", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedTwoCells(t)
+      await mirrorSync(t.db, DOWNSTREAM)
+      expect((await downstreamCell(t, "cell-1"))?.hidden).toBe(false)
+
+      // Both land before the downstream's next sync, so one window carries them.
+      await upstreamHide(t, "cell-1", true)
+      await upstreamEdit(t, "cell-1", "In the beginning, God")
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      const cell = await downstreamCell(t, "cell-1")
+      expect(cell?.value).toBe("In the beginning, God")
+      expect(cell?.hidden).toBe(true)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("hide, edit, then show ends VISIBLE with the new text — the last visibility wins", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedTwoCells(t)
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      await upstreamHide(t, "cell-2", true)
+      await upstreamEdit(t, "cell-2", "And the earth was formless")
+      await upstreamHide(t, "cell-2", false)
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      const cell = await downstreamCell(t, "cell-2")
+      expect(cell?.value).toBe("And the earth was formless")
+      expect(cell?.hidden).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("an edit to a cell that was never hidden does not hide it", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedTwoCells(t)
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      await upstreamEdit(t, "cell-1", "In the beginning, God")
+      await mirrorSync(t.db, DOWNSTREAM)
+
+      const cell = await downstreamCell(t, "cell-1")
+      expect(cell?.value).toBe("In the beginning, God")
+      expect(cell?.hidden).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+})
+
+describe("mirrorSync — visibility travels down a chain of links (AQU-1546 case 2)", () => {
+  it("a cell hidden in A is hidden in B AND in C", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedChainedProject(t)
+      await seedTwoCells(t)
+      await upstreamHide(t, "cell-2", true)
+
+      // B pulls from A, then C pulls from B — C's only evidence of the hide is
+      // the visibility that rode B's `source.cell.mirror` events.
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+
+      expect((await downstreamCell(t, "cell-2"))?.hidden).toBe(true)
+      const chained = await chainedCell(t, "cell-2")
+      expect(chained?.value).toBe("And the earth was void")
+      expect(chained?.hidden).toBe(true)
+      expect((await chainedCell(t, "cell-1"))?.hidden).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("showing the cell again in A shows it in both B and C", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedChainedProject(t)
+      await seedTwoCells(t)
+      await upstreamHide(t, "cell-2", true)
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+      expect((await chainedCell(t, "cell-2"))?.hidden).toBe(true)
+
+      await upstreamHide(t, "cell-2", false)
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+
+      expect((await downstreamCell(t, "cell-2"))?.hidden).toBe(false)
+      expect((await chainedCell(t, "cell-2"))?.hidden).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("hidden-then-edited in A reaches C hidden, with the edited text", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedChainedProject(t)
+      await seedTwoCells(t)
+      await upstreamHide(t, "cell-2", true)
+      await upstreamEdit(t, "cell-2", "And the earth was formless")
+
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+
+      const chained = await chainedCell(t, "cell-2")
+      expect(chained?.value).toBe("And the earth was formless")
+      expect(chained?.hidden).toBe(true)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("a text-only edit in A does not un-park a cell C already has hidden", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedChainedProject(t)
+      await seedTwoCells(t)
+      await upstreamHide(t, "cell-2", true)
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+      expect((await chainedCell(t, "cell-2"))?.hidden).toBe(true)
+
+      // A separate window carrying nothing but text. Each hop's mirror payload
+      // must omit `hidden` so the projection leaves `hidden_at` alone.
+      await upstreamEdit(t, "cell-2", "And the earth was formless")
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+
+      const chained = await chainedCell(t, "cell-2")
+      expect(chained?.value).toBe("And the earth was formless")
+      expect(chained?.hidden).toBe(true)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("re-running each hop is idempotent — the second pass mirrors nothing", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedChainedProject(t)
+      await seedTwoCells(t)
+      await upstreamHide(t, "cell-2", true)
+      await mirrorSync(t.db, DOWNSTREAM)
+      await mirrorSync(t.db, CHAINED)
+
+      expect((await mirrorSync(t.db, DOWNSTREAM)).cellsMirrored).toBe(0)
+      expect((await mirrorSync(t.db, CHAINED)).cellsMirrored).toBe(0)
+      expect((await chainedCell(t, "cell-2"))?.hidden).toBe(true)
+    } finally {
+      await t.close()
+    }
+  })
+})

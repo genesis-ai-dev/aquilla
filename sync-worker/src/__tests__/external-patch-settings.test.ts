@@ -318,6 +318,11 @@ const POLICY_DIRECTION_CASES: {
   { key: 'harmonize_min_role', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
   { key: 'cellEditingFloor', tighten: { from: 'contributor', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'contributor' } },
   { key: 'validationNamedUsers', tighten: { from: ['a', 'b'], to: ['a'] }, loosen: { from: ['a'], to: ['a', 'b'] } },
+  // AQU-1571: the audio twins, which an agent could loosen until they joined
+  // POLICY_SETTINGS_KEYS.
+  { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
+  { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
+  { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {

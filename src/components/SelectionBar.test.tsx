@@ -548,6 +548,58 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
   })
 })
 
+/**
+ * AQU-1572 — a bulk action is ONE `cell validated` / `cell unvalidated` event
+ * carrying how many lines it changed, not one per line.
+ */
+describe("SelectionBar — validation telemetry (AQU-1572)", () => {
+  const events = (name: string) => vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === name)
+
+  it("reports a bulk text validation once, counting only what it validated", () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+    ], [], "fr", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    expect(events("cell validated")).toHaveLength(1)
+    expect(events("cell validated")[0][1]).toMatchObject({
+      medium: "text", source: "ui", surface: "selection", cell_count: 2, lane: "fr",
+    })
+    vi.restoreAllMocks()
+  })
+
+  it("reports a bulk removal as one cell unvalidated", () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
+
+    expect(events("cell unvalidated")).toHaveLength(1)
+    expect(events("cell unvalidated")[0][1]).toMatchObject({ medium: "text", cell_count: 1, lane: "default" })
+    vi.restoreAllMocks()
+  })
+
+  it("reports a bulk audio vote as one event with the audio medium", async () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^validate audio/i }))
+
+    await vi.waitFor(() => expect(events("cell validated")).toHaveLength(1))
+    expect(events("cell validated")[0][1]).toMatchObject({ medium: "audio", surface: "selection" })
+    vi.restoreAllMocks()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // AQU-490 — bulk validating recordings
 // ---------------------------------------------------------------------------

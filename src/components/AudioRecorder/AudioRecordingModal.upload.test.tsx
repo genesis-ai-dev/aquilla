@@ -62,6 +62,12 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: vi.fn(async () => "evt"),
   emitCellAudioRename: vi.fn(async () => "evt"),
 }))
+const telemetry = vi.hoisted(() => ({ attached: vi.fn(), recorded: vi.fn() }))
+vi.mock("@/lib/review-telemetry", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reportAudioAttached: telemetry.attached,
+  reportAudioRecorded: telemetry.recorded,
+}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "sync-tok",
 }))
@@ -175,6 +181,19 @@ describe("AudioRecordingModal — upload a file", () => {
     // The workspace hears about it exactly as it does for a recorded take, so a
     // text-less line still gets the target row that makes it countable work.
     await waitFor(() => expect(onTakeSaved).toHaveBeenCalledWith("c1"))
+  })
+
+  // AQU-1572: an upload is `audio attached`, never `audio recorded`.
+  it("reports the upload once as an attached file", async () => {
+    telemetry.attached.mockClear()
+    telemetry.recorded.mockClear()
+    renderModal()
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(telemetry.attached).toHaveBeenCalledTimes(1))
+    expect(telemetry.attached).toHaveBeenCalledWith(expect.objectContaining({
+      cells: [{ fileId: "f1", cellId: "c1" }], method: "upload", source: "ui", durationMs: 1000,
+    }))
+    expect(telemetry.recorded).not.toHaveBeenCalled()
   })
 
   it("keeping a take leaves every way of making another one live (2026-08-13)", async () => {

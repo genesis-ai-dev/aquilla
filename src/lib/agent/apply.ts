@@ -21,6 +21,7 @@ import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { reportValidation } from "@/lib/review-telemetry"
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -180,6 +181,25 @@ export async function applyStagedEvent(
   }
 }
 
+/**
+ * AQU-1572: report the validations among events that were just applied. The
+ * person approved them, but the agent chose which cells — `source: "agent"`
+ * is what tells the review loop's own work apart from the agent's.
+ */
+export function reportAppliedValidations(events: readonly StagedEvent[], projectId: string): void {
+  const byLane = new Map<string, Array<{ fileId: string; cellId: string }>>()
+  for (const ev of events) {
+    if (ev.kind !== "cell.validate" || !ev.fileId || !ev.cellId) continue
+    const lane = typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : ""
+    byLane.set(lane, [...(byLane.get(lane) ?? []), { fileId: ev.fileId, cellId: ev.cellId }])
+  }
+  for (const [lane, cells] of byLane) {
+    reportValidation({
+      medium: "text", validated: true, projectId, cells, lane, source: "agent", surface: "proposal",
+    })
+  }
+}
+
 /** Which side of a cell's chain an applied event becomes the head of. */
 function headSideFor(kind: string): "targetEventId" | "sourceEventId" | null {
   if (kind === "target.cell.commit" || kind === "target.cell.create") return "targetEventId"
@@ -219,5 +239,6 @@ export async function applyStagedEvents(
       localHeads.set(cellId, { ...localHeads.get(cellId), [side]: id })
     }
   }
+  reportAppliedValidations(events, ctx.projectId)
   return ids
 }

@@ -58,7 +58,9 @@ interface CellsTarget {
  * The shared part: project, lane, how many cells, and — when there is exactly
  * one file or one cell — which. A bulk action across files names neither.
  */
-function cellsProps({ projectId, cells, lane, source, surface }: CellsTarget): TelemetryProps {
+function cellsProps({ projectId, cells: touched, lane, source, surface }: CellsTarget): TelemetryProps {
+  // A line can carry several takes; voting on two of them is still one line.
+  const cells = [...new Map(touched.map((c) => [`${c.fileId}\u0000${c.cellId}`, c])).values()]
   const props: TelemetryProps = {
     project_id: projectId,
     lane: telemetryLane(lane),
@@ -132,7 +134,8 @@ export interface AudioGeneratedInput extends CellsTarget {
   /** A stock voice's id. A cloned voice is somebody's voice, so its id is
    *  never sent; `voice_kind` says it was a clone. */
   voiceId?: string | null
-  voiceKind: "stock" | "clone"
+  /** "mixed" when one action generated with several kinds of voice. */
+  voiceKind: "stock" | "clone" | "mixed"
   durationMs?: number | null
 }
 

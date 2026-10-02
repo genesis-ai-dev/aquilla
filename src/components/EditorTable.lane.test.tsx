@@ -43,6 +43,8 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),
 }))
 vi.mock("@/lib/contextual/transport", () => ({ reviewContextualDraft }))
+const { reportValidation } = vi.hoisted(() => ({ reportValidation: vi.fn() }))
+vi.mock("@/lib/review-telemetry", () => ({ reportValidation }))
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).
@@ -173,6 +175,19 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     )
   })
 
+  // AQU-1572: "toggling text validation in the editor produces one cell
+  // validated event with medium=text".
+  it("reports a validation from the cell's control once, as text, in its lane", async () => {
+    reportValidation.mockClear()
+    renderTable("fr")
+    fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
+    await vi.waitFor(() => expect(reportValidation).toHaveBeenCalledTimes(1))
+    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
+      medium: "text", validated: true, lane: "fr", source: "ui", surface: "cell",
+      cells: [{ fileId: "file-1", cellId: "cell-1" }],
+    }))
+  })
+
   it("passes the default lane ('') unchanged so N=1 stays byte-identical", async () => {
     emitCellValidate.mockClear()
     renderTable("")
@@ -189,6 +204,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
   // limited to Spanish had it refused ("…the main language at the time").
   it("validates your own edit in the lane you edited, not the main language", async () => {
     emitCellValidate.mockClear()
+    reportValidation.mockClear()
     emitTargetCellCommit.mockClear()
     reviewContextualDraft.mockClear()
     hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", "fr"), [
@@ -199,6 +215,9 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
     expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
+    // AQU-1572: the validation an edit adds by itself is not a review action,
+    // and reporting it would bury the deliberate ones.
+    expect(reportValidation).not.toHaveBeenCalled()
     emitTargetCellCommit.mockClear()
   })
 

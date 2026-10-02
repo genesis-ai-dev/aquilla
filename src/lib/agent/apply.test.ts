@@ -9,6 +9,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { StagedEvent } from "./protocol"
 
 vi.mock("@/lib/sync/events-emit", () => ({ enqueueEvent: vi.fn() }))
+const { reportValidation } = vi.hoisted(() => ({ reportValidation: vi.fn() }))
+vi.mock("@/lib/review-telemetry", () => ({ reportValidation }))
 
 import { enqueueEvent } from "@/lib/sync/events-emit"
 import { applyStagedEvent, applyStagedEvents, UnsupportedAgentEventError } from "./apply"
@@ -267,6 +269,32 @@ describe("applyStagedEvent — cell creates (AQU-890)", () => {
     await expect(
       applyStagedEvent(createEvent({ payload: { cellId: "c-new" } }), CTX),
     ).rejects.toThrow(/needs a string value/)
+  })
+})
+
+describe("applyStagedEvents — telemetry (AQU-1572)", () => {
+  it("reports an applied proposal's validations as ONE agent event per lane", async () => {
+    reportValidation.mockClear()
+    const validate = (cellId: string, targetLang?: string): StagedEvent => ({
+      kind: "cell.validate", fileId: "f-1", cellId,
+      payload: { editEventId: `evt-${cellId}`, ...(targetLang ? { targetLang } : {}) },
+      display: {},
+    })
+    await applyStagedEvents([commitEvent(), validate("c-1"), validate("c-2"), validate("c-3", "es")], CTX)
+    expect(reportValidation).toHaveBeenCalledTimes(2)
+    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
+      medium: "text", validated: true, source: "agent", projectId: "proj-1", lane: "",
+      cells: [{ fileId: "f-1", cellId: "c-1" }, { fileId: "f-1", cellId: "c-2" }],
+    }))
+    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
+      lane: "es", cells: [{ fileId: "f-1", cellId: "c-3" }],
+    }))
+  })
+
+  it("reports nothing for a proposal with no validations", async () => {
+    reportValidation.mockClear()
+    await applyStagedEvents([commitEvent()], CTX)
+    expect(reportValidation).not.toHaveBeenCalled()
   })
 })
 

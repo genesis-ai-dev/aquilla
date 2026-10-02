@@ -11,6 +11,7 @@ import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { GeneratedClip } from "@/lib/review-telemetry"
 
 export interface GenerateCellVoiceArgs {
   /**
@@ -52,6 +53,8 @@ export interface GenerateCellVoiceArgs {
   voiceCellId?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1572: see `GenerateAndAttachArgs.onGenerated`. */
+  onGenerated?: (clip: GeneratedClip) => void
 }
 
 /**
@@ -124,6 +127,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       ...(label ? { label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
+      ...(args.onGenerated ? { onGenerated: args.onGenerated } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

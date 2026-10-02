@@ -20,6 +20,7 @@ import type { AudioValidationTake } from "@/components/cell/AudioValidationContr
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
+import { reportValidation } from "@/lib/review-telemetry"
 
 export interface UseAudioValidation {
   /** Every selected dub take on the cell, with the project's policy applied. */
@@ -46,8 +47,10 @@ export function useAudioValidation(opts: {
   jwt?: string | null
   /** AQU-1462: lane the member is working in. The vote itself stays shared. */
   targetLang?: string
+  /** AQU-1572: where the vote was cast, for telemetry ("recording-tab", "recorder"). */
+  surface: string
 }): UseAudioValidation {
-  const { project, fileId, cellId, username, onCommitted, jwt, targetLang } = opts
+  const { project, fileId, cellId, username, onCommitted, jwt, targetLang, surface } = opts
   const { t } = useI18n()
   const jwtRef = useRef<string | null>(jwt ?? null)
   jwtRef.current = jwt ?? null
@@ -91,6 +94,10 @@ export function useAudioValidation(opts: {
         author: username,
         ...(targetLang ? { targetLang } : {}),
       })
+      reportValidation({
+        medium: "audio", validated, projectId: project.id, cells: [{ fileId, cellId }],
+        lane: targetLang, source: "ui", surface,
+      })
       await onCommitted?.(cellId)
       // AQU-490: and the part `onCommitted` cannot do. It refreshes the CELLS
       // read, which is where text validation lives; an audio vote lives in the
@@ -104,7 +111,7 @@ export function useAudioValidation(opts: {
       console.error("[audio-validate] emit failed", error)
       return false
     }
-  }, [project.id, fileId, cellId, username, roleLevel, onCommitted, getTokenForFile, targetLang])
+  }, [project.id, fileId, cellId, username, roleLevel, onCommitted, getTokenForFile, targetLang, surface])
 
   return {
     takesFor,

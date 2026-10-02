@@ -31,6 +31,9 @@ vi.mock("./transcribe-status", () => ({
   setTranscribeStatus: vi.fn(),
 }))
 
+const { reportGeneratedClips } = vi.hoisted(() => ({ reportGeneratedClips: vi.fn() }))
+vi.mock("@/lib/review-telemetry", () => ({ reportGeneratedClips }))
+
 vi.mock("./tts", () => ({
   ttsStatusKey: (id: string) => `synth:${id}`,
   getTtsStatus: vi.fn(() => ({ kind: "idle" })),
@@ -214,6 +217,22 @@ describe("runSynthAll", () => {
     ]
     await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
     expect(generateCellVoice).toHaveBeenCalledTimes(2)
+  })
+
+  // AQU-1572: Generate all is one action, so one `audio generated`.
+  it("reports the run's generated clips once, together", async () => {
+    const { generateCellVoice } = await import("./voice-generate-helpers")
+    vi.mocked(generateCellVoice).mockImplementation(async (args) => {
+      args.onGenerated?.({ fileId: args.cell.fileId, cellId: args.cell.id, provider: "inworld", voiceKind: "stock" })
+      return true
+    })
+    const cells = [makeCell({ id: "c1", translated: "Hola" }), makeCell({ id: "c2", translated: "Adios" })]
+    await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1", targetLang: "es" })
+    expect(reportGeneratedClips).toHaveBeenCalledTimes(1)
+    const [clips, context] = reportGeneratedClips.mock.calls[0]
+    expect(clips).toHaveLength(2)
+    expect(context).toEqual({ projectId: "proj1", lane: "es", surface: "generate-all" })
+    vi.mocked(generateCellVoice).mockImplementation(async () => true)
   })
 })
 

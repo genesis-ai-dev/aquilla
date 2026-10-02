@@ -42,6 +42,7 @@ import {
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
+import { reportValidation } from "@/lib/review-telemetry"
 
 interface Props {
   project: ProjectRecord
@@ -315,6 +316,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || audioTakeTargets.length === 0) return
     if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
     setRunning({ kind: "validate-audio" })
+    // AQU-1572: one event for the whole selection, counting the votes that
+    // reached the outbox even when a later one throws.
+    const voted: typeof audioTakeTargets = []
     try {
       // AWAITED, unlike the text loop beside it. These are not fire-and-forget
       // here because the commit below flushes the outbox, and a flush that
@@ -328,6 +332,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
+        voted.push(target)
       }
       toast.add({
         type: "success",
@@ -339,6 +344,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // can live on a cue sibling.
       await commitAudioValidation(audioTakeTargets.map((target) => target.fileId))
     } finally {
+      reportValidation({
+        medium: "audio", validated: true, projectId: project.id, cells: voted,
+        lane: activeLane, source: "ui", surface: "selection",
+      })
       setRunning({ kind: "idle" })
     }
   }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
@@ -348,6 +357,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || audioRemoveTargets.length === 0) return
     if (!canPerform("cell.audio.unvalidate", project.syncRole?.level ?? null)) return
     setRunning({ kind: "validate-audio" })
+    const withdrawn: typeof audioRemoveTargets = []
     try {
       for (const target of audioRemoveTargets) {
         // No `targetUsername`: absent means "my own vote", and removing
@@ -362,6 +372,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
+        withdrawn.push(target)
       }
       toast.add({
         type: "success",
@@ -369,6 +380,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       })
       await commitAudioValidation(audioRemoveTargets.map((target) => target.fileId))
     } finally {
+      reportValidation({
+        medium: "audio", validated: false, projectId: project.id, cells: withdrawn,
+        lane: activeLane, source: "ui", surface: "selection",
+      })
       setRunning({ kind: "idle" })
     }
   }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
@@ -428,6 +443,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         })
       }
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
+      reportValidation({
+        medium: "text", validated: true, projectId: project.id,
+        cells: summary.validatable.map((cell) => ({ fileId: cell.fileId, cellId: cell.id })),
+        lane: activeLane, source: "ui", surface: "selection",
+      })
       const message = batchValidateToast(summary, t, formatLocaleList)
       toast.add({
         type: message.type,
@@ -447,7 +467,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (unvalidatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      let removed = 0
+      const removed: Array<{ fileId: string; cellId: string }> = []
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
         if (!cell.activeValidators.includes(username)) continue
@@ -461,14 +481,18 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           editEventId: cell.targetEventId,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
-        removed++
+        removed.push({ fileId: cell.fileId, cellId: cell.id })
       }
       toast.add({
         type: "success",
-        title: t("editor.selection.unvalidatedToast", { count: removed }),
+        title: t("editor.selection.unvalidatedToast", { count: removed.length }),
+      })
+      reportValidation({
+        medium: "text", validated: false, projectId: project.id, cells: removed,
+        lane: activeLane, source: "ui", surface: "selection",
       })
       // AQU-616: flush now rather than waiting for the periodic flusher.
-      if (removed > 0) onValidationCommitted?.()
+      if (removed.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }

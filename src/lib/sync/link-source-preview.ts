@@ -138,3 +138,70 @@ export async function loadLinkSourcePreview(
   ])
   return buildLinkSourcePreview(upstream, self.files)
 }
+
+/**
+ * AQU-1561: the upstream's files alone, for a project that does not exist yet.
+ *
+ * Create New Project asks the same "which of these files?" question as the link
+ * flow above, but one read short of it: the project being created has no files,
+ * so there is nothing to clash with and nothing to compare against. Reusing
+ * `buildLinkSourcePreview` with an empty existing-file list is what keeps the
+ * two answers the same shape — every row comes back `clashes: false`, and the
+ * shared list component renders no clash badges for it — rather than the create
+ * dialog growing its own notion of an upstream file row.
+ *
+ * Throws what `fetchProject` throws. The caller shows the failure and offers a
+ * retry rather than rendering an empty list, which would read as "an upstream
+ * with no files" — a different situation, and one that still creates.
+ */
+export async function loadUpstreamFileChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<LinkSourcePreviewFile[]> {
+  const upstream = await fetchProject(upstreamProjectId, jwt, apiUrl)
+  return buildLinkSourcePreview(upstream, []).files
+}
+
+/**
+ * AQU-1561: the two numbers every caller needs off a selection, derived in one
+ * place so the "all files" default and the nothing-checked refusal mean the same
+ * thing in both flows.
+ *
+ * `allSelected` is what decides whether the request omits `fileIds` entirely
+ * (follow the whole project, including files the upstream gains later) or sends
+ * the picked ids (a fixed list). `nothingSelected` is the one state both flows
+ * refuse — a link or a clone that carries no files is a mistake, not a choice —
+ * and is deliberately false for an EMPTY upstream, which is a different and
+ * perfectly linkable situation.
+ */
+export function summarizeFileSelection(
+  files: readonly LinkSourcePreviewFile[],
+  selectedFileIds: ReadonlySet<string>,
+): { selectedCount: number; allSelected: boolean; nothingSelected: boolean } {
+  const selectedCount = files.filter((f) => selectedFileIds.has(f.id)).length
+  return {
+    selectedCount,
+    allSelected: files.length > 0 && selectedCount === files.length,
+    nothingSelected: files.length > 0 && selectedCount === 0,
+  }
+}
+
+/** AQU-1561: the clashing names still CHECKED, de-duplicated by name. Unchecking
+ *  a clashing file takes it out of the warning, because a file that is not
+ *  coming cannot collide with anything. */
+export function selectedClashNames(
+  files: readonly LinkSourcePreviewFile[],
+  selectedFileIds: ReadonlySet<string>,
+): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const f of files) {
+    if (!f.clashes || !selectedFileIds.has(f.id)) continue
+    const key = f.name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(f.name)
+  }
+  return names
+}

@@ -125,6 +125,38 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1561: which of the upstream's files the new project brings in.
+    // Same question the Source & sync link flow asks, so the list itself reuses
+    // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
+    // sentences around it differ, because a clone's one-time copy and a live
+    // link's ongoing follow are different promises.
+    "projectSettings.create.upstreamFilesLabel": "Files to bring in",
+    "projectSettings.create.upstreamFilesLoading": "Loading that project's files…",
+    "projectSettings.create.upstreamFilesLoadError":
+      "Couldn't load that project's file list, so we can't say which files would " +
+      "be brought in. Nothing has been created.",
+    "projectSettings.create.upstreamFilesRetryButton": "Try again",
+    "projectSettings.create.upstreamFilesNoneSelected":
+      "Pick at least one file to bring in.",
+    "projectSettings.create.upstreamFilesEmptyUpstream":
+      "That project has no files yet, so none will be brought in now.",
+    "projectSettings.create.upstreamFilesCount": plural({
+      one: "{count} file will be brought into the new project.",
+      other: "{count} files will be brought into the new project.",
+    }),
+    // The live case follows the upstream from here on, so whether the link is
+    // whole-project or a fixed list decides what arrives LATER too.
+    "projectSettings.create.upstreamFilesLiveAllNote":
+      "The new project will follow the whole source project, so files it adds " +
+      "later will arrive too.",
+    "projectSettings.create.upstreamFilesLiveSubsetNote":
+      "The new project will follow only the files you picked. Files the source " +
+      "project adds later will not arrive on their own.",
+    // A clone never syncs again, so there is no "later" to describe — only what
+    // the one snapshot copies.
+    "projectSettings.create.upstreamFilesCloneNote":
+      "A copy is taken once, of the files you picked. The new project does not " +
+      "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
@@ -1135,6 +1167,13 @@ export const projectSettings = defineNamespace({
         description:
           "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
           "snapshot copy, not a live link.",
+      },
+      "projectSettings.create.upstreamFilesCount": {
+        description:
+          "Sentence under the file list in the Create New Project dialog, saying how many of the upstream project's files the new project will bring in.",
+        placeholders: {
+          count: "How many files are checked (data, a plain integer), e.g. '3'.",
+        },
       },
       "projectSettings.create.cloneIntro": {
         description:

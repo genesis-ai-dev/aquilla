@@ -25,6 +25,21 @@ import type { CreateTarget } from "@/lib/sync/create-targets"
 
 // AQU-1352: the destination picker fetches create-targets on open and submit
 // waits for it. Each test resolves it (Personal unless it says otherwise).
+// AQU-1561: the dialog reads the chosen upstream's file list so the lead can
+// pick which files to bring in. These tests are about everything else in the
+// create flow, so the list resolves to one file and stays all-checked — the
+// whole-project default, which keeps `linkProjectSource` carrying no `fileIds`
+// exactly as it did before that slice.
+vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi
+      .fn()
+      .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+  }
+})
+
 vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({

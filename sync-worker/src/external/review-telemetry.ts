@@ -20,8 +20,12 @@
 // artifact id, audio id or URL.
 //
 // Consent: the browser's analytics switch lives in that browser's localStorage
-// (src/lib/analytics-consent.ts), which no worker can read. Like auth-worker's
-// agent telemetry, these events therefore do not consult it.
+// (src/lib/analytics-consent.ts), which no worker can read. REST and MCP
+// commits have no browser behind them, so, like auth-worker's agent telemetry,
+// they do not consult it. A session ('app') commit does: a person in the app
+// applies the in-app agent's plan from the review card, so the card states
+// that browser's switch on the commit request (`?analytics=on`) and the worker
+// sends nothing without it — see reviewTelemetryAllowed.
 //
 // Contract, same as auth-worker's agent telemetry (AQU-1467): one request per
 // commit, never throws, never delays the response (ctx.waitUntil), and a no-op
@@ -56,6 +60,23 @@ export const MIXED_LANE = 'mixed'
  */
 export function telemetrySourceFor(channel: ProvenanceChannel): TelemetrySource {
   return channel === 'rest' ? 'api' : 'agent'
+}
+
+/**
+ * AQU-1572 review: may this commit report to PostHog at all? A session ('app')
+ * commit is a person in the browser, so it reports only when the review card
+ * says that person's analytics switch is on (`?analytics=on` on the commit
+ * request; a query parameter, not a header, so the browser's CORS preflight is
+ * unaffected). Anything else, including an older client that says nothing,
+ * reads as off. REST and MCP have no browser switch to honour.
+ */
+export function reviewTelemetryAllowed(request: Pick<Request, 'url'>, channel: ProvenanceChannel): boolean {
+  if (channel !== 'app') return true
+  try {
+    return new URL(request.url).searchParams.get('analytics') === 'on'
+  } catch {
+    return false
+  }
 }
 
 /** The event kinds that change an approval, and which approval. */

@@ -28,6 +28,7 @@ import {
   MIXED_LANE,
   emitEventsTelemetry,
   linkMediaTelemetry,
+  reviewTelemetryAllowed,
   sendReviewTelemetry,
   telemetryAppEnv,
   telemetryDistinctId,
@@ -467,9 +468,10 @@ describe('review telemetry — ask mode through the session route', () => {
       .run()
     expect(await posthogBatches()).toHaveLength(0)
 
-    const { res } = await sessionCall(env, token, `/${id}/commit`)
+    // The review card states the person's analytics switch (on here).
+    const { res } = await sessionCall(env, token, `/${id}/commit?analytics=on`)
     expect(res.status).toBe(200)
-    const { res: again } = await sessionCall(env, token, `/${id}/commit`)
+    const { res: again } = await sessionCall(env, token, `/${id}/commit?analytics=on`)
     expect(again.status).toBe(200)
 
     const batches = await posthogBatches()
@@ -480,6 +482,65 @@ describe('review telemetry — ask mode through the session route', () => {
     expect(event.distinct_id).toBe(sha256('alice'))
     expect(event.properties.source).toBe('agent')
     expect(event.properties.cell_count).toBe(1)
+  })
+})
+
+// The review card applies a plan for a person in the browser, whose analytics
+// switch the worker cannot read. It says so on the commit; without it, nothing
+// is sent (an older client, or a person who turned analytics off).
+describe('review telemetry — the session route honours the browser analytics switch', () => {
+  it.each([
+    ['off', '?analytics=off'],
+    ['not stated', ''],
+  ])('sends nothing for a session commit when analytics is %s, though the commit lands', async (_label, query) => {
+    await seedTarget(tdb, 'cell-1', 'tgt-1')
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash) VALUES (8, 'optout', 'o@x.com', 'h')`,
+    )
+    await tdb.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, 8, 300)`,
+      [PROJECT],
+    )
+    const env = makeEnv(tdb.db)
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: '', userId: 8, username: 'optout', role: 300 })
+    const call = async (path: string, body?: unknown) => {
+      const res = (await handleSessionChangesetsRequest(
+        new Request(`https://w/api/v1/changesets/${PROJECT}${path}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          },
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        }),
+        env,
+        ctx,
+      ))!
+      return { res, body: (await res.json()) as any }
+    }
+    const { body: prep } = await call('', { commands: [{ kind: 'EmitEvents', events: [validate('cell-1')] }] })
+    const id = prep.changeset.id as string
+    await tdb.db
+      .prepare(
+        `INSERT INTO changeset_confirmations
+           (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
+         VALUES (?, ?, '8', 'session', ?, ?, NULL)`,
+      )
+      .bind('conf-optout', id, prep.digest, new Date(Date.now() + 60_000).toISOString())
+      .run()
+
+    const { res } = await call(`/${id}/commit${query}`)
+    expect(res.status).toBe(200)
+    expect(await tdb.rows('cell_validators')).toHaveLength(1)
+    expect(await posthogBatches()).toHaveLength(0)
+  })
+
+  it('leaves REST and MCP commits alone: they have no browser switch', () => {
+    const req = { url: 'https://w/api/v1/external/projects/p/changesets/c/commit' }
+    expect(reviewTelemetryAllowed(req, 'rest')).toBe(true)
+    expect(reviewTelemetryAllowed(req, 'mcp')).toBe(true)
+    expect(reviewTelemetryAllowed(req, 'app')).toBe(false)
+    expect(reviewTelemetryAllowed({ url: `${req.url}?analytics=on` }, 'app')).toBe(true)
   })
 })
 

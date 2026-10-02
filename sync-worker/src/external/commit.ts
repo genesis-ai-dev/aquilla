@@ -60,7 +60,7 @@ import { resolveCellStates } from './preconditions'
 import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
-import { linkMediaTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { linkMediaTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
@@ -1479,17 +1479,20 @@ async function commitLinkMedia(
 
   // AQU-1572: one `audio attached` for the cells whose attach landed. After the
   // terminal write, and before the partial-failure reply: a partly rejected
-  // changeset is still committed, and its accepted attaches are real.
-  sendReviewTelemetry(
-    env,
-    ctx,
-    cred.username,
-    linkMediaTelemetry(
-      projectId,
-      attaches.filter((a) => acceptedIds.has(a.eventId)),
-      telemetrySourceFor(channel),
-    ),
-  )
+  // changeset is still committed, and its accepted attaches are real. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      linkMediaTelemetry(
+        projectId,
+        attaches.filter((a) => acceptedIds.has(a.eventId)),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
 
   if (rejected.length > 0) {
     return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {

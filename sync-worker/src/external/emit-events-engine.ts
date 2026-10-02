@@ -29,7 +29,7 @@ import {
   type EventsWriteResponse,
 } from './commit-gates'
 import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
-import { emitEventsTelemetry, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { emitEventsTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -844,16 +844,19 @@ export async function commitEmitEvents(
 
   // AQU-1572: report the validations that landed — after the terminal write,
   // and only the accepted events, so a refused, stale or still-staged plan
-  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id.
-  sendReviewTelemetry(
-    env,
-    ctx,
-    cred.username,
-    emitEventsTelemetry(
-      projectId,
-      cmd.events.filter((_, i) => acceptedIds.has(allEventIds[i])),
-      telemetrySourceFor(channel),
-    ),
-  )
+  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      emitEventsTelemetry(
+        projectId,
+        cmd.events.filter((_, i) => acceptedIds.has(allEventIds[i])),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
   return Response.json({ receipt })
 }

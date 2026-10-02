@@ -1,4 +1,4 @@
-import { compareByCanonicalBookOrder, bookCodeFromFileName } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, bookCodeFromFileName, bookCodeFromFileNameStrict } from "@/lib/file-labeling/bible-book-names"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -124,6 +124,18 @@ function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): n
  */
 export function fileBookCode(file: GroupableFile): string | undefined {
   return file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+}
+
+/**
+ * True when `fileBookCode` is more than a guess: the file stores its book, or
+ * its name names the book outright ("JON-source", "Judges"), not just starts
+ * or ends with three letters that happen to be a code. AQU-1365 review: the
+ * translation check only offers to update a file's source text in place on
+ * this, since a wrong guess would reconcile one book's verses over another's.
+ */
+export function fileBookCodeIsCertain(file: GroupableFile): boolean {
+  if (file.bookCode) return true
+  return mayBeScripture(file) && bookCodeFromFileNameStrict(file.name) !== undefined
 }
 
 /**

@@ -1308,6 +1308,14 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.languageBody": "{fileName} says it's in {language}, the language you translate into. A translation goes into a file that's already in this project.",
     "importExport.translationCheck.chooseFile": "Choose the file it translates",
     "importExport.translationCheck.importAsSource": "Import it as a new source text",
+    // AQU-1365 review: the check when the upload can't be handed to the
+    // translation review (format, another lane), and a Contributor's empty project.
+    "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
+    "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
+    "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+    "importExport.translationCheck.otherLane": "It says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.translationCheck.otherLaneBody": "{fileName} says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
     "importExport.translationCheck.manyTitle": "Some of these look like translations",
     "importExport.translationCheck.manyBody": plural({
       one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
@@ -4023,6 +4031,47 @@ export const importExport = defineNamespace({
       "importExport.translationCheck.importAsSource": {
         description:
           "Button on the 'This looks like a translation' screen: ignore the warning and import the upload as new source text. Imperative.",
+      },
+      // AQU-1365 review: the check's answers when the upload can only come in as
+      // source text, and a Contributor's empty project.
+      "importExport.translationCheck.sameBookPlain": {
+        description:
+          "Shown instead of the usual question on the '{book} is already in this project' screen when the upload can't be imported as a translation (its format, or its language belongs to another lane), so the screen doesn't ask whether it is one. One sentence.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.severalSameBookPlain": {
+        description:
+          "Shown when the project already has two or more files for the uploaded file's book and the upload can't be imported as a translation anyway (its format, or another lane's language). One sentence.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.formatSourceOnly": {
+        description:
+          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence; USFM is a file format name, do not translate it.",
+      },
+      "importExport.translationCheck.otherLane": {
+        description:
+          "Extra sentences on the 'Is this a translation?' screens when the uploaded file's header names a language this project translates into, but not in the language lane open in the editor. A translation import only fills the open lane, so it isn't offered. 'It' is the uploaded file. Two sentences.",
+        placeholders: {
+          language: "Name of a language the project translates into in a lane other than the one open in the editor, e.g. 'Russian'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.otherLaneBody": {
+        description:
+          "Explains the 'This looks like a translation' screen when the language the upload names belongs to a language lane other than the one open in the editor. Two sentences.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          language: "Name of a language the project translates into in a lane other than the one open in the editor, e.g. 'Russian'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.intent.translation.noFilesLead": {
+        description:
+          "Shown to a Contributor (who can import translations but not new source text) when the project has no files yet: as the tooltip of the disabled Import button and of the disabled 'A translation' card. Two short sentences.",
       },
       "importExport.translationCheck.manyTitle": {
         description:

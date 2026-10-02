@@ -7,6 +7,11 @@
  * Layouts (see `translationCheckLayout`):
  *  - One file, its book in exactly one project file: put it into that file as
  *    its translation, update that file's source text, or import it separately.
+ *    Update is offered only when that file's book is known rather than
+ *    guessed from its name, and is never the highlighted answer.
+ *  - A file the translation review can't read (a .usx), or one in another
+ *    lane's language, can only come in as source text; the question then
+ *    says so instead of asking whether it is a translation.
  *  - One file, its book in several files: choose the file it translates, or
  *    import it separately.
  *  - One file holding several books: import it separately (a translation goes
@@ -33,10 +38,16 @@ interface TranslationCheckPanelProps {
   /** False when this person can't import a translation (role), so the
    *  answers that lead there are not offered. */
   canImportTranslation: boolean
+  /** A language the check found, as the person knows it (the lane's name,
+   *  not a bare tag like `ru`), and whether it is the lane a translation
+   *  import fills right now. */
+  describeLanguage: (language: string) => { name: string; active: boolean }
   onChoose: (choice: TranslationCheckChoice) => void
 }
 
-export function TranslationCheckPanel({ layout, fileCount, canImportTranslation, onChoose }: TranslationCheckPanelProps) {
+type Answer = { choice: TranslationCheckChoice; label: string }
+
+export function TranslationCheckPanel({ layout, fileCount, canImportTranslation, describeLanguage, onChoose }: TranslationCheckPanelProps) {
   const { t, locale } = useI18n()
   // One answer per question: the import it starts takes a moment to show.
   const [chosen, setChosen] = useState(false)
@@ -46,33 +57,66 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
     onChoose(choice)
   }
   const signal = layout.kind === "many" ? null : layout.signal
+  const language = signal?.language ? describeLanguage(signal.language) : null
+  // A translation import fills the lane open in the editor. A file in
+  // another lane's language must not be handed over to fill this one
+  // (AQU-1365 review).
+  const otherLane = language !== null && !language.active
   // The review reads USFM, spreadsheets and subtitles; another format can
   // only be imported as source text.
-  const canHandOff = canImportTranslation && signal !== null && isFileTargetFileName(signal.fileName)
-  const languageToo = signal?.language
-    ? t("importExport.translationCheck.languageToo", { language: signal.language })
+  const readable = signal !== null && isFileTargetFileName(signal.fileName)
+  const canHandOff = canImportTranslation && readable && !otherLane
+  const languageLine = !language
+    ? null
+    : otherLane
+      ? t("importExport.translationCheck.otherLane", { language: language.name })
+      : t("importExport.translationCheck.languageToo", { language: language.name })
+  // Said only when a hand-off is otherwise on offer, so the question on
+  // screen never asks for an answer that has no button.
+  const formatLine = canImportTranslation && !readable && !otherLane
+    ? t("importExport.translationCheck.formatSourceOnly")
     : null
 
   let body: string[]
-  let answers: { choice: TranslationCheckChoice; label: string }[]
+  let answers: Answer[]
   switch (layout.kind) {
     case "sameBook": {
       const book = layout.book.file.name
-      body = [
-        t("importExport.translationCheck.sameBookBody", { fileName: layout.signal.fileName, book }),
-        ...(languageToo ? [languageToo] : []),
-      ]
-      answers = [
-        ...(canHandOff ? [{ choice: "translation" as const, label: t("importExport.translationCheck.putInto", { book }) }] : []),
-        { choice: "update", label: t("importExport.translationCheck.update", { book }) },
-        { choice: "separate", label: t("importExport.translationCheck.separate") },
-      ]
+      // Only a file whose book is known, not guessed from a few letters of
+      // its name, is offered an in-place update of its source text, and that
+      // is never the highlighted answer.
+      const update: Answer[] = layout.book.file.bookCertain
+        ? [{ choice: "update", label: t("importExport.translationCheck.update", { book }) }]
+        : []
+      const separate: Answer = { choice: "separate", label: t("importExport.translationCheck.separate") }
+      if (canHandOff) {
+        body = [
+          t("importExport.translationCheck.sameBookBody", { fileName: layout.signal.fileName, book }),
+          ...(languageLine ? [languageLine] : []),
+        ]
+        answers = [
+          { choice: "translation", label: t("importExport.translationCheck.putInto", { book }) },
+          ...update,
+          separate,
+        ]
+      } else {
+        body = [
+          t("importExport.translationCheck.sameBookPlain", { fileName: layout.signal.fileName, book }),
+          ...(languageLine ? [languageLine] : []),
+          ...(formatLine ? [formatLine] : []),
+        ]
+        answers = [separate, ...update]
+      }
       break
     }
     case "sameBookAmbiguous":
       body = [
-        t("importExport.translationCheck.severalSameBook", { fileName: layout.signal.fileName, book: layout.bookName }),
-        ...(languageToo ? [languageToo] : []),
+        t(canHandOff ? "importExport.translationCheck.severalSameBook" : "importExport.translationCheck.severalSameBookPlain", {
+          fileName: layout.signal.fileName,
+          book: layout.bookName,
+        }),
+        ...(languageLine ? [languageLine] : []),
+        ...(formatLine ? [formatLine] : []),
       ]
       answers = [
         ...(canHandOff ? [{ choice: "choose-file" as const, label: t("importExport.translationCheck.chooseFile") }] : []),
@@ -86,16 +130,24 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
           fileName: layout.signal.fileName,
           books: formatList(books, locale, { type: "conjunction" }),
         }),
-        ...(languageToo ? [languageToo] : []),
+        ...(languageLine ? [languageLine] : []),
       ]
       answers = [{ choice: "separate", label: t("importExport.translationCheck.separate") }]
       break
     }
     case "language":
-      body = [t("importExport.translationCheck.languageBody", {
-        fileName: layout.signal.fileName,
-        language: layout.signal.language ?? "",
-      })]
+      body = otherLane
+        ? [t("importExport.translationCheck.otherLaneBody", {
+            fileName: layout.signal.fileName,
+            language: language?.name ?? "",
+          })]
+        : [
+            t("importExport.translationCheck.languageBody", {
+              fileName: layout.signal.fileName,
+              language: language?.name ?? "",
+            }),
+            ...(formatLine ? [formatLine] : []),
+          ]
       answers = [
         ...(canHandOff ? [{ choice: "choose-file" as const, label: t("importExport.translationCheck.chooseFile") }] : []),
         { choice: "separate", label: t("importExport.translationCheck.importAsSource") },

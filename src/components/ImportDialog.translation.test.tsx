@@ -91,7 +91,7 @@ function host(overrides: Partial<TranslationImportHost> = {}): TranslationImport
     applyOptimisticTargetEdits: vi.fn(),
     disabledReason: null,
     languageLabel: "Siberian Tatar",
-    targetLanguages: ["Siberian Tatar"],
+    targetLanguages: [{ language: "Siberian Tatar", label: null, active: true }],
     ...overrides,
   }
 }
@@ -182,6 +182,16 @@ describe("AQU-1365: the Import dialog's first screen", () => {
     )
     expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByTestId("translation-chooser")).toBeInTheDocument()
+  })
+
+  it("tells a Contributor in a project with no files that a project lead adds the source first", () => {
+    renderDialog({
+      sourceDisabledReason: "You're a Contributor; you need at least Project lead access.",
+      translation: host({ files: [], activeFileId: null, activeFileCells: [] }),
+    })
+    expect(screen.getByTestId("import-intent-translation")).toHaveAttribute(
+      "data-tooltip", "A project lead needs to add a source text first. A translation goes into a file that's already here.",
+    )
   })
 
   it("greys out A translation in a project with no files, and says why", () => {

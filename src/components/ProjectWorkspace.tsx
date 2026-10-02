@@ -9404,9 +9404,15 @@ export function ProjectWorkspace() {
   const sourceImportDenialReason = canImportSource
     ? null
     : denialMessage(t, ROLE.PROJECT_LEAD, project?.syncRole?.level ?? null)
-  const importDenialReason = canImportSource || canImportTranslation
+  // A Contributor in a project with no files could only reach a dialog with
+  // both choices greyed out, so the button says why instead (AQU-1365 review).
+  const importDenialReason = canImportSource
     ? null
-    : denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
+    : !canImportTranslation
+      ? denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
+      : (project?.files.length ?? 0) === 0
+        ? t("importExport.intent.translation.noFilesLead")
+        : null
   // AQU-1365: the files a translation can go into, in sidebar order, so the
   // picker reads like the file list beside it.
   const translationImportFiles = useMemo(
@@ -14304,7 +14310,15 @@ export function ProjectWorkspace() {
               ? null
               : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
-            targetLanguages: [project.targetLanguage, ...targetLanes].filter((language): language is string => Boolean(language)),
+            // One entry per lane, so the check can tell a file in this lane's
+            // language (offer the translation import) from one in another
+            // lane's (say so; the import only fills the open lane).
+            targetLanguages: availableLanes.flatMap((lane) => {
+              const language = lane === "" ? project.targetLanguage : lane
+              return language
+                ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }]
+                : []
+            }),
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

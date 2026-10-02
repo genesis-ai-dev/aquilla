@@ -133,14 +133,14 @@ describe("translationSignals", () => {
       fileKey: "JON-tatar.usfm",
       fileName: "JON-tatar.usfm",
       bookIds: ["JON"],
-      sameBook: [{ bookCode: "JON", files: [{ id: "jonah", name: "Jonah" }] }],
+      sameBook: [{ bookCode: "JON", files: [{ id: "jonah", name: "Jonah", bookCertain: true }] }],
       language: "Siberian Tatar",
     }])
   })
 
   it("flags a book already here even when the file names no language", () => {
     const [found] = signals([upload("RUT-tatar.usfm", "\\id RUT\n\\c 1\n", ["RUT"])])
-    expect(found.sameBook[0].files).toEqual([{ id: "ruth", name: "Ruth" }])
+    expect(found.sameBook[0].files).toEqual([{ id: "ruth", name: "Ruth", bookCertain: true }])
     expect(found.language).toBeUndefined()
   })
 
@@ -209,7 +209,22 @@ describe("translationSignals", () => {
       [upload("1CH.usfm", "\\id 1CH\n\\c 1\n", ["1CH"])],
       { existingFiles: [{ id: "chron", name: "1CH", type: "codex" }] },
     )
-    expect(found.sameBook[0].files).toEqual([{ id: "chron", name: "1CH" }])
+    expect(found.sameBook[0].files).toEqual([{ id: "chron", name: "1CH", bookCertain: true }])
+  })
+
+  // AQU-1365 review: a book read from a few letters of a file's name is a
+  // guess, and "Update its source text" must not act on a guess.
+  it("says when a file's book is only guessed from its name", () => {
+    const [found] = signals(
+      [upload("JUD-tatar.usfm", "\\id JUD\n\\c 1\n", ["JUD"])],
+      { existingFiles: [{ id: "jud", name: "Judgment notes.usfm", type: "usfm" }] },
+    )
+    expect(found.sameBook[0].files).toEqual([{ id: "jud", name: "Judgment notes.usfm", bookCertain: false }])
+    const [judges] = signals(
+      [upload("JUD-tatar.usfm", "\\id JUD\n\\c 1\n", ["JUD"])],
+      { existingFiles: [{ id: "jdg", name: "Judges.usfm", type: "usfm" }] },
+    )
+    expect(judges).toBeUndefined()
   })
 })
 
@@ -225,7 +240,7 @@ describe("translationCheckLayout", () => {
   })
 
   it("can't offer one destination when two files hold the book, or the file holds two books", () => {
-    const twoJonahs = { ...jonah, sameBook: [{ bookCode: "JON", files: [{ id: "a", name: "Jonah" }, { id: "b", name: "Jonah" }] }] }
+    const twoJonahs = { ...jonah, sameBook: [{ bookCode: "JON", files: [{ id: "a", name: "Jonah", bookCertain: true }, { id: "b", name: "Jonah", bookCertain: true }] }] }
     expect(translationCheckLayout([twoJonahs], 1)).toMatchObject({ kind: "sameBookAmbiguous", bookName: "Jonah" })
     expect(translationCheckLayout([{ ...jonah, bookIds: ["JON", "RUT"] }], 1).kind).toBe("multiBook")
   })

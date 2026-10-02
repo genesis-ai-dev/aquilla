@@ -189,9 +189,19 @@ export interface TranslationImportHost {
   disabledReason: string | null
   /** Name of the language the import fills (the active lane's), when known. */
   languageLabel: string | null
-  /** Every target language of the project, for telling a translation from a
-   *  source upload. */
-  targetLanguages: string[]
+  /** Every target language of the project (one per lane), for telling a
+   *  translation from a source upload. */
+  targetLanguages: TranslationTargetLanguage[]
+}
+
+/** AQU-1365: one of the project's target lanes, as the translation check sees it. */
+export interface TranslationTargetLanguage {
+  /** The lane's language as stored (a name like "Siberian Tatar", or a tag). */
+  language: string
+  /** The lane's name as the person knows it, when it has one. */
+  label: string | null
+  /** True for the lane open in the editor, the one a translation import fills. */
+  active: boolean
 }
 
 /** One translation import in flight: how it arrives, its file, and a key that
@@ -236,6 +246,8 @@ interface PendingTranslationCheck {
   fileCount: number
   resume: (choice: TranslationCheckResume) => Promise<void>
   returnScreen: "upload" | "gdrive"
+  /** The language catalog the check ran with, for naming a bare tag. */
+  catalog: readonly LanguageEntry[]
 }
 
 const NO_TRANSLATION_FILES: TranslationDestination[] = []
@@ -387,7 +399,10 @@ export function ImportDialog({
   const translationFiles = translation?.files ?? NO_TRANSLATION_FILES
   const translationDisabledReason = translation
     ? translation.disabledReason
-      ?? (translationFiles.length === 0 ? t("importExport.intent.translation.noFiles") : null)
+      ?? (translationFiles.length === 0
+        // Only a project lead can add that source text (AQU-1365 review).
+        ? t(sourceDisabledReason ? "importExport.intent.translation.noFilesLead" : "importExport.intent.translation.noFiles")
+        : null)
     : null
   const translationDestination = translationRun
     ? translationFiles.find((file) => file.id === translationRun.fileId) ?? null
@@ -758,7 +773,7 @@ export function ImportDialog({
         uploads: open,
         existingFiles: translationFiles,
         sourceLanguage,
-        targetLanguages: host.targetLanguages,
+        targetLanguages: host.targetLanguages.map((lane) => lane.language),
         catalog,
       })
       if (signals.length === 0) return false
@@ -769,6 +784,7 @@ export function ImportDialog({
         fileCount,
         resume,
         returnScreen,
+        catalog,
       })
       setScreen("translationCheck")
       return true
@@ -818,7 +834,7 @@ export function ImportDialog({
         // keeps the file's translations. Keyed by the same keys
         // `emitParsedFile` looks up: a USFM upload's result has no book code,
         // so its name is what finds Jonah (AQU-1365 review).
-        if (layout.kind !== "sameBook") return
+        if (layout.kind !== "sameBook" || !layout.book.file.bookCertain) return
         const flagged = check.uploads.find((upload) => upload.fileKey === layout.signal.fileKey)
         const keys = new Set([
           layout.book.bookCode,
@@ -841,6 +857,17 @@ export function ImportDialog({
         void check.resume({})
         return
     }
+  }
+
+  // AQU-1365 review: a language the check found, by the lane's own name (a
+  // lane stored as "ru" reads "Russian"), and whether it is the lane open in
+  // the editor, which is the only one a translation import fills.
+  function describeCheckedLanguage(language: string): { name: string; active: boolean } {
+    const lane = translation?.targetLanguages.find((entry) => entry.language === language)
+      ?? translation?.targetLanguages.find((entry) => languagesEqual(entry.language, language))
+    const lower = language.trim().toLowerCase()
+    const named = translationCheck?.catalog.find((entry) => entry.code === lower || entry.altCode === lower)?.name
+    return { name: lane?.label?.trim() || named || language, active: lane?.active ?? false }
   }
 
   // AQU-1365: the review's "Import into Ruth instead" offers a file only when
@@ -1457,6 +1484,7 @@ export function ImportDialog({
             layout={translationCheck.layout}
             fileCount={translationCheck.fileCount}
             canImportTranslation={translation?.disabledReason === null}
+            describeLanguage={describeCheckedLanguage}
             onChoose={answerTranslationCheck}
           />
         )}

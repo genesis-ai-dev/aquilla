@@ -23,6 +23,7 @@
 import { languageSurfaceForms, languagesEqual } from "@/lib/language-normalize"
 import type { LanguageEntry } from "@/lib/languages/catalog"
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
+import { fileBookCodeIsCertain } from "@/lib/sidebar/group-by-corpus"
 
 /**
  * The language-bearing parts of an upload's header.
@@ -199,11 +200,19 @@ export interface TranslationSignal {
   fileKey: string
   fileName: string
   bookIds: string[]
-  /** For each of its books already in the project, the files that hold it. */
-  sameBook: { bookCode: string; files: { id: string; name: string }[] }[]
+  /** For each of its books already in the project, the files that hold it.
+   *  `bookCertain` is false when a file's book is only guessed from a few
+   *  letters of its name (`fileBookCodeIsCertain`). */
+  sameBook: { bookCode: string; files: SameBookFile[] }[]
   /** The project target language its header names, when it names one (and
    *  not the source language). */
   language?: string
+}
+
+export interface SameBookFile {
+  id: string
+  name: string
+  bookCertain: boolean
 }
 
 export function translationSignals(input: {
@@ -235,7 +244,11 @@ export function translationSignals(input: {
     const sameBook = upload.bookIds
       .map((bookCode) => ({
         bookCode,
-        files: filesForBook(existingFiles, bookCode).map((file) => ({ id: file.id, name: file.name })),
+        files: filesForBook(existingFiles, bookCode).map((file) => ({
+          id: file.id,
+          name: file.name,
+          bookCertain: fileBookCodeIsCertain(file),
+        })),
       }))
       .filter((match) => match.files.length > 0)
     const hasHeader = upload.header.fields.length > 0 || upload.header.notes.length > 0
@@ -258,7 +271,7 @@ export function translationSignals(input: {
 export type TranslationCheckLayout =
   /** One file, one book, already here in exactly one file: translation,
    *  update, or separate. */
-  | { kind: "sameBook"; signal: TranslationSignal; book: { bookCode: string; file: { id: string; name: string } } }
+  | { kind: "sameBook"; signal: TranslationSignal; book: { bookCode: string; file: SameBookFile } }
   /** One file whose one book more than one project file holds. */
   | { kind: "sameBookAmbiguous"; signal: TranslationSignal; bookName: string }
   /** One file holding several books, some already here. */

@@ -84,7 +84,7 @@ function host(overrides: Partial<TranslationImportHost> = {}): TranslationImport
     applyOptimisticTargetEdits: vi.fn(),
     disabledReason: null,
     languageLabel: "Siberian Tatar",
-    targetLanguages: ["Siberian Tatar"],
+    targetLanguages: [{ language: "Siberian Tatar", label: null, active: true }],
     ...overrides,
   }
 }
@@ -148,10 +148,12 @@ describe("AQU-1365: Is this a translation?", () => {
     // The REAL parser's output: a parsed USFM upload carries no `bookCode`
     // (an earlier mock added one, which hid that the book check never fired
     // on a real upload).
-    vi.mocked(prepareImportFile).mockImplementation(async (file: File) => ({
-      fileType: "usfm",
-      results: parseTextFormat({ fileType: "usfm", name: file.name, text: await file.text() }),
-    }) as never)
+    vi.mocked(prepareImportFile).mockImplementation(async (file: File) => {
+      // A .usx reaches the parser already converted to USFM, so its fixture
+      // is written as USFM.
+      const fileType = file.name.endsWith(".vtt") ? "vtt" : "usfm"
+      return { fileType, results: parseTextFormat({ fileType, name: file.name, text: await file.text() }) } as never
+    })
     vi.mocked(importFile).mockResolvedValue({ refs: [{ fileId: "new-ref" } as never], speakerPairs: [] })
   })
 
@@ -299,6 +301,48 @@ describe("AQU-1365: Is this a translation?", () => {
     })
     expect(await screen.findByRole("button", { name: /confirm import/i })).toBeInTheDocument()
     expect(screen.queryByTestId("translation-check")).not.toBeInTheDocument()
+  })
+
+  // AQU-1365 review: when the upload can't go to the translation review, the
+  // screen must not ask "is it a translation?" with no button to say yes, and
+  // must never highlight the in-place source update.
+  it("doesn't ask whether a .usx is a translation, since only source answers exist for it", async () => {
+    renderDialog()
+    await upload([usfm(JON_TATAR.replace(" Siberian Tatar (test)", ""), "JON-tatar.usx")])
+    const check = await screen.findByTestId("translation-check")
+    expect(check).toHaveTextContent("JON-tatar.usx is for Jonah, and Jonah is already in this project.")
+    expect(check).toHaveTextContent(
+      "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+    )
+    expect(check).not.toHaveTextContent("Is it a translation")
+    const buttons = within(check).getAllByRole("button")
+    expect(buttons.map((button) => button.textContent)).toEqual(["Import it as a separate file", "Update Jonah's source text"])
+  })
+
+  it("offers no in-place update of a file whose book is only guessed from its name", async () => {
+    renderDialog({ translation: host({ files: [{ id: "jud", name: "Judgment notes", type: "usfm" }, ...FILES] }) })
+    await upload([usfm("\\id JUD\n\\c 1\n\\v 1 Иуда\n", "JUD-tatar.usfm")])
+    const check = await screen.findByTestId("translation-check")
+    expect(within(check).getByRole("button", { name: "Put it into Judgment notes as its translation" })).toBeInTheDocument()
+    expect(within(check).queryByRole("button", { name: /update/i })).not.toBeInTheDocument()
+  })
+
+  it("names another lane's language and doesn't hand the file to the lane that's open", async () => {
+    renderDialog({
+      translation: host({
+        targetLanguages: [
+          { language: "Siberian Tatar", label: null, active: true },
+          { language: "ru", label: null, active: false },
+        ],
+      }),
+    })
+    await upload([new File(["WEBVTT\nLanguage: ru\n\n00:00.000 --> 00:01.000\nПривет\n"], "episode-ru.vtt")])
+    const check = await screen.findByTestId("translation-check")
+    expect(check).toHaveTextContent(
+      "episode-ru.vtt says it's in Russian, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    )
+    expect(within(check).queryByRole("button", { name: "Choose the file it translates" })).not.toBeInTheDocument()
+    expect(within(check).getByRole("button", { name: "Import it as a new source text" })).toBeInTheDocument()
   })
 
   it("doesn't check at all without the translation path", async () => {

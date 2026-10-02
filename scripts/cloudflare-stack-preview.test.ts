@@ -74,6 +74,41 @@ describe("full-stack Cloudflare previews", () => {
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
   })
 
+  // AQU-1353: the QA bots could not walk /admin at all, because a preview named
+  // no platform admin — every claim about an admin surface came back NOT CHECKED.
+  // The fixture that fixed that is also the one thing in this config that hands
+  // out cross-tenant read access, so pin its whole shape here.
+  it("grants preview platform admin to the QA fixture only, with the step-up gate still on", () => {
+    const vars = previewConfig("auth", { cwd: "/repo" }).previews.vars ?? {}
+    expect(vars.ADMIN_EMAILS).toBe("qa-admin@local.test")
+    // One address, not a list: a second entry is how an operator account would
+    // sneak onto a preview.
+    expect((vars.ADMIN_EMAILS ?? "").split(",")).toHaveLength(1)
+    // Elevation is NOT relaxed for the bots. adminElevationRequired() is
+    // `ADMIN_REQUIRE_ELEVATION === "true" && WRANGLER_LOCAL !== "1"`, so both
+    // halves have to hold for the real gate to run on a preview.
+    expect(vars.ADMIN_REQUIRE_ELEVATION).toBe("true")
+    expect(vars).not.toHaveProperty("WRANGLER_LOCAL")
+    // Nothing admin-shaped leaks onto the sync preview, which has no such routes.
+    expect(previewConfig("sync", { cwd: "/repo" }).previews.vars).not.toHaveProperty("ADMIN_EMAILS")
+  })
+
+  it("never names a live operator address in the preview admin allowlist", () => {
+    // The live allowlists live in auth-worker/wrangler.toml (top-level [vars]
+    // plus every [env.*.vars]). A preview must not share an address with any of
+    // them: a preview admin who is also an operator would make this config a
+    // path to real credentials rather than a QA fixture.
+    const toml = readFileSync(join(import.meta.dirname, "..", "auth-worker", "wrangler.toml"), "utf8")
+    const operators = [...toml.matchAll(/^ADMIN_EMAILS\s*=\s*"([^"]*)"/gm)]
+      .flatMap(([, value]) => value.split(","))
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => email.length > 0)
+    expect(operators.length).toBeGreaterThan(0)
+    const preview = (previewConfig("auth", { cwd: "/repo" }).previews.vars ?? {}).ADMIN_EMAILS
+    expect(preview).toBeTruthy()
+    expect(operators).not.toContain(preview.toLowerCase())
+  })
+
   it("preserves the sync Durable Object migration history", () => {
     const config = previewConfig("sync", { cwd: "/repo" })
     expect(config.previews.durable_objects?.bindings).toEqual([{ name: "ProjectSync", class_name: "ProjectSync" }])

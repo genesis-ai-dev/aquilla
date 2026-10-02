@@ -92,6 +92,10 @@ that route does not exist; set `AQUILLA_QA_USER` and `AQUILLA_QA_PASSWORD`
 and `login` signs in through the real form. Use a QA account on
 development storage, never a production account.
 
+The site-wide admin console is a second account, not a role: `login_admin`
+and `AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD` (see the admin
+fixture below).
+
 ## Fixtures on development storage
 
 Every branch preview and dev.aquilla.app read and write one development
@@ -101,6 +105,21 @@ everyone. Name them in stories; never paste an id.
 - **Org:** QA Bot Workspace. **Accounts:** `qa-bot` (owner) and
   `qa-bot-2` (a plain member, for two-user and presence stories).
   Passwords live with the bot runner, not in this repo.
+- **Platform admin:** `qa-admin`, email **`qa-admin@local.test`** (AQU-1353).
+  The site-wide console (`/admin`) is gated on an allowlist of account
+  *emails* (`ADMIN_EMAILS`), which is a separate axis from the org role
+  ladder — no org permission reaches it, so `qa-bot` cannot, which is why
+  `/admin` claims used to come back `NOT CHECKED`. A branch preview's
+  allowlist holds that one address and nothing else
+  (`scripts/cloudflare-stack-preview.mjs`); `dev.aquilla.app` and production
+  keep the operator list in `auth-worker/wrangler.toml` and are not affected
+  by it. Set `AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD` for the
+  bot; on the local stack the seeded `dev` user is the admin instead and
+  `login_admin` uses it with no configuration. Previews keep step-up
+  elevation **on**, and because they have no mail binding the code comes back
+  in the request response and the gate prints it — so the bot walks the real
+  flow. The console's Platform tab writes **platform-wide** settings: walk it,
+  change nothing.
 - **Projects:** `english to burmese` (Bible in Basic English from eBible)
   for Scripture stories; `QA Scripture Verse Resources` for Verse
   Resources, Parallel Bibles, and every **cross-file** story — it carries
@@ -134,6 +153,13 @@ recipe is here. Rebuild them as `qa-bot` in `QA Bot Workspace`, and keep
 every project and file name exactly as spelled above — the stories quote
 them.
 
+- `qa-admin` — register through the normal signup form with the email
+  **`qa-admin@local.test`** exactly as spelled (the preview allowlist matches
+  on the email, so a different address silently has no admin rights). It needs
+  no org and no project: a platform admin resolves owner-level on every org
+  server-side. Hand its password to the bot runner as
+  `AQUILLA_QA_ADMIN_PASSWORD`. To check it took, sign in on any branch preview
+  and open `/admin`: a non-admin is redirected to `/orgs/all`.
 - `QA Smoke Project` and `QA Org Search B` — create empty. No import.
 - `english to burmese` — import the Bible in Basic English (`eng-engBBE`)
   from the eBible catalogue in the import dialog.

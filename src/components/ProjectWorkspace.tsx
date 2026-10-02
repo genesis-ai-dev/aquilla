@@ -428,7 +428,7 @@ import {
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
-import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
+import { textValidationScope, textVoteGate } from "@/lib/review/text-validation-policy"
 import { useConcepts } from "@/hooks/useConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
@@ -451,6 +451,7 @@ import {
   batchValidateTelemetry,
   batchValidateToast,
   summarizeBatchValidate,
+  workspaceBatchValidateOptions,
   type BatchValidateSummary,
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -6808,16 +6809,14 @@ export function ProjectWorkspace() {
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
-    const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
     const shownIds = new Set(order.slice(window.start, window.end))
     const start = window.start
     const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
-      // AQU-1571: the project's text rules, as the editor row applies them.
-      const validationBlock = project
-        ? textValidationBlock(cell, project, { roleLevel: project.syncRole?.level ?? null, username: currentUsername })
-        : null
+      // AQU-1571: role, scope and the project's text rules, as the editor row
+      // applies them; the click handler below asks the same question.
+      const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
         (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
       )
@@ -6851,8 +6850,8 @@ export function ProjectWorkspace() {
         validationStatus: cell.validationStatus,
         activeValidators: cell.activeValidators,
         validationHistory: cell.validationHistory,
-        canValidate: roleCanValidate && isInMemberScope(myScopes, cell.fileId, activeLane) && validationBlock === null,
-        validationBlock,
+        canValidate: vote.canValidate,
+        validationBlock: vote.block,
       }
     })
 
@@ -9261,23 +9260,15 @@ export function ProjectWorkspace() {
    */
   const batchValidateSummary = useCallback(() => summarizeBatchValidate(
     project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
-    {
+    // AQU-1571: the project's text rules, pinned by a unit test of the builder.
+    workspaceBatchValidateOptions({
+      project,
+      activeFileId,
       username: currentUsername,
       myScopes,
       activeLane,
-      cap: project?.completionSettings?.validationBatchSize,
-      // AQU-1571: and the project's minimum role / named-validator list, which
-      // the server enforces on every vote; a reader they exclude gets the
-      // "your role cannot validate" outcome instead of a batch of refusals.
-      canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null)
-        && (!project || textValidationScope(project, {
-          roleLevel: project.syncRole?.level ?? null,
-          username: currentUsername,
-        }).canValidate),
-      hasTarget: Boolean(project?.id && activeFileId),
-      allowAiDrafts: allowBulkValidateAiDrafts,
-      allowSelfValidation: project?.allowSelfValidation,
-    },
+      allowBulkValidateAiDrafts,
+    }),
   ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane, allowBulkValidateAiDrafts])
 
   const actionCtx = useMemo(() => ({
@@ -11800,10 +11791,9 @@ export function ProjectWorkspace() {
     if (!cell?.targetEventId || !isInMemberScope(myScopes, cell.fileId, activeLane)) return false
     // AQU-1571: a vote the project's text rules refuse never leaves; the
     // control is already greyed, this covers anything that calls past it.
-    if (validated && textValidationBlock(cell, project, {
-      roleLevel: project.syncRole?.level ?? null,
-      username: currentUsername,
-    })) return false
+    if (validated && !textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane }).canValidate) {
+      return false
+    }
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     try {
       await emit({

@@ -22,8 +22,10 @@
  * same telemetry, and the guard branches are unit-testable without React.
  */
 import { isBulkValidatableByMe, type BulkValidatePolicy } from "@/lib/review/bulk-validation"
-import { isOwnTextEdit } from "@/lib/review/text-validation-policy"
+import { isOwnTextEdit, textValidationScope } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
+import { canPerform } from "@/lib/sync/role-policy"
+import type { ProjectRecord } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TVars } from "@/lib/i18n/translate"
 
@@ -88,7 +90,16 @@ export interface BatchValidateSummary {
    */
   cappedOut: number
   outcome: BatchValidateOutcome
+  /**
+   * AQU-1571: on a "no-permission" outcome, which rule shut the reader out —
+   * their role, or the project's named-validator list. Only the wording
+   * differs; telemetry keeps the one outcome.
+   */
+  noPermissionReason?: BatchValidateNoPermissionReason
 }
+
+/** Why a reader may validate no text at all on this project. */
+export type BatchValidateNoPermissionReason = "role" | "allowlist"
 
 function emptySkips(): BatchValidateSkips {
   return { needsTranslation: 0, alreadyMine: 0, ownEdit: 0, aiDraft: 0, outOfScope: 0, notCommitted: 0 }
@@ -138,6 +149,9 @@ export interface SummarizeOptions {
   /** False when the caller cannot validate text at all: their role, or the
    *  project's minimum role / named-validator list (`textValidationScope`). */
   canValidate?: boolean
+  /** With `canValidate: false`: which of those rules it was. Absent reads as
+   *  "role", the wording every caller used before AQU-1571. */
+  noPermissionReason?: BatchValidateNoPermissionReason
   /** False when there is no project/file to validate against. */
   hasTarget?: boolean
   /**
@@ -159,6 +173,7 @@ export function summarizeBatchValidate(
 ): BatchValidateSummary {
   const {
     username, myScopes, activeLane, cap, canValidate = true, hasTarget = true, allowAiDrafts, allowSelfValidation,
+    noPermissionReason = "role",
   } = options
   const skips = emptySkips()
 
@@ -166,7 +181,7 @@ export function summarizeBatchValidate(
     return { validatable: [], skips, skippedTotal: 0, cappedOut: 0, outcome: "no-target" }
   }
   if (!canValidate) {
-    return { validatable: [], skips, skippedTotal: 0, cappedOut: 0, outcome: "no-permission" }
+    return { validatable: [], skips, skippedTotal: 0, cappedOut: 0, outcome: "no-permission", noPermissionReason }
   }
 
   const eligible: BatchValidateCandidate[] = []
@@ -187,6 +202,47 @@ export function summarizeBatchValidate(
   else outcome = "validated"
 
   return { validatable: capped, skips, skippedTotal, cappedOut, outcome }
+}
+
+/**
+ * AQU-1571: the options the "Batch validate text…" workspace action summarizes
+ * with, built from the open project. Pulled out of ProjectWorkspace so the
+ * project's rules (role, minimum role, named validators, "Allow
+ * self-validation") are pinned by a unit test: dropping one of them sent the
+ * run straight back to queuing votes the server refuses, with every test green.
+ */
+export function workspaceBatchValidateOptions(args: {
+  project:
+    | Pick<
+        ProjectRecord,
+        "id" | "syncRole" | "completionSettings" | "allowSelfValidation" | "validationRoleFloor" | "validationNamedUsers"
+      >
+    | null
+    | undefined
+  activeFileId: string | null | undefined
+  username: string
+  myScopes: MemberScope[]
+  activeLane: string
+  allowBulkValidateAiDrafts: boolean | undefined
+}): SummarizeOptions {
+  const { project, activeFileId, username, myScopes, activeLane, allowBulkValidateAiDrafts } = args
+  const roleLevel = project?.syncRole?.level ?? null
+  const roleCanValidate = canPerform("cell.validate", roleLevel)
+  const scope = project ? textValidationScope(project, { roleLevel, username }) : null
+  return {
+    username,
+    myScopes,
+    activeLane,
+    cap: project?.completionSettings?.validationBatchSize,
+    // The server enforces the project's minimum role and named-validator list
+    // on every vote; a reader they exclude gets the no-permission outcome
+    // instead of a batch of refusals.
+    canValidate: roleCanValidate && (scope?.canValidate ?? true),
+    noPermissionReason: roleCanValidate && scope?.reason === "allowlist" ? "allowlist" : "role",
+    hasTarget: Boolean(project?.id && activeFileId),
+    allowAiDrafts: allowBulkValidateAiDrafts,
+    allowSelfValidation: project?.allowSelfValidation,
+  }
 }
 
 /**
@@ -223,6 +279,21 @@ export function batchValidateTelemetry(
  * toast nobody reads.
  */
 type Translate = (key: MessageKey, vars?: TVars) => string
+
+/**
+ * AQU-1571: "your role cannot validate" is wrong for a reader the project's
+ * named-validator list leaves out: their role is fine, and a role change
+ * would not help. Shared by the selection bar's disabled reason, the toast
+ * and the "Batch validate text…" confirmation.
+ */
+export function noPermissionMessage(
+  summary: Pick<BatchValidateSummary, "noPermissionReason">,
+  t: Translate,
+): string {
+  return summary.noPermissionReason === "allowlist"
+    ? t("editor.batchValidate.notNamedValidator")
+    : t("editor.batchValidate.noPermission")
+}
 
 /** `useFormat().list` — a locale-aware join, not `.join(", ")`. */
 type JoinList = (items: readonly string[]) => string
@@ -284,7 +355,7 @@ export function batchValidateToast(
     case "no-target":
       return { type: "info", title: t("editor.batchValidate.noTarget") }
     case "no-permission":
-      return { type: "error", title: t("editor.batchValidate.noPermission") }
+      return { type: "error", title: noPermissionMessage(summary, t) }
     case "no-candidates":
       return { type: "info", title: t("editor.batchValidate.noCandidates") }
     case "failed":
@@ -358,7 +429,7 @@ export function batchValidateConfirmDescription(
     case "no-target":
       return t("editor.batchValidate.noTarget")
     case "no-permission":
-      return t("editor.batchValidate.noPermission")
+      return noPermissionMessage(summary, t)
     case "no-candidates":
       return t("editor.batchValidate.noCandidates")
     default:

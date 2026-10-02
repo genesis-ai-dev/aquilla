@@ -40,6 +40,7 @@ import { useFormat } from "@/lib/i18n/format"
 import {
   batchValidateTelemetry,
   batchValidateToast,
+  noPermissionMessage,
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -159,10 +160,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // AQU-1571: the project's minimum role and named-validator list, which the
   // server enforces on every text vote. A reader they exclude can validate
   // nothing here, so the count is zero and the button says why.
-  const textScopeCanValidate = textValidationScope(project, {
+  const textScope = textValidationScope(project, {
     roleLevel: project.syncRole?.level ?? null,
     username,
-  }).canValidate
+  })
+  const textScopeCanValidate = textScope.canValidate
+  // Which rule shut the reader out: "your role" is wrong advice for someone
+  // the named-validator list leaves out, whose role is fine.
+  const noPermissionReason = textScope.reason === "allowlist" ? "allowlist" : "role"
   const allowSelfValidation = project.allowSelfValidation
   const validatableCount = useMemo(
     // AQU-490: shared with ProjectWorkspace.runBatchValidate, which used to
@@ -186,7 +191,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // drafts needing individual review → cells still lacking a translation.
   const validateDisabledReason = useMemo(() => {
     if (validatableCount > 0) return null
-    if (!textScopeCanValidate) return t("editor.batchValidate.noPermission")
+    if (!textScopeCanValidate) return noPermissionMessage({ noPermissionReason }, t)
     const policy = { allowAiDrafts: allowBulkValidateAiDrafts }
     // AQU-633: cells eligible + not-yet-mine but blocked only by scope.
     const outOfScope = selectedCells.filter(
@@ -210,17 +215,24 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     // AQU-1571: lines whose latest change is the reader's own, on a project
     // that wants someone else to validate them. Ahead of the AI-draft reason:
     // the reader's own draft is refused one at a time too.
-    const ownEdits = selectedCells.filter(
-      (c) =>
-        c.translated.trim() &&
-        c.targetEventId &&
-        !c.activeValidators.includes(username) &&
-        isOwnTextEdit(c, username, allowSelfValidation),
-    ).length
+    const isOwnEdit = (c: CellData) =>
+      Boolean(c.translated.trim()) &&
+      Boolean(c.targetEventId) &&
+      !c.activeValidators.includes(username) &&
+      isOwnTextEdit(c, username, allowSelfValidation)
+    const ownEdits = selectedCells.filter(isOwnEdit).length
     if (alreadyMine > 0 && ownEdits === 0 && aiDrafts === 0 && needTranslation === 0) {
       return t("editor.selection.validateAllMine")
     }
-    if (ownEdits > 0) return t("editor.selection.validateOwnEdits")
+    // "These cells are yours" only when every selected line is. In a mixed
+    // selection that sentence is false for the rest, and it hid the reason the
+    // reader could act on: another person's AI draft is the org's rule to
+    // relax, so that reason leads.
+    if (ownEdits > 0 && ownEdits === selectedCells.length) return t("editor.selection.validateOwnEdits")
+    const othersAiDrafts = aiDrafts === 0 ? 0 : selectedCells.filter(
+      (c) => c.translated.trim() && c.targetEventId && c.aiDrafted && !isOwnEdit(c),
+    ).length
+    if (ownEdits > 0 && othersAiDrafts === 0) return t("editor.selection.validateOwnEditsSome")
     // The rule is the org's to relax, so say where — a greyed-out button with
     // no way forward is how this read to Sam on 2026-10-01.
     if (aiDrafts > 0) {
@@ -235,7 +247,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     }
     if (needTranslation > 0) return t("editor.selection.validateNeedTranslation")
     return t("editor.selection.validateNothingEligible")
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, allowBulkValidateAiDrafts, allowSelfValidation, textScopeCanValidate, t])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, allowBulkValidateAiDrafts, allowSelfValidation, textScopeCanValidate, noPermissionReason, t])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -479,6 +491,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         activeLane,
         hasTarget: Boolean(project.id),
         canValidate: textScopeCanValidate,
+        noPermissionReason,
         allowAiDrafts: allowBulkValidateAiDrafts,
         allowSelfValidation,
       })
@@ -511,7 +524,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowBulkValidateAiDrafts, allowSelfValidation, textScopeCanValidate])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowBulkValidateAiDrafts, allowSelfValidation, textScopeCanValidate, noPermissionReason])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return

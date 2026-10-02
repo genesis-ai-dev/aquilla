@@ -590,13 +590,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
-    "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
+    // AQU-1571: the server refuses the vote up front, for every role, and the
+    // editor greys the check out; "ignored" and "a contributor's" were both wrong.
+    "projectSettings.validation.allowSelfDescription":
+      "When off, nobody can validate a line whose latest change is their own, whatever " +
+      "their role. Someone else has to.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
+    // AQU-1571: people off the list cannot vote at all (the server refuses it),
+    // and the field is a member picker, not a comma-separated box.
     "projectSettings.validation.namedValidatorsDescription":
-      "Comma-separated usernames. When set, only these users' votes count toward the " +
-      "threshold (AND'd with the role floor). Leave empty to allow any " +
-      "sufficiently-privileged user.",
+      "When anyone is listed, only these people can validate text, and they still " +
+      "need the minimum role above. Leave empty to allow anyone who meets the " +
+      "minimum role.",
 
     // ── AQU-490: the audio policy, beside the text policy rather than folded
     // into it. Sam's ruling is that these are SEPARATE settings, so every

@@ -928,13 +928,39 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     vi.restoreAllMocks()
   })
 
-  it("does the same for a reader left off the named-validator list", async () => {
+  // Their role is fine; a role change would not help, so the reason must not
+  // name it.
+  it("tells a reader left off the named-validator list that the project names who validates", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs"]))
     renderBar(strict(ROLE.PROJECT_LEAD, { validationNamedUsers: ["bob"] }), [
       makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
     ])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
+    await expectTooltip(validateButton(), "Only the people this project names can validate text.")
+    vi.restoreAllMocks()
+  })
+
+  // A mixed selection: "these cells are yours" would be false for the rest,
+  // and would hide the reason the reader or their org can act on.
+  it("leads with the AI-draft reason when another person's draft sits beside the reader's own", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft", "their-draft"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" }),
+      makeCell({ id: "their-draft", translated: "auto 2", aiDrafted: true, lastEditor: "bob" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "untouched AI drafts require individual review")
+    vi.restoreAllMocks()
+  })
+
+  it("says only some lines are the reader's when the rest have no translation", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1", "empty"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "empty", translated: "", lastEditor: null }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Some selected cells have your latest change, so someone else must validate them")
     vi.restoreAllMocks()
   })
 })

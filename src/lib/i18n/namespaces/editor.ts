@@ -613,6 +613,8 @@ export const editor = defineNamespace({
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
     "editor.selection.validateOwnEdits":
       "You made the latest change to these cells, so someone else must validate them",
+    "editor.selection.validateOwnEditsSome":
+      "Some selected cells have your latest change, so someone else must validate them",
     "editor.selection.validateAiDrafts":
       "Nothing eligible — untouched AI drafts require individual review",
     "editor.selection.validateAiDraftsOrgHint":
@@ -712,6 +714,8 @@ export const editor = defineNamespace({
     "editor.batchValidate.noCandidates": "There are no cells here to validate.",
     "editor.batchValidate.noPermission":
       "Your role cannot validate cells in this project.",
+    "editor.batchValidate.notNamedValidator":
+      "Only the people this project names can validate text.",
     "editor.batchValidate.noTarget": "Open a file before validating.",
     "editor.batchValidate.failedTitle": "Validation could not be saved",
     "editor.batchValidate.failedBody":
@@ -4419,6 +4423,13 @@ export const editor = defineNamespace({
           "change to the selected cells. A project rule: someone else has to " +
           "sign them off.",
       },
+      "editor.selection.validateOwnEditsSome": {
+        description:
+          "Tooltip when bulk-validate is disabled and some, but not all, of the " +
+          "selected cells were last changed by this user on a project that does " +
+          "not let people validate their own work. The rest are blocked for " +
+          "another reason (already validated, or no translation yet).",
+      },
       "editor.selection.validateAiDrafts": {
         description:
           "Tooltip when bulk-validate is disabled because the selected cells are " +
@@ -4693,6 +4704,13 @@ export const editor = defineNamespace({
           "Toast when the reader's project role is below the validation floor. "
           + "The server is authoritative; this is the client saying so first "
           + "rather than sending a request it knows will be refused.",
+      },
+      "editor.batchValidate.notNamedValidator": {
+        description:
+          "Toast, disabled-button tooltip and confirmation text when the project "
+          + "keeps a list of named people who may validate text and this user is "
+          + "not on it. Their role is not the reason, so the sentence must not "
+          + "mention roles.",
       },
       "editor.batchValidate.noTarget": {
         description:

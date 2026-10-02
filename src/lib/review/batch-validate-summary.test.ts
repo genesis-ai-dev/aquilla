@@ -21,10 +21,13 @@ import {
   batchValidateSkipReason,
   batchValidateToast,
   batchValidateTelemetry,
+  noPermissionMessage,
   summarizeBatchValidate,
+  workspaceBatchValidateOptions,
   type BatchValidateCandidate,
 } from "./batch-validate-summary"
 import type { MemberScope } from "@/lib/sync/member-scopes"
+import { ROLE } from "@/lib/sync/role-policy"
 
 const ME = "tester"
 
@@ -372,5 +375,81 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
       validated_count: 1,
     })
     expect(batchValidateTelemetry(summarizeBatchValidate([cell()], base), "selection").skipped_own_edit).toBe(0)
+  })
+})
+
+/**
+ * AQU-1571: "Batch validate text…" builds its options from the open project.
+ * Each project rule the server enforces on a vote has to reach the summary,
+ * or the run queues votes the server refuses and ends in a red "N failed".
+ */
+describe("workspaceBatchValidateOptions — the project's rules reach the run", () => {
+  const project = (over: Record<string, unknown> = {}) => ({
+    id: "p1",
+    syncRole: { level: ROLE.CONTRIBUTOR, name: "contributor", source: "project" },
+    ...over,
+  }) as never
+  const opts = (p: unknown, activeFileId: string | null = "file-1") =>
+    workspaceBatchValidateOptions({
+      project: p as never,
+      activeFileId,
+      username: ME,
+      myScopes: [],
+      activeLane: "",
+      allowBulkValidateAiDrafts: false,
+    })
+
+  it("passes 'Allow self-validation' through, so the reader's own lines are skipped", () => {
+    const o = opts(project({ allowSelfValidation: false }))
+    expect(o.allowSelfValidation).toBe(false)
+    const summary = summarizeBatchValidate([cell({ lastEditor: ME })], o)
+    expect(summary.validatable).toHaveLength(0)
+    expect(summary.skips.ownEdit).toBe(1)
+  })
+
+  it("shuts out a reader below the project's minimum role, as a role refusal", () => {
+    const o = opts(project({ validationRoleFloor: "project_lead" }))
+    expect(o).toMatchObject({ canValidate: false, noPermissionReason: "role" })
+    expect(summarizeBatchValidate([cell()], o).outcome).toBe("no-permission")
+  })
+
+  it("shuts out a reader off the named-validator list, without blaming their role", () => {
+    const o = opts(project({ validationNamedUsers: ["someone-else"] }))
+    expect(o).toMatchObject({ canValidate: false, noPermissionReason: "allowlist" })
+    const summary = summarizeBatchValidate([cell()], o)
+    expect(summary).toMatchObject({ outcome: "no-permission", noPermissionReason: "allowlist" })
+    expect(batchValidateToast(summary, t, joinList).title).toBe("editor.batchValidate.notNamedValidator")
+    expect(batchValidateConfirmDescription(summary, t, joinList)).toBe("editor.batchValidate.notNamedValidator")
+  })
+
+  it("calls a role that cannot validate at all a role refusal, even with a list set", () => {
+    const o = opts(project({
+      syncRole: { level: ROLE.COMMENTER, name: "commenter", source: "project" },
+      validationNamedUsers: ["someone-else"],
+    }))
+    expect(o).toMatchObject({ canValidate: false, noPermissionReason: "role" })
+  })
+
+  it("lets a listed reader with the role through, with the project's cap", () => {
+    const o = opts(project({
+      validationNamedUsers: [ME],
+      validationRoleFloor: "reviewer",
+      syncRole: { level: ROLE.REVIEWER, name: "reviewer", source: "project" },
+      completionSettings: { validationBatchSize: 5 },
+    }))
+    expect(o).toMatchObject({ canValidate: true, cap: 5, hasTarget: true })
+  })
+
+  it("has no target with no file open", () => {
+    expect(opts(project(), null).hasTarget).toBe(false)
+    expect(opts(null).hasTarget).toBe(false)
+  })
+})
+
+describe("noPermissionMessage", () => {
+  it("names the role only when the role is the reason", () => {
+    expect(noPermissionMessage({ noPermissionReason: "role" }, t)).toBe("editor.batchValidate.noPermission")
+    expect(noPermissionMessage({}, t)).toBe("editor.batchValidate.noPermission")
+    expect(noPermissionMessage({ noPermissionReason: "allowlist" }, t)).toBe("editor.batchValidate.notNamedValidator")
   })
 })

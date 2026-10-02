@@ -17,7 +17,8 @@
 //
 // Pure and free of i18n, so every rule is a fast unit test.
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { ROLE } from "@/lib/sync/role-policy"
+import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
+import { ROLE, canPerform } from "@/lib/sync/role-policy"
 
 /**
  * The role a project's "minimum role to validate" names, as a level. Shared
@@ -101,4 +102,39 @@ export function textValidationBlock(
   if (!textValidationScope(project, policy).canValidate) return "policy"
   if (isOwnTextEdit(cell, policy.username, project.allowSelfValidation)) return "self"
   return null
+}
+
+/** One line's text vote, as the agent pane offers it. */
+export interface TextVoteGate {
+  /** May the viewer add a text vote on this line right now? */
+  canValidate: boolean
+  /** When a project rule is the reason they may not, which one (the control's
+   *  tooltip). Null when the reason is their role or scope, or there is none. */
+  block: TextValidationBlock | null
+}
+
+/**
+ * AQU-1571: every check the server applies to a text vote, for one line —
+ * the `cell.validate` role, the viewer's assigned files and lanes, then the
+ * project's rules. The agent pane's control and its click handler both ask
+ * here, so the greyed control and the click that sends nothing cannot drift
+ * apart, and the whole decision has a unit test.
+ */
+export function textVoteGate(
+  cell: { fileId: string; lastEditor?: string | null },
+  project:
+    | Pick<ProjectRecord, "syncRole" | "validationRoleFloor" | "validationNamedUsers" | "allowSelfValidation">
+    | null
+    | undefined,
+  viewer: { username: string; myScopes: MemberScope[]; activeLane: string },
+): TextVoteGate {
+  const roleLevel = project?.syncRole?.level ?? null
+  const block = project ? textValidationBlock(cell, project, { roleLevel, username: viewer.username }) : null
+  return {
+    canValidate:
+      canPerform("cell.validate", roleLevel) &&
+      isInMemberScope(viewer.myScopes, cell.fileId, viewer.activeLane) &&
+      block === null,
+    block,
+  }
 }

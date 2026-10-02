@@ -8,6 +8,7 @@ import {
   isOwnTextEdit,
   textValidationBlock,
   textValidationScope,
+  textVoteGate,
 } from "./text-validation-policy"
 import { ROLE } from "@/lib/sync/role-policy"
 
@@ -90,5 +91,40 @@ describe("textValidationBlock", () => {
     expect(textValidationBlock({ lastEditor: "ana" }, strict, policy())).toBe("policy")
     expect(textValidationBlock({ lastEditor: "bo" }, strict, policy())).toBe("policy")
     expect(textValidationBlock({ lastEditor: "bo" }, { validationNamedUsers: ["bo"] }, policy())).toBe("policy")
+  })
+})
+
+// AQU-1571: the agent pane's text vote control and its click handler both ask
+// this one question, so the greyed control and the click cannot disagree.
+describe("textVoteGate", () => {
+  const viewer = (over: Partial<{ username: string; myScopes: { kind: "lane" | "file"; value: string }[]; activeLane: string }> = {}) =>
+    ({ username: "ana", myScopes: [], activeLane: "", ...over })
+  const project = (over: Record<string, unknown> = {}) =>
+    ({ syncRole: { level: ROLE.CONTRIBUTOR, name: "contributor", source: "project" }, ...over }) as never
+  const line = (over: Record<string, unknown> = {}) => ({ fileId: "f1", lastEditor: "bob", ...over })
+
+  it("lets a contributor validate somebody else's line", () => {
+    expect(textVoteGate(line(), project(), viewer())).toEqual({ canValidate: true, block: null })
+  })
+
+  it("blocks the reader's own latest change as 'self' when self-validation is off", () => {
+    expect(textVoteGate(line({ lastEditor: "ana" }), project({ allowSelfValidation: false }), viewer()))
+      .toEqual({ canValidate: false, block: "self" })
+    expect(textVoteGate(line({ lastEditor: "ana" }), project({ allowSelfValidation: true }), viewer()))
+      .toEqual({ canValidate: true, block: null })
+  })
+
+  it("blocks a reader the minimum role or named list excludes as 'policy'", () => {
+    expect(textVoteGate(line(), project({ validationRoleFloor: "project_lead" }), viewer()))
+      .toEqual({ canValidate: false, block: "policy" })
+    expect(textVoteGate(line(), project({ validationNamedUsers: ["bob"] }), viewer()))
+      .toEqual({ canValidate: false, block: "policy" })
+  })
+
+  it("refuses a role that cannot validate, or a line outside the reader's lanes, with no policy reason", () => {
+    const commenter = project({ syncRole: { level: ROLE.COMMENTER, name: "c", source: "project" } })
+    expect(textVoteGate(line(), commenter, viewer())).toEqual({ canValidate: false, block: null })
+    expect(textVoteGate(line(), project(), viewer({ myScopes: [{ kind: "lane", value: "fr" }], activeLane: "es" })))
+      .toEqual({ canValidate: false, block: null })
   })
 })

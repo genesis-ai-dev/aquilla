@@ -291,6 +291,7 @@ import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
 import { useWorkspaceDockTabs } from "@/hooks/useWorkspaceDockTabs"
+import { useFileFilterFocus } from "@/hooks/useFileFilterFocus"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import {
   computeRightRailSurfaces,
@@ -1200,6 +1201,14 @@ export function ProjectWorkspace() {
     selectVisibleTab: selectDockTab,
     showProgrammatically: showDockTabProgrammatically,
   } = useWorkspaceDockTabs(centerSurface === "agent", projectId)
+  // AQU-1531: "Choose file" in the Agent workbench shows the Files panel AND
+  // lands the cursor in its filter box, so the click has a visible result even
+  // when the panel was already showing (it is, on every entry to Agent).
+  const fileFilterFocus = useFileFilterFocus()
+  const chooseFileInSidebar = useCallback(() => {
+    showDockTabProgrammatically("files")
+    fileFilterFocus.request()
+  }, [fileFilterFocus, showDockTabProgrammatically])
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
   // sheet opens onto the files list instead of a 40px icon strip. (The Agent
@@ -12390,6 +12399,7 @@ export function ProjectWorkspace() {
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
                   assignedFileIds={myAssignedFileIds}
+                  filterFocus={fileFilterFocus}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -12823,7 +12833,7 @@ export function ProjectWorkspace() {
             fileNames={agentFileNames}
             editorHref={editorReturnPath ?? `/project/${project.id}/editor`}
             onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
-            onChooseFile={() => showDockTabProgrammatically("files")}
+            onChooseFile={chooseFileInSidebar}
             editorMode={{
               lens,
               timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,

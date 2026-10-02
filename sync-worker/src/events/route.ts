@@ -586,12 +586,20 @@ const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: s
  * A NULL recorder — a take whose attach event is gone, or one on a project the
  * rollout has not reached — is "unknown", never a match. It must not silently
  * equal the caller.
+ *
+ * AQU-1571: the take's stored `url` comes along, so a re-attach in the same
+ * request that SWAPS the audio can be told from one that only refreshes it.
  */
+interface StoredTake {
+  createdBy: string | null
+  url: string | null
+}
+
 async function prefetchTakeRecorders(
   db: AquillaDb,
   takes: readonly TakeKey[],
-): Promise<Map<string, string | null>> {
-  const recorders = new Map<string, string | null>()
+): Promise<Map<string, StoredTake>> {
+  const recorders = new Map<string, StoredTake>()
   if (takes.length === 0) return recorders
 
   const placeholders = takes.map(() => '(?, ?, ?, ?)').join(', ')
@@ -600,17 +608,20 @@ async function prefetchTakeRecorders(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, audio_id, created_by FROM cell_audio
+      `SELECT project_id, file_id, cell_id, audio_id, created_by, url FROM cell_audio
        WHERE (project_id, file_id, cell_id, audio_id) IN (${placeholders})`,
     )
     .bind(...binds)
     .all<{
       project_id: string; file_id: string; cell_id: string
-      audio_id: string; created_by: string | null
+      audio_id: string; created_by: string | null; url: string | null
     }>()
 
   for (const r of results) {
-    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), r.created_by)
+    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), {
+      createdBy: r.created_by,
+      url: r.url,
+    })
   }
   return recorders
 }
@@ -791,8 +802,9 @@ export async function handleEventsWriteRequest(
   /** The edits this request's cell.validate events name (AQU-1571). */
   const validateEditIds = new Set<string>()
   const validateTakes = new Map<string, TakeKey>()
-  /** Takes this request attaches (see the cell.audio.attach note below). */
-  const batchAttachedTakes = new Set<string>()
+  /** Takes this request attaches, with the urls it attaches them under (see
+   *  the cell.audio.attach note below). */
+  const batchAttachedTakes = new Map<string, Set<string>>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -863,9 +875,12 @@ export async function handleEventsWriteRequest(
     // way. Collected before authorization and regardless of order, so a vote
     // placed AHEAD of its attach in the batch is caught too.
     if (e.kind === 'cell.audio.attach') {
-      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
-      if (typeof audioId === 'string' && audioId) {
-        batchAttachedTakes.add(`${key}\u0000${audioId}`)
+      const p = e.payload as { audioId?: unknown; url?: unknown } | undefined
+      if (typeof p?.audioId === 'string' && p.audioId) {
+        const takeKey = `${key}\u0000${p.audioId}`
+        const urls = batchAttachedTakes.get(takeKey) ?? new Set<string>()
+        if (typeof p.url === 'string') urls.add(p.url)
+        batchAttachedTakes.set(takeKey, urls)
       }
     }
   }
@@ -1503,7 +1518,21 @@ export async function handleEventsWriteRequest(
             // which is the only case that reliably reaches it. A stored
             // recorder wins over the fallback: re-attaching somebody else's
             // take (the transcription re-attach) leaves created_by alone.
-            const recorder = takeRecorders.get(takeKey) ?? (attachedHere ? callerUsername : null)
+            //
+            // AQU-1571: unless this request swaps the take's AUDIO. Putting
+            // your own recording under somebody else's take id is a new
+            // recording, and the projection now credits it to whoever attached
+            // it (cell.audio.attach); this is the same rule for a vote cast in
+            // the same request, before that projection has run.
+            const stored = takeRecorders.get(takeKey)
+            const attachedUrls = batchAttachedTakes.get(takeKey)
+            const swappedHere =
+              stored !== undefined &&
+              attachedUrls !== undefined &&
+              [...attachedUrls].some((url) => url !== stored.url)
+            const recorder = swappedHere
+              ? callerUsername
+              : (stored?.createdBy ?? (attachedHere ? callerUsername : null))
             if (recorder != null && recorder === callerUsername) {
               rejected.push({
                 id: rawEvent.id ?? '(unknown)',

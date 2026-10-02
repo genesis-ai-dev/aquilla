@@ -664,6 +664,92 @@ describe('cell.audio.validate — audio validation config', () => {
     expect(row?.created_by).toBe('bob')
   })
 
+  // AQU-1571: re-attaching somebody else's take under a DIFFERENT url puts
+  // the caller's own audio behind it. The fill-only created_by kept the
+  // original recorder, so the caller could then vote for their own audio and
+  // inherit every vote cast on the old one.
+  it('treats a take whose audio is swapped in the same request as the caller’s own', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-s', 'bob')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+
+    const swap: RawEvent = {
+      id: 'evt-swap-batch', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'carol', payload: { audioId: 'take-s', url: 'frontier-audio://carols-own.webm', slot: 'recording' },
+      clientTs: 199,
+    } as RawEvent
+    const res = await handleEventsWriteRequest(
+      await makeRequest([swap, makeAudioValidateEvent('evt-av-swap', 'carol', 'take-s')], await makeToken(400, 'carol')),
+      makeEnv(db),
+    )
+    const body = (await res!.json()) as any
+    const refusal = (body.rejected ?? []).find((r: { id: string }) => r.id === 'evt-av-swap')
+    expect(refusal?.reason).toMatch(/validating your own recording/)
+  })
+
+  it('credits swapped audio to whoever attached it and drops the votes cast on the old audio', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-w', 'bob')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+    // dave heard bob's recording and signed it off.
+    expect((await post(db, makeAudioValidateEvent('evt-av-dave', 'dave', 'take-w'), await makeToken(300, 'dave'))).rejected)
+      .toHaveLength(0)
+
+    const swap: RawEvent = {
+      id: 'evt-swap-later', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'carol', payload: { audioId: 'take-w', url: 'frontier-audio://carols-own.webm', slot: 'recording' },
+      clientTs: 210,
+    } as RawEvent
+    expect((await post(db, swap, await makeToken(400, 'carol'))).rejected).toHaveLength(0)
+
+    const row = await db
+      .prepare(`SELECT created_by, validator_count FROM cell_audio WHERE audio_id = 'take-w'`)
+      .bind()
+      .first<{ created_by: string | null; validator_count: number }>()
+    expect(row).toMatchObject({ created_by: 'carol', validator_count: 0 })
+    const votes = await db
+      .prepare(`SELECT username FROM cell_audio_validators WHERE audio_id = 'take-w'`)
+      .bind()
+      .all<{ username: string }>()
+    expect(votes.results).toEqual([])
+
+    // A later request cannot sign it off as carol either.
+    const body = await post(db, makeAudioValidateEvent('evt-av-carol-late', 'carol', 'take-w'), await makeToken(400, 'carol'))
+    expect(body.rejected[0]?.reason).toMatch(/validating your own recording/)
+  })
+
+  it('keeps the recorder and the votes through a routine re-attach of the same audio', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await seedTake(db, 'take-r', 'bob')
+    await setProjectSettings(db, { allowSelfValidationAudio: false })
+    expect((await post(db, makeAudioValidateEvent('evt-av-dave-r', 'dave', 'take-r'), await makeToken(300, 'dave'))).rejected)
+      .toHaveLength(0)
+
+    // The transcription re-attach: same url, new timings, by somebody else.
+    const refresh: RawEvent = {
+      id: 'evt-refresh-r', schemaVersion: 1, kind: 'cell.audio.attach',
+      projectId: 'proj-v', fileId: 'file-v', cellId: 'cell-v1', parentId: null,
+      author: 'carol',
+      payload: {
+        audioId: 'take-r', url: 'frontier-audio://take-r.wav', slot: 'recording',
+        timings: [{ word: 'hi', start: 0, end: 2, t0: 0, t1: 0.4 }],
+      },
+      clientTs: 220,
+    } as RawEvent
+    expect((await post(db, refresh, await makeToken(400, 'carol'))).rejected).toHaveLength(0)
+
+    const row = await db
+      .prepare(`SELECT created_by, validator_count FROM cell_audio WHERE audio_id = 'take-r'`)
+      .bind()
+      .first<{ created_by: string | null; validator_count: number }>()
+    expect(row).toMatchObject({ created_by: 'bob', validator_count: 1 })
+  })
+
   it('still lets somebody else validate that take', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')

@@ -260,10 +260,10 @@ out, so a branch named for AQU-A ends up holding AQU-B commits **and** a junk dr
 uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
 makes the work impossible to review or revert cleanly.
 
-- **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
+- **Each ticket gets its own git worktree off live `origin/dev`** (PRs target `dev`), on the Linear-suggested
   branch (`ryder/aqu-###-…`). Never share the main checkout between tickets; it is
-  frequently dirty. Create it with `pnpm worktree:new <branch> [dir]`. That command
-  starts from `origin/dev` (`--base <ref>` overrides, for example `--base origin/main`).
+  frequently dirty. Create it with `pnpm worktree:new <branch> [dir]`
+  (`--base <ref>` overrides the start point, for example `--base origin/main` for a hotfix).
   The default directory is a sibling named for the ticket (`../aquilla-aqu-1234`).
 - **Bare `git worktree add` plus a symlinked `node_modules` is not enough.**
   `core.hooksPath` is the relative `.husky/_`, which husky writes and git ignores, so a

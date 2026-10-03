@@ -7,6 +7,7 @@ import { createStorePromise, type Adapter, type Store } from "@livestore/livesto
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
 import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
+import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
 
 const STORE_ID = "aquilla-offline"
@@ -27,9 +28,11 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   ])
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
+  installBfcacheGuard()
   return makePersistedAdapter({
     worker: (options: WorkerOptions) => {
       const worker = new LiveStoreWorker(options)
+      trackLeaderWorker(worker)
       devBridge?.watchLeaderWorker(worker, options.name ?? "leader")
       return worker
     },

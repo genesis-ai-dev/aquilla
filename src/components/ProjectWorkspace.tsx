@@ -27,7 +27,7 @@ import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
-import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -6622,6 +6622,29 @@ export function ProjectWorkspace() {
     writeLastLocation(currentUsername, projectId, { fileId: activeFileId })
   }, [projectId, activeFileId, currentUsername])
 
+  // ── per-file last cell: resume where you were in THIS file ───────────────
+  // Every arrival at a file in the editor — switching tabs, or coming back
+  // from comments/agent/memory (which unmount the editor, so it would
+  // otherwise reopen at the top) — parks that file's remembered cell for the
+  // consumer below. Keyed on the arrival, not on every render, so it never
+  // yanks the user while they are working. An explicit jump outranks it: a
+  // `?cellId=` link (restoreMayPark), or a presence/assignment jump that is
+  // already waiting to land in this file.
+  const lastCellArrivalRef = useRef<string | null>(null)
+  useEffect(() => {
+    const onEditor = centerSurface === "editor"
+    const arrival = projectId && activeFileId && onEditor ? `${projectId}|${activeFileId}` : null
+    if (arrival === lastCellArrivalRef.current) return
+    lastCellArrivalRef.current = arrival
+    if (!projectId || !activeFileId || !arrival) return
+    if (pendingPresenceJumpRef.current?.fileId === activeFileId) return
+    if (pendingScopeScrollRef.current?.fileId === activeFileId) return
+    if (!restoreMayPark(pendingCellScrollRef.current)) return
+    const cellId = readLastCell(currentUsernameRef.current, projectId, activeFileId)
+    if (!cellId) return
+    pendingCellScrollRef.current = { cellId, flash: false, fileId: activeFileId, source: "restore" }
+  }, [projectId, activeFileId, centerSurface])
+
   // ── last-location: scroll to remembered cell once cells are loaded ────────
   // After a restore-navigation the editor isn't rendered yet; we park the
   // target cell in pendingCellScrollRef and consume it here once `cells`
@@ -6667,7 +6690,10 @@ export function ProjectWorkspace() {
       ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
       : false
     if (ok || step.last) giveUp()
-  }, [activeFileId, cellStore, cellStoreVersion, lens])
+  // `centerSurface`: coming back from comments/agent/memory remounts the
+  // editor without touching the cell store or the file, so without it the
+  // per-file last-cell park sat unconsumed until the next keystroke.
+  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -7427,6 +7453,18 @@ export function ProjectWorkspace() {
   useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Remember `cellId` as where the user is in the open file — on a claim, and
+  // on a jump from the section dropdown. Debounced (500 ms) so rapid focus
+  // events don't hammer localStorage.
+  const rememberCell = useCallback((cellId: string) => {
+    if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
+    writeLocTimerRef.current = setTimeout(() => {
+      writeLocTimerRef.current = null
+      if (!projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
+      writeLastCell(currentUsername, projectId, activeFileId, cellId)
+    }, 500)
+  }, [projectId, activeFileId, currentUsername])
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
     setFocusedCellId(cellId) // FRO-175: reactive for chat panel context
@@ -7444,16 +7482,9 @@ export function ProjectWorkspace() {
       selection: null,
     })
     focusLockState.claim(cellId)
-    // Debounce last-location cell write (500 ms) so rapid focus events
-    // don't hammer localStorage.
-    if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
-    writeLocTimerRef.current = setTimeout(() => {
-      writeLocTimerRef.current = null
-      if (!projectId || !activeFileId) return
-      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
-    }, 500)
+    rememberCell(cellId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, activeFileId, currentUsername, focusLockState.claim, getActiveCell, sendPresenceUpdate])
+  }, [rememberCell, focusLockState.claim, getActiveCell, sendPresenceUpdate])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
     // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
@@ -8022,8 +8053,15 @@ export function ProjectWorkspace() {
       editorRef.current?.scrollToCellId(result.cellId, { flash: true })
     }
     if (result.fileId !== activeFileId) {
+      // Park as an explicit link (not a timer) so the per-file last-cell
+      // restore for the destination file cannot land after it and win.
+      pendingCellScrollRef.current = {
+        cellId: result.cellId,
+        flash: true,
+        fileId: result.fileId,
+        source: "link",
+      }
       workspaceTabs.openFile(result.fileId)
-      setTimeout(flash, 400)
     } else {
       flash()
     }
@@ -13546,6 +13584,7 @@ export function ProjectWorkspace() {
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
+            onNavigateToCell={rememberCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}

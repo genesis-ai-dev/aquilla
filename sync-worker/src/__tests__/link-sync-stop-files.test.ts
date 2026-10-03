@@ -33,6 +33,7 @@ import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-
 import type { EventKind } from "../events/types"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 
 const UPSTREAM = "proj-upstream-gospels"
 const DOWNSTREAM = "proj-downstream-c"
@@ -56,10 +57,11 @@ async function emit(
   )
   const serverSeq = Number(seqRow.rows[0]?.next_seq ?? 1)
   const author = args.author ?? "lead"
+  const parentId = await headParentFor(t, projectId, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, $6, $7, $8, $8, $8)`,
-    [id, projectId, args.fileId ?? null, args.cellId ?? null, kind, author, JSON.stringify(args.payload), serverSeq],
+     VALUES ($1, 1, $2, $3, $4, $9, $5, $6, $7, $8, $8, $8)`,
+    [id, projectId, args.fileId ?? null, args.cellId ?? null, kind, author, JSON.stringify(args.payload), serverSeq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -67,7 +69,7 @@ async function emit(
     projectId,
     fileId: args.fileId ?? null,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind,
     author,
     payload: args.payload,

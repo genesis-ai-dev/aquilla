@@ -827,6 +827,10 @@ interface EditorTableProps {
    *  or null when focus leaves the table. Non-lock-bearing presence: peers see
    *  this user on the row even when they never activate the editor. */
   onViewCell?: (cellId: string | null) => void
+  /** Fires with the cell a navigation control (the section dropdown, a
+   *  suggested passage) jumped to, so the workspace can remember it as where
+   *  the user is in this file. */
+  onNavigateToCell?: (cellId: string) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -1035,7 +1039,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onViewCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onNavigateToCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -2116,6 +2120,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
     if (!targetCellId) return
+    onNavigateToCell?.(targetCellId)
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
@@ -2133,7 +2138,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
+  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone])
 
   /**
    * Open a suggested passage (AQU-515) — land on the first cell inside the
@@ -2150,6 +2155,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         && compareAddresses(parsed.address, suggestion.end) <= 0
     }))
     if (!targetCellId) return
+    onNavigateToCell?.(targetCellId)
     const milestoneKey = milestoneKeyByCellId.get(targetCellId)
     if (milestoneKey) {
       setChapterNavigationSelection({ fileId: audioFileId, label: milestoneKey })
@@ -2185,7 +2191,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
       return
     }
-    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    // A jump already asked for a page (revealCellPage — e.g. the workspace
+    // restoring the last cell when the editor remounts) outranks the row at
+    // the top; otherwise this re-run would turn the page straight back.
+    const requested = pendingJumpCellIdRef.current
+    const visibleId = requested && milestoneKeyByCellId.has(requested)
+      ? requested
+      : fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
     const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
     if (!key) return
     const subsectionKey = idmlMilestoneNavigation && visibleId

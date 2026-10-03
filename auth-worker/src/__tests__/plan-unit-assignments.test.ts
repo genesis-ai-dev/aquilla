@@ -9,11 +9,25 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { getUnitAssignments } from "../services/assignments"
+import { getUnitAssignments, resolveTargetLaneId } from "../services/assignments"
 import type { Env } from "../types"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const testEnv = env as unknown as Env
+
+/**
+ * AQU-1609: the unit read is scoped by `lanes.id`, so a test naming a lane by
+ * its legacy tag resolves it the way the route does. The lane rows themselves
+ * are minted by the harness's lane-fill trigger when the fixture's cells are
+ * inserted, so this must run after `seedUnit`.
+ */
+async function laneIdFor(tag: string): Promise<string> {
+  const id = await resolveTargetLaneId(testEnv, "pa", tag)
+  // A miss would silently read as "no cells in that lane" and turn every
+  // progress assertion below into a zero that looks like a product bug.
+  if (id === "") throw new Error(`no target lane for tag '${tag}' in project pa`)
+  return id
+}
 
 // Org 1: wendi (owner 700), anna + bob (contributors 400), outsider (nobody).
 // Project 'pa', one file 'f1' holding two books.
@@ -103,7 +117,7 @@ async function seedUnit(): Promise<void> {
 describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
   it("scopes a book unit to that book's assignments only", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     // as-bob's cells are all EXO, so it is not work on this unit at all.
     expect(rows.map((r) => r.assignmentId)).toEqual(["as-anna"])
     expect(rows[0]).toMatchObject({
@@ -117,7 +131,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("takes the whole file for a file-grain unit ('')", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     // A file-grain unit IS the file, so both books' assignments belong to it.
     // Newest first, as with every other assignment read.
     expect(rows.map((r) => r.assignmentId)).toEqual(["as-bob", "as-anna"])
@@ -125,7 +139,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("excludes unassigned and completed assignments", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     const ids = rows.map((r) => r.assignmentId)
     // as-anna-old was unassigned, as-cara-done was marked complete. Both still
     // have assignment_cells rows covering this unit; neither is live work.
@@ -135,7 +149,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("limits all four counts to that assignment's own cells inside the unit", async () => {
     await seedUnit()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna).toMatchObject({
       // g1 g2 g3 — anna's three, not the file's five.
       cellsTotal: 3,
@@ -162,12 +176,12 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     // target_lang predicate on the target join, the default lane would see g1
     // twice and count g2 as validated — 3 validated out of 3 cells, a unit
     // reading finished while two thirds of its default-lane work is untouched.
-    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(defaultLane).toMatchObject({ cellsTotal: 3, translated: 2, validated: 1 })
 
     // The Spanish lane is its own answer over the same cells: both g1 and g2
     // are translated and endorsed there.
-    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "es")
+    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(spanish).toMatchObject({ cellsTotal: 3, translated: 2, validated: 2 })
 
     // Audio has no lane to pick, so it reads the same from either.
@@ -184,7 +198,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{\"validationCount\":2}')",
     ).run()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.validated).toBe(0)
     expect(anna.translated).toBe(2)
   })
@@ -206,7 +220,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     ).run()
 
     // Unset: headings count, exactly as they did before the setting existed.
-    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(counting[0].cellsTotal).toBe(4)
 
     // The project opts out; its own answer wins over the org's.
@@ -214,7 +228,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')
        ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(excluding[0].cellsTotal).toBe(3)
   })
 
@@ -231,7 +245,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')
        ON CONFLICT (org_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(rows[0].cellsTotal).toBe(3)
   })
 
@@ -242,7 +256,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     await env.AQUILLA_PG.prepare(
       "DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id IN ('g1','g2','g3')",
     ).run()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(rows).toHaveLength(0)
   })
 })
@@ -253,7 +267,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 describe("per-chapter coverage on a unit's assignments", () => {
   it("names the chapters each assignment covers, in canonical order", async () => {
     await seedUnit()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
     expect(anna.chapters).toEqual([
       // g1 and g2: both translated, g1 endorsed, both recorded, g1 signed off.
@@ -268,7 +282,7 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // The fold's own invariant. A GROUP BY that gained a column without the
     // sum-back would leave the panel's headline numbers reading one chapter's
     // worth of work instead of the assignment's.
-    for (const a of await getUnitAssignments(testEnv, "pa", "f1", "", "")) {
+    for (const a of await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))) {
       const sum = (pick: (c: (typeof a.chapters)[number]) => number) =>
         a.chapters.reduce((n, c) => n + pick(c), 0)
       expect(a.cellsTotal).toBe(sum((c) => c.total))
@@ -291,7 +305,7 @@ describe("per-chapter coverage on a unit's assignments", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','g10')",
     ).run()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 10"])
   })
 
@@ -300,8 +314,8 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // Same cells, two answers. g1 and g2 are both endorsed in Spanish; only g1
     // is in the default lane. A chapter row that lost its lane predicate would
     // report GEN 1 fully validated on the tab where it is half done.
-    const [def] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
-    const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "es")
+    const [def] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(def.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 1 })
     expect(es.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 2 })
     // Audio has no lane to pick, so it reads the same from either tab.
@@ -325,14 +339,14 @@ describe("per-chapter coverage on a unit's assignments", () => {
         ('as-anna','f1','g3h'), ('as-anna','f1','g4u')`,
     ).run()
 
-    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(counting[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 3", "GEN 4"])
 
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')
        ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(excluding[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 4"])
     expect(excluding[0].cellsTotal).toBe(4)
   })
@@ -342,7 +356,7 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // A file-grain unit holds both books. The GROUP BY carries the assignment,
     // so bob's Exodus chapters must not land in anna's list or the panel would
     // credit her with work she does not hold.
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     const byId = new Map(rows.map((r) => [r.assignmentId, r]))
     expect(byId.get("as-anna")!.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
     expect(byId.get("as-bob")!.chapters.map((c) => c.key)).toEqual(["EXO 1"])

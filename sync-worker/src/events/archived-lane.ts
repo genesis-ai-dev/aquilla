@@ -8,6 +8,7 @@ import {
   archivedTagsFromSettings,
   type ArchiveLaneRow,
 } from '../../../src/lib/lanes/archived-lane'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import type { RequestCache } from './request-cache'
 
 const rowsByCache = new WeakMap<RequestCache, Map<string, Promise<ArchiveLaneRow[]>>>()
@@ -18,7 +19,9 @@ async function loadRows(db: AquillaDb, projectId: string): Promise<ArchiveLaneRo
     .filter((lane) => lane.role === 'target')
     .map((lane) => ({
       id: lane.id,
-      name: lane.name,
+      // AQU-1592: the refusal message names the lane the way the screen does —
+      // the name when one was set, else the language.
+      name: laneDisplayName(lane),
       legacyTag: lane.legacyTag,
       archivedAt: lane.archivedAt,
     }))

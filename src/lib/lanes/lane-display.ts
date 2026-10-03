@@ -1,0 +1,132 @@
+/**
+ * AQU-1592 — the only sanctioned way to read a lane's display name and its
+ * language code.
+ *
+ * The lane row stores ONLY what the user typed:
+ *
+ *   * `language` — required (freeform: "Spanish", "Yooper English", "Potato").
+ *     Never derived. This is what the AI is told and what every "same
+ *     language?" comparison reads.
+ *   * `name` — optional display override. Display is `name` when set, else
+ *     `language`.
+ *   * `langCode` — optional override of the code derived from `language`. An
+ *     advanced setting, hidden unless the user asks for it. Blank means derive
+ *     from `language` at READ time; the derived value is never written back.
+ *
+ * Deriving at write time is what AQU-1585 is: a `lang_code` captured when the
+ * lane was created keeps claiming the old language after someone edits the
+ * label. Nothing can drift if nothing derived is stored — so the derivation
+ * lives here, on the read path, and every reader goes through it.
+ *
+ * MIGRATION FALLBACK: rows that predate migration 0129 carry their label in
+ * `name` and a write-time-derived code in `langCode`, with `language` NULL.
+ * `laneLanguage` therefore falls back to `name`, and a stored `langCode` is
+ * honoured as an override. The batch backfill (AQU-1616) is what fills
+ * `language` and clears the names and codes that were derived; until it runs,
+ * these fallbacks are what make an un-backfilled row read correctly.
+ */
+
+import { BLANK_LANE_PLACEHOLDER, codeForLanguageLabel, SOURCE_LANE_PLACEHOLDER } from "./backfill-plan"
+
+/**
+ * The identity fields of a lane row, as every representation of one carries
+ * them (`ProjectLaneRecord`, `ProjectLaneView`, a raw SQL row mapped to camel
+ * case). Every field is optional so a caller holding a partial row — or a row
+ * from a server that predates 0129 — can still ask.
+ */
+export interface LaneIdentity {
+  role?: "source" | "target"
+  language?: string | null
+  name?: string | null
+  langCode?: string | null
+}
+
+/**
+ * The language this lane translates into, as the user typed it.
+ *
+ * Falls back to the stored `name` for a row that predates 0129 (see MIGRATION
+ * FALLBACK above). Returns "" when the lane carries neither — a BLANK project
+ * whose target language was never set.
+ */
+export function laneLanguage(lane: LaneIdentity): string {
+  const language = (lane.language ?? "").trim()
+  if (language) return language
+  return (lane.name ?? "").trim()
+}
+
+/**
+ * What the screen shows for this lane: the name when the user gave one, else
+ * the language, else the role's placeholder.
+ *
+ * The placeholder is DERIVED here rather than stored, which is the point: a
+ * lane that shows "Untitled lane" has an empty language, not a name of
+ * "Untitled lane" that would then survive the language being filled in.
+ */
+export function laneDisplayName(lane: LaneIdentity): string {
+  const name = (lane.name ?? "").trim()
+  if (name) return name
+  const language = (lane.language ?? "").trim()
+  if (language) return language
+  return lane.role === "source" ? SOURCE_LANE_PLACEHOLDER : BLANK_LANE_PLACEHOLDER
+}
+
+/**
+ * The lane's language code: the override when the user set one, else the code
+ * derived from the language, else null (honest for a freeform label like
+ * "Grade 7 English" that no catalog entry matches).
+ *
+ * A stored override is canonicalized for case/format when it is a well-formed
+ * BCP 47 tag, and returned as stored when it is not — a reader reports what
+ * the row holds; rejecting malformed input is the write path's job
+ * ({@link canonicalLanguageCodeOverride}).
+ */
+export function laneLanguageCode(lane: LaneIdentity): string | null {
+  const override = (lane.langCode ?? "").trim()
+  if (override) return canonicalizeBcp47(override) ?? override
+  return codeForLanguageLabel(laneLanguage(lane))
+}
+
+/** The code the "Advanced" disclosure shows as its placeholder. */
+export function derivedLaneLanguageCode(lane: LaneIdentity): string | null {
+  return codeForLanguageLabel(laneLanguage(lane))
+}
+
+/** True when this lane carries an explicit code override rather than deriving one. */
+export function hasLaneCodeOverride(lane: LaneIdentity): boolean {
+  return (lane.langCode ?? "").trim().length > 0
+}
+
+/**
+ * Canonical form of a BCP 47 tag, or null when the tag is malformed.
+ * `Intl.getCanonicalLocales` throws a RangeError on a malformed tag and fixes
+ * the case of a well-formed one ("ES-mx" → "es-MX").
+ */
+function canonicalizeBcp47(tag: string): string | null {
+  try {
+    const [canonical] = Intl.getCanonicalLocales(tag)
+    return canonical ?? null
+  } catch {
+    return null
+  }
+}
+
+export type CodeOverrideResult =
+  | { ok: true; code: string | null }
+  | { ok: false; problem: "malformed" }
+
+/**
+ * Validate and canonicalize a code override on the way IN.
+ *
+ * Blank is valid and means "no override — derive from the language", so it
+ * stores NULL. Anything else must be a well-formed BCP 47 tag; it is stored in
+ * canonical case so two spellings of one tag cannot disagree.
+ */
+export function canonicalLanguageCodeOverride(
+  raw: string | null | undefined,
+): CodeOverrideResult {
+  const trimmed = (raw ?? "").trim()
+  if (!trimmed) return { ok: true, code: null }
+  const canonical = canonicalizeBcp47(trimmed)
+  if (!canonical) return { ok: false, problem: "malformed" }
+  return { ok: true, code: canonical }
+}

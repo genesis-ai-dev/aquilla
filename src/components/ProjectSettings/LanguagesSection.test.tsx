@@ -354,3 +354,202 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     expect(screen.queryByTestId("lane-last-change-lane-es")).toBeNull()
   })
 })
+
+// AQU-1592 — lane identity on the languages screen: the LANGUAGE is required,
+// the NAME is an optional override whose placeholder is the language, and the
+// CODE override hides behind an "Advanced" disclosure showing the derived code.
+//
+// The product rule these guard is "store only what the user typed". A derived
+// name or code written at create time keeps claiming the old language after the
+// label is edited, which is the root cause of AQU-1585 — so the assertions below
+// are about what the screen SUBMITS, not only about what it renders.
+describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
+  const LANGUAGE_ONLY: ProjectLaneView = {
+    id: "lane-yo",
+    role: "target",
+    // Stores no name and no code: it displays and resolves via its language.
+    language: "Yoruba",
+    name: null,
+    langCode: null,
+    legacyTag: "Yoruba",
+    position: 1,
+    archivedAt: null,
+  }
+  const DEFAULT_LANE: ProjectLaneView = {
+    id: "lane-default",
+    role: "target",
+    language: "French",
+    name: null,
+    langCode: null,
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  }
+
+  function renderIdentity(
+    lanes: ProjectLaneView[] = [DEFAULT_LANE, LANGUAGE_ONLY],
+    results: {
+      create?: "ok" | "duplicate" | "invalid" | "malformed_code"
+      edit?: "ok" | "duplicate" | "invalid" | "malformed_code"
+    } = {},
+  ) {
+    const onCreateLane = vi.fn(async () => results.create ?? ("ok" as const))
+    const onRenameLane = vi.fn(async () => results.edit ?? ("ok" as const))
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={["Yoruba"]}
+        canEdit
+        disabledTooltip={null}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={lanes}
+        onRenameLane={onRenameLane}
+        onCreateLane={onCreateLane}
+        onSetLaneArchived={vi.fn(async () => true)}
+      />,
+    )
+    return { onCreateLane, onRenameLane }
+  }
+
+  it("shows a lane that carries only a language, with the language as the name placeholder", () => {
+    renderIdentity()
+    expect((screen.getByTestId("lane-language-lane-yo") as HTMLInputElement).value).toBe("Yoruba")
+    const nameField = screen.getByTestId("lane-name-input-lane-yo") as HTMLInputElement
+    // Empty value, language placeholder: the name is genuinely unset, and the
+    // placeholder says what the lane shows instead.
+    expect(nameField.value).toBe("")
+    expect(nameField.placeholder).toBe("Yoruba")
+  })
+
+  it("renders the code derived from the language, which is not stored", () => {
+    renderIdentity([
+      DEFAULT_LANE,
+      { ...LANGUAGE_ONLY, language: "Spanish", legacyTag: "Spanish" },
+    ])
+    expect(screen.getByText("es")).toBeTruthy()
+  })
+
+  it("submits a language edit as a language, not a rename", async () => {
+    const { onRenameLane } = renderIdentity()
+    const field = screen.getByTestId("lane-language-lane-yo")
+    fireEvent.change(field, { target: { value: "Yoruba (Oyo)" } })
+    fireEvent.blur(field)
+    await waitFor(() =>
+      expect(onRenameLane).toHaveBeenCalledWith("lane-yo", { language: "Yoruba (Oyo)" }),
+    )
+  })
+
+  it("refuses to blank a lane's language", async () => {
+    const { onRenameLane } = renderIdentity()
+    const field = screen.getByTestId("lane-language-lane-yo") as HTMLInputElement
+    fireEvent.change(field, { target: { value: "  " } })
+    fireEvent.blur(field)
+    await waitFor(() => expect(screen.getByText(/needs a language/i)).toBeTruthy())
+    expect(onRenameLane).not.toHaveBeenCalled()
+    // The field snaps back, so the row keeps showing what is actually stored.
+    expect(field.value).toBe("Yoruba")
+  })
+
+  it("clears the name override when the name field is emptied", async () => {
+    const { onRenameLane } = renderIdentity([
+      DEFAULT_LANE,
+      { ...LANGUAGE_ONLY, name: "Draft Yoruba" },
+    ])
+    const field = screen.getByTestId("lane-name-input-lane-yo")
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.blur(field)
+    // null CLEARS the override — it does not write the language back as a name.
+    await waitFor(() => expect(onRenameLane).toHaveBeenCalledWith("lane-yo", { name: null }))
+  })
+
+  it("hides the code override until Advanced is opened, then shows the derived code as its placeholder", () => {
+    renderIdentity([
+      DEFAULT_LANE,
+      { ...LANGUAGE_ONLY, language: "Spanish", legacyTag: "Spanish" },
+    ])
+    expect(screen.queryByTestId("lane-code-lane-yo")).toBeNull()
+    fireEvent.click(screen.getByTestId("lane-advanced-toggle-lane-yo"))
+    const code = screen.getByTestId("lane-code-lane-yo") as HTMLInputElement
+    expect(code.value).toBe("")
+    expect(code.placeholder).toBe("es")
+  })
+
+  it("opens Advanced already expanded for a lane that has an override", () => {
+    renderIdentity([DEFAULT_LANE, { ...LANGUAGE_ONLY, langCode: "yo-NG" }])
+    const code = screen.getByTestId("lane-code-lane-yo") as HTMLInputElement
+    expect(code.value).toBe("yo-NG")
+  })
+
+  it("submits a code override and reports a malformed one", async () => {
+    const { onRenameLane } = renderIdentity([DEFAULT_LANE, LANGUAGE_ONLY], {
+      edit: "malformed_code",
+    })
+    fireEvent.click(screen.getByTestId("lane-advanced-toggle-lane-yo"))
+    const code = screen.getByTestId("lane-code-lane-yo")
+    fireEvent.change(code, { target: { value: "not a tag!" } })
+    fireEvent.blur(code)
+    await waitFor(() =>
+      expect(onRenameLane).toHaveBeenCalledWith("lane-yo", { code: "not a tag!" }),
+    )
+    expect(screen.getByText(/not a valid language code/i)).toBeTruthy()
+  })
+
+  it("creates a lane from a language alone, submitting no name", async () => {
+    const { onCreateLane } = renderIdentity()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Swahili" },
+    })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    // name: "" — the server stores null, so the lane shows its language. A
+    // derived "Swahili" name here is what AQU-1585 is about.
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({ name: "", language: "Swahili", code: null }),
+    )
+  })
+
+  it("requires a language to create a lane", async () => {
+    const { onCreateLane } = renderIdentity()
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() => expect(screen.getByText(/needs a language/i)).toBeTruthy())
+    expect(onCreateLane).not.toHaveBeenCalled()
+  })
+
+  it("uses the typed language as the new lane's name placeholder", () => {
+    renderIdentity()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Swahili" },
+    })
+    expect((screen.getByTestId("add-lane-name-input") as HTMLInputElement).placeholder).toBe(
+      "Swahili",
+    )
+  })
+
+  it("keeps the new lane's code override behind Advanced and submits it", async () => {
+    const { onCreateLane } = renderIdentity()
+    expect(screen.queryByTestId("add-lane-code-input")).toBeNull()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Spanish" },
+    })
+    fireEvent.click(screen.getByTestId("add-lane-advanced-toggle"))
+    const code = screen.getByTestId("add-lane-code-input") as HTMLInputElement
+    expect(code.placeholder).toBe("es")
+    fireEvent.change(code, { target: { value: "es-MX" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "Spanish",
+        code: "es-MX",
+      }),
+    )
+  })
+
+  it("reports a malformed code from the create path", async () => {
+    renderIdentity([DEFAULT_LANE, LANGUAGE_ONLY], { create: "malformed_code" })
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Spanish" },
+    })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() => expect(screen.getByText(/not a valid language code/i)).toBeTruthy())
+  })
+})

@@ -64,8 +64,9 @@ import {
 } from "../../../db/shared/projects"
 import {
   insertTargetLane,
+  laneDisplayNameSql,
   readLaneLastChange,
-  renameTargetLane,
+  updateTargetLane,
   setTargetLaneArchived,
 } from "../../../db/shared/lanes"
 import { planNewTargetLane } from "../../../src/lib/lanes/lane-create"
@@ -223,7 +224,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
 async function targetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const rows = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)
@@ -444,13 +445,20 @@ projectSettings.on(
   },
 )
 
+// AQU-1592: the languages screen edits a lane's identity — the language it
+// translates into, an optional display name, an optional code override. Every
+// field is optional on PATCH so a client may send just the one it changed; a
+// client that predates AQU-1592 sends `name` alone, which still means "rename".
 const renameLaneSchema = z.object({
-  name: z.string(),
+  name: z.string().nullable().optional(),
+  language: z.string().optional(),
+  code: z.string().nullable().optional(),
 })
 
 const createLaneSchema = z.object({
   name: z.string(),
   language: z.string(),
+  code: z.string().nullable().optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -527,10 +535,12 @@ projectSettings.post(
       laneId,
       name: body.name,
       language: body.language,
+      code: body.code,
       targetLanguage,
       existing: (current.lanes ?? []).map((lane) => ({
         id: lane.id,
         name: lane.name,
+        language: lane.language,
         legacyTag: lane.legacyTag,
       })),
     })
@@ -542,6 +552,7 @@ projectSettings.post(
     try {
       await insertTargetLane(c.env.AQUILLA_PG, projectId, {
         id: laneId,
+        language: plan.language,
         name: plan.name,
         langCode: plan.langCode,
         legacyTag: plan.legacyTag,
@@ -582,17 +593,21 @@ projectSettings.patch(
     const laneId = c.req.param("laneId") as string
     const denied = await denyLanguageWrite(c.env, user, projectId)
     if (denied) return c.json(denied, 403)
-    const result = await renameTargetLane(
-      c.env.AQUILLA_PG,
-      projectId,
-      laneId,
-      c.req.valid("json").name,
-    )
+    const body = c.req.valid("json")
+    const result = await updateTargetLane(c.env.AQUILLA_PG, projectId, laneId, {
+      ...(body.name === undefined ? {} : { name: body.name }),
+      ...(body.language === undefined ? {} : { language: body.language }),
+      ...(body.code === undefined ? {} : { code: body.code }),
+    })
     if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
     if (result.status === "duplicate") {
       return c.json({ error: "duplicate_name" }, 409)
     }
-    if (result.status === "empty" || result.status === "too_long") {
+    if (
+      result.status === "empty" ||
+      result.status === "too_long" ||
+      result.status === "malformed_code"
+    ) {
       return c.json({ error: result.status }, 400)
     }
     if (result.status !== "ok") return c.json({ error: result.status }, 400)

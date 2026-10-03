@@ -1,0 +1,37 @@
+-- Migration 0129: lane identity is language + optional name + optional code
+-- override — AQU-1592 "Lane schema: required language, optional name, optional
+-- code override".
+--
+-- MODEL: store only what the user typed.
+--   * `language` — the freeform language the maintainer typed ("Spanish",
+--     "Yooper English", "Potato"). Never derived. It is what the AI is told and
+--     what every "same language?" comparison reads.
+--   * `name` — OPTIONAL display override. Display is `name` when set, else
+--     `language`. Becomes nullable here: a lane that was only ever given a
+--     language stores no name, and the read-time placeholder ("Source" /
+--     "Untitled lane") is derived rather than written.
+--   * `lang_code` — keeps its column name but changes meaning: it is now the
+--     OPTIONAL BCP 47 override of the code derived from `language`, exposed
+--     behind an "Advanced" disclosure. NULL means "derive at read time"
+--     (`laneLanguageCode` in src/lib/lanes/lane-display.ts); the derived value
+--     is never written back.
+--
+-- WHY: a stored `lang_code` derived at write time drifts away from the label
+-- the next time someone edits the language, which is the root cause of
+-- AQU-1585 (editing the project target language creates a duplicate lane and
+-- mislabels the default lane). Nothing can drift if nothing derived is stored.
+--
+-- `language` is added NULLABLE on purpose. Rows that predate this migration
+-- carry their label in `name`, and the readers fall back to `name` until the
+-- batch backfill (AQU-1616) fills `language` and clears the names and codes
+-- that were derived. Making it NOT NULL is that ticket's job, after the
+-- backfill has run.
+--
+-- Apply by hand against Neon (same convention as prior migrations here —
+-- NOT applied automatically):
+--   set -a; . ./.env; set +a
+--   npx tsx scripts/pg.ts db/postgres/migrations/0129_lane_language.sql
+-- Verify: `\d lanes` shows a nullable `language` column and a nullable `name`.
+
+ALTER TABLE lanes ADD COLUMN IF NOT EXISTS language TEXT;
+ALTER TABLE lanes ALTER COLUMN name DROP NOT NULL;

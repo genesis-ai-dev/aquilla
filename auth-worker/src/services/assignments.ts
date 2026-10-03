@@ -40,16 +40,59 @@ export interface AssigneeWorkload {
   cellsDone: number
 }
 
+/**
+ * AQU-1083 / AQU-1493: whether the assignment's project leaves headings and
+ * titles out of its counts — the project's answer, else its org's, else no.
+ * The same stored columns, and the same answer, as the `policy` CTE in
+ * `getUnitAssignments`, correlated on the outer `a` so every per-assignment
+ * figure below can ask it once.
+ */
+const EXCLUDES_STRUCTURAL_SQL = `COALESCE((
+  SELECT COALESCE(ps.count_structural, os.count_structural) = 'false'
+    FROM projects p
+    LEFT JOIN project_settings ps ON ps.project_id = p.id
+    LEFT JOIN org_settings os ON os.org_id = p.org_id
+   WHERE p.id = a.project_id
+), false)`
+
+/**
+ * The structural cell types, on the SOURCE row `alias` — target rows carry no
+ * type. COALESCE because a null type means content and `NULL IN (...)` would
+ * drop every untyped cell (see the note in `getUnitAssignments`).
+ */
+const isStructuralSql = (alias: string) => `COALESCE(${alias}.type, '') IN ('heading', 'paratext')`
+
+/**
+ * Picks between two forms of one count by the project's policy, so the policy
+ * is read once per assignment and a project that counts headings — nearly all
+ * of them — pays nothing for the filter.
+ */
+const byStructuralPolicy = (counting: string, excluding: string) =>
+  `(CASE WHEN ${EXCLUDES_STRUCTURAL_SQL} THEN ${excluding} ELSE ${counting} END)`
+
 /** The denominator: assigned cells that still EXIST, counted live. Mirrors
  *  CELLS_DONE_SUBQUERY's join without the validated predicate; `side =
  *  'source'` is what makes each assigned cell count exactly once, since
- *  assignment_cells resolved source rows. */
-const CELLS_TOTAL_SUBQUERY = `(
+ *  assignment_cells resolved source rows.
+ *
+ *  AQU-1493: and without the headings, when the project does not count them.
+ *  A chapter assignment takes the chapter's headings along (they count in the
+ *  chapter on the board), so with headings off "Assigned to me" read 23/24 for
+ *  a chapter whose every verse was done, while the plan inspector's row for the
+ *  same person — which applies the policy — said "Nothing left". Applied when
+ *  READING, not when the assignment is made, because the setting can change
+ *  afterwards; that also squares whole-file assignments, which always held the
+ *  headings. */
+const cellsTotalSql = (structural: string) => `(
   SELECT COUNT(*) FROM assignment_cells ac
     JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'source'
-   WHERE ac.assignment_id = a.assignment_id
+   WHERE ac.assignment_id = a.assignment_id${structural}
 )`
+const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
+  cellsTotalSql(""),
+  cellsTotalSql(`\n     AND NOT ${isStructuralSql("c")}`),
+)
 
 /**
  * The numerator: assigned cells whose TARGET row is validated — in the lane the
@@ -74,14 +117,29 @@ const CELLS_TOTAL_SUBQUERY = `(
  *
  * `a.lane_id` rather than a bound lane is deliberate: an assignment IS pinned
  * to one lane (AQU-538 §3.5), so its progress is only ever measured there.
+ *
+ * AQU-1493: with headings left out (see CELLS_TOTAL_SUBQUERY), the type is
+ * read from each cell's SOURCE row, the only side that carries one.
  */
-const CELLS_DONE_SUBQUERY = `(
+const CELLS_DONE_SUBQUERY = byStructuralPolicy(
+  `(
   SELECT COUNT(*) FROM assignment_cells ac
     JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
-)`
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_cells ac
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                 AND c.cell_id = ac.cell_id AND c.side = 'target'
+                 AND c.lane_id = a.lane_id AND c.validated = 1
+    JOIN cells s ON s.project_id = a.project_id AND s.file_id = ac.file_id
+                 AND s.cell_id = ac.cell_id AND s.side = 'source'
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("s")}
+)`,
+)
 
 /**
  * AQU-1609: the `lanes.id` a legacy target-language tag names, or `''` when the

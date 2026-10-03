@@ -407,7 +407,7 @@ describe("lines added with no reference (AQU-1493)", () => {
 
   it("counts the added line toward the book of the line above it", async () => {
     await seedAddedLines()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", await laneIdFor(""))
     expect(anna.assignmentId).toBe("as-gen-only")
     expect(anna.cellsTotal).toBe(2)
     // …and in that line's chapter, so the panel can name it.
@@ -429,16 +429,16 @@ describe("lines added with no reference (AQU-1493)", () => {
       "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','hg2')",
     ).run()
     await storePlanKeys("f1")
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.assignmentId).toBe("as-anna")
     expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2], ["GEN 2", 2]])
   })
 
   it("follows the line above in a file of several books", async () => {
     await seedAddedLines()
-    const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", "")
+    const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", await laneIdFor(""))
     expect(exo.map((r) => r.assignmentId)).toContain("as-added-exo")
-    const gen = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const gen = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(gen.map((r) => r.assignmentId)).not.toContain("as-added-exo")
   })
 })

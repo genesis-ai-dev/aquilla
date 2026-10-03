@@ -8,11 +8,15 @@
 // the first still to validate, else the assignment's first cell. A whole-file
 // assignment keeps opening the file, as it always has.
 //
-// The inbox row carries no cell ids — the server sends the scope as a label
-// — so the cells are read on the click, one chapter at a time, from the same
-// per-chapter read the board's chapter card draws its chips from. That read
-// already places headings and lines added in the editor in their chapter, so
-// the landing agrees with the chips a manager sees for the same chapter.
+// A chapter assignment's row carries no cell ids — the server sends its scope
+// as a label — so the cells are read on the click, one chapter at a time, from
+// the same per-chapter read the board's chapter card draws its chips from. That
+// read already places headings and lines added in the editor in their chapter,
+// so the landing agrees with the chips a manager sees for the same chapter.
+//
+// A 'cells' assignment (AQU-1628, the editor's current selection) does carry
+// its ids, but only on the per-project inbox read; the org-wide read this list
+// uses does not send them, so such a row opens its file like a whole-file one.
 
 import type { MyAssignment } from "@/lib/sync/assignments"
 import { getBookOrdinal, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"

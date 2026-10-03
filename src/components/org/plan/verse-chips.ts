@@ -96,3 +96,34 @@ export function verseChipLabel(ref: string, sectionKey: string): string {
   const match = /^\S+\s+(\d+:\d+)$/.exec(ref)
   return match ? match[1] : ref
 }
+
+/**
+ * AQU-1493: where a WORD chip's line sits — a heading's or an unnumbered
+ * line's chip prints a word instead of a number, so two of them in one strip
+ * read alike and say nothing about which line each opens. This names the
+ * nearest numbered verse beside the line, in the order the worker listed them
+ * (file order): a heading introduces the verse BELOW it, so it looks there
+ * first; an added line counts with the line ABOVE it, so it looks there first.
+ * Each falls back to the other side. `verse` is that verse's chip label.
+ *
+ * Absent from the map when the list holds no numbered verse at all — a front
+ * matter card — and the caller numbers such chips instead.
+ */
+export function wordChipPlaces(
+  verses: readonly ShortVerse[],
+  sectionKey: string,
+): Map<string, { near: "before" | "after"; verse: string }> {
+  const numbered = (v: ShortVerse) => !v.structural && !v.unnumbered && v.ref !== ""
+  const places = new Map<string, { near: "before" | "after"; verse: string }>()
+  verses.forEach((v, i) => {
+    if (!v.cellId || !(v.structural || v.unnumbered)) return
+    const below = verses.slice(i + 1).find(numbered)
+    const above = verses.slice(0, i).reverse().find(numbered)
+    const order: ["before" | "after", ShortVerse | undefined][] = v.structural
+      ? [["before", below], ["after", above]]
+      : [["after", above], ["before", below]]
+    const hit = order.find(([, n]) => n)
+    if (hit) places.set(v.cellId, { near: hit[0], verse: verseChipLabel(hit[1]!.ref, sectionKey) })
+  })
+  return places
+}

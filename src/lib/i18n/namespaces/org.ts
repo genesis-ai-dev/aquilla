@@ -1480,6 +1480,12 @@ export const org = defineNamespace({
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
     "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
     "org.projectOverview.plan.headingLine": "Heading",
+    "org.projectOverview.plan.titleLine": "Title or intro",
+    "org.projectOverview.plan.headingBefore": "Heading before {verse}",
+    "org.projectOverview.plan.headingAfter": "Heading after {verse}",
+    "org.projectOverview.plan.unnumberedBefore": "Unnumbered line before {verse}",
+    "org.projectOverview.plan.unnumberedAfter": "Unnumbered line after {verse}",
+    "org.projectOverview.plan.wordChipOrdinal": "{line} ({index} of {count})",
     "org.projectOverview.plan.unnumberedInChapter": plural({
       one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
       other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
@@ -3253,8 +3259,42 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.headingLine": {
         description:
-          "Chip in the plan inspector's chapter card for a heading or title line, such as 'The Creation' or a book title, where a numbered verse's chip would print '12:4'. Opens that line in the editor.",
+          "Chip in the plan inspector's chapter card for a section heading, such as 'The Creation', where a numbered verse's chip would print '12:4'. Opens that line in the editor.",
         maxLength: 20,
+      },
+      "org.projectOverview.plan.titleLine": {
+        description:
+          "Chip on the plan inspector's front-matter card (the part of a book before chapter 1) for a book's title, running header, table-of-contents line or introduction paragraph. Opens that line in the editor.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingBefore": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card, saying which line it opens: the heading printed just before that verse.",
+        placeholders: { verse: "The verse below the heading, as its chip prints it, e.g. '3:1'." },
+      },
+      "org.projectOverview.plan.headingAfter": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card for a heading at the end of a chapter with no verse below it: the heading printed just after that verse.",
+        placeholders: { verse: "The verse above the heading, as its chip prints it, e.g. '3:24'." },
+      },
+      "org.projectOverview.plan.unnumberedBefore": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just before that verse.",
+        placeholders: { verse: "The verse below the line, as its chip prints it, e.g. '2:1'." },
+      },
+      "org.projectOverview.plan.unnumberedAfter": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just after that verse.",
+        placeholders: { verse: "The verse above the line, as its chip prints it, e.g. '2:5'." },
+      },
+      "org.projectOverview.plan.wordChipOrdinal": {
+        description:
+          "Tooltip and screen-reader name of a chip that prints a word instead of a verse number, when several such chips on the card would otherwise have the same name (two headings stacked before one verse, or several title lines on a book's front matter). Says which of them this is, in file order, e.g. 'Heading before 3:1 (2 of 2)'.",
+        placeholders: {
+          line: "The chip's name without the count, already translated: e.g. 'Heading before 3:1' or 'Title or intro'.",
+          index: "Its position among the chips with that word — a number.",
+          count: "How many chips on the card print that word — a number.",
+        },
       },
       "org.projectOverview.plan.unnumberedInChapter": {
         description:

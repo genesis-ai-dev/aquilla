@@ -40,7 +40,7 @@ import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanCha
 import { PLAN_TONE } from "./plan-tone"
 import { GO_TO_FIRST_KEY, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
-import { shortVerses, verseChipLabel } from "./verse-chips"
+import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./verse-chips"
 
 /**
  * Mounted with a `key` per unit by its caller, so stepping to another unit
@@ -211,6 +211,9 @@ export function PlanInspector({
   useEffect(() => {
     if (openSectionKey) loadVerses(openSectionKey)
   }, [openSectionKey, loadVerses])
+  const openSectionIsFrontMatter = openSection
+    ? classifyPlanSection(openSection.key, numberedBookCodes(sections.map((s) => s.key))).kind === "frontMatter"
+    : false
   const openSectionTitle = (() => {
     if (!openSection) return ""
     const numbered = numberedBookCodes(sections.map((s) => s.key))
@@ -537,6 +540,7 @@ export function PlanInspector({
                 key={openSection.key}
                 section={openSection}
                 title={openSectionTitle}
+                frontMatter={openSectionIsFrontMatter}
                 hasAudio={hasAudio}
                 hasText={hasText}
                 verses={sectionVerses.get(openSection.key)}
@@ -687,11 +691,17 @@ export function PlanInspector({
  * they arrive, or if they never do, the title is plain text.
  */
 function PlanChapterCard({
-  section, title, hasAudio, hasText = true, verses, onOpenCell,
+  section, title, frontMatter = false, hasAudio, hasText = true, verses, onOpenCell,
 }: {
   section: PlanSection
   /** "Chapter 12", or a named section's own label. */
   title: string
+  /**
+   * AQU-1493: the card is a book's front matter. Its structural lines are the
+   * book's title, header, contents and introduction, so their chips say
+   * "Title or intro" rather than "Heading".
+   */
+  frontMatter?: boolean
   hasAudio: boolean
   /** AQU-955: false on an audio-only file; the card drops its text bar. */
   hasText?: boolean
@@ -742,6 +752,38 @@ function PlanChapterCard({
   const unnumbered = verses?.status === "ready"
     ? verses.verses.filter((v) => v.unnumbered && !v.structural).length
     : 0
+
+  // AQU-1493: a chip with no number prints a word, and several can share it
+  // ("Heading", "Heading"). Each gets a name that says where its line sits —
+  // "Heading before 3:1" — as its accessible name and its tooltip, and where
+  // two lines still share a name (stacked headings, or a front-matter card
+  // with no numbered verse to place them by) a count among them: "(2 of 3)".
+  const wordOf = (v: ShortVerse): string | null => v.structural
+    ? t(frontMatter ? "org.projectOverview.plan.titleLine" : "org.projectOverview.plan.headingLine")
+    : v.unnumbered ? t("org.projectOverview.plan.unnumberedLine") : null
+  const allVerses = verses?.status === "ready" ? verses.verses : []
+  const places = wordChipPlaces(allVerses, section.key)
+  const placedName = (v: ShortVerse): string | null => {
+    const word = wordOf(v)
+    if (!word) return null
+    const place = v.cellId ? places.get(v.cellId) : undefined
+    if (!place || (v.structural && frontMatter)) return word
+    const key = v.structural
+      ? place.near === "before" ? "org.projectOverview.plan.headingBefore" : "org.projectOverview.plan.headingAfter"
+      : place.near === "before" ? "org.projectOverview.plan.unnumberedBefore" : "org.projectOverview.plan.unnumberedAfter"
+    return t(key, { verse: place.verse })
+  }
+  const wordChipName = (v: ShortVerse & { cellId: string }): string | undefined => {
+    const name = placedName(v)
+    if (!name) return undefined
+    const namesakes = allVerses.filter((o) => placedName(o) === name)
+    if (namesakes.length < 2) return name === wordOf(v) ? undefined : name
+    return t("org.projectOverview.plan.wordChipOrdinal", {
+      line: name,
+      index: namesakes.findIndex((o) => o.cellId === v.cellId) + 1,
+      count: namesakes.length,
+    })
+  }
 
   return (
     <div
@@ -822,26 +864,27 @@ function PlanChapterCard({
           style={{ maskImage: fadeMask(fade), WebkitMaskImage: fadeMask(fade) }}
           data-testid="plan-chapter-verses"
         >
-          {short.map((v) => (
-            <button
-              key={v.cellId}
-              type="button"
-              data-testid={`plan-verse-chip-${v.cellId}`}
-              // Text in the STATUS azure: `text-primary` is the pale accent
-              // tuned for button fills, and on a chip this small it washed out.
-              // AQU-1493: a line with no reference has no number to print, so
-              // its chip says what it is in words and grows to fit them. So
-              // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
-              className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
-              onClick={() => onOpenCell?.(v.cellId)}
-            >
-              {v.structural
-                ? t("org.projectOverview.plan.headingLine")
-                : v.unnumbered
-                  ? t("org.projectOverview.plan.unnumberedLine")
-                  : verseChipLabel(v.ref, section.key)}
-            </button>
-          ))}
+          {short.map((v) => {
+            const name = wordChipName(v)
+            return (
+              <AppTooltip key={v.cellId} content={name}>
+                <button
+                  type="button"
+                  aria-label={name}
+                  data-testid={`plan-verse-chip-${v.cellId}`}
+                  // Text in the STATUS azure: `text-primary` is the pale accent
+                  // tuned for button fills, and on a chip this small it washed out.
+                  // AQU-1493: a line with no reference has no number to print, so
+                  // its chip says what it is in words and grows to fit them. So
+                  // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
+                  className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
+                  onClick={() => onOpenCell?.(v.cellId)}
+                >
+                  {wordOf(v) ?? verseChipLabel(v.ref, section.key)}
+                </button>
+              </AppTooltip>
+            )
+          })}
         </div>
       )}
       {/* AQU-1493: only on the chapter that holds them (Sam, 2026-10-01). A

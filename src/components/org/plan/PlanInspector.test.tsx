@@ -745,6 +745,50 @@ describe("the chapter card", () => {
     expect(screen.queryByTestId("plan-chapter-unnumbered")).toBeNull()
   })
 
+  it("names each word chip by where its line sits, so two of them can be told apart (AQU-1493)", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 6, filledCount: 1, validatedCount: 1 })],
+      [
+        verse("h2", "", { filled: false, validated: false, structural: true }),
+        verse("s1", "GEN 2:s1:1", { filled: false, validated: false, structural: true }),
+        verse("g21", "GEN 2:1"),
+        verse("x1", "", { filled: false, validated: false, unnumbered: true }),
+        verse("g22", "GEN 2:2", { filled: false, validated: false }),
+        verse("hEnd", "", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    const name = (id: string) => screen.getByTestId(`plan-verse-chip-${id}`).getAttribute("aria-label")
+    // Stacked headings before the same verse: the place, then which of them.
+    expect(name("h2")).toBe("Heading before 2:1 (1 of 2)")
+    expect(name("s1")).toBe("Heading before 2:1 (2 of 2)")
+    // An added line is placed by the line above it; a heading with no verse
+    // below it, by the verse above.
+    expect(name("x1")).toBe("Unnumbered line after 2:1")
+    expect(name("hEnd")).toBe("Heading after 2:2")
+    // A numbered chip already names itself.
+    expect(name("g22")).toBeNull()
+    // The chip itself still prints the short word.
+    expect(screen.getByTestId("plan-verse-chip-x1")).toHaveTextContent("Unnumbered line")
+  })
+
+  it("calls a front-matter card's structural lines titles or intros, numbered among themselves (AQU-1493)", async () => {
+    // JON:h:1, JON:mt1:1 and JON:ip:1: the book's running header, title and
+    // introduction, all on the front matter before chapter 1. None is a heading.
+    await openChapter(
+      nearlyDone({ sectionKey: "JON" }),
+      [section("JON", { totalCount: 3, filledCount: 0, validatedCount: 0 }), section("JON 1")],
+      [
+        verse("fh", "JON:h:1", { filled: false, validated: false, structural: true }),
+        verse("fmt", "JON:mt1:1", { filled: false, validated: false, structural: true }),
+        verse("fip", "JON:ip:1", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Title or intro", "Title or intro", "Title or intro"])
+    expect(screen.getByTestId("plan-verse-chip-fmt").getAttribute("aria-label")).toBe("Title or intro (2 of 3)")
+  })
+
   it("counts only added lines in the unnumbered note, never a heading (AQU-1493)", async () => {
     // A mixed-version deploy could still flag a heading `unnumbered`; the
     // `structural` flag wins.

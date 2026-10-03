@@ -114,7 +114,7 @@ describe("ensureProjectLanes", () => {
     expect(await lanes(t)).toHaveLength(2)
   })
 
-  it("assigns 8-hex ids that are per-project unique and stable on re-run", async () => {
+  it("assigns 8-hex ids that stay put on re-run, and rejects the same id in another project", async () => {
     await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
     const first = await t.pg.query<{ id: string; role: string }>(
       `SELECT id, role FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
@@ -127,19 +127,13 @@ describe("ensureProjectLanes", () => {
 
     const sharedId = first.rows[0]!.id
     const otherProject = "proj-ensure-lanes-other"
-    await t.pg.query(
-      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-       VALUES ($1, $2, 'source', 'Source', NULL, NULL, 0)`,
-      [sharedId, otherProject],
-    )
-    const both = await t.pg.query<{ project_id: string; id: string }>(
-      `SELECT project_id, id FROM lanes WHERE id = $1 ORDER BY project_id`,
-      [sharedId],
-    )
-    expect(both.rows).toEqual([
-      { project_id: PROJECT, id: sharedId },
-      { project_id: otherProject, id: sharedId },
-    ])
+    await expect(
+      t.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ($1, $2, 'source', 'Source', NULL, NULL, 0)`,
+        [sharedId, otherProject],
+      ),
+    ).rejects.toMatchObject({ code: "23505", constraint: "uq_lanes_id" })
 
     await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
     const again = await t.pg.query<{ id: string }>(

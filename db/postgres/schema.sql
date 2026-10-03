@@ -1277,13 +1277,15 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 -- First-class lanes with opaque IDs (0096_lanes.sql, AQU-1240 v2). Replaces the
 -- implicit '' default lane. role='source' (one per project, not lane-addressable)
 -- or 'target' (one per distinct target_lang value, incl. '' = default lane).
--- id is an opaque 8-hex app-generated value; PRIMARY KEY is (project_id, id).
+-- id is an opaque 8-hex app-generated value, globally unique (uq_lanes_id,
+-- 0129 / AQU-1606). PRIMARY KEY stays (project_id, id) so composite foreign
+-- keys (project_id, lane_id) -> lanes(project_id, id) are unchanged.
 -- name is NOT unique (UI disambiguates); lang_code is BCP-47 (NULL=placeholder);
 -- legacy_tag is the immutable cutover target_lang ('' for default, NULL for
 -- source) that makes rename-safe replay resolve history by tag, never by name.
 -- position / archived_at are additive (display order / soft-archive).
 CREATE TABLE IF NOT EXISTS lanes (
-    id          TEXT        NOT NULL,   -- opaque 8-hex, app-generated (see src/lib/lanes/lane-id.ts)
+    id          TEXT        NOT NULL,   -- opaque 8-hex, globally unique, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
     name        TEXT        NOT NULL,
@@ -1295,6 +1297,8 @@ CREATE TABLE IF NOT EXISTS lanes (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_id
+    ON lanes(id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_project_source
     ON lanes(project_id) WHERE role = 'source';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_project_legacy_tag

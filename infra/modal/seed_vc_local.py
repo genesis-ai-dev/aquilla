@@ -11,7 +11,7 @@ builds the venv:
 
 Then point the local sync-worker at it in `sync-worker/.dev.vars`:
     SEED_VC_URL="http://127.0.0.1:8791/convert"
-    SEED_VC_TOKEN="<same value as this server's SEED_VC_TOKEN>"
+    SEED_VC_TOKEN="<token>"
 
 Environment:
     SEED_VC_DIR     upstream checkout (the wrapper sets it)

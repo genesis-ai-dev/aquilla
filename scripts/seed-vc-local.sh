@@ -51,13 +51,13 @@ if [[ "$(cat "$STAMP" 2>/dev/null)" != "$REQS_SHA" ]]; then
 fi
 
 if [[ -z "${SEED_VC_TOKEN:-}" && -f "$ROOT/sync-worker/.dev.vars" ]]; then
-  SEED_VC_TOKEN="$(sed -n 's/^SEED_VC_TOKEN *= *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$ROOT/sync-worker/.dev.vars" | tail -1)"
+  SEED_VC_TOKEN="$(sed -n 's/^SEED_VC_TOKEN *= *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$ROOT/sync-worker/.dev.vars" | tail -1)" # secret-scan:allow — reads the local dev var, not a literal secret
 fi
 if [[ -z "${SEED_VC_TOKEN:-}" ]]; then
   cat >&2 <<'EOF'
 seed-vc-local: no SEED_VC_TOKEN. Add these to sync-worker/.dev.vars, then re-run:
   SEED_VC_URL="http://127.0.0.1:8791/convert"
-  SEED_VC_TOKEN="<any long random string>"
+  SEED_VC_TOKEN="<token>"
 EOF
   exit 1
 fi

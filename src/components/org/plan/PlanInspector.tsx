@@ -801,6 +801,21 @@ function PlanChapterCard({
       : place.near === "before" ? "org.projectOverview.plan.unnumberedBefore" : "org.projectOverview.plan.unnumberedAfter"
     return t(key, { verse: place.verse })
   }
+  // AQU-1493 (Sam, 2026-10-03): a heading's chip says which verse it
+  // introduces — "Heading · 1:6" — so a strip of them reads as places rather
+  // than as one word repeated. Only a heading with a verse BELOW it: one at the
+  // end of a chapter introduces nothing, and a front-matter title has no verse
+  // to name, so both keep the bare word. An unnumbered line carries no ref of
+  // its own and keeps its word too; its tooltip still says where it sits.
+  const chipText = (v: ShortVerse & { cellId: string }): string => {
+    if (v.structural && !frontMatter) {
+      const place = places.get(v.cellId)
+      if (place?.near === "before") {
+        return t("org.projectOverview.plan.headingChipAt", { verse: place.verse })
+      }
+    }
+    return wordOf(v) ?? verseChipLabel(v.ref, section.key)
+  }
   const wordChipName = (v: ShortVerse & { cellId: string }): string | undefined => {
     const name = placedName(v)
     if (!name) return undefined
@@ -908,7 +923,7 @@ function PlanChapterCard({
                   className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
                   onClick={() => onOpenCell?.(v.cellId)}
                 >
-                  {wordOf(v) ?? verseChipLabel(v.ref, section.key)}
+                  {chipText(v)}
                 </button>
               </AppTooltip>
             )

@@ -781,7 +781,9 @@ describe("the chapter card", () => {
       { onOpenCell },
     )
     const row = screen.getByTestId("plan-chapter-verses")
-    expect([...row.children].map((c) => c.textContent)).toEqual(["Heading", "Heading", "2:2"])
+    // AQU-1493 (Sam, 2026-10-03): a heading's chip names the verse it
+    // introduces, "Heading · 2:1", the separator the board joins fragments with.
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Heading \u00b7 2:1", "Heading \u00b7 2:1", "2:2"])
     // A word chip grows to fit its word; a verse chip keeps its fixed width.
     expect(screen.getByTestId("plan-verse-chip-h2").className).toContain("px-2")
     expect(screen.getByTestId("plan-verse-chip-h2").className).not.toContain("w-[46px]")
@@ -815,7 +817,12 @@ describe("the chapter card", () => {
     // A numbered chip already names itself.
     expect(name("g22")).toBeNull()
     // The chip itself still prints the short word.
-    expect(screen.getByTestId("plan-verse-chip-x1")).toHaveTextContent("Unnumbered line")
+    expect(screen.getByTestId("plan-verse-chip-x1")).toHaveTextContent(/^Unnumbered line$/)
+    // A heading prints the verse it introduces beside the word, and keeps the
+    // full sentence for its tooltip; one with no verse below it introduces
+    // nothing and keeps the bare word.
+    expect(screen.getByTestId("plan-verse-chip-h2")).toHaveTextContent(/^Heading \u00b7 2:1$/)
+    expect(screen.getByTestId("plan-verse-chip-hEnd")).toHaveTextContent(/^Heading$/)
   })
 
   it("says a line added above a book's first verse counts with its front matter, not 'this chapter' (AQU-1493)", async () => {

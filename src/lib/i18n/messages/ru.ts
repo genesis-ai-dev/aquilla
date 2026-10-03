@@ -3080,6 +3080,7 @@ export const ru: Catalog = {
   "org.projectOverview.plan.frontMatterAndChaptersShort": {"forms":{"one":"вводная часть и {count} глава не готовы","few":"вводная часть и {count} главы не готовы","many":"вводная часть и {count} глав не готовы","other":"вводная часть и {count} главы не готовы"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Строка без номера",
   "org.projectOverview.plan.headingLine": "Заголовок",
+  "org.projectOverview.plan.headingChipAt": "Заголовок · {verse}",
   "org.projectOverview.plan.titleLine": "Название или введение",
   "org.projectOverview.plan.headingBefore": "Заголовок перед {verse}",
   "org.projectOverview.plan.headingAfter": "Заголовок после {verse}",

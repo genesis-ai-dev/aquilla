@@ -1491,6 +1491,9 @@ export const org = defineNamespace({
     }),
     "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
     "org.projectOverview.plan.headingLine": "Heading",
+    // AQU-1493: the same chip when the heading has a verse below it — the verse
+    // it introduces, so a row of headings says where each one is.
+    "org.projectOverview.plan.headingChipAt": "Heading \u00b7 {verse}",
     "org.projectOverview.plan.titleLine": "Title or intro",
     "org.projectOverview.plan.headingBefore": "Heading before {verse}",
     "org.projectOverview.plan.headingAfter": "Heading after {verse}",
@@ -3283,8 +3286,14 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.headingLine": {
         description:
-          "Chip in the plan inspector's chapter card for a section heading, such as 'The Creation', where a numbered verse's chip would print '12:4'. Opens that line in the editor.",
+          "Chip in the plan inspector's chapter card for a section heading, such as 'The Creation', where a numbered verse's chip would print '12:4'. Opens that line in the editor. A heading with a verse below it shows headingChipAt instead; this bare word is for one at the end of a chapter.",
         maxLength: 20,
+      },
+      "org.projectOverview.plan.headingChipAt": {
+        description:
+          "Chip in the plan inspector's chapter card for a section heading that has a verse below it: the word 'Heading' and the verse the heading introduces, joined the way the board joins two fragments (see shortfallPair). Use the same word as headingLine. Its tooltip is headingBefore.",
+        placeholders: { verse: "The verse just below the heading, as its chip prints it, e.g. '1:6'. Not translated." },
+        maxLength: 28,
       },
       "org.projectOverview.plan.titleLine": {
         description:

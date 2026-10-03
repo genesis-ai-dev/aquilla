@@ -3034,6 +3034,7 @@ export const id: Catalog = {
   "org.projectOverview.plan.frontMatterAndChaptersShort": {"forms":{"other":"bagian awal dan {count} pasal belum rampung"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Baris tanpa nomor",
   "org.projectOverview.plan.headingLine": "Judul",
+  "org.projectOverview.plan.headingChipAt": "Judul · {verse}",
   "org.projectOverview.plan.titleLine": "Judul atau pengantar",
   "org.projectOverview.plan.headingBefore": "Judul sebelum {verse}",
   "org.projectOverview.plan.headingAfter": "Judul setelah {verse}",

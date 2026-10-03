@@ -7,6 +7,15 @@ import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
 
+
+/** Reason keys the harmonizer may send. A key the client does not know (a
+ *  newer server) shows no reason rather than a raw key. */
+const HARMONIZER_REASONS = ["harmonizer.quotes.closeHere"] as const
+type HarmonizerReason = (typeof HARMONIZER_REASONS)[number]
+function isHarmonizerReason(key: string): key is HarmonizerReason {
+  return (HARMONIZER_REASONS as readonly string[]).includes(key)
+}
+
 export function SmartEditPopover({
   suggestion,
   anchor,
@@ -33,6 +42,14 @@ export function SmartEditPopover({
             <span aria-hidden>→</span>
             <span className="font-medium">{suggestion.new}</span>
           </div>
+          {suggestion.tier === "harmonize" && (
+            <div className="space-y-1 text-xs">
+              {suggestion.reasonKey && isHarmonizerReason(suggestion.reasonKey) && (
+                <p>{t(suggestion.reasonKey, suggestion.reasonValues)}</p>
+              )}
+              <p className="text-muted-foreground">{t("harmonizer.popoverNote")}</p>
+            </div>
+          )}
           {suggestion.tier === "llm" && (
             <div className="space-y-1 text-xs">
               {suggestion.reason && <p>{suggestion.reason}</p>}

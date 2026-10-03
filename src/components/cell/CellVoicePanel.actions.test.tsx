@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -72,6 +72,11 @@ function renderPanel(
   return { onAfterGenerate }
 }
 
+async function openChangeVoice(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("voice-card-change-voice"))
+  return screen.getByRole("dialog")
+}
+
 describe("CellVoicePanel voice actions (AQU-1109)", () => {
   beforeEach(() => {
     localStorage.clear()
@@ -118,7 +123,8 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
   it("Change voice converts the take into the assigned cloned voice", async () => {
     const user = userEvent.setup()
     const { onAfterGenerate } = renderPanel(recorded, "v-anna")
-    const button = screen.getByRole("button", { name: "Change voice" })
+    const dialog = await openChangeVoice(user)
+    const button = within(dialog).getByRole("button", { name: "Change voice" })
     expect(button).toBeEnabled()
     await user.click(button)
     await waitFor(() => expect(onAfterGenerate).toHaveBeenCalledTimes(1))
@@ -146,7 +152,8 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       onMakeCharacter: () => {},
     }
     const { rerender } = renderWithTooltips(<CellVoicePanel cell={recorded} {...props} />)
-    await user.click(screen.getByRole("button", { name: "Change voice" }))
+    const dialog = await openChangeVoice(user)
+    await user.click(within(dialog).getByRole("button", { name: "Change voice" }))
     await waitFor(() => expect(changeCellVoice).toHaveBeenCalled())
     expect(play).not.toHaveBeenCalled()
 
@@ -167,13 +174,48 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     await waitFor(() => expect(play).toHaveBeenCalledTimes(1))
   })
 
-  it("Change voice is disabled, with a reason, for a stock voice", async () => {
+  it("Change voice is greyed out, with a reason, for a stock voice", async () => {
     renderPanel(recorded, "v-mary")
-    const button = screen.getByRole("button", { name: "Change voice" })
-    expect(button).toBeDisabled()
-    expect(screen.getByRole("combobox", { name: "Quality" })).toBeDisabled()
+    const trigger = screen.getByTestId("voice-card-change-voice")
+    expect(trigger).toBeDisabled()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    // Same stand-in AppTooltip uses for every disabled control (AQU-959).
+    const standIn = trigger.closest('[data-slot="tooltip-disabled-trigger"]')
+    expect(standIn).not.toBeNull()
+    expect(standIn).not.toHaveAttribute("disabled")
     await expectTooltip(
-      button.parentElement as HTMLElement,
+      standIn as HTMLElement,
+      "Mary has no reference clip. Assign a cloned voice to change this take.",
+    )
+  })
+
+  it("still explains the greyed icon after the assigned voice changes", async () => {
+    const settings = { voices, defaultVoiceId: "v-anna" } as ProjectTtsSettings
+    const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
+    const props = {
+      cell: recorded,
+      project,
+      projectId: "proj-1",
+      settings,
+      session: { jwt: "x" } as unknown as never,
+      username: "tester",
+      onAfterGenerate: () => {},
+      onMakeCharacter: () => {},
+    }
+    const { rerender } = renderWithTooltips(<CellVoicePanel {...props} />)
+    expect(screen.getByTestId("voice-card-change-voice")).toBeEnabled()
+
+    rerender(
+      <TooltipProvider delay={0}>
+        <CellVoicePanel {...props} settings={{ voices, defaultVoiceId: "v-mary" } as ProjectTtsSettings} />
+      </TooltipProvider>,
+    )
+    const trigger = screen.getByTestId("voice-card-change-voice")
+    expect(trigger).toBeDisabled()
+    const standIn = trigger.closest('[data-slot="tooltip-disabled-trigger"]')
+    expect(standIn).not.toBeNull()
+    await expectTooltip(
+      standIn as HTMLElement,
       "Mary has no reference clip. Assign a cloned voice to change this take.",
     )
   })
@@ -192,7 +234,8 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       },
     } as unknown as CellData
     renderPanel(converted, "v-anna")
-    expect(screen.getByRole("button", { name: "Change voice" })).toBeDisabled()
+    const dialog = await openChangeVoice(userEvent.setup())
+    expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeDisabled()
   })
 
   it("sends the quality the user picks, and a higher quality can run again", async () => {
@@ -210,11 +253,12 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       },
     } as unknown as CellData
     renderPanel(converted, "v-anna")
-    const quality = screen.getByRole("combobox", { name: "Quality" })
+    const dialog = await openChangeVoice(user)
+    const quality = within(dialog).getByRole("combobox", { name: "Quality" })
     expect(quality).toHaveTextContent("Standard")
     await user.click(quality)
     await user.click(screen.getByRole("option", { name: "High" }))
-    const button = screen.getByRole("button", { name: "Change voice" })
+    const button = within(dialog).getByRole("button", { name: "Change voice" })
     expect(button).toBeEnabled()
     await user.click(button)
     await waitFor(() => expect(changeCellVoice).toHaveBeenCalled())

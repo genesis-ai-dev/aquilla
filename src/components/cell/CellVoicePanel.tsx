@@ -34,7 +34,7 @@
 // keeps its own element. The app-wide audio-coordinator still guarantees
 // only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AudioLines, CircleAlert, CopyPlus, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -137,6 +137,101 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
         <div className="mt-1.5 text-center text-[10px] tabular-nums text-muted-foreground">
           {Math.round(volume * 100)}%
         </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** Change voice, with the action and its quality in a popover. The trigger is
+ *  only the icon; it sits to the left of Generate. */
+function ChangeVoiceButton({
+  disabled,
+  triggerDisabled,
+  qualityDisabled,
+  quality,
+  reason,
+  onChange,
+  onQuality,
+}: {
+  disabled: boolean
+  /** Stock voices have nothing to copy. The icon stays grey and does not open. */
+  triggerDisabled: boolean
+  qualityDisabled: boolean
+  quality: (typeof CHANGE_VOICE_QUALITIES)[number]
+  reason: string
+  onChange: () => void
+  onQuality: (quality: (typeof CHANGE_VOICE_QUALITIES)[number]) => void
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const label = t("editor.voice.changeVoice")
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {/* Keyed on the greyed state. AppTooltip's stand-in for a disabled
+          button is a different element than the live trigger; leaving the
+          same tooltip mounted across that swap stops it opening again. */}
+      <AppTooltip key={triggerDisabled ? "grey" : "live"} content={triggerDisabled ? reason : label}>
+        <PopoverTrigger
+          disabled={triggerDisabled}
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={label}
+              data-testid="voice-card-change-voice"
+              disabled={triggerDisabled}
+              className="shrink-0 text-muted-foreground"
+            />
+          }
+        >
+          <AudioLines className="h-3.5 w-3.5" />
+        </PopoverTrigger>
+      </AppTooltip>
+      <PopoverContent align="start" side="bottom" className="w-44">
+        <AppTooltip content={reason} disabledTriggerClassName="w-full">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            className="w-full"
+            onClick={() => {
+              setOpen(false)
+              onChange()
+            }}
+          >
+            <AudioLines />
+            {label}
+          </Button>
+        </AppTooltip>
+        <Select
+          value={quality}
+          disabled={qualityDisabled}
+          onValueChange={(value) => {
+            if (value != null && (CHANGE_VOICE_QUALITIES as readonly string[]).includes(value)) {
+              onQuality(value as typeof quality)
+            }
+          }}
+        >
+          <AppTooltip content={t("editor.voice.changeVoiceQualityTooltip")} disabledTriggerClassName="w-full">
+            <SelectTrigger
+              size="sm"
+              disabled={qualityDisabled}
+              aria-label={t("editor.voice.changeVoiceQuality")}
+              className="w-full!"
+            >
+              {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
+            </SelectTrigger>
+          </AppTooltip>
+          <SelectContent alignItemWithTrigger={false} align="start">
+            <SelectGroup>
+              {CHANGE_VOICE_QUALITIES.map((q) => (
+                <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </PopoverContent>
     </Popover>
   )
@@ -371,6 +466,23 @@ export function CellVoicePanel({
         </TakeWaveform>
         {row(
           <>
+            {canEdit && changeBlocker !== "no-take" && (
+              <ChangeVoiceButton
+                disabled={isVoicing || changeBlocker != null}
+                triggerDisabled={changeBlocker === "not-cloned"}
+                qualityDisabled={isVoicing || changeBlocker === "not-cloned"}
+                quality={quality}
+                reason={
+                  changeBlocker === "not-cloned"
+                    ? t("editor.voice.changeVoiceNeedsClone", { name: active.name })
+                    : changeBlocker === "up-to-date"
+                      ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
+                      : t("editor.voice.changeVoiceTooltip", { name: active.name })
+                }
+                onChange={() => void changeVoice()}
+                onQuality={setChangeVoiceQuality}
+              />
+            )}
             {canEdit && canGenerate && (
               <AppTooltip content={t("editor.voice.generateFromText")}>
                 <Button
@@ -419,54 +531,6 @@ export function CellVoicePanel({
               </AppTooltip>
             )}
           </>,
-        )}
-        {canEdit && changeBlocker !== "no-take" && (
-          <div className="mt-2 flex items-center gap-1.5">
-            <AppTooltip
-              content={
-                changeBlocker === "not-cloned"
-                  ? t("editor.voice.changeVoiceNeedsClone", { name: active.name })
-                  : changeBlocker === "up-to-date"
-                    ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
-                    : t("editor.voice.changeVoiceTooltip", { name: active.name })
-              }
-            >
-              <span className="inline-flex">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isVoicing || changeBlocker != null}
-                  onClick={() => void changeVoice()}
-                >
-                  <AudioLines />
-                  {t("editor.voice.changeVoice")}
-                </Button>
-              </span>
-            </AppTooltip>
-            <Select
-              value={quality}
-              disabled={isVoicing || changeBlocker === "not-cloned"}
-              onValueChange={(value) => {
-                if (value != null && (CHANGE_VOICE_QUALITIES as readonly string[]).includes(value)) {
-                  setChangeVoiceQuality(value as typeof quality)
-                }
-              }}
-            >
-              <AppTooltip content={t("editor.voice.changeVoiceQualityTooltip")}>
-                <SelectTrigger size="sm" aria-label={t("editor.voice.changeVoiceQuality")}>
-                  {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
-                </SelectTrigger>
-              </AppTooltip>
-              <SelectContent alignItemWithTrigger={false} align="start">
-                <SelectGroup>
-                  {CHANGE_VOICE_QUALITIES.map((q) => (
-                    <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
         )}
       </div>
     )

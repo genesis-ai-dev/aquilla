@@ -5086,9 +5086,9 @@ export const editor = defineNamespace({
       },
       "editor.voice.changeVoice": {
         description:
-          "Button on a line that already has a take. It keeps the recording and " +
-          "makes it sound like the assigned cloned voice. No new speech is generated " +
-          "from text.",
+          "Name of the icon on a line that already has a take, and of the button " +
+          "inside the popover it opens. It keeps the recording and makes it sound " +
+          "like the assigned cloned voice. No new speech is generated from text.",
         maxLength: 18,
       },
       "editor.voice.changeVoiceTooltip": {

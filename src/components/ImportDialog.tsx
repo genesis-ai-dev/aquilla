@@ -384,8 +384,16 @@ export function ImportDialog({
         return
       }
 
-      const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
-      const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
+      // AQU-1596: the direction decision reads the *lane's* languages. A file's
+      // declared languages are import information and can disagree with the
+      // lane — letting a declaration stand in for the lane's language here is
+      // what let a Spanish-declaring file answer the direction question for a
+      // French lane. The declaration is still used, but only to pre-fill the
+      // panel below as a suggestion.
+      const effectiveSource = sourceLanguage.trim()
+      const effectiveTarget = targetLanguage.trim()
+      const declaredSource = (inferredLanguages?.sourceLanguage ?? "").trim()
+      const declaredTarget = (inferredLanguages?.targetLanguage ?? "").trim()
 
       // Direction is ambiguous when: both empty, target is unset, or source==target
       // (using the normalizer so "French"=="fra" doesn't spuriously trigger this).
@@ -402,8 +410,18 @@ export function ImportDialog({
 
       if (needsDirection && !skipped) {
         setPendingImport({ refs, inferredLanguages })
-        setDirectionSource(effectiveSource)
-        setDirectionTarget(languagesEqual(effectiveSource, effectiveTarget) ? "" : effectiveTarget)
+        // The declared values are the suggestion: they pre-fill the inputs
+        // wherever the lane has nothing usable to show, and the user's answer is
+        // what actually gets saved (AQU-1596 — suggest or warn, never silently
+        // adopt). "Usable" excludes a target equal to the source, which is the
+        // broken state the panel exists to repair — there the declaration is
+        // the most useful thing we can offer.
+        const suggestedSource = effectiveSource || declaredSource
+        const laneTargetUsable =
+          effectiveTarget !== "" && !languagesEqual(effectiveSource, effectiveTarget)
+        const suggestedTarget = laneTargetUsable ? effectiveTarget : declaredTarget
+        setDirectionSource(suggestedSource)
+        setDirectionTarget(languagesEqual(suggestedSource, suggestedTarget) ? "" : suggestedTarget)
         setScreen("direction")
         return
       }
@@ -451,7 +469,12 @@ export function ImportDialog({
     try {
       const mergedLanguages = {
         ...(captured.inferredLanguages ?? {}),
-        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        // AQU-1596: the confirmed value is exactly what stands in the field.
+        // The source used to fall back to the file's declaration when the user
+        // cleared it, which turned a declaration the user had just deleted into
+        // the lane's language. Cleared now means "leave the lane alone", which
+        // is what the target side already did.
+        sourceLanguage: directionSource.trim() || undefined,
         targetLanguage: directionTarget.trim() || undefined,
         // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
         // REPLACES current values instead of only filling empty slots.

@@ -97,6 +97,7 @@ import {
 } from "../services/sync-worker-notify"
 import { loadLinkFileIds } from "../services/source-linking"
 import { createProjectShared } from "../../../db/shared/projects"
+import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
@@ -134,8 +135,11 @@ interface FileProjection {
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
-  sourceLanguage?: string
-  targetLanguage?: string
+  /** AQU-1596: what this file's header claimed, as import information. It is
+   *  not the language of any lane and may disagree with one — a language shown
+   *  to a user comes off the lane row, never off here. */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Linked core video, read from files.meta like the fields above. AQU-646:
@@ -210,8 +214,8 @@ export async function loadFilesByProject(
     const list = byProject.get(f.project_id) ?? []
     // Timeline-segment-model: order lens lives in meta (JSON), same as langs.
     let orderedBy: string | undefined
-    let sourceLanguage: string | undefined
-    let targetLanguage: string | undefined
+    let declaredSourceLanguage: string | undefined
+    let declaredTargetLanguage: string | undefined
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
@@ -228,10 +232,6 @@ export async function loadFilesByProject(
           coreMediaUrl?: unknown
           timingMode?: unknown
           trackOverrides?: unknown
-          source_language?: string
-          target_language?: string
-          sourceLanguage?: string
-          targetLanguage?: string
           source_text_direction?: string
           target_text_direction?: string
           sourceTextDirection?: string
@@ -245,8 +245,12 @@ export async function loadFilesByProject(
           sortIndex?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
-        sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
-        targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
+        // AQU-1596: read through the declared-languages contract, which
+        // prefers the canonical keys and still accepts the legacy spellings
+        // that untouched blobs carry.
+        const declared = readDeclaredLanguages(m)
+        declaredSourceLanguage = normalizeLanguage(declared.declaredSourceLanguage ?? undefined)
+        declaredTargetLanguage = normalizeLanguage(declared.declaredTargetLanguage ?? undefined)
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
@@ -303,8 +307,8 @@ export async function loadFilesByProject(
       // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
       ...(sortIndex !== undefined ? { sortIndex } : {}),
       ...(orderedBy ? { orderedBy } : {}),
-      ...(sourceLanguage ? { sourceLanguage } : {}),
-      ...(targetLanguage ? { targetLanguage } : {}),
+      ...(declaredSourceLanguage ? { declaredSourceLanguage } : {}),
+      ...(declaredTargetLanguage ? { declaredTargetLanguage } : {}),
       ...(sourceTextDirection ? { sourceTextDirection } : {}),
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),

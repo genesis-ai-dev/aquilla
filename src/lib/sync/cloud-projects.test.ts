@@ -166,7 +166,7 @@ describe("minimalProjectRecord", () => {
     const withFiles: CloudProjectSummary = {
       ...summary,
       files: [
-        { id: "f-1", name: "GEN", type: "usfm", cellCount: 1533, sourceLanguage: "en", targetLanguage: "arb", corpusMarker: "Treasure Hunt Bible" },
+        { id: "f-1", name: "GEN", type: "usfm", cellCount: 1533, declaredSourceLanguage: "en", declaredTargetLanguage: "arb", corpusMarker: "Treasure Hunt Bible" },
         { id: "f-csv", name: "mapped.csv", type: "csv", cellCount: 31, hasScriptureContent: true },
         { id: "f-2", name: "EXO", type: "usfm", cellCount: 1213 },
       ],

@@ -8664,8 +8664,8 @@ export function ProjectWorkspace() {
             projectId: project.id,
             name: deleted.name,
             fileType: deleted.type,
-            sourceLanguage: null,
-            targetLanguage: null,
+            declaredSourceLanguage: null,
+            declaredTargetLanguage: null,
             cellCount: 0,
             approvedCount: 0,
             filledCount: 0,
@@ -12194,14 +12194,18 @@ export function ProjectWorkspace() {
       })
     // Await and capture baseProject for the language-seed block below.
     const baseProject = await _lastImportWrite
-    // FRO-249: seed source/target language from import metadata.
+    // FRO-249: seed source/target language from the user's import answer.
     //
-    // Two modes (determined by `inferredLanguages.explicit`):
-    //   - EXPLICIT (user confirmed via DirectionPanel): values REPLACE current
-    //     ones when the current target is empty OR equals the current source
-    //     (the broken source==target state). This is BLOCKER 1's fix.
-    //   - INFERRED (metadata-only, no explicit confirmation): only fills EMPTY
-    //     slots, never overwrites an intentionally configured language.
+    // AQU-1596: only an EXPLICIT answer (the user confirmed via DirectionPanel)
+    // can set a language. Values that merely came off the file's header are a
+    // *declaration* — import information that can disagree with the lane the
+    // rows land in (a Macula file declares `hbo`; a Spanish-declaring file may
+    // be imported into the French lane) — so they no longer fill project
+    // settings. They suggest (pre-filling the panel) and they warn (below).
+    //
+    // EXPLICIT values REPLACE current ones when the current target is empty OR
+    // equals the current source (the broken source==target state). That is
+    // BLOCKER 1's fix and is unchanged.
     //
     // WARN a: use `baseProject` (freshly read above) for the emptiness test,
     //   not the stale render-closure `project`.
@@ -12219,6 +12223,21 @@ export function ProjectWorkspace() {
       const currentSource = baseProject.sourceLanguage?.trim() || ""
       const currentTarget = baseProject.targetLanguage?.trim() || ""
 
+      // AQU-1596: a declared language that disagrees with the lane is a
+      // warning, never a block and never a silent overwrite. The import has
+      // already succeeded at this point; this only tells the user that the file
+      // said something different from the lane they imported into, so they can
+      // decide whether the lane's language or the file was wrong.
+      if (!explicit) {
+        const declaredTarget = inTgt?.trim() || ""
+        if (declaredTarget && currentTarget && !languagesEqual(declaredTarget, currentTarget)) {
+          toast.add({
+            type: "warning",
+            title: `This file says ${declaredTarget} — you imported into the ${currentTarget} lane.`,
+          })
+        }
+      }
+
       let newSource: string
       let newTarget: string
 
@@ -12231,9 +12250,11 @@ export function ProjectWorkspace() {
           ? (inTgt?.trim() || currentTarget)
           : currentTarget
       } else {
-        // Inferred-only: fill empty slots only.
-        newSource = currentSource || inSrc?.trim() || ""
-        newTarget = currentTarget || inTgt?.trim() || ""
+        // Not explicit: nothing the file declared may become the lane's
+        // language, so the settings stay exactly as they are and the patch
+        // below no-ops.
+        newSource = currentSource
+        newTarget = currentTarget
       }
 
       // Distinct source/target is the key invariant — skip if both would end

@@ -49,21 +49,22 @@ export function laneChipLabel(
 /**
  * AQU-606 — resolve the label for a project's '' (default) lane.
  *
- * After the lanes migration a project's target language lives on **project
- * settings** (surfaced as `PortfolioProject.targetLanguage`, AQU-523) while its
- * migrated files carry no per-file `targetLanguage` hint. Deriving the label
- * from the file hint alone therefore left every migrated project's default lane
- * showing the generic "Default" placeholder instead of e.g. "French".
+ * The label comes off the lane: a project's target language lives on **project
+ * settings** (surfaced as `PortfolioProject.targetLanguage`, AQU-523), and
+ * after AQU-1419 on the lane row itself. `''` when there is none, so the caller
+ * renders the neutral "no target set" placeholder.
  *
- * Resolution order: the project-level target language, then the per-file hint
- * (which still covers projects whose files were tagged before the migration),
- * then '' so the caller renders the neutral "no target set" placeholder.
+ * AQU-1596: this used to fall back to a per-file `targetLanguage` hint. A file
+ * only ever *declared* a language — a Macula file declares the corpus code
+ * `hbo`, and a translation imported into the French lane may declare Spanish —
+ * so that fallback could label a lane with a language the lane does not have.
+ * A missing label is better than a wrong one; the declared value stays on the
+ * file as import information and is never read as a lane's language.
  */
 export function resolveDefaultLaneLabel(
   project: Pick<PortfolioProject, "targetLanguage">,
-  fileHint?: string,
 ): string {
-  return project.targetLanguage?.trim() || fileHint?.trim() || ""
+  return project.targetLanguage?.trim() || ""
 }
 
 /** A 0..100 integer percentage guarded against NaN (missing counts). */

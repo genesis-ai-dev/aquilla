@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
@@ -2048,8 +2049,9 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, unknown> = p.projectionMeta
         ? { ...p.projectionMeta }
         : {}
-      if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
-      if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      // AQU-1596: stored as the file's *declared* languages (import
+      // information), not as the lane's language. Payload names are history.
+      assignDeclaredLanguages(langMeta, p.sourceLanguage, p.targetLanguage)
       if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
       if (p.targetTextDirection) langMeta.targetTextDirection = p.targetTextDirection
       // Timeline-segment-model: the file's order lens lives in meta (JSON),

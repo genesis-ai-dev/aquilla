@@ -8,6 +8,7 @@
 // project renders exactly one chip — visual parity with the pre-lane table.
 
 import type { PortfolioLane, PortfolioProject } from "@/lib/frontier/portfolio"
+import { sameLanguageTag } from "@/lib/language-normalize"
 
 /**
  * Display lanes for a project: the default ('') lane is always first, followed
@@ -85,7 +86,9 @@ export function withOptimisticLane<T extends PortfolioProject>(p: T, lane: strin
   // Base off the currently-displayed lanes so the default ('') lane is retained
   // even when the server sent no per-lane breakdown (displayLanes synthesizes it).
   const existing = p.lanes && p.lanes.length > 0 ? p.lanes : displayLanes(p)
-  if (existing.some((l) => l.lane.toLowerCase() === trimmed.toLowerCase())) return p
+  // AQU-1597: the one language normalizer decides "already shown", so the chip
+  // the server will resolve to "Spanish" is not appended a second time as "es".
+  if (existing.some((l) => sameLanguageTag(l.lane, trimmed))) return p
   const added: PortfolioLane = {
     lane: trimmed,
     totalCells: 0,

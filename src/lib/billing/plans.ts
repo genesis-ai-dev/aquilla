@@ -5,6 +5,8 @@
 // "talk to us" (Enterprise). Enterprise pricing is out of scope; Enterprise
 // orgs only get a hard usage cap.
 
+import { languageTagKey } from "../../../db/shared/language-normalize"
+
 export const WORDS_PER_CREDIT_DEFAULT = 100
 export const CYCLES_PER_YEAR = 13
 
@@ -102,8 +104,10 @@ export interface TargetLaneProject {
   archivedLanes?: readonly string[] | null
 }
 
+/** AQU-1597: "Spanish", "spanish" and "es" are one language, so they are one
+ *  billable lane. The shared normalizer is the only thing that decides this. */
 function normalizeLaneTag(raw: string | null | undefined): string {
-  return (raw ?? "").trim().toLowerCase()
+  return languageTagKey(raw)
 }
 
 export function countDistinctTargetLanes(projects: readonly TargetLaneProject[]): number {

@@ -14,6 +14,8 @@ import {
   type InworldSupportedLanguage,
 } from "./inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { sameLanguageTag } from "@/lib/language-normalize"
+import { isLaneArchived } from "@/components/project-lane-archive"
 
 export type { InworldCatalogVoice }
 
@@ -34,18 +36,15 @@ export function projectTargetLaneLanguages(project: {
   targetLanes?: readonly string[]
   archivedLanes?: readonly string[]
 }): string[] {
-  const archived = new Set(
-    (project.archivedLanes ?? [])
-      .map((lane) => lane.trim().toLowerCase())
-      .filter(Boolean),
-  )
+  // AQU-1597: archived-lane and duplicate checks go through the one language
+  // normalizer, so a project that archived "Spanish" does not offer "spanish".
+  const archived = project.archivedLanes ?? []
   const out: string[] = []
   const add = (raw: string | undefined) => {
     const value = raw?.trim()
     if (!value) return
-    const key = value.toLowerCase()
-    if (archived.has(key)) return
-    if (out.some((existing) => existing.toLowerCase() === key)) return
+    if (isLaneArchived(value, archived)) return
+    if (out.some((existing) => sameLanguageTag(existing, value))) return
     out.push(value)
   }
   add(project.targetLanguage)

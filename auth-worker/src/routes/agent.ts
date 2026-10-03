@@ -1470,7 +1470,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
     {
       projectId: t.stageCtx.projectId,
       focusedFileId: t.stageCtx.fileId,
-      lane: t.stageCtx.lane,
+        lane: t.stageCtx.lane,
       aliases: t.aliases,
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,

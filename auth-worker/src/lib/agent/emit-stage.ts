@@ -22,6 +22,7 @@
 // writer.
 
 import { AliasMap } from "./compress"
+import { resolveLaneIdOrTag } from "../../../../db/shared/lane-ref"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
@@ -55,7 +56,9 @@ export interface EmitStageContext {
   /** Focused file/cell for :file / :cell resolution. */
   fileId?: string
   cellId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -130,22 +133,29 @@ interface CellRow {
   canonical_ref: string | null
 }
 
+/** The active lane's id for a stage context (AQU-1610). `ctx.lane` may be
+ *  spelled either way; the id is what the cell queries key on. */
+async function laneIdOf(db: AquillaDb, ctx: EmitStageContext): Promise<string | null> {
+  return (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId
+}
+
 async function fetchCellPair(
   db: AquillaDb,
   projectId: string,
   fileId: string,
   cellId: string,
-  lane: string,
+  laneId: string | null,
 ): Promise<{ source: CellRow | null; target: CellRow | null }> {
   // AQU-1447: the target row is the ACTIVE lane's, never another lane's head.
-  // Source rows always live at target_lang = '' (see selectCellPairs).
+  // AQU-1610: "the active lane" is its id. A source row is `side = 'source'`,
+  // whatever lane it sits in (see selectCellPairs).
   const { results } = await db
     .prepare(
       `SELECT side, event_id, value, canonical_ref FROM cells
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
-         AND ((side = 'source' AND target_lang = '') OR (side = 'target' AND target_lang = ?))`,
+         AND (side = 'source' OR (side = 'target' AND lane_id = ?))`,
     )
-    .bind(projectId, fileId, cellId, lane)
+    .bind(projectId, fileId, cellId, laneId)
     .all<CellRow>()
   return {
     source: results.find((r) => r.side === "source") ?? null,
@@ -285,7 +295,7 @@ async function stageOne(
       if (typeof anchor !== "string") {
         return { kind: "rejected", reason: "anchorCellId must be a string or null" }
       }
-      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, ctx.lane)
+      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, await laneIdOf(db, ctx))
       if (!anchorPair.source && !anchorPair.target) {
         return {
           kind: "rejected",
@@ -297,7 +307,7 @@ async function stageOne(
     }
 
     if (cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, await laneIdOf(db, ctx))
       const occupied = kind === "source.cell.create" ? pair.source : pair.target
       if (occupied) {
         const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
@@ -323,7 +333,7 @@ async function stageOne(
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }
     if (fileId && cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, await laneIdOf(db, ctx))
       display.canonicalRef =
         pair.target?.canonical_ref ?? pair.source?.canonical_ref ?? undefined
 

@@ -20,23 +20,23 @@ Smoke twin: `e2e/specs/collab/cross-user-validate.smoke.spec.ts`
 
 ## Expected end state
 
-- After step 4, alice's cell shows her sentence, and a green check icon appears to its left (the cell auto-validates for its own author on commit. The button's accessible name becomes **Validated — row 1. Click to remove your validation.** for alice).
+- After step 4, alice's cell shows her sentence, and a green check icon appears to its left (the cell auto-validates for its own author on commit. The button's accessible name becomes **Validated by you, row 1. Click to see the list, where you can remove your validation.** for alice).
 - After step 6, bob's editor shows the same sentence in the same cell, with no reload.
-- After step 7, the validation control's accessible name changes to **Validated — row 1. Click to remove your validation.** and `aria-pressed` on it is `true`. Clicking it (or hovering, since the control is a hover-triggered popover trigger) opens a panel titled **Validated by** listing **alice** and **bob (you)**. The file's status bar at the bottom of the editor shows **1 validated** in green, and the row's target column carries a small green check-mark badge next to the text.
+- After step 7, the validation control's accessible name changes to **Validated by you, row 1. Click to see the list, where you can remove your validation.** and `aria-pressed` on it is `true`. Clicking it (or hovering, since the control is a hover-triggered popover trigger) opens a panel titled **Validated by** listing **alice** and **bob (you)**. The file's status bar at the bottom of the editor shows **1 validated** in green, and the row's target column carries a small green check-mark badge next to the text.
 
 ## Counts as a failure
 
 - The **Role** combobox has no **Reviewer** option, or picking it does not stick (the Members table shows bob as something other than **Reviewer**).
 - Bob's editor never shows alice's sentence, even after a reload.
 - No validation control is visible or reachable for bob on that cell.
-- Clicking the control does not flip its accessible name to **Validated — row 1. Click to remove your validation.**, or `aria-pressed` stays `false`.
+- Clicking the control does not flip its accessible name to **Validated by you, row 1. Click to see the list, where you can remove your validation.**, or `aria-pressed` stays `false`.
 - The **Validated by** panel is missing bob's own name after he validates.
 
 ## Notes for the agent
 
 Cell 0 of `sample.md` is the **# Heading** line, not the first paragraph. The importer gives every structural heading its own cell ahead of the paragraph cells, so "cell 0" and "row 1" both mean the Heading row, and the paragraph "This is a **sample** markdown file..." is row 2.
 
-Editing a cell auto-validates it for the person who typed it. Alice's own commit already shows a green check and an accessible name of **Validated — row 1. Click to remove your validation.** for her session before bob does anything. Bob is not adding the first validation, he is adding a second one. His button starts in the **Validated by others** state, not **Not validated**.
+Editing a cell auto-validates it for the person who typed it. Alice's own commit already shows a green check and an accessible name of **Validated by you, row 1. Click to see the list, where you can remove your validation.** for her session before bob does anything. Bob is not adding the first validation, he is adding a second one. His button starts in the **Validated by others** state, not **Not validated**.
 
 The validation control's accessible name is dynamic, and it embeds the cell's reference (`row 1` here, since `sample.md` carries no book/chapter reference). Match the fixed parts of the string (`Validated`, `Validated by others`, `Click to add your validation`, `Click to remove your validation`) rather than hardcoding the whole label if a different fixture is ever used.
 

@@ -988,7 +988,6 @@ export const zh_Hant: Catalog = {
   "editor.validation.notValidatedTooltip": "尚未驗證 — 點擊即可驗證",
   "editor.validation.outOfScopeTooltip": "不在您被指派的檔案或語言軌範圍內",
   "editor.validation.unavailableTooltip": "無法進行驗證",
-  "editor.validation.ariaValidated": "已驗證 — {ref}。點擊即可移除您的驗證。",
   "editor.validation.ariaValidatedByOthers": "已由其他人驗證 — {ref}。點擊即可加上您的驗證。",
   "editor.validation.ariaNotValidated": "尚未驗證 — {ref}。點擊即可驗證。",
   "editor.validation.validatedBy": "驗證者",

@@ -988,7 +988,6 @@ export const zh_Hans: Catalog = {
   "editor.validation.notValidatedTooltip": "尚未验证 — 点击即可验证",
   "editor.validation.outOfScopeTooltip": "不在您被指派的文件或语言轨范围内",
   "editor.validation.unavailableTooltip": "无法进行验证",
-  "editor.validation.ariaValidated": "已验证 — {ref}。点击即可移除您的验证。",
   "editor.validation.ariaValidatedByOthers": "已由其他人验证 — {ref}。点击即可加上您的验证。",
   "editor.validation.ariaNotValidated": "尚未验证 — {ref}。点击即可验证。",
   "editor.validation.validatedBy": "验证者",

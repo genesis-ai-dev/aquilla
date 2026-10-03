@@ -207,8 +207,13 @@ export function TargetValidationControl({
       // No "click to…" when a click would do nothing — the audio control's
       // rule. A viewer outside the lane used to be told to click a dead button.
       aria-label={
+        // A press on your own validation pins the "Text validated by" list
+        // (8bdd4f1be); removing it is that list's "Remove your validation"
+        // button, which exists only while you may still validate here.
         isSelfValidated
-          ? t("editor.validation.ariaValidated", { ref: cellRef })
+          ? canValidate
+            ? t("editor.validation.ariaValidatedByYou", { ref: cellRef })
+            : t("editor.validation.ariaValidatedByYouNoAction", { ref: cellRef })
           : state === "full-others" || state === "others"
             ? canValidateThisCell
               ? t("editor.validation.ariaValidatedByOthers", { ref: cellRef })

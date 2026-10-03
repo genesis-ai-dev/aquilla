@@ -198,6 +198,35 @@ describe("TargetValidationControl", () => {
   describe("the Text validated by list", () => {
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+    // Walk 10-02: the check still announced "Click to remove your validation"
+    // after a press stopped removing anything. It names what a press does now.
+    it("names your own validation for what a press does: open the list, not remove the vote", () => {
+      const onValidationChange = vi.fn()
+      const { rerender } = render(
+        <TargetValidationControl
+          cellRef="row 4" hasContent validationStatus="self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={onValidationChange}
+        />,
+      )
+      const button = screen.getByRole("button", {
+        name: "Validated by you, row 4. Click to see the list, where you can remove your validation.",
+      })
+      fireEvent.click(button)
+      expect(onValidationChange).not.toHaveBeenCalled()
+      expect(screen.getByRole("button", { name: "Remove your validation" })).toBeInTheDocument()
+
+      // Without the right to validate here, there is no Remove button to point at.
+      rerender(
+        <TargetValidationControl
+          cellRef="row 4" hasContent validationStatus="self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate={false} canValidateThisCell={false} onValidationChange={onValidationChange}
+        />,
+      )
+      expect(screen.getByRole("button", { name: "Validated by you, row 4." })).toBeInTheDocument()
+    })
+
     it("stays open after a click on a hover-opened list, and after the pointer leaves", async () => {
       render(
         <TargetValidationControl

@@ -1001,7 +1001,6 @@ export const ms: Catalog = {
   "editor.validation.notValidatedTooltip": "Belum disahkan — klik untuk sahkan",
   "editor.validation.outOfScopeTooltip": "Di luar fail atau laluan tugasan anda",
   "editor.validation.unavailableTooltip": "Pengesahan tidak tersedia",
-  "editor.validation.ariaValidated": "Disahkan — {ref}. Klik untuk tarik balik pengesahan anda.",
   "editor.validation.ariaValidatedByOthers": "Disahkan oleh orang lain — {ref}. Klik untuk menambah pengesahan anda.",
   "editor.validation.ariaNotValidated": "Belum disahkan — {ref}. Klik untuk sahkan.",
   "editor.validation.validatedBy": "Disahkan oleh",

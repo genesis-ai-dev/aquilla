@@ -988,7 +988,6 @@ export const th: Catalog = {
   "editor.validation.notValidatedTooltip": "ยังไม่ได้ตรวจสอบ — คลิกเพื่อตรวจสอบ",
   "editor.validation.outOfScopeTooltip": "อยู่นอกไฟล์หรือช่องภาษาที่มอบหมายให้คุณ",
   "editor.validation.unavailableTooltip": "ไม่สามารถตรวจสอบได้",
-  "editor.validation.ariaValidated": "ตรวจสอบแล้ว — {ref} คลิกเพื่อยกเลิกการตรวจสอบของคุณ",
   "editor.validation.ariaValidatedByOthers": "ผู้อื่นตรวจสอบแล้ว — {ref} คลิกเพื่อเพิ่มการตรวจสอบของคุณ",
   "editor.validation.ariaNotValidated": "ยังไม่ได้ตรวจสอบ — {ref} คลิกเพื่อตรวจสอบ",
   "editor.validation.validatedBy": "ตรวจสอบโดย",

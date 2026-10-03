@@ -988,7 +988,6 @@ export const ar: Catalog = {
   "editor.validation.notValidatedTooltip": "غير متحقَّق منه — انقر للتحقّق",
   "editor.validation.outOfScopeTooltip": "خارج الملفات أو المسارات المسندة إليك",
   "editor.validation.unavailableTooltip": "التحقّق غير متاح",
-  "editor.validation.ariaValidated": "متحقَّق منه — {ref}. انقر لإزالة تحقّقك.",
   "editor.validation.ariaValidatedByOthers": "متحقَّق منه من آخرين — {ref}. انقر لإضافة تحقّقك.",
   "editor.validation.ariaNotValidated": "غير متحقَّق منه — {ref}. انقر للتحقّق.",
   "editor.validation.validatedBy": "تحقّق منه",

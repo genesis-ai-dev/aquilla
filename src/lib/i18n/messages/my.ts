@@ -988,7 +988,6 @@ export const my: Catalog = {
   "editor.validation.notValidatedTooltip": "မစိစစ်ရသေး — စိစစ်ရန် နှိပ်ပါ",
   "editor.validation.outOfScopeTooltip": "သင့်အား တာဝန်ပေးထားသည့် ဖိုင် သို့မဟုတ် လိုင်းများ၏ ပြင်ပ",
   "editor.validation.unavailableTooltip": "စိစစ်ခြင်း မရနိုင်ပါ",
-  "editor.validation.ariaValidated": "စိစစ်ပြီး — {ref}။ သင့်စိစစ်ချက်ကို ဖယ်ရှားရန် နှိပ်ပါ။",
   "editor.validation.ariaValidatedByOthers": "အခြားသူများက စိစစ်ပြီး — {ref}။ သင့်စိစစ်ချက် ထည့်ရန် နှိပ်ပါ။",
   "editor.validation.ariaNotValidated": "မစိစစ်ရသေး — {ref}။ စိစစ်ရန် နှိပ်ပါ။",
   "editor.validation.validatedBy": "စိစစ်သူများ",

@@ -791,13 +791,15 @@ export interface EventPayloads {
   'assignment.create': {
     /** Client-generated id (ulid/uuid) — the assignment's stable key. */
     assignmentId: string
-    scopeKind: 'books' | 'chapters'
+    scopeKind: 'books' | 'chapters' | 'cells'
     /**
      * One entry per assigned unit. `chapter` present for 'chapters'
      * (e.g. { fileId, chapter: "GEN 1" } -> canonical_ref LIKE "GEN 1:%");
-     * fileId-only for 'books' (all source cells in the file).
+     * `cellIds` present for 'cells' (AQU-1628: exactly those source cells, the
+     * ids the editor selects by); fileId-only for 'books' (all source cells in
+     * the file).
      */
-    scope: { fileId: string; chapter?: string }[]
+    scope: { fileId: string; chapter?: string; cellIds?: string[] }[]
     /** Human-readable label for the assigned scope, e.g. "Genesis 1-3". */
     scopeLabel: string
     /** Frontier user id of the assignee. */

@@ -6136,10 +6136,21 @@ export function ProjectWorkspace() {
     if (myAssignments.length === 0 || !activeFileId) return map
     for (const a of myAssignments) {
       if (a.projectId !== project?.id) continue
-      // For this file's cells, mark all cells (book-scope) or only chapter-matched ones.
+      // For this file's cells, mark all cells (book-scope), only the
+      // chapter-matched ones, or exactly the lines a selection named.
+      // AQU-1628: a 'cells' assignment covers its own list and nothing else —
+      // falling into the book branch would paint the whole file as this
+      // person's, which is the lie the ticket was filed about. A server that
+      // predates `cellIds` sends none; marking nothing is the honest answer
+      // there, since the extent is unknowable from `scopeLabel`.
+      const selectionCellIds = a.scopeKind === "cells" ? new Set(a.cellIds ?? []) : null
       for (const cell of cellSummaries) {
         if (cell.fileId !== activeFileId) continue
-        if (a.scopeKind === "chapters") {
+        if (selectionCellIds) {
+          if (selectionCellIds.has(cell.id)) {
+            map.set(cell.id, { username: currentUsername, scopeLabel: a.scopeLabel })
+          }
+        } else if (a.scopeKind === "chapters") {
           // Match: globalReferences[0] starts with "CHAPTER:" where CHAPTER is
           // one of the chapters listed in scopeLabel (e.g. "GEN 1, GEN 2 in Genesis").
           // We parse chapter tokens as the comma-separated prefix before " in ".

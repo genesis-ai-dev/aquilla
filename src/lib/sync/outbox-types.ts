@@ -576,10 +576,11 @@ export interface OutboxEventPayloads {
   // ── Assignments (project-level, non-chain-mutating) ──────────────────────
   "assignment.create": {
     assignmentId: string // client-generated uuidv7 — the assignment's stable key
-    scopeKind: "books" | "chapters"
+    scopeKind: "books" | "chapters" | "cells"
     /** One entry per assigned unit; `chapter` present for 'chapters' (e.g.
-     *  { fileId, chapter: "GEN 1" }), fileId-only for 'books'. */
-    scope: { fileId: string; chapter?: string }[]
+     *  { fileId, chapter: "GEN 1" }), `cellIds` present for 'cells' (AQU-1628:
+     *  exactly those source lines), fileId-only for 'books'. */
+    scope: { fileId: string; chapter?: string; cellIds?: string[] }[]
     scopeLabel: string
     assigneeUserId: number
     deadline?: string | null

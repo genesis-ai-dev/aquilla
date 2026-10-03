@@ -130,8 +130,8 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     draw()
     const wave = screen.getByTestId("voice-card-waveform")
     const tools = row().lastElementChild!.querySelectorAll("button")
-    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Record audio", "Volume", "Clone a voice from this take"])
-    for (const name of ["Record audio", "Volume", "Clone a voice from this take"]) {
+    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Generate audio from text", "Record audio", "Volume", "Clone voice from take"])
+    for (const name of ["Generate audio from text", "Record audio", "Volume", "Clone voice from take"]) {
       const b = screen.getByRole("button", { name })
       expect(row().lastElementChild!.contains(b)).toBe(true)
       expect(wave.contains(b)).toBe(false)

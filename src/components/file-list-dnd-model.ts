@@ -2,11 +2,13 @@
 // that slot still come from `planFileMove`; this module never computes them.
 
 import {
+  closestCenter,
   pointerWithin,
   type Active,
   type Collision,
   type CollisionDetection,
   type DroppableContainer,
+  type Modifier,
   type Over,
 } from "@dnd-kit/core"
 import { hasSortableData } from "@dnd-kit/sortable"
@@ -55,11 +57,27 @@ function containerOf(hit: Collision): DroppableContainer | undefined {
   return container as DroppableContainer
 }
 
+/** The lifted row stays in the sidebar column while the pointer tracks the slot. */
+export const lockSidebarDragToVertical: Modifier = ({ transform }) => ({
+  ...transform,
+  x: 0,
+})
+
+function sameGroupFiles(args: Parameters<CollisionDetection>[0], group: string): DroppableContainer[] {
+  return args.droppableContainers.filter((container) => {
+    return hasSortableData(container) && readSidebarGroup(container.data.current) === group
+  })
+}
+
 /**
- * A file row sits inside its group droppable. Prefer the row: dropping on a
- * row takes that row's slot, while the group itself only exists so a hover
- * in the header (or in another group) can be refused instead of falling
- * through to whichever row is nearest.
+ * A file row sits inside its group droppable.
+ *
+ * The pointer wins when it is actually on a row. A different group's header
+ * (or a collapsed group) is a refusal. Gaps between rows, and a pointer that
+ * has drifted off the narrow column, keep sorting against the nearest row in
+ * the active group — otherwise the list freezes the moment the cursor leaves
+ * a 28px row. The active group's own header is the exception: it is above
+ * every row, and hovering it should not preview a move.
  */
 export const sidebarFileCollision: CollisionDetection = (args) => {
   const hits = pointerWithin(args)
@@ -67,5 +85,38 @@ export const sidebarFileCollision: CollisionDetection = (args) => {
     const container = containerOf(hit)
     return container !== undefined && hasSortableData(container)
   })
-  return fileHits.length > 0 ? fileHits : hits
+  if (fileHits.length > 0) return fileHits
+
+  const activeGroup = readSidebarGroup(args.active?.data.current)
+  const groupHits = hits.filter((hit) => {
+    const container = containerOf(hit)
+    return container !== undefined && !hasSortableData(container)
+  })
+  const hoveredGroup = groupHits
+    .map((hit) => containerOf(hit))
+    .find((container): container is DroppableContainer => container !== undefined)
+  const hoveredGroupName = hoveredGroup ? readSidebarGroup(hoveredGroup.data.current) : null
+
+  if (hoveredGroupName !== null && hoveredGroupName !== activeGroup) {
+    return groupHits.filter((hit) => {
+      const container = containerOf(hit)
+      return container !== undefined && readSidebarGroup(container.data.current) === hoveredGroupName
+    })
+  }
+
+  const rows = activeGroup === null ? [] : sameGroupFiles(args, activeGroup)
+  if (
+    hoveredGroupName === activeGroup &&
+    args.pointerCoordinates &&
+    rows.length > 0
+  ) {
+    const firstTop = rows.reduce((top, container) => {
+      const rect = args.droppableRects.get(container.id)
+      return rect ? Math.min(top, rect.top) : top
+    }, Number.POSITIVE_INFINITY)
+    if (args.pointerCoordinates.y < firstTop) return groupHits
+  }
+
+  if (rows.length > 0) return closestCenter({ ...args, droppableContainers: rows }).slice(0, 1)
+  return groupHits
 }

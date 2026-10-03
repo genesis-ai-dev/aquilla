@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
-import { Search as SearchIcon, X, ChevronDown, Pencil, GripVertical, RotateCcw } from "lucide-react"
+import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -205,13 +205,11 @@ export function ExpandableFileList({
   // not a thing anyone means to do.
   const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
   const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
-  const [dropAt, setDropAt] = useState<{ group: string; position: number } | null>(null)
   const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
   const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
 
   function endDrag() {
     setDrag(null)
-    setDropAt(null)
     setRefusedGroup(null)
   }
 
@@ -227,21 +225,8 @@ export function ExpandableFileList({
 
   function handleDragOver(event: DragOverEvent) {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
-    if (resolution.kind === "refuse") {
-      setRefusedGroup((current) => current === resolution.group ? current : resolution.group)
-      setDropAt((current) => current === null ? current : null)
-      return
-    }
-    setRefusedGroup((current) => current === null ? current : null)
-    if (resolution.kind === "move") {
-      setDropAt((current) =>
-        current?.group === resolution.group && current.position === resolution.toPosition
-          ? current
-          : { group: resolution.group, position: resolution.toPosition },
-      )
-      return
-    }
-    setDropAt((current) => current === null ? current : null)
+    const next = resolution.kind === "refuse" ? resolution.group : null
+    setRefusedGroup((current) => current === next ? current : next)
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -479,8 +464,6 @@ export function ExpandableFileList({
                       // Not while renaming: the row holds a text input, and a
                       // drag ancestor takes the pointer away from selecting inside it.
                       const isDraggable = canReorderGroup && !isEditing
-                      const isDropTarget =
-                        dropAt?.group === group.label && dropAt.position === position
                       return (
                         <FileListRow
                           key={file.id}
@@ -488,25 +471,12 @@ export function ExpandableFileList({
                           id={file.id}
                           group={group.label}
                           draggable={isDraggable}
-                          isDropTarget={isDropTarget}
+                          handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
                         >
                           <div
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
                             onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
                           >
-                          {isDraggable && (
-                            <span
-                              // Decorative for the mouse, named for the
-                              // screen reader — though the keyboard route to
-                              // the same move is Move up / Move down in the
-                              // row's menu, which is where it belongs.
-                              role="img"
-                              aria-label={t("nav.fileList.reorderHandle", { name: file.name })}
-                              className="pointer-events-none absolute -start-2 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-70"
-                            >
-                              <GripVertical className="h-3 w-3" />
-                            </span>
-                          )}
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}

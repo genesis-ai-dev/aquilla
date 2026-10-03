@@ -112,4 +112,51 @@ describe("sidebarFileCollision", () => {
     })
     expect(hits.map((hit) => hit.id)).toEqual(["sidebar-drop:Season 1"])
   })
+
+  it("keeps sorting when the pointer is in the gap between two rows", () => {
+    const later = droppable(
+      "episode-3",
+      { group: "Season 1", sortable: { containerId: "Season 1", index: 2, items: ["episode-1", "episode-2", "episode-3"] } },
+      box(84, 40),
+    )
+    const hits = sidebarFileCollision({
+      active: active("episode-1", "Season 1"),
+      collisionRect: box(78, 12),
+      droppableRects: new Map([
+        [season.id, box(0, 140)],
+        [episode.id, box(40, 40)],
+        [later.id, box(84, 40)],
+      ]),
+      droppableContainers: [season, episode, later],
+      pointerCoordinates: { x: 20, y: 82 },
+    })
+    expect(hits.map((hit) => hit.id)).toEqual(["episode-3"])
+  })
+
+  it("follows the row when the pointer has drifted off the sidebar", () => {
+    const hits = sidebarFileCollision({
+      active: active("episode-1", "Season 1"),
+      collisionRect: box(40, 40),
+      droppableRects: new Map([[season.id, box(0, 120)], [episode.id, box(40, 40)]]),
+      droppableContainers: [season, episode],
+      pointerCoordinates: { x: -30, y: 55 },
+    })
+    expect(hits.map((hit) => hit.id)).toEqual(["episode-2"])
+  })
+
+  it("refuses from the other group's header instead of snapping back", () => {
+    const other = droppable("sidebar-drop:Season 2", { group: "Season 2" }, box(200, 80))
+    const hits = sidebarFileCollision({
+      active: active("episode-1", "Season 1"),
+      collisionRect: box(200, 20),
+      droppableRects: new Map([
+        [season.id, box(0, 120)],
+        [episode.id, box(40, 40)],
+        [other.id, box(200, 80)],
+      ]),
+      droppableContainers: [season, episode, other],
+      pointerCoordinates: { x: 20, y: 210 },
+    })
+    expect(hits.map((hit) => hit.id)).toEqual(["sidebar-drop:Season 2"])
+  })
 })

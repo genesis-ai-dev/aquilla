@@ -132,9 +132,18 @@ function center(element: HTMLElement) {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
 }
 
+/** The grip. The row around it is a click, not a drag. */
+function reorderHandle(name: string): HTMLElement {
+  const found = slot(name).querySelector("[data-reorder-handle]")
+  if (!(found instanceof HTMLElement)) throw new Error(`no reorder handle for "${name}"`)
+  return found
+}
+
 function beginDrag(name: string) {
   layoutReorderTargets()
-  const element = slot(name)
+  const element = reorderHandle(name)
+  const host = slot(name).getBoundingClientRect()
+  element.getBoundingClientRect = () => box(host.top, host.height, host.left, 16)
   const point = center(element)
   fireEvent.pointerDown(element, pointerInit(point.x, point.y))
   // The move that crosses the activation distance only starts the drag.
@@ -248,6 +257,21 @@ describe("dragging a file within its group", () => {
     expect(episode.getAttribute("draggable")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Episode 2" }))
     expect(onSelectFile).toHaveBeenCalledWith("episode-2")
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
+
+  it("does not reorder when the pointer slides across the file name", () => {
+    renderList(PLACED_SEASON)
+    layoutReorderTargets()
+    const name = screen.getByRole("button", { name: "Episode 10" })
+    const host = slot("Episode 10").getBoundingClientRect()
+    name.getBoundingClientRect = () => box(host.top, host.height, host.left + 24, host.width - 24)
+    const point = center(name)
+    fireEvent.pointerDown(name, pointerInit(point.x, point.y))
+    const nudged = pointerInit(point.x, point.y + FILE_DRAG_ACTIVATION_DISTANCE + 24)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, pointerInit(point.x, host.top + 120))
+    fireEvent.pointerUp(document, pointerInit(point.x, host.top + 120, 0))
     expect(onReorderFiles).not.toHaveBeenCalled()
   })
 })

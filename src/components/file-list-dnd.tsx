@@ -6,8 +6,12 @@
 // Move down; there is no keyboard sensor, and the library's space-bar
 // instructions are cleared so a screen reader is not told about a gesture
 // this list does not offer.
+//
+// The grip is the only thing that starts a drag. The row itself stays a
+// click (and the sidebar stays a scroll). The lifted row is a copy that
+// tracks the pointer; the source becomes the gap the other rows slide into.
 
-import { useMemo, type ReactNode } from "react"
+import { useEffect, useMemo, type PointerEvent, type ReactNode } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -30,6 +34,7 @@ import { GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   FILE_DRAG_ACTIVATION_DISTANCE,
+  lockSidebarDragToVertical,
   sidebarFileCollision,
 } from "./file-list-dnd-model"
 
@@ -56,14 +61,21 @@ const sameGroupVerticalStrategy: SortingStrategy = (args) => {
   return verticalListSortingStrategy(args)
 }
 
+const rowSlide = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
+const dropAnimation = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
 export function FileDragPreview({ name }: { name: string }) {
   return (
-    <div
-      aria-hidden
-      className="flex h-7 max-w-xs items-center gap-1 rounded-lg bg-background px-2 text-[13px] text-foreground shadow-md ring-1 ring-border"
-    >
-      <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground" />
-      <span className="truncate">{name}</span>
+    <div aria-hidden className="flex h-full min-h-7 items-start">
+      <div className="flex h-7 w-full items-center gap-1 rounded-lg bg-popover px-2 text-[13px] text-popover-foreground shadow-lg ring-1 ring-border">
+        <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{name}</span>
+      </div>
     </div>
   )
 }
@@ -115,18 +127,39 @@ function ActiveFileReorder({
   children: ReactNode
 }) {
   const sensors = useSensors(useSensor(PointerSensor, pointerSensorOptions))
+  const reduceMotion = prefersReducedMotion()
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = ""
+    }
+  }, [])
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={sidebarFileCollision}
+      modifiers={[lockSidebarDragToVertical]}
       accessibility={accessibility}
-      onDragStart={onDragStart}
+      onDragStart={(event) => {
+        document.body.style.cursor = "grabbing"
+        onDragStart(event)
+      }}
       onDragOver={onDragOver}
-      onDragEnd={onDragEnd}
-      onDragCancel={onDragCancel}
+      onDragEnd={(event) => {
+        document.body.style.cursor = ""
+        onDragEnd(event)
+      }}
+      onDragCancel={() => {
+        document.body.style.cursor = ""
+        onDragCancel()
+      }}
     >
       {children}
-      <DragOverlay dropAnimation={null}>{overlay}</DragOverlay>
+      <DragOverlay
+        dropAnimation={reduceMotion ? null : dropAnimation}
+        style={{ pointerEvents: "none" }}
+      >
+        {overlay}
+      </DragOverlay>
     </DndContext>
   )
 }
@@ -214,21 +247,22 @@ export function FileListRow({
   id,
   group,
   draggable,
-  isDropTarget,
+  handleLabel,
   children,
 }: {
   sortable: boolean
   id: string
   group: string
   draggable: boolean
-  isDropTarget: boolean
+  /** Accessible name for the grip. Null when this row cannot start a drag. */
+  handleLabel: string | null
   children: ReactNode
 }) {
   if (!sortable) {
     return <div className="group/file-slot relative">{children}</div>
   }
   return (
-    <SortableFileSlot id={id} group={group} draggable={draggable} isDropTarget={isDropTarget}>
+    <SortableFileSlot id={id} group={group} draggable={draggable} handleLabel={handleLabel}>
       {children}
     </SortableFileSlot>
   )
@@ -238,19 +272,20 @@ function SortableFileSlot({
   id,
   group,
   draggable,
-  isDropTarget,
+  handleLabel,
   children,
 }: {
   id: string
   group: string
   draggable: boolean
-  isDropTarget: boolean
+  handleLabel: string | null
   children: ReactNode
 }) {
   const data = useMemo(() => ({ group }), [group])
-  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({
+  const { setNodeRef, setActivatorNodeRef, listeners, transform, transition, isDragging } = useSortable({
     id,
     data,
+    transition: prefersReducedMotion() ? { duration: 0, easing: "linear" } : rowSlide,
     // Renaming: the row holds a text input. It can still be a drop slot,
     // but it must not start a drag or the pointer leaves the selection.
     disabled: draggable ? false : { draggable: true, droppable: false },
@@ -258,7 +293,6 @@ function SortableFileSlot({
   return (
     <div
       ref={setNodeRef}
-      {...(draggable ? listeners : undefined)}
       data-reorderable={draggable ? "true" : undefined}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -266,11 +300,29 @@ function SortableFileSlot({
       }}
       className={cn(
         "group/file-slot relative",
-        draggable && "cursor-grab",
-        isDropTarget && "rounded-md ring-1 ring-primary/60",
-        isDragging && "opacity-50",
+        // The source stays in the layout as the gap. The overlay is the row
+        // the pointer is holding, so a faded copy here would be a second ghost.
+        isDragging && "pointer-events-none opacity-0",
       )}
     >
+      {draggable && handleLabel && (
+        <span
+          ref={setActivatorNodeRef}
+          role="img"
+          aria-label={handleLabel}
+          data-reorder-handle=""
+          style={{ touchAction: "none" }}
+          className="absolute inset-y-0 -start-2 z-10 flex w-4 cursor-grab items-center justify-center text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-100 active:cursor-grabbing"
+          {...listeners}
+          onPointerDown={(event: PointerEvent<HTMLSpanElement>) => {
+            listeners?.onPointerDown?.(event)
+            event.stopPropagation()
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </span>
+      )}
       {children}
     </div>
   )

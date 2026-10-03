@@ -131,6 +131,10 @@ export function LanguagesSection({
   const targetRows = (laneRecords ?? []).filter((lane) => lane.role === "target")
   const rowMode = targetRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
   const defaultRow = targetRows.find((lane) => (lane.legacyTag ?? "") === "")
+  // The former default lane is listed in its own block above (it is still the
+  // project's default-language row until AQU-1594 moves language editing onto
+  // the lane), so it is kept out of the "additional lanes" list — but it is no
+  // longer kept out of ARCHIVING — it carries its own archive control.
   const activeRows = targetRows
     .filter((lane) => (lane.legacyTag ?? "") !== "" && !lane.archivedAt)
     .slice()
@@ -139,6 +143,13 @@ export function LanguagesSection({
     .filter((lane) => lane.archivedAt)
     .slice()
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
+  // AQU-1600: every target lane archives, the former default one included.
+  // The single remaining rule is that a project keeps at least one active
+  // target lane — the server refuses the last one (`last_lane`), so the
+  // control is disabled here rather than offering a click that cannot work.
+  const activeTargetCount = targetRows.filter((lane) => !lane.archivedAt).length
+  const canArchiveAnyLane = activeTargetCount > 1
+  const archiveBlockedTooltip = t("projectSettings.languages.lastActiveLaneTooltip")
 
   // The primary is shown in the default-language field above. Listing it again
   // from the complete registry made a new project's first language appear twice.
@@ -278,6 +289,64 @@ export function LanguagesSection({
               />
             </div>
           )}
+          {/* AQU-1600: the former default lane is ordinary — it archives from
+              here like any extra lane does from the list below, and reappears
+              with a Restore control in the archived list. Only the
+              last-active-lane rule still refuses. */}
+          {rowMode && defaultRow && !defaultRow.archivedAt && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {pendingArchive === defaultRow.id ? (
+                <>
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="text-xs text-muted-foreground">
+                      {t("projectSettings.languages.archiveConfirm", { lane: defaultRow.name })}
+                    </span>
+                    {onLoadLaneLastChange && (
+                      <LaneLastChangeNote laneId={defaultRow.id} load={onLoadLaneLastChange} />
+                    )}
+                  </div>
+                  <Button
+                    variant="destructive"
+                    disabled={busyLane === defaultRow.id}
+                    onClick={() => void handleConfirmArchive(defaultRow.id)}
+                  >
+                    {busyLane === defaultRow.id
+                      ? t("projectSettings.languages.archivingButton")
+                      : t("projectSettings.languages.confirmArchiveButton")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busyLane === defaultRow.id}
+                    onClick={() => setPendingArchive(null)}
+                  >
+                    {t("common.cancel")}
+                  </Button>
+                </>
+              ) : (
+                <DisabledFieldTooltip
+                  disabled={!canEdit || !canArchiveAnyLane}
+                  tooltip={canEdit ? archiveBlockedTooltip : disabledTooltip}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    disabled={!canEdit || !canArchiveAnyLane}
+                    data-testid={`archive-lane-${defaultRow.id}`}
+                    aria-label={t("projectSettings.languages.archiveLaneAriaLabel", {
+                      lane: defaultRow.name,
+                    })}
+                    onClick={() => {
+                      setLaneActionError(null)
+                      setPendingArchive(defaultRow.id)
+                    }}
+                  >
+                    <Archive className="h-4 w-4" />
+                  </Button>
+                </DisabledFieldTooltip>
+              )}
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             {t("projectSettings.languages.defaultTargetNote")}
           </p>
@@ -331,12 +400,15 @@ export function LanguagesSection({
                         </Button>
                       </div>
                     ) : (
-                      <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                      <DisabledFieldTooltip
+                        disabled={!canEdit || !canArchiveAnyLane}
+                        tooltip={canEdit ? archiveBlockedTooltip : disabledTooltip}
+                      >
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 shrink-0"
-                          disabled={!canEdit}
+                          disabled={!canEdit || !canArchiveAnyLane}
                           data-testid={`archive-lane-${lane.id}`}
                           aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: lane.name })}
                           onClick={() => {

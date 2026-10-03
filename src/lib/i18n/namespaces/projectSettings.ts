@@ -886,6 +886,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
     "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
+    // AQU-1600: every target lane is archivable, including the former default
+    // one — but a project must keep one active, so the last one's archive
+    // control is disabled with this reason.
+    "projectSettings.languages.lastActiveLaneTooltip":
+      "This is the project's only active lane. Add another target lane before archiving this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",

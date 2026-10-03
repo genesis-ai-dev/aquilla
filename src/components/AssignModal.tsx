@@ -68,6 +68,7 @@ import {
   getFileChapters,
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
+import type { AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   canOpenAssignUi,
@@ -531,22 +532,28 @@ export function AssignModal({
     }
 
     // Build scope + scopeLabel for the single-event scopes.
-    let scope: { fileId: string; chapter?: string }[] = []
+    //
+    // File identity rides `fileId` (and the Assigned-to-me File column) — keep
+    // scopeLabel as the work description only, not "… in <fileName>".
+    // Persisted scope-label data (stored on the assignment record), not a
+    // rendered UI string — left in English; see AQU-511 dialog namespace notes.
+    let scope: AssignmentScopeEntry[] = []
     let scopeLabel = ""
-    let apiScopeKind: "books" | "chapters" = "books"
+    let apiScopeKind: AssignmentScopeKind = "books"
 
-    if (scopeKind === "selection" || scopeKind === "verses") {
+    if (scopeKind === "selection") {
+      if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
+      // AQU-1628: send the selected lines, not the file they live in. The file
+      // alone resolves to every source line in it server-side, so the assignee
+      // got the whole file while the label below still said "N segment(s)".
+      if (selectedCellIds.size === 0) { setError(t("dialog.assign.error.noSelection")); return }
+      scope = [{ fileId: activeFileId, cellIds: [...selectedCellIds] }]
+      scopeLabel = `${selectedCellIds.size} ${segmentNoun}(s)`
+      apiScopeKind = "cells"
+    } else if (scopeKind === "verses") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
       scope = [{ fileId: activeFileId }]
-      // File identity rides `fileId` (and the Assigned-to-me File column) —
-      // keep scopeLabel as the work description only, not "… in <fileName>".
-      // Persisted scope-label data (stored on the assignment record), not a
-      // rendered UI string — left in English; see AQU-511 dialog namespace notes.
-      scopeLabel = scopeKind === "selection"
-        ? `${selectedCellIds.size} ${segmentNoun}(s)`
-        : isScripture
-          ? "All verses"
-          : "Entire file"
+      scopeLabel = isScripture ? "All verses" : "Entire file"
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError(t("dialog.assign.error.noFileOpen")); return }
@@ -596,7 +603,10 @@ export function AssignModal({
     }
   }, [
     members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
-    selectedCellIds.size, selectedChapters, selectedFileIds,
+    // AQU-1628: the whole set, not just its size — submit now sends the ids,
+    // and swapping which cells are selected without changing how many must
+    // not leave this callback holding the previous selection.
+    selectedCellIds, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,

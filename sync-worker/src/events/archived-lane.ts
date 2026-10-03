@@ -56,7 +56,12 @@ export async function targetLaneRowExists(
 }
 
 /**
- * Stable 403 reason, or null. `tag` of `''` is the default lane and is never refused.
+ * Stable 403 reason, or null.
+ *
+ * AQU-1600: a `tag` of `''` is the former default lane — an ordinary lane that
+ * can be archived — so it is checked like any other rather than waved through.
+ * A project with no `''` lane row simply has no match and is not refused.
+ *
  * `visibleLaneIds` null means the caller may know every lane. A set hides the
  * archived name from a caller who may not know that lane exists.
  */
@@ -67,7 +72,6 @@ export async function refusalForArchivedLane(
   cache: RequestCache,
   visibleLaneIds: ReadonlySet<string> | null = null,
 ): Promise<string | null> {
-  if (tag === '') return null
   const [settings, lanes] = await Promise.all([
     cache.projectSettings(projectId),
     rowsFor(db, projectId, cache),

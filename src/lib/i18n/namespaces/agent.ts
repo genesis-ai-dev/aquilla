@@ -34,6 +34,8 @@ export const agent = defineNamespace({
     "agent.dock.attachFileAriaLabel": "Attach file",
     "agent.dock.attachFileTitle": "Attach a file for the agent",
     "agent.dock.removeAttachmentAriaLabel": "Remove {fileName}",
+    "agent.dock.copyChat": "Copy chat",
+    "agent.dock.copiedChat": "Copied",
 
     // ── Rename-suggestions banner (SuggestionBanner) — unrelated feature
     //    (Bible-book / episode file naming), keyed here because this agent
@@ -540,6 +542,8 @@ export const agent = defineNamespace({
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
     "agent.validation.roleCannotValidate": "Your role can't validate in this project",
+    "agent.validation.selfValidationBlocked":
+      "Not applicable — this project doesn't allow validating your own edit",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -688,6 +692,17 @@ export const agent = defineNamespace({
           "file attachment chip from the composer before sending, naming the file " +
           "being removed.",
         placeholders: { fileName: "Display name of the attached file being removed." },
+      },
+      "agent.dock.copyChat": {
+        description:
+          "Tooltip and accessible name for the small icon button at the top-right of the " +
+          "agent conversation that copies the whole conversation (the user's messages and " +
+          "the agent's replies) to the clipboard as plain text.",
+      },
+      "agent.dock.copiedChat": {
+        description:
+          "Brief confirmation shown in the same tooltip/accessible name for about a second " +
+          "after agent.dock.copyChat succeeds: the conversation is now on the clipboard.",
       },
       "agent.rename.bannerSuffix": {
         description:
@@ -1294,6 +1309,14 @@ export const agent = defineNamespace({
         description:
           "Tooltip on a disabled per-row Validate button in the validation queue " +
           "when the signed-in user's project role is below the validation floor.",
+      },
+      "agent.validation.selfValidationBlocked": {
+        description:
+          "Shown in place of the per-row Validate button when the project has " +
+          "\"Allow self-validation\" off and the signed-in user is the line's last " +
+          "editor, so the server would refuse the validation. States that the " +
+          "prepared validation does not apply to this reader and why, rather than " +
+          "offering a button that fails.",
       },
       "agent.team.inspector.resize": {
         description:

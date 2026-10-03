@@ -87,6 +87,32 @@ describe("AgentDockView shared Team chat", () => {
     expect(screen.getByRole("textbox")).toBeInTheDocument()
   })
 
+  // AQU-1652: app chrome disables text selection, which left users unable to
+  // copy anything the agent said. The conversation must be selectable, Cmd+A
+  // must select the conversation (not the page), and Copy chat must hand over
+  // the readable conversation — never the model-only wire legend.
+  it("lets the user select-all and copy the conversation", async () => {
+    state.runs = [{
+      localId: "run", runId: null, prompt: "What does “In the beginning” mean?",
+      wireContent: "⟦ctx:1⟧ legend file_id=secret", status: "ok",
+      items: [{ id: "i0", kind: "text", text: "It opens the creation account." }],
+    }]
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    const { container } = render(<AgentDockView {...props} />)
+
+    const viewport = container.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]')!
+    fireEvent.keyDown(viewport, { key: "a", metaKey: true })
+    const content = container.querySelector('[data-slot="message-scroller-content"]')!
+    const range = window.getSelection()!.getRangeAt(0)
+    expect(range.commonAncestorContainer).toBe(content)
+
+    fireEvent.click(screen.getByTestId("agent-copy-chat"))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      "You: What does “In the beginning” mean?\n\nAgent: It opens the creation account.",
+    ))
+  })
+
   it("renders the prelude ahead of existing session runs in the same scroller", () => {
     state.runs = [{ localId: "run", runId: null, prompt: "Session prompt", items: [], status: "ok" }]
     const { container } = render(<AgentDockView {...props} conversationPrelude={<div>Contextual dispatch</div>} />)
@@ -114,7 +140,7 @@ describe("AgentDockView shared Team chat", () => {
     submit()
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       wire: expect.stringContaining("<exact>\nsource & words"),
-      display: expect.stringContaining("[GEN 1:1]"),
+      display: expect.stringContaining("“<exact> source & words”"),
       request: expect.objectContaining({
         projectId: "project", context: { fileId: "file", cellId: "cell" },
         artifacts: [{ artifactId: "artifact-notes.txt", fileName: "notes.txt" }],

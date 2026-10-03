@@ -349,11 +349,21 @@ export function ensureTargetLaneStmt(
 export type ArchiveLaneResult =
   | { status: "ok"; lane: ProjectLaneRecord }
   | { status: "not_found" }
-  | { status: "default_lane" }
+  | { status: "last_lane" }
 
 /**
- * Soft-archive a target lane (`archived_at`). The default lane (`legacy_tag`
- * '') stays; its cells are the project's primary target language.
+ * Soft-archive a target lane (`archived_at`).
+ *
+ * AQU-1600: the former default lane (`legacy_tag` '') is an ordinary lane and
+ * archives like any other. Its row — and its `legacy_tag ''` — stay forever,
+ * so historical events still replay through it; only `archived_at` moves.
+ *
+ * The one refusal left is `last_lane`: a project must keep at least one
+ * non-archived target lane, so archiving the last active one is rejected
+ * rather than leaving a project nobody can translate in. The row's
+ * `archived_at` is the only input to that count — the legacy
+ * `settings.archivedLanes` mirror is a list of TAGS and cannot name the
+ * former default lane (its tag is ''), so it is not consulted here.
  */
 export async function setTargetLaneArchived(
   db: AquillaDb,
@@ -364,7 +374,18 @@ export async function setTargetLaneArchived(
   const lanes = await listProjectLanes(db, projectId)
   const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
   if (!current) return { status: "not_found" }
-  if (current.legacyTag === "") return { status: "default_lane" }
+  const currentlyActive = current.archivedAt == null || current.archivedAt === ""
+  // Only a change that actually removes the last ACTIVE lane is refused;
+  // re-archiving an already-archived lane changes no count and stays a no-op.
+  if (archived && currentlyActive) {
+    const stillActive = lanes.some(
+      (lane) =>
+        lane.role === "target" &&
+        lane.id !== laneId &&
+        (lane.archivedAt == null || lane.archivedAt === ""),
+    )
+    if (!stillActive) return { status: "last_lane" }
+  }
   const archivedAt = archived ? new Date().toISOString() : null
   await db
     .prepare(

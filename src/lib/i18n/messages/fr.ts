@@ -4227,7 +4227,7 @@ export const fr: Catalog = {
   "projectSettings.structuralCells.saveFailed": "Impossible d'enregistrer cette modification",
   "projectSettings.validation.allowSelfLabel": "Autoriser l'auto-validation",
   "projectSettings.validation.allowSelfDescription": "Lorsque désactivé, personne ne peut valider une ligne dont la dernière modification est la sienne, quel que soit son rôle. Quelqu'un d'autre doit le faire.",
-  "projectSettings.validation.namedValidatorsLabel": "Validateurs nommés (facultatif)",
+  "projectSettings.validation.namedValidatorsLabel": "Validateurs nommés",
   "projectSettings.validation.namedValidatorsDescription": "Lorsque des personnes sont listées, elles seules peuvent valider le texte, et il leur faut toujours le rôle minimum ci-dessus. Laissez vide pour autoriser toute personne ayant le rôle minimum.",
   "projectSettings.validation.minRoleAudioLabel": "Rôle minimum pour valider les enregistrements",
   "projectSettings.validation.minRoleAudioDescription": "Qui peut approuver un enregistrement. Défini séparément de la règle texte ci-dessus — un projet peut vouloir une barre plus haute pour l'audio que pour les traductions, ou l'inverse.",

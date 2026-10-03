@@ -4297,7 +4297,7 @@ export const ru: Catalog = {
   "projectSettings.structuralCells.saveFailed": "Не удалось сохранить это изменение",
   "projectSettings.validation.allowSelfLabel": "Разрешить самоподтверждение",
   "projectSettings.validation.allowSelfDescription": "Если выключено, никто не может подтвердить строку, последнее изменение в которой внёс он сам, независимо от роли. Это должен сделать кто-то другой.",
-  "projectSettings.validation.namedValidatorsLabel": "Конкретные проверяющие (необязательно)",
+  "projectSettings.validation.namedValidatorsLabel": "Конкретные проверяющие",
   "projectSettings.validation.namedValidatorsDescription": "Если кто-то указан, подтверждать текст могут только эти люди, и им по-прежнему нужна минимальная роль, указанная выше. Оставьте пустым, чтобы разрешить всем, у кого есть минимальная роль.",
   "projectSettings.validation.minRoleAudioLabel": "Минимальная роль для подтверждения записей",
   "projectSettings.validation.minRoleAudioDescription": "Кто может подтверждать запись. Задаётся отдельно от правила для текста выше — проекту может требоваться более высокая планка для аудио, чем для переводов, или наоборот.",

@@ -595,7 +595,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.allowSelfDescription":
       "When off, nobody can validate a line whose latest change is their own, whatever " +
       "their role. Someone else has to.",
-    "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
+    "projectSettings.validation.namedValidatorsLabel": "Named validators",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
     // AQU-1571: people off the list cannot vote at all (the server refuses it),
     // and the field is a member picker, not a comma-separated box.

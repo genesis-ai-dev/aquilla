@@ -4232,7 +4232,7 @@ export const id: Catalog = {
   "projectSettings.structuralCells.saveFailed": "Tidak dapat menyimpan perubahan itu",
   "projectSettings.validation.allowSelfLabel": "Izinkan validasi mandiri",
   "projectSettings.validation.allowSelfDescription": "Saat nonaktif, tidak ada yang dapat memvalidasi baris yang terakhir diubahnya sendiri, apa pun perannya. Orang lain yang harus melakukannya.",
-  "projectSettings.validation.namedValidatorsLabel": "Validator bernama (opsional)",
+  "projectSettings.validation.namedValidatorsLabel": "Validator bernama",
   "projectSettings.validation.namedValidatorsDescription": "Bila ada yang dicantumkan, hanya orang-orang ini yang dapat memvalidasi teks, dan mereka tetap memerlukan peran minimum di atas. Kosongkan untuk mengizinkan siapa pun yang memenuhi peran minimum.",
   "projectSettings.decay.summary": "Dukungan pengambilan",
   "projectSettings.decay.description": "Sinyal dukungan ini mengukur kedekatan dengan sel tetangga yang sudah disetujui dalam graf pengambilan. Ia dapat memprioritaskan tinjauan, tetapi bukan skor mutu terjemahan dan tidak pernah menghapus keharusan tinjauan manusia.",

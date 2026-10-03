@@ -3704,7 +3704,7 @@ export const zh_Hans: Catalog = {
   "projectSettings.validation.minRoleDescription": "只有至少具备此角色的用户才能投下验证票。默认为审阅者。",
   "projectSettings.validation.allowSelfLabel": "允许自我验证",
   "projectSettings.validation.allowSelfDescription": "关闭后，任何人都不能验证自己最后修改的行，无论其角色如何。必须由其他人验证。",
-  "projectSettings.validation.namedValidatorsLabel": "指定的验证者（选填）",
+  "projectSettings.validation.namedValidatorsLabel": "指定的验证者",
   "projectSettings.validation.namedValidatorsDescription": "列出任何人后，只有这些人可以验证文本，且他们仍需具备上方的最低角色。留空则允许任何达到最低角色的人验证。",
   "projectSettings.decay.summary": "检索佐证",
   "projectSettings.decay.description": "这项佐证信号衡量的是在检索图谱中与已核准邻近单元格的接近程度。它可以用来排定审阅优先级，但并不是翻译质量分数，也绝不会取消人工审阅的要求。",

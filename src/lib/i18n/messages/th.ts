@@ -3690,7 +3690,7 @@ export const th: Catalog = {
   "projectSettings.validation.minRoleDescription": "เฉพาะผู้ใช้ที่มีบทบาทตั้งแต่ระดับนี้ขึ้นไปเท่านั้นที่สามารถลงคะแนนตรวจสอบได้ ค่าเริ่มต้นคือผู้ตรวจทาน",
   "projectSettings.validation.allowSelfLabel": "อนุญาตให้ตรวจสอบงานตนเอง",
   "projectSettings.validation.allowSelfDescription": "เมื่อปิด จะไม่มีใครตรวจสอบบรรทัดที่ตนเองแก้ไขล่าสุดได้ ไม่ว่าจะมีบทบาทใด ต้องให้ผู้อื่นตรวจสอบ",
-  "projectSettings.validation.namedValidatorsLabel": "ผู้ตรวจสอบที่ระบุชื่อ (ไม่บังคับ)",
+  "projectSettings.validation.namedValidatorsLabel": "ผู้ตรวจสอบที่ระบุชื่อ",
   "projectSettings.validation.namedValidatorsDescription": "เมื่อระบุชื่อผู้ใดไว้ จะมีเพียงบุคคลเหล่านี้ที่ตรวจสอบข้อความได้ และยังต้องมีบทบาทขั้นต่ำข้างต้นด้วย เว้นว่างไว้เพื่ออนุญาตทุกคนที่มีบทบาทขั้นต่ำ",
   "projectSettings.decay.summary": "การสนับสนุนการดึงข้อมูล",
   "projectSettings.decay.description": "สัญญาณสนับสนุนนี้วัดความใกล้เคียงกับเซลล์ข้างเคียงที่อนุมัติแล้วในกราฟการดึงข้อมูล ใช้จัดลำดับความสำคัญของการตรวจทานได้ แต่ไม่ใช่คะแนนคุณภาพคำแปล และไม่ได้ยกเลิกข้อกำหนดให้มนุษย์ตรวจทาน",

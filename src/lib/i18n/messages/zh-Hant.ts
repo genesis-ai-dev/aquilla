@@ -3704,7 +3704,7 @@ export const zh_Hant: Catalog = {
   "projectSettings.validation.minRoleDescription": "只有至少具備此角色的使用者才能投下驗證票。預設為審閱者。",
   "projectSettings.validation.allowSelfLabel": "允許自我驗證",
   "projectSettings.validation.allowSelfDescription": "關閉後，任何人都不能驗證自己最後修改的行，無論其角色為何。必須由其他人驗證。",
-  "projectSettings.validation.namedValidatorsLabel": "指定的驗證者（選填）",
+  "projectSettings.validation.namedValidatorsLabel": "指定的驗證者",
   "projectSettings.validation.namedValidatorsDescription": "列出任何人後，只有這些人可以驗證文本，且他們仍需具備上方的最低角色。留白則允許任何達到最低角色的人驗證。",
   "projectSettings.decay.summary": "檢索佐證",
   "projectSettings.decay.description": "這項佐證訊號衡量的是在檢索圖譜中與已核准鄰近單元格的接近程度。它可以用來排定審閱優先順序，但並不是翻譯品質分數，也絕不會取消人工審閱的要求。",

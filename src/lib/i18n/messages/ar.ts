@@ -3693,7 +3693,7 @@ export const ar: Catalog = {
   "projectSettings.validation.minRoleDescription": "يمكن فقط للمستخدمين الذين يملكون هذا الدور على الأقل الإدلاء بصوت تحقّق. الافتراضي: مراجِع.",
   "projectSettings.validation.allowSelfLabel": "السماح بالتحقّق الذاتي",
   "projectSettings.validation.allowSelfDescription": "عند الإيقاف، لا يمكن لأي شخص التحقّق من سطر يكون آخر تغيير فيه من صنعه، أيًّا كان دوره. يجب أن يتولّى ذلك شخص آخر.",
-  "projectSettings.validation.namedValidatorsLabel": "المتحقِّقون المحدَّدون بالاسم (اختياري)",
+  "projectSettings.validation.namedValidatorsLabel": "المتحقِّقون المحدَّدون بالاسم",
   "projectSettings.validation.namedValidatorsDescription": "عند إدراج أي شخص، لا يمكن إلا لهؤلاء الأشخاص التحقّق من النص، ويظل عليهم استيفاء الحد الأدنى للدور أعلاه. اتركه فارغًا للسماح لأي شخص يستوفي الحد الأدنى للدور.",
   "projectSettings.decay.summary": "دعم الاسترجاع",
   "projectSettings.decay.description": "تقيس إشارة الدعم هذه القرب من الخلايا المجاورة الموافَق عليها في الرسم البياني للاسترجاع. يمكنها ترتيب أولوية المراجعة، لكنها ليست مقياسًا لجودة الترجمة ولا تُلغي أبدًا متطلب المراجعة البشرية.",

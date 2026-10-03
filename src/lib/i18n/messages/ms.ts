@@ -3688,7 +3688,7 @@ export const ms: Catalog = {
   "projectSettings.validation.minRoleDescription": "Hanya pengguna dengan sekurang-kurangnya peranan ini boleh mengundi pengesahan. Lalai kepada penyemak.",
   "projectSettings.validation.allowSelfLabel": "Benarkan pengesahan sendiri",
   "projectSettings.validation.allowSelfDescription": "Apabila dimatikan, tiada sesiapa boleh mengesahkan baris yang perubahan terakhirnya dibuat sendiri, walau apa pun peranannya. Orang lain perlu melakukannya.",
-  "projectSettings.validation.namedValidatorsLabel": "Pengesah bernama (pilihan)",
+  "projectSettings.validation.namedValidatorsLabel": "Pengesah bernama",
   "projectSettings.validation.namedValidatorsDescription": "Apabila sesiapa disenaraikan, hanya mereka boleh mengesahkan teks, dan mereka masih memerlukan peranan minimum di atas. Biarkan kosong untuk membenarkan sesiapa yang memenuhi peranan minimum.",
   "projectSettings.decay.summary": "Sokongan pengambilan",
   "projectSettings.decay.description": "Isyarat sokongan ini mengukur kedekatan dengan sel jiran yang diluluskan dalam graf pengambilan. Ia boleh mengutamakan semakan, tetapi ia bukan skor kualiti terjemahan dan tidak sekali-kali menggantikan keperluan semakan manusia.",

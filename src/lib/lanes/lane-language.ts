@@ -28,9 +28,16 @@
 /** The identity fields of a lane row (`ProjectLaneView` / `ProjectRecord.lanes`). */
 export interface LaneLanguageRow {
   id: string
+  role?: "source" | "target"
   name: string
   langCode: string | null
   legacyTag: string | null
+}
+
+/** The source lane's `legacy_tag` is NULL, which reads as the default lane's
+ *  `''`, so tag lookups only ever consider target rows. */
+function targetRows(lanes: readonly LaneLanguageRow[] | null | undefined): LaneLanguageRow[] {
+  return (lanes ?? []).filter((lane) => lane.role !== "source")
 }
 
 /** `value` unless it is blank or just the lane's own id. */
@@ -67,7 +74,7 @@ function rowForTag(
   tag: string,
   lanes: readonly LaneLanguageRow[] | null | undefined,
 ): LaneLanguageRow | null {
-  const rows = lanes ?? []
+  const rows = targetRows(lanes)
   // A lane tagged with its own id is the bug case, so match on the id too: a
   // caller holding the id rather than the tag resolves to the same row.
   return (
@@ -114,7 +121,7 @@ export function laneLabelsByTag(
   lanes: readonly LaneLanguageRow[] | null | undefined,
 ): Record<string, string> {
   const labels: Record<string, string> = {}
-  for (const lane of lanes ?? []) {
+  for (const lane of targetRows(lanes)) {
     const label = laneRowLabel(lane)
     if (label) labels[lane.legacyTag ?? ""] = label
   }

@@ -125,3 +125,21 @@ describe("laneLabelsByTag (AQU-1586)", () => {
     expect(laneLabelsByTag([row({ id: "b0b0b0b0", legacyTag: "b0b0b0b0" })])).toEqual({})
   })
 })
+
+describe("the source lane is never a tag match", () => {
+  // Every project's lane list leads with its source lane, whose NULL tag would
+  // otherwise read as the default lane's ''.
+  const lanes: LaneLanguageRow[] = [
+    row({ id: "50dce001", role: "source", name: "English", langCode: "en", legacyTag: null }),
+    row({ id: "defa0001", role: "target", name: "Spanish", langCode: "es", legacyTag: "" }),
+  ]
+
+  it("labels the default lane from the default target row", () => {
+    expect(laneLabelForTag("", lanes)).toBe("Spanish")
+    expect(laneLabelsByTag(lanes)).toEqual({ "": "Spanish" })
+  })
+
+  it("resolves the default lane's language from the default target row", () => {
+    expect(laneLanguageForTag("", lanes)).toBe("es")
+  })
+})

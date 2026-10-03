@@ -15,11 +15,18 @@ bt=$(printf '%s' "$branch" | grep -oiE 'aqu-[0-9]+' | head -1 | tr '[:lower:]' '
 # No ticket in the branch name → nothing to compare against.
 [ -z "$bt" ] && exit 0
 
-# Tickets referenced by commits already on this branch (vs origin/main).
+# Tickets referenced by commits already on this branch, counted from the
+# nearer of origin/dev (where PRs land) and origin/main (hotfixes). Against
+# main alone, every branch cut from dev listed all of dev's unreleased tickets.
+base=origin/main
+best=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 999999)
+dev_count=$(git rev-list --count origin/dev..HEAD 2>/dev/null || echo 999999)
+if [ "$dev_count" -lt "$best" ]; then base=origin/dev; fi
+
 # `|| true`: husky runs hooks with `sh -e`, and grep exits 1 when it selects
 # nothing — i.e. on every clean single-ticket branch — which turned this
 # warn-only guard into a hard commit blocker. Guarantee the promise above.
-others=$(git log --pretty=%s origin/main..HEAD 2>/dev/null \
+others=$(git log --pretty=%s "$base"..HEAD 2>/dev/null \
   | grep -oiE 'AQU-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$" || true)
 
 if [ -n "$others" ]; then

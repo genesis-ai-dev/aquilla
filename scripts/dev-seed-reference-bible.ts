@@ -418,8 +418,12 @@ function curlLines(apiToken: string, settingsVersion: number, rows: readonly Dem
   return [
     "# The installed Bibles (both should be listed):",
     `curl -s ${auth} ${ext}/reference-bibles`,
-    "# PatchSettings: the ticket's array form is accepted (staged for approval, nothing changes until you approve):",
+    "# PatchSettings: the ticket's array form is accepted (staged for approval, nothing changes until you approve).",
+    "# Approving it REPLACES the whole setting: Arabic keeps Van Dyck, but Plain English loses the KJV (Settings shows None",
+    "# for it, and its row 6 stops warning). Re-run this seed to put the KJV back.",
     patch(["arb-vandyck"]),
+    "# … to approve something without losing the Plain English lane, use the map form (one Bible per lane):",
+    patch(DEMO_SETTINGS.referenceBibleVersions),
     "# … an unknown Bible id gives validation_failed:",
     patch(["nope"]),
     "# … a key that is not a lane of this project gives validation_failed:",

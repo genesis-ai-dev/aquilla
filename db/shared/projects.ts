@@ -405,8 +405,12 @@ export async function updateProjectSettingsShared(
   const oldThreshold = validationThreshold(current.settings)
   const newThreshold = validationThreshold(normalizedSettings)
   const thresholdChanged = oldThreshold !== newThreshold
+  // AQU-1585: hand the write the project's existing lane rows (already loaded
+  // above) so a stale `targetLanes` entry cannot mint a lane. Lane rows are the
+  // record of which lanes exist; the registry only follows them.
   const laneStmts = ensureProjectLaneStmts(db, input.projectId, {
     settings: normalizedSettings,
+    existingLanes: current.lanes ?? [],
   })
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a

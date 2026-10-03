@@ -52,6 +52,9 @@ describe("findScriptureReferences (AQU-1573)", () => {
     expect(canon("John 3:16—4:2")).toEqual(["JHN 3:16-4:2"])
     expect(canon("John 3.16")).toEqual(["JHN 3:16"])
     expect(canon("John 3:16 to 18")).toEqual(["JHN 3:16-18"])
+    // A same-chapter range written in full (review 2026-10-02).
+    expect(canon("John 3:16-3:18")).toEqual(["JHN 3:16-18"])
+    expect(canon("John 3:16–3:16")).toEqual(["JHN 3:16"])
   })
 
   it("reads verse lists and same-book chapter lists as separate passages", () => {
@@ -60,6 +63,15 @@ describe("findScriptureReferences (AQU-1573)", () => {
     expect(canon("Romans 8:28; 12:1-2")).toEqual(["ROM 8:28", "ROM 12:1-2"])
     expect(canon("Romans 5:8; John 15:13 show us")).toEqual(["ROM 5:8", "JHN 15:13"])
     expect(canon("Romans 8:28, 2 Timothy 3:16")).toEqual(["ROM 8:28", "2TI 3:16"])
+    expect(canon("John 3:16, 18 and 20.")).toEqual(["JHN 3:16", "JHN 3:18", "JHN 3:20"])
+    expect(canon("(John 3:16, 18)")).toEqual(["JHN 3:16", "JHN 3:18"])
+    expect(canon("John 3:16 and verse 18 tell us")).toEqual(["JHN 3:16", "JHN 3:18"])
+  })
+
+  it("does not read a count after a reference as another verse (review 2026-10-02)", () => {
+    expect(canon("Read Romans 8:28 and 2 more passages")).toEqual(["ROM 8:28"])
+    expect(canon("see John 3:16, 17 people came")).toEqual(["JHN 3:16"])
+    expect(canon("John 3:16 & 3 friends")).toEqual(["JHN 3:16"])
   })
 
   it("reads spoken forms", () => {

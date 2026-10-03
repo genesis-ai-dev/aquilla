@@ -91,7 +91,10 @@ function rangeEnd(c: Cursor, chapter: number, verse: number, allowDot: boolean):
   const save = c.pos
   if (!c.eat(DASH)) return null
   const cv = chapterVerse(c, allowDot)
-  if (cv && cv.chapter > chapter) return { endChapter: cv.chapter, verseEnd: cv.verse, end: cv.end }
+  // "John 3:16-4:2" crosses chapters; "John 3:16-3:18" is written in full but stays in one.
+  if (cv && (cv.chapter > chapter || (cv.chapter === chapter && cv.verse >= verse))) {
+    return { endChapter: cv.chapter, verseEnd: cv.verse, end: cv.end }
+  }
   if (!cv) {
     const v = num(c)
     if (v && v.n >= verse && !c.peek(/\s*[:.]\d/u)) return { endChapter: chapter, verseEnd: v.n, end: v.end }
@@ -156,9 +159,12 @@ function nextSegment(c: Cursor, last: Seg, allowDot: boolean): Seg | null {
   const cv = chapterVerse(c, allowDot)
   if (cv) return segment(start, cv.chapter, cv.verse, rangeEnd(c, cv.chapter, cv.verse, allowDot), cv.end)
   if (sep[1] !== ";") {
-    c.eat(VERSE_WORD)
+    const verseWord = !!c.eat(VERSE_WORD)
     const v = num(c)
-    if (v && !c.peek(/\s*[:.]\d/u)) {
+    // A bare number must end the list item: "John 3:16, 18." or "3:16, 18-20",
+    // not "Romans 8:28 and 2 more passages" or "John 3:16, 17 people came".
+    // "and verse 18 tells us" names itself a verse, so it may run on.
+    if (v && !c.peek(/\s*[:.]\d/u) && (verseWord || c.peek(LIST_ITEM_END))) {
       const chapter = last.endChapter
       return segment(start, chapter, v.n, rangeEnd(c, chapter, v.n, allowDot), v.end)
     }
@@ -166,6 +172,9 @@ function nextSegment(c: Cursor, last: Seg, allowDot: boolean): Seg | null {
   c.pos = save
   return null
 }
+
+/** What may follow a bare verse number in a list: a range, another item, punctuation or the end. */
+const LIST_ITEM_END = /(?:\s*(?:[-–—‐‑,;.:!?؟)\]"”»']|&|$)|\s+(?:and|to|through|thru)(?![\p{L}]))/iu
 
 function valid(s: Seg): boolean {
   const inRange = (n: number, max: number) => n >= 1 && n <= max

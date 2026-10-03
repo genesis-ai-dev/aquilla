@@ -26,10 +26,18 @@ const REFS_PER_REQUEST = 200
 /** Source texts whose references are remembered before the memo is reset. */
 const MAX_MEMO_TEXTS = 20_000
 const PREFETCH_DELAY_MS = 300
+/**
+ * How long a "this Bible is not installed" answer is trusted. Not forever: a
+ * tester who loads the Bibles (or a preview database that gets them later)
+ * should see verses in the same tab without a reload (review 2026-10-02).
+ */
+export const NOT_INSTALLED_RETRY_MS = 30_000
 
 interface VersionCache {
   /** undefined = not asked yet; null = the server does not have this Bible. */
   version: ReferenceBibleSummary | null | undefined
+  /** When the server last said it does not have this Bible (Date.now()). */
+  notInstalledAt: number
   /** canonical → passage, or null when this Bible has no such verse. */
   passages: Map<string, ReferencePassage | null>
   inflight: Map<string, Promise<void>>
@@ -44,7 +52,7 @@ const referencesByText = new Map<string, FoundReference[]>()
 function cacheFor(versionId: string): VersionCache {
   let cache = caches.get(versionId)
   if (!cache) {
-    cache = { version: undefined, passages: new Map(), inflight: new Map(), revision: 0, listeners: new Set() }
+    cache = { version: undefined, notInstalledAt: 0, passages: new Map(), inflight: new Map(), revision: 0, listeners: new Set() }
     caches.set(versionId, cache)
   }
   return cache
@@ -66,26 +74,33 @@ export function cachedReferences(text: string): FoundReference[] {
   return found
 }
 
-/** Distinct canonical references the cells' sources cite, in document order. */
-function canonicalsFor(cells: readonly SourceTextCell[]): string[] {
+/**
+ * Distinct canonical references the cells' sources cite, in document order,
+ * and which of them the finder cut short ("Psalm 119:1-176" → PSA 119:1-30):
+ * the server returns a complete 30-verse range for those, so the cut has to
+ * be carried to the block from here.
+ */
+function canonicalsFor(cells: readonly SourceTextCell[]): { canonicals: string[]; cut: Set<string> } {
   const seen = new Set<string>()
-  const out: string[] = []
+  const canonicals: string[] = []
+  const cut = new Set<string>()
   for (const cell of cells) {
     const text = effectiveSourceText(cell)
     if (!text || !/\d/.test(text)) continue
     for (const f of uniqueReferences(cachedReferences(text))) {
+      if (f.truncated) cut.add(f.canonical)
       if (seen.has(f.canonical)) continue
       seen.add(f.canonical)
-      out.push(f.canonical)
+      canonicals.push(f.canonical)
     }
   }
-  return out
+  return { canonicals, cut }
 }
 
 /** Fetch whatever of `canonicals` this Bible's cache lacks; waits for in-flight ones. */
 async function loadCanonicals(jwt: string, versionId: string, canonicals: readonly string[]): Promise<void> {
   const cache = cacheFor(versionId)
-  if (cache.version === null) return
+  if (cache.version === null && Date.now() - cache.notInstalledAt < NOT_INSTALLED_RETRY_MS) return
   const waits: Promise<void>[] = []
   const missing: string[] = []
   for (const canonical of canonicals) {
@@ -99,6 +114,7 @@ async function loadCanonicals(jwt: string, versionId: string, canonicals: readon
     const request = fetchReferencePassages(jwt, versionId, batch).then((result) => {
       if (!result) {
         cache.version = null
+        cache.notInstalledAt = Date.now()
       } else {
         cache.version = result.version
         for (const passage of result.passages) cache.passages.set(passage.canonical, passage)
@@ -192,7 +208,7 @@ export function useReferenceBible(options: UseReferenceBibleOptions): UseReferen
   const ensureLoaded = useCallback(
     async (cells: readonly SourceTextCell[]) => {
       if (!jwt || !versionId) return
-      const canonicals = canonicalsFor(cells)
+      const { canonicals } = canonicalsFor(cells)
       if (canonicals.length > 0) await loadCanonicals(jwt, versionId, canonicals)
     },
     [jwt, versionId],
@@ -201,7 +217,7 @@ export function useReferenceBible(options: UseReferenceBibleOptions): UseReferen
   const blockFor = useCallback(
     async (cells: readonly SourceTextCell[]) => {
       if (!jwt || !versionId) return undefined
-      const canonicals = canonicalsFor(cells)
+      const { canonicals, cut } = canonicalsFor(cells)
       if (canonicals.length === 0) return undefined
       await loadCanonicals(jwt, versionId, canonicals)
       const loaded = cacheFor(versionId)
@@ -209,6 +225,7 @@ export function useReferenceBible(options: UseReferenceBibleOptions): UseReferen
       const passages = canonicals
         .map((canonical) => loaded.passages.get(canonical))
         .filter((p): p is ReferencePassage => !!p)
+        .map((p) => (cut.has(p.canonical) && !p.truncated ? { ...p, truncated: true } : p))
       return (
         buildReferenceVersesBlock({
           versionName: loaded.version.name,

@@ -12,7 +12,7 @@ vi.mock("@/lib/frontier/reference-bibles", () => ({
 }))
 
 import { fetchReferencePassages, type ReferencePassagesResult } from "@/lib/frontier/reference-bibles"
-import { resetReferenceBibleCacheForTests, useReferenceBible } from "./useReferenceBible"
+import { NOT_INSTALLED_RETRY_MS, resetReferenceBibleCacheForTests, useReferenceBible } from "./useReferenceBible"
 import { REFERENCE_VERSES_HEADING } from "@/lib/completion/prompt-build"
 import type { ReferenceBibleSummary } from "@/lib/reference-bible/types"
 
@@ -132,6 +132,42 @@ describe("useReferenceBible", () => {
     expect(await result.current.blockFor([LIST])).toBeUndefined()
     expect(fetchPassages).toHaveBeenCalledTimes(1)
     expect(result.current.checkContext).toBeNull()
+  })
+
+  it("asks again once the not-installed answer is stale, so a Bible loaded later shows up without a reload", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000)
+    try {
+      serve("eng-kjv")
+      const { result } = hook("arb-vandyck")
+      expect(await result.current.blockFor([ISAIAH])).toBeUndefined()
+      // The tester loads the Bibles now; within the window the answer stands.
+      serve()
+      now.mockReturnValue(1_000_000 + NOT_INSTALLED_RETRY_MS - 1)
+      expect(await result.current.blockFor([ISAIAH])).toBeUndefined()
+      expect(fetchPassages).toHaveBeenCalledTimes(1)
+      now.mockReturnValue(1_000_000 + NOT_INSTALLED_RETRY_MS)
+      expect(await result.current.blockFor([ISAIAH])).toContain("[ISA 40:25]")
+      expect(fetchPassages).toHaveBeenCalledTimes(2)
+      await waitFor(() => expect(result.current.checkContext?.lookup("ISA 40:25")).toEqual(VERSES["ISA 40:25"]))
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it("notes in the block that a long range was cut to its first verses (review 2026-10-02)", async () => {
+    fetchPassages.mockImplementation(async (_jwt, _id, refs) => ({
+      version: VAN_DYCK,
+      passages: refs.map((canonical) => ({
+        canonical,
+        label: canonical,
+        verses: Array.from({ length: 30 }, (_, i) => ({ chapter: 119, verse: i + 1, text: `آية ${i + 1}` })),
+      })),
+      unresolved: [],
+    }))
+    const { result } = hook("arb-vandyck")
+    const block = await result.current.blockFor([cell("Psalm 119:1-176 is the longest psalm.")])
+    expect(fetchPassages.mock.calls[0][2]).toEqual(["PSA 119:1-30"])
+    expect(block).toContain("(the rest of this passage is not shown)")
   })
 
   it("rejects on a failed request (the caller drafts without it) and retries next time", async () => {

@@ -146,3 +146,13 @@ it("never reads 100% while a cell is untranslated", () => {
   rerender(<StatusBar cells={done} healthMap={new Map()} projectHealth={0} />)
   expect(plain()).toContain("252 translated (100%)")
 })
+
+it("groups the badge counts the way the counts beside them are grouped", () => {
+  // The footer read "1,208 cells · 1,207 translated" and then "1207 validated".
+  const many = Array.from({ length: 2500 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i < 1207 ? "validated" : "unvalidated" }) as CellSummary)
+  const { container } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain).toContain("1,207 validated")
+  expect(plain).toContain("1,293 unvalidated")
+})

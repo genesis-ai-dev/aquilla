@@ -61,14 +61,20 @@ export function StatusBar({
             pct: pctDisplay,
           })}
         </span>
+        {/* Grouped like the counts beside them ("1,207 validated", not
+            "1207"); the plural form still reads the digits. */}
         {unvalidated > 0 && (
           <Badge variant="secondary" className="text-amber-500">
-            {t("workspace.statusBar.unvalidatedBadge", { count: unvalidated })}
+            {t("workspace.statusBar.unvalidatedBadge", {
+              count: bidiIsolate(formatNumber(unvalidated, locale)),
+            })}
           </Badge>
         )}
         {validated > 0 && (
           <Badge variant="secondary" className="text-green-500">
-            {t("terminology.livingMemory.validatedCount", { count: validated })}
+            {t("terminology.livingMemory.validatedCount", {
+              count: bidiIsolate(formatNumber(validated, locale)),
+            })}
           </Badge>
         )}
       </span>

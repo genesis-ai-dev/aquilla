@@ -4,9 +4,12 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { selectAffectedE2E } from "./lib/e2e-impact"
 import { affectedRunMode } from "./lib/e2e-run-mode"
+import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ZERO_SHA = /^0+$/
+
+refuseBorrowedNodeModules(REPO_ROOT)
 
 function git(args: string[]): string {
   return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim()
@@ -73,6 +76,8 @@ if (impact.specs.length === 0) {
   console.log("[e2e-affected] no browser journey affected; skipping E2E startup")
   process.exit(0)
 }
+
+refuseMissingPlaywrightChromium()
 
 const runMode = affectedRunMode(impact.specs.length)
 console.log(

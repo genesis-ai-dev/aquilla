@@ -14,6 +14,7 @@ import {
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
 import { acquireE2eSlotLock, type E2eSlotLock } from "./lib/e2e-lock"
+import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -469,6 +470,9 @@ function resetE2ePostgres(): string {
 }
 
 async function main(): Promise<void> {
+  refuseBorrowedNodeModules(REPO_ROOT)
+  refuseMissingPlaywrightChromium()
+
   if (!existsSync(AUTH_WORKER_DIR)) {
     console.error(`${TAG}[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)

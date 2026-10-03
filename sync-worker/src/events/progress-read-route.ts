@@ -380,16 +380,24 @@ function chapterKeySql(alias: string): string {
  * into a column list whose binds are positional, and a `?` here would consume
  * whichever bind happened to be next. It is a clamped integer from
  * readValidationCountAudio, never user text.
+ *
+ * `laneSql` (AQU-1591) is interpolated for that same reason, and is why the
+ * caller resolves the lane to its `lanes.id` with a query of its own rather than
+ * binding the tag here: the id is an opaque value READ BACK FROM THE DATABASE
+ * and re-checked against its character class, never the caller's `?lane=` text.
+ * Without it this queue sent "go to the next unrecorded line" past every line
+ * some OTHER language had voiced.
  */
 function liveTakeSql(
   fileExpr: string,
   cellExpr: string,
   signed: boolean,
   threshold = 1,
+  laneSql = '',
 ): string {
   const dubTake = `a.project_id = s.project_id AND a.file_id = ${fileExpr}
                      AND a.cell_id = ${cellExpr} AND a.deleted = 0
-                     AND a.selected = 1 AND a.role = 'dub'`
+                     AND a.selected = 1 AND a.role = 'dub'${laneSql}`
   if (!signed) return `EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})`
   // ONE TAKE PER TRACK, the same rule AUDIO_CTE_SQL applies — and this is the
   // second of three readers that did not have it. A leftover generated voice
@@ -402,6 +410,39 @@ function liveTakeSql(
                             WHERE ${dubTake}
                               AND ${takeSoundsOnItsTrackSql('a')}
                               AND a.validator_count < ${Math.max(1, Math.floor(threshold))}))`
+}
+
+/**
+ * AQU-1591: the `laneSql` fragment {@link liveTakeSql} splices in, resolved
+ * once per request.
+ *
+ * It is a FRAGMENT rather than a bind because its callers interpolate the take
+ * expressions into column lists whose binds are positional — see liveTakeSql's
+ * note. So the lane tag off the wire is never spliced; it is bound HERE, in a
+ * point lookup on the lanes primary key, and only the opaque id that comes back
+ * (re-checked against the 8-hex class src/lib/lanes/lane-id.ts generates) ever
+ * reaches the SQL string.
+ *
+ * A NULL `lane_id` belongs to the DEFAULT lane, which is the batch backfill's
+ * rule for an un-backfilled dub (AQU-1616) and the rule the per-file audio read
+ * applies, so a take answers these queues the same before and after that PR.
+ *
+ * No lanes row: the project was never laned, so it has exactly one lane and
+ * there is nothing to filter — the empty fragment, i.e. pre-1591 behavior.
+ */
+async function takeLaneFilterSql(
+  db: AquillaDb,
+  projectId: string,
+  lane: string,
+): Promise<string> {
+  const row = await db
+    .prepare(`SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`)
+    .bind(projectId, lane)
+    .first<{ id: string }>()
+  const id = row?.id ?? ''
+  if (!/^[0-9a-f]{1,32}$/.test(id)) return ''
+  return `
+                     AND (a.lane_id = '${id}'${lane === '' ? ' OR a.lane_id IS NULL' : ''})`
 }
 
 interface FirstOpenRow {
@@ -485,7 +526,7 @@ export async function readFirstOpenCell(
   // fraction of it; production files are twenty times that size.
   const wantsText = kind === 'untranslated' || kind === 'unvalidated'
   const wantsAudio = kind === 'unrecorded' || kind === 'unsigned'
-  const [countStructural, validationCount, validationCountAudio, sheet] = await Promise.all([
+  const [countStructural, validationCount, validationCountAudio, sheet, takeLaneSql] = await Promise.all([
     readCountStructuralCells(db, projectId),
     // Only the unvalidated queue compares endorsements against the threshold.
     kind === 'unvalidated' ? readValidationCount(db, projectId) : Promise.resolve(1),
@@ -501,6 +542,9 @@ export async function readFirstOpenCell(
             ORDER BY id DESC LIMIT 1`,
         ).bind(projectId, fileId).first<{ id: string }>()
       : Promise.resolve(null),
+    // AQU-1591: this lane's take filter, interpolated into the fragments below.
+    // Only the audio queues ask, and it is one point lookup on the lanes PK.
+    wantsAudio ? takeLaneFilterSql(db, projectId, lane) : Promise.resolve(''),
   ])
   const sheetId = sheet?.id ?? ''
   const onSheet = sheetId !== ''
@@ -510,8 +554,8 @@ export async function readFirstOpenCell(
        WHERE l.project_id = s.project_id AND l.kind = 'text-audio' AND l.linked = 1
          AND l.from_file_id = s.file_id AND l.from_cell_id = s.cell_id AND l.to_file_id = ?
          AND ${predicate})`
-  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
-  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio)
+  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false, 1, takeLaneSql)
+  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio, takeLaneSql)
 
   const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`]
   const binds: unknown[] = []
@@ -527,8 +571,8 @@ export async function readFirstOpenCell(
         `${linkedCues(`${cueTake} AND NOT ${cueSigned}`)} AS cues_unsigned`)
       binds.push(sheetId, sheetId)
     } else {
-      columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take`,
-        `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed`)
+      columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false, 1, takeLaneSql)} AS has_take`,
+        `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio, takeLaneSql)} AS take_signed`)
     }
   }
   // AQU-1240 slice 7: the lane join dual-reads (lane_id once backfilled,
@@ -668,9 +712,12 @@ export async function handleProgressReadRequest(
     // interpolated into the SQL below, so it has to exist before the string
     // does. The text threshold is only compared to a column afterwards, which
     // is why it can still ride along in the Promise.all.
-    const [countStructural, validationCountAudio] = await Promise.all([
+    const [countStructural, validationCountAudio, takeLaneSql] = await Promise.all([
       readCountStructuralCells(env.AQUILLA_PG, projectId),
       readValidationCountAudio(env.AQUILLA_PG, projectId),
+      // AQU-1591: and for the same reason — the take fragments below are
+      // interpolated, so the lane they filter on has to be resolved first.
+      takeLaneFilterSql(env.AQUILLA_PG, projectId, lane),
     ])
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
@@ -678,8 +725,8 @@ export async function handleProgressReadRequest(
                 s.canonical_ref,
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count,
-                ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
-                ${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed
+                ${liveTakeSql('s.file_id', 's.cell_id', false, 1, takeLaneSql)} AS has_take,
+                ${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio, takeLaneSql)} AS take_signed
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id

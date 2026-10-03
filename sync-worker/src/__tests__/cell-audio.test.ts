@@ -68,10 +68,16 @@ describe("cell-audio projection", () => {
     expect(touches).toEqual(["cell_audio"])
     expect(stmts).toHaveLength(2)
 
-    // First: deselect other clips in the same slot (never this audio_id).
+    // First: deselect other clips in the same slot (never this audio_id) — and
+    // AQU-1591, only in this take's own lane. The three trailing binds are the
+    // lane predicate's (project, tag, tag); the event names no lane, so the tag
+    // is '' — the default lane. A dub recorded in French no longer clears the
+    // Swahili selection in the same slot; audio-lane-projection.test.ts asserts
+    // on the rows that proves.
     expect(recorded[0].sql).toContain("UPDATE cell_audio SET selected = 0")
     expect(recorded[0].sql).toContain("slot = ? AND audio_id != ?")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "generatedVoice", "audio-x.wav"])
+    expect(recorded[0].sql).toContain("lane_id")
+    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "generatedVoice", "audio-x.wav", "p1", "", ""])
 
     // Second: upsert this clip as selected + live, timings serialized.
     expect(recorded[1].sql).toContain("INSERT INTO cell_audio")
@@ -91,6 +97,9 @@ describe("cell-audio projection", () => {
     expect(a[13]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
     expect(a[14]).toBe("evt-audio-1") // event_id
     expect(a[15]).toBe(100) // created_ts = serverTs
+    expect(a[16]).toBe("dub") // role — nothing said 'source'
+    // AQU-1591: lane_id's resolve subquery binds (project, role, role, tag).
+    expect(a.slice(18)).toEqual(["p1", "dub", "dub", ""])
   })
 
   it("attach: binds NULL for optional fields the payload omits", () => {
@@ -176,7 +185,10 @@ describe("cell-audio projection", () => {
     expect(touches).toEqual(["cell_audio"])
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain("SET selected = 0")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "audio-y.wav"])
+    // AQU-1591: + the lane predicate's (project, tag, tag). A select switches
+    // the active take in ONE lane; it used to empty the slot in all of them.
+    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "audio-y.wav", "p1", "", ""])
+    // The select itself is keyed on audio_id, which is unique without a lane.
     expect(recorded[1].sql).toContain("SET selected = 1, deleted = 0")
     expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-y.wav"])
   })
@@ -195,7 +207,8 @@ describe("cell-audio projection", () => {
     expect(stmts).toHaveLength(1)
     expect(recorded[0].sql).toContain("SET selected = 0")
     expect(recorded[0].sql).not.toContain("audio_id")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording"])
+    // AQU-1591: ...in this lane's slot only (project, tag, tag).
+    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "p1", "", ""])
   })
 
   it("remove: soft-deletes and deselects", () => {

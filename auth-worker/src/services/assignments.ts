@@ -349,9 +349,11 @@ export async function getUnitAssignments(
     // so joining takes straight onto the cell rows would multiply every other
     // count by the number of takes.
     //
-    // cell_audio has NO target_lang column, so audio is lane-independent BY
-    // CONSTRUCTION — one recording is the recording, whichever text lane you
-    // are looking at. That is a schema fact, not a simplification here.
+    // AQU-1591: audio IS per lane now. `cell_audio.lane_id` arrived with
+    // migration 0129, the shared CTE groups by it, and the join below pins the
+    // takes to the unit's own lane — the one `a.target_lang` names. Until then
+    // this panel counted every language's recordings as this assignee's, so a
+    // line voiced in Swahili read as recorded on the French unit too.
     `WITH policy AS (
        -- AQU-1083. Whether chapter headings and section titles count as
        -- translatable content is a team setting: the project's answer, else its
@@ -409,7 +411,10 @@ export async function getUnitAssignments(
        LEFT JOIN cells t ON t.project_id = c.project_id AND t.file_id = c.file_id
                         AND t.cell_id = c.cell_id AND t.side = 'target'
                         AND t.target_lang = ?
-       LEFT JOIN audio au ON au.cell_id = c.cell_id
+       -- AQU-1591: ...and in THIS unit's lane. The audio CTE returns one row
+       -- per (cell, lane); joining on the cell alone would hand a unit every
+       -- lane's takes, which is what it used to do.
+       LEFT JOIN audio au ON au.cell_id = c.cell_id AND au.lane = ?
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
          ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
@@ -433,9 +438,9 @@ export async function getUnitAssignments(
   )
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane on the target join, then the
-    // WHERE — and the section key last, only when the fragment above put a
-    // placeholder there. Adding a CTE ahead of another means inserting its
+    // audio thresholds in the SELECT list, the lane on the target join, the same
+    // lane on the audio join (AQU-1591), then the WHERE — and the section key
+    // last, only when the fragment above put a placeholder there. Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
     .bind(
       projectId,
@@ -443,6 +448,9 @@ export async function getUnitAssignments(
       fileId,
       validationCount,
       validationCountAudio,
+      lane,
+      // AQU-1591: the audio join's lane, immediately after the target join's —
+      // statement order, which is the only order these binds have.
       lane,
       projectId,
       fileId,

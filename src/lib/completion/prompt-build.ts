@@ -251,6 +251,11 @@ export interface ReferenceBlockPassage {
  *     3:16 لأَنَّهُ هكَذَا …
  *     3:17 لأَنَّهُ لَمْ …
  */
+/** Arabic harakat (incl. superscript alef and Quranic marks) and Hebrew
+ *  niqqud/cantillation: the optional vowel pointing a reader may leave out.
+ *  Not every combining mark — an Indic vowel sign is part of the spelling. */
+const OPTIONAL_VOWEL_MARKS = /[\u0591-\u05C7\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08FF]/u
+
 export function buildReferenceVersesBlock(input: {
   versionName: string
   languageName?: string | null
@@ -261,6 +266,7 @@ export function buildReferenceVersesBlock(input: {
   let verseCount = 0
   let charCount = 0
   let omitted = 0
+  let pointed = false
   for (let p = 0; p < input.passages.length; p++) {
     const passage = input.passages[p]
     const kept: ReferenceBlockPassage["verses"][number][] = []
@@ -271,6 +277,7 @@ export function buildReferenceVersesBlock(input: {
         break
       }
       kept.push(v)
+      if (!pointed && OPTIONAL_VOWEL_MARKS.test(v.text)) pointed = true
       verseCount += 1
       charCount += v.text.length
     }
@@ -299,7 +306,11 @@ export function buildReferenceVersesBlock(input: {
   const bible = input.languageName ? `${input.versionName} (${input.languageName})` : input.versionName
   return (
     `${REFERENCE_VERSES_HEADING}${bible} (MUST follow):\n` +
-    "The source cites the verses below. Where it quotes one of them, in full or in part, copy the matching words from this Bible exactly instead of translating them yourself: do not change, add or drop words inside the quotation. You may leave out vowel marks to match the rest of your translation. If the source only names a reference without quoting it, translate the source as usual.\n" +
+    "The source cites the verses below. Where it quotes one of them, in full or in part, copy the matching words from this Bible exactly instead of translating them yourself: do not change, add or drop words inside the quotation. " +
+    // Only a Bible printed with vowel pointing (Van Dyck) gets the vowel-mark
+    // allowance; it is noise for the King James Version (AQU-1573 walk).
+    (pointed ? "You may leave out vowel marks to match the rest of your translation. " : "") +
+    "If the source only names a reference without quoting it, translate the source as usual.\n" +
     lines.join("\n")
   )
 }

@@ -54,6 +54,24 @@ describe("buildReferenceVersesBlock", () => {
     expect(lines).toHaveLength(3)
   })
 
+  // AQU-1573 walk: the vowel-mark allowance is for a pointed Bible only.
+  it("allows leaving out vowel marks for the vowelled Van Dyck, and not for the King James Version", () => {
+    const vd = buildReferenceVersesBlock({ ...VAN_DYCK, passages: [passage("ISA 40:25")] })
+    expect(vd.split("\n")[1]).toContain("You may leave out vowel marks to match the rest of your translation.")
+    const kjv = buildReferenceVersesBlock({
+      versionName: "King James Version",
+      languageName: "English",
+      passages: [{
+        canonical: "PSA 23:1",
+        label: "Psalm 23:1",
+        verses: [{ chapter: 23, verse: 1, text: "The LORD is my shepherd; I shall not want." }],
+      }],
+    })
+    const instruction = kjv.split("\n")[1]
+    expect(instruction).not.toContain("vowel")
+    expect(instruction).toContain("do not change, add or drop words inside the quotation. If the source only names")
+  })
+
   it("lists a range verse by verse under its label", () => {
     const block = buildReferenceVersesBlock({ ...VAN_DYCK, passages: [passage("JHN 3:16-17")] })
     const lines = block.split("\n").slice(2)

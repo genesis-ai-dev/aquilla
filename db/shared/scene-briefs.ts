@@ -15,7 +15,7 @@
 // from either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
-import { resolveLane, type LaneRef } from "./lane-ref"
+import { liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -425,16 +425,26 @@ export async function reviewSceneBrief(
     return { status: "ok", brief: rowToBrief(row) }
   }
 
-  // approve: archive the current holder of this span key (if any), then approve.
+  // approve: archive the current holder of this span key (if any), then
+  // approve. The span key is lane_id after migration 0129 and the legacy tag
+  // before it (AQU-1610); archiving by the column the index does NOT use
+  // leaves the current holder in place for the approve to collide with.
+  const liveKey = await liveLaneKey(db, "scene_briefs_live")
   await db.batch([
     db
       .prepare(
         `UPDATE scene_briefs
             SET status = 'archived', updated_at = now()
           WHERE project_id = ? AND file_id = ? AND start_cell_id = ?
-            AND end_cell_id = ? AND lane_id = ? AND status = 'approved'`,
+            AND end_cell_id = ? AND ${liveKey} = ? AND status = 'approved'`,
       )
-      .bind(current.projectId, current.fileId, current.startCellId, current.endCellId, current.laneId),
+      .bind(
+        current.projectId,
+        current.fileId,
+        current.startCellId,
+        current.endCellId,
+        liveKey === "lane_id" ? current.laneId : current.targetLang,
+      ),
     db
       .prepare(
         `UPDATE scene_briefs

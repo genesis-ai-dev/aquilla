@@ -14,7 +14,7 @@
 
 import type { AquillaDb } from "../shim/postgres"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
-import { laneRef, resolveLane, type LaneRef } from "./lane-ref"
+import { laneRef, liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 
 export type { LaneRef } from "./lane-ref"
 
@@ -949,14 +949,25 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   } catch (err) {
     // Unique-index race: someone else created the active run between our
     // check and insert — report theirs.
+    // The insert can also be rejected by a PRE-0129 `contextual_runs_active`,
+    // which is keyed on the tag: a lane with no legacy tag then collides with
+    // the former default lane's run even though their lane ids differ. Look
+    // the racing run up by whichever column that index is keyed on, so the
+    // caller gets `active_exists` rather than a raw database error.
+    const activeKey = await liveLaneKey(db, "contextual_runs_active")
     const racing = await db
       .prepare(
         `SELECT id FROM contextual_runs
-          WHERE project_id = ? AND file_id = ? AND lane_id = ?
+          WHERE project_id = ? AND file_id = ? AND ${activeKey} = ?
             AND status IN (${activePlaceholders})
           LIMIT 1`,
       )
-      .bind(input.projectId, input.fileId, lane.laneId, ...ACTIVE_STATUSES)
+      .bind(
+        input.projectId,
+        input.fileId,
+        activeKey === "lane_id" ? lane.laneId : lane.targetLang,
+        ...ACTIVE_STATUSES,
+      )
       .first<{ id: string }>()
     if (racing) return { status: "active_exists", runId: racing.id }
     throw err
@@ -1626,26 +1637,34 @@ export async function insertDrafts(
   // AQU-1610: lane identity comes off the owning run's lane_id, never its tag.
   const laneId = owner.laneId
   const laneTag = owner.targetLang
+  // The live-proposal index is keyed on lane_id after migration 0129 and on
+  // the tag before it, and this statement has to name whichever exists.
+  const liveKey = await liveLaneKey(db, "contextual_drafts_live")
+  const liveValue = liveKey === "lane_id" ? laneId : laneTag
   const cellIds = input.drafts.map((d) => d.cellId)
   const placeholders = cellIds.map(() => "?").join(",")
   const stmts = [
     db
       .prepare(
         `UPDATE contextual_drafts SET status = 'superseded', reviewed_at = now()
-          WHERE project_id = ? AND file_id = ? AND lane_id = ?
+          WHERE project_id = ? AND file_id = ? AND ${liveKey} = ?
             AND cell_id IN (${placeholders})
             AND status = 'proposed'`,
       )
-      .bind(input.projectId, input.fileId, laneId, ...cellIds),
+      .bind(input.projectId, input.fileId, liveValue, ...cellIds),
     ...input.drafts.map((d) =>
       db
         .prepare(
-          // AQU-1610: the live-proposal conflict target is the lane id
-        // (migration 0129), and lane_id is bound from the owning run.
+          // AQU-1610: lane_id is bound from the owning run; the conflict
+        // target is whichever column the live-proposal index is keyed on
+        // (lane_id after migration 0129, the tag before it). `lane_id` is
+        // re-set on conflict so that in the pre-0129 world, where the losing
+        // row may belong to a sibling lane, the row ends up owned by the
+        // writer whose text it now carries.
         `INSERT INTO contextual_drafts
               (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
-           ON CONFLICT (project_id, file_id, cell_id, lane_id) WHERE status = 'proposed'
+           ON CONFLICT (project_id, file_id, cell_id, ${liveKey}) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
              run_id = EXCLUDED.run_id,
@@ -1653,6 +1672,8 @@ export async function insertDrafts(
              text = EXCLUDED.text,
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
+             lane_id = EXCLUDED.lane_id,
+             target_lang = EXCLUDED.target_lang,
              created_at = now()`,
         )
         .bind(

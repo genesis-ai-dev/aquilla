@@ -119,3 +119,36 @@ export async function resolveLaneIdOrTag(
 export type RequiredLaneRef =
   | { laneId: string | null; targetLang?: string | null }
   | { laneId?: string | null; targetLang: string }
+
+/**
+ * Which column the contextual pipeline's live-row uniqueness rules are keyed
+ * on in THIS database, right now.
+ *
+ * Migration 0129 moves `contextual_runs_active`, `contextual_drafts_live` and
+ * `scene_briefs_live` from the legacy tag to `lane_id`. The Workers deploy
+ * separately from the migration and in either order, so for one window the
+ * running code meets the other world's indexes — and the mismatch is not
+ * benign: an `ON CONFLICT` target with no matching index raises *"there is no
+ * unique or exclusion constraint matching the ON CONFLICT specification"*, and
+ * a supersede keyed on the column the index does NOT use leaves the live row
+ * in place for the insert to collide with. Both turn into a run that stages
+ * nothing.
+ *
+ * So the three writers ask instead of assuming. One cheap catalog read per
+ * write batch, uncached on purpose: the answer changes the moment the
+ * migration lands, and a cached "no" would keep a deployed Worker broken past
+ * the fix. Delete this with the rest of the tag fallback (AQU-1611).
+ */
+export async function liveLaneKey(
+  db: AquillaDb,
+  indexName: "contextual_runs_active" | "contextual_drafts_live" | "scene_briefs_live",
+): Promise<"lane_id" | "target_lang"> {
+  const row = await db
+    .prepare("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?")
+    .bind(indexName)
+    .first<{ indexdef: string }>()
+  // No row at all means no index to conflict with; the lane_id spelling is the
+  // one the rest of the code uses, so fail toward it rather than toward a
+  // column this ticket is retiring.
+  return !row || row.indexdef.includes("lane_id") ? "lane_id" : "target_lang"
+}

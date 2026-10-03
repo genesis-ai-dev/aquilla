@@ -1536,8 +1536,9 @@ export const org = defineNamespace({
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
-    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
-    // matter — cells with no chapter number, filed before chapter 1.
+    // AQU-1278: a book's USFM front matter — cells with no chapter number,
+    // filed before chapter 1. Lower case for a plan row's fragment; the grid's
+    // tile and its card capitalise it (`useFrontMatterLabel`).
     "org.projectOverview.plan.frontMatter": "front matter",
     "org.projectOverview.plan.tileAria": plural({
       one: "Chapter {chapter}: {count} cell short",
@@ -3403,7 +3404,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.frontMatter": {
         description:
-          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers. Also the title of that tile's card (shown with its first letter capitalised) and, on a plan row, where the outstanding cells are when only the front matter is short.",
+          "A Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Written in lower case, because on a plan row it is read as a fragment in the slot where 'chapters 2 and 3' would sit: where the outstanding cells are when only the front matter is short. The tile beneath the inspector's chapter grid and the title of that tile's card show it with its first letter capitalised, as labels standing alone.",
         maxLength: 14,
       },
       "org.projectOverview.plan.tileAria": {

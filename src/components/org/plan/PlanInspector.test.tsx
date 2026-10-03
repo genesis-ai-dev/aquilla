@@ -353,7 +353,7 @@ describe("the chapter grid (AQU-1278)", () => {
     renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
     await waitFor(() => expect(screen.getByTestId("plan-chapter-extras")).toBeInTheDocument())
     expect(within(screen.getByTestId("plan-chapter-extras")).getByTestId("plan-tile-GEN"))
-      .toHaveTextContent("front matter")
+      .toHaveTextContent("Front matter")
     const grid = screen.getByTestId("plan-chapter-grid")
     expect([...grid.children].map((c) => c.getAttribute("data-testid"))).toEqual(["plan-tile-GEN 1"])
   })
@@ -1091,9 +1091,11 @@ describe("the chapter card names front matter in words", () => {
     fireEvent.click(screen.getByTestId("plan-tile-GEN"))
     await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
     // AQU-1493: the tile's own words, starting with a capital as a heading
-    // does ("Chapter 3"); the tile beneath the grid stays lower case.
+    // does ("Chapter 3"). The tile is a label standing alone too, so it reads
+    // the same (Sam, 2026-10-03); it used to be lower case.
     expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^Front matter$/)
-    expect(screen.getByTestId("plan-tile-GEN")).toHaveTextContent("front matter")
+    expect(screen.getByTestId("plan-tile-GEN")).toHaveTextContent(/^Front matter/)
+    expect(screen.getByTestId("plan-tile-GEN")).not.toHaveTextContent("front matter")
   })
 })
 

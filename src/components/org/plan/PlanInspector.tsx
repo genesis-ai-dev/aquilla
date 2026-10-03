@@ -38,7 +38,7 @@ import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
-import { GO_TO_FIRST_KEY, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
+import { GO_TO_FIRST_KEY, useFrontMatterLabel, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./verse-chips"
 
@@ -217,6 +217,7 @@ export function PlanInspector({
   const openSectionIsFrontMatter = openSection
     ? classifyPlanSection(openSection.key, numbered).kind === "frontMatter"
     : false
+  const frontMatterLabel = useFrontMatterLabel()
   const openSectionTitle = (() => {
     if (!openSection) return ""
     const kind = classifyPlanSection(openSection.key, numbered)
@@ -226,15 +227,11 @@ export function PlanInspector({
     // recognise as "the bit before chapter 1". A document's own sections keep
     // the names they have; "Chapter Scene 4" would invent one that does not
     // exist.
-    // AQU-1493: the tile's words are lower case to sit among chapter numbers;
-    // heading a card, like "Chapter 3", they start with a capital. Cased here
-    // rather than a second catalogue string that differs only in case, which
-    // most of the target languages would translate twice for nothing.
-    const tileWords = t("org.projectOverview.plan.frontMatter")
+    // AQU-1493: the same sentence-case words as the tile, like "Chapter 3".
     return kind.kind === "chapter"
       ? t("org.projectOverview.plan.chapterTitle", { chapter: kind.n })
       : kind.kind === "frontMatter"
-        ? tileWords.charAt(0).toLocaleUpperCase(locale) + tileWords.slice(1)
+        ? frontMatterLabel
         : openSection.key
   })()
   // AQU-1493: front matter is not a chapter. It holds a book's title and

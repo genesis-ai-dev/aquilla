@@ -116,14 +116,21 @@ async function attach(
 }
 
 /** GET the per-file read. `lane` undefined = no `?lane=` param at all. */
-async function read(lane?: string): Promise<Record<string, { attachments: Record<string, unknown> }>> {
-  const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+async function read(
+  lane?: string,
+  walledTo?: string[],
+): Promise<Record<string, { attachments: Record<string, unknown> }>> {
+  const token = await makeTestToken(SECRET, {
+    projectId: P,
+    fileId: F,
+    ...(walledTo ? { role: 300, laneGrants: walledTo.map((id) => ({ lane: id, level: 300 })) } : {}),
+  })
   const qs = lane === undefined ? '' : `?lane=${encodeURIComponent(lane)}`
   const res = await handleCellAudioReadRequest(
     new Request(`https://sync.invalid/api/v1/projects/${P}/files/${F}/audio-attachments${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     }),
-    { AQUILLA_PG: h.db, SYNC_SECRET_KEY: SECRET },
+    { AQUILLA_PG: h.db, SYNC_SECRET_KEY: SECRET, ...(walledTo ? { LANE_READ_WALL: '1' } : {}) },
   )
   expect(res?.status).toBe(200)
   const body = (await res!.json()) as {
@@ -264,6 +271,30 @@ describe('the per-file read is lane-scoped', () => {
     await h.pg.exec(`UPDATE cell_audio SET lane_id = NULL WHERE audio_id = 'take-sw'`)
     expect(visibleIds(await read(''))).toEqual(['programme', 'take-sw'])
     expect(visibleIds(await read('fr'))).toEqual(['programme', 'take-fr'])
+  })
+})
+
+describe('the per-file read honours the lane read wall', () => {
+  beforeEach(async () => {
+    await attach('programme', { role: 'source' })
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr', { lane: 'fr' })
+  })
+
+  it('an unscoped read returns only granted lanes’ dubs plus the programme audio', async () => {
+    expect(visibleIds(await read(undefined, [FR_LANE]))).toEqual(['programme', 'take-fr'])
+    expect(visibleIds(await read(undefined, [DEFAULT_LANE]))).toEqual(['programme', 'take-sw'])
+  })
+
+  it('a lane the caller was not granted reads as empty', async () => {
+    expect(await read('', [FR_LANE])).toEqual({})
+    expect(visibleIds(await read('fr', [FR_LANE]))).toEqual(['programme', 'take-fr'])
+  })
+
+  it('an un-backfilled dub is walled as the default lane’s', async () => {
+    await h.pg.exec(`UPDATE cell_audio SET lane_id = NULL WHERE audio_id = 'take-sw'`)
+    expect(visibleIds(await read(undefined, [FR_LANE]))).toEqual(['programme', 'take-fr'])
+    expect(visibleIds(await read(undefined, [DEFAULT_LANE]))).toEqual(['programme', 'take-sw'])
   })
 })
 

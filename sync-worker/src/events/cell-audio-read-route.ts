@@ -16,17 +16,27 @@
 //                 which is what the export paths and any older client send.
 //
 // Auth: sync-token JWT scoped to projectId; viewer (100) and up — same as the
-// cells read.
+// cells read. AQU-730: when the read wall is on, a requested lane must be one
+// the caller was granted, and an unscoped read returns only granted lanes'
+// dubs plus the shared programme audio.
 
 import { verifyTokenForProject } from "../auth"
 
 export interface CellAudioReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" enforces lane grants on this read. Unset = every lane. */
+  LANE_READ_WALL?: string
 }
 
 import { collapseCellAudioRows, type AudioRowRaw } from "./cell-audio-collapse"
 import { audioLaneDualReadBinds, audioLaneDualReadSql } from "./lane-id-sql"
+import {
+  canReadRequestedLane,
+  grantedLaneIds,
+  targetVisibilityClause,
+  visibleLanesForRead,
+} from "./lane-read-wall"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/audio-attachments$/
 
@@ -66,6 +76,18 @@ export async function handleCellAudioReadRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  if (laneRequested && !(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane))) {
+    return Response.json({ cells: {} }, { headers: { "Cache-Control": "private, no-store" } })
+  }
+  // A dub with no lane_id yet is the '' lane's, as in audioLaneDualReadSql.
+  const wall = targetVisibilityClause({
+    laneIds: await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes),
+    sideExpr: "a.role",
+    laneIdExpr: `COALESCE(a.lane_id, (SELECT id FROM public.lanes
+                   WHERE project_id = a.project_id AND role = 'target' AND legacy_tag = ''))`,
+  })
+
   // AQU-490: the votes come back in the SAME statement, aggregated in a
   // lateral rather than joined. A plain join to cell_audio_validators would
   // return one row per (take, validator) and every take with two validators
@@ -87,9 +109,10 @@ export async function handleCellAudioReadRequest(
        ) v ON TRUE
       WHERE a.project_id = ? AND a.file_id = ? AND a.deleted = 0
         ${laneFilterSql}
+        ${wall?.sql ?? ""}
       ORDER BY a.created_ts ASC`,
   )
-    .bind(projectId, fileId, ...laneFilterBinds)
+    .bind(projectId, fileId, ...laneFilterBinds, ...(wall?.binds ?? []))
     .all<AudioRowRaw>()
 
   const cells = collapseCellAudioRows(res.results ?? [])

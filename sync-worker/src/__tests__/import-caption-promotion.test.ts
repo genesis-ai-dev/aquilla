@@ -218,6 +218,41 @@ describe('caption rows promotion: an existing timeline track', () => {
     expect((await file('video')).meta.trackOverrides).not.toHaveProperty('source-subtitles')
   })
 
+  // The old dialog could re-point the derived Source text or Target text row
+  // at a hidden caption file. Left in place, that row kept drawing those
+  // captions while the Text view showed the new rows.
+  it('gives the derived text rows back to the new rows and keeps their captions as a track', async () => {
+    await attachAsTrack('episode', {
+      kind: 'source-subtitles', name: 'Episode captions', contentFileId: 'cues',
+    })
+    await store.pg.query(`UPDATE files SET meta = jsonb_set(meta::jsonb, '{trackOverrides}',
+      (meta::jsonb -> 'trackOverrides') || $1::jsonb)::text WHERE id = 'video'`,
+    [JSON.stringify({
+      'source-subtitles': { name: 'Old source', contentFileId: 'old-source' },
+      'target-subtitles': { name: 'Old target', contentFileId: 'old-target', color: 'amber' },
+    })])
+    expect(await promoteCaptionsToRows(store.db, existingTrack()))
+      .toEqual({ ok: true, cellCount: 3 })
+    const overrides = (await file('video')).meta.trackOverrides as Record<string, any>
+    // Both rows draw the file's rows again; a colour the person chose stays.
+    expect(overrides).not.toHaveProperty('source-subtitles')
+    expect(overrides['target-subtitles']).toEqual({ color: 'amber' })
+    expect(overrides).not.toHaveProperty('episode')
+    // What they showed is still on the timeline, as its own track.
+    const moved = Object.values(overrides).filter(o => o.contentFileId?.startsWith('old-'))
+    expect(moved).toEqual(expect.arrayContaining([
+      { kind: 'source-subtitles', name: 'Old source', contentFileId: 'old-source' },
+      { kind: 'target-subtitles', name: 'Old target', contentFileId: 'old-target' },
+    ]))
+    expect(moved).toHaveLength(2)
+    expect(overrides.other).toEqual(PARENT_META.trackOverrides.other)
+    // A retry is answered from the receipt and moves nothing twice.
+    const before = (await store.rows('events')).length
+    expect(await promoteCaptionsToRows(store.db, existingTrack())).toMatchObject({ ok: true })
+    expect(await store.rows('events')).toHaveLength(before)
+    expect(await store.pg.query(`SELECT * FROM seq_allocations`).then(r => r.rows)).toHaveLength(0)
+  })
+
   it('replays a lost response from its receipt', async () => {
     await attachAsTrack('episode', {
       kind: 'source-subtitles', name: 'Episode captions', contentFileId: 'cues',

@@ -100,7 +100,17 @@ interface CueRow {
   metadata: Record<string, unknown> | string | null
 }
 
-type TrackOverrides = Record<string, { kind?: string; contentFileId?: string } | undefined>
+type TrackOverrides = Record<string, { kind?: string; name?: string; contentFileId?: string } | undefined>
+
+/**
+ * The file's own text rows on the timeline. Once the file has rows they draw
+ * those rows; an override's contentFileId re-points one at a hidden caption
+ * file instead (the pre-AQU-1566 dialog's "overwrite Source text").
+ */
+const DERIVED_TEXT_ROWS = ['source-subtitles', 'target-subtitles'] as const
+/** Events a promotion may add to move such re-pointed rows off the parent:
+ *  two per derived text row. Allocated up front; unused numbers are a gap. */
+const MAX_DERIVED_MOVES = DERIVED_TEXT_ROWS.length * 2
 
 const num = (value: number | string | null) => value === null ? undefined : Number(value)
 const objectRecord = (value: unknown): Record<string, unknown> | undefined => {
@@ -133,7 +143,9 @@ export async function promoteCaptionsToRows(
   // Sized outside the transaction (the seq range is allocated on its own
   // connection, as every import write does); re-checked under the locks below.
   const expected = await liveSourceCount(db, args.projectId, p.contentFileId)
-  const seqBase = await allocateSeqRange(db, args.projectId, expected + (p.trackId ? 3 : 1))
+  const seqBase = await allocateSeqRange(
+    db, args.projectId, expected + (p.trackId ? 3 : 1) + MAX_DERIVED_MOVES,
+  )
   const result = await db.transaction<Result>(async tx => {
     const parent = await tx.prepare(
       `SELECT id, name, role, kind, book_code, source_file_id, anchor_file_id,
@@ -279,6 +291,45 @@ export async function promoteCaptionsToRows(
       fileId: p.contentFileId, cellId: null, parentId: null, kind: 'file.delete',
       author: args.author, clientTs: args.clientTs, serverTs: serverTs++, payload: {},
     } as PersistedEvent<'file.delete'>] : []
+    // A legacy empty file may have its Source text (or Target text) row
+    // re-pointed at a hidden caption file. Left alone, that row would keep
+    // drawing those captions while the Text view shows the new rows, the very
+    // disagreement this operation exists to end. So the row goes back to
+    // drawing the file's own rows, and the captions it carried move to a
+    // timeline-only track of their own under the same name: nothing the
+    // person attached disappears. Server-minted ids: a retry is answered from
+    // the genesis receipt above before it ever reaches here.
+    const derivedMoves: PersistedEvent<'file.track.set'>[] = []
+    for (const rowId of DERIVED_TEXT_ROWS) {
+      const override = overrides[rowId]
+      if (rowId === p.trackId || !override?.contentFileId) continue
+      if (override.contentFileId !== p.contentFileId) {
+        const content = await tx.prepare(
+          'SELECT name FROM files WHERE id = ? AND project_id = ?',
+        ).bind(override.contentFileId, args.projectId).first<{ name: string | null }>()
+        derivedMoves.push({
+          id: crypto.randomUUID(), schemaVersion: 1, projectId: args.projectId,
+          fileId: args.fileId, cellId: null, parentId: null, kind: 'file.track.set',
+          author: args.author, clientTs: args.clientTs, serverTs: serverTs++,
+          payload: { trackId: crypto.randomUUID(), patch: {
+            kind: rowId,
+            name: override.name?.trim() || content?.name?.trim() || 'Captions',
+            contentFileId: override.contentFileId,
+          } },
+        })
+      }
+      derivedMoves.push({
+        id: crypto.randomUUID(), schemaVersion: 1, projectId: args.projectId,
+        fileId: args.fileId, cellId: null, parentId: null, kind: 'file.track.set',
+        author: args.author, clientTs: args.clientTs, serverTs: serverTs++,
+        // Only what the overwrite wrote goes; an order or colour the person
+        // set on the row stays. With nothing else on it the entry goes whole.
+        payload: { trackId: rowId, patch: Object.keys(override)
+          .every(key => key === 'name' || key === 'contentFileId' || key === 'kind')
+          ? null : { name: null, contentFileId: null } },
+      })
+    }
+    lifecycle.push(...derivedMoves)
     const events: PersistedEvent[] = [genesis, ...cellEvents, ...lifecycle]
     let inserted = 0
     for (let i = 0; i < events.length; i += BULK_ROWS) {

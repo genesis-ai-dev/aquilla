@@ -114,7 +114,7 @@ describe("AgentDockView shared Team chat", () => {
     submit()
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       wire: expect.stringContaining("<exact>\nsource & words"),
-      display: expect.stringContaining("[GEN 1:1]"),
+      display: expect.stringContaining("“<exact> source & words”"),
       request: expect.objectContaining({
         projectId: "project", context: { fileId: "file", cellId: "cell" },
         artifacts: [{ artifactId: "artifact-notes.txt", fileName: "notes.txt" }],

@@ -338,7 +338,9 @@ export const importExport = defineNamespace({
     "importExport.youtube.name": "Video name",
     "importExport.youtube.previewImport": "Preview import",
     "importExport.youtube.linkVideo": "Link video",
-    "importExport.youtube.pictureHint": "You can add caption tracks later in the media timeline. Enable track editing in Project Settings to use this option.",
+    // AQU-1566 (option b): a link-only file's first captions become its rows,
+    // attached by a maintainer from its Text view, with no track-editing switch.
+    "importExport.youtube.pictureHint": "A maintainer can attach captions later from this file's Text view. They become its rows, ready to translate.",
     "importExport.youtube.media": "Your original audio or video",
     "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your ASR settings, or review embedded caption tracks if present.",
     "importExport.youtube.captionHint": "Export your captions from YouTube Studio as VTT, SRT, or SBV. YouTube’s player can display captions, but does not share caption text or audio with Aquilla. Text drawn into the video picture is not a subtitle track.",

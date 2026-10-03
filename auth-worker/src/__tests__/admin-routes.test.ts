@@ -70,9 +70,9 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     expect(body.orgs[0]).toMatchObject({ id: 1, ownerUsername: "wendi", memberCount: 1, projectCount: 2 })
   })
 
-  // AQU-1071: the tenants table shows each org's active-language count, so the
+  // AQU-1071: the tenants table shows each org's active target-lane count, so the
   // billing band is legible across tenants instead of one Billing tab at a time.
-  it("GET /orgs reports each org's active target-language count, per the billing rule", async () => {
+  it("GET /orgs reports each org's active target-lane count, per the billing rule", async () => {
     await seedUser(7, "root")
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare(
@@ -89,9 +89,17 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_settings (project_id, settings, version) VALUES
-        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Dioula"]}', 1),
-        ('pb', '{"targetLanguage":"Dioula","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pa', '{"targetLanguage":"Bambara"}', 1),
+        ('pb', '{"targetLanguage":"Bambara","targetLanes":["Songhai","Ignored"],"archivedLanes":["Songhai"]}', 1),
         ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, archived_at) VALUES
+        ('eslane01', 'pa', 'target', 'Spanish', 'es', '', NULL),
+        ('eslane02', 'pa', 'target', 'Spanish', 'es', 'es-b', NULL),
+        ('frlane01', 'pb', 'target', 'French', 'fr', '', NULL),
+        ('swlane01', 'pb', 'target', 'Swahili', 'sw', 'sw', '2026-01-01'),
+        ('zrlane01', 'pz', 'target', 'Zarma', 'dje', '', NULL)`,
     ).run()
 
     const res = await app.request("/api/v2/admin/orgs", { headers: authHeader(await jwtFor("root")) }, env)
@@ -100,9 +108,9 @@ describe("/api/v2/admin/* platform-admin gate", () => {
       orgs: Array<{ id: number; activeLanguageCount: number }>
     }
     const byId = Object.fromEntries(body.orgs.map((o) => [o.id, o]))
-    // Bambara and Dioula — Dioula is shared by two projects, Songhai is archived,
-    // and Zarma's project is archived.
-    expect(byId[1]).toMatchObject({ activeLanguageCount: 2 })
+    // Two Spanish lanes on pa, one French lane on pb. pb's archived Swahili lane
+    // and pz's archived project do not count, and settings.targetLanes is ignored.
+    expect(byId[1]).toMatchObject({ activeLanguageCount: 3 })
     // An org with no projects answers 0 rather than omitting the field, so the
     // table can tell "none" apart from "this server doesn't report it".
     expect(byId[2]).toMatchObject({ activeLanguageCount: 0 })

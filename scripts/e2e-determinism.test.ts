@@ -33,7 +33,7 @@ describe("E2E determinism guardrails", () => {
     const scripts = packageJson.scripts ?? {}
 
     expect(scripts["test:e2e:guard"]).toBe(
-      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
+      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts scripts/lib/e2e-lock.test.ts",
     )
 
     for (const scriptName of [

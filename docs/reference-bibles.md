@@ -72,12 +72,21 @@ anything) compares each draft with the verses its source cites, in the active
 lane's Bible:
 
 - **Does not match**: the draft quotes a cited verse (three or more words in a
-  row match) but changes, adds or drops words inside the quote. The quoted part
-  of the translation is marked.
-- **Not taken from the Bible**: the source visibly quotes the verse (quotation
-  marks around three or more words, or the reference in brackets after the
-  quote) but the draft does not use the Bible's wording at all. The reference
-  in the source is marked.
+  row match) but changes, adds or drops words inside the quote. Inside the
+  draft's own quotation marks every word must be the verse's, so a changed
+  first or last word, or a quote that copies the opening and paraphrases the
+  rest, is caught; outside quotation marks, a different word where the verse
+  runs on is caught for a verse the source quotes. The quoted part of the
+  translation is marked.
+- **Not taken from the Bible**: the source visibly quotes the verse but the
+  draft does not use the Bible's wording at all. "Visibly quotes" means
+  quotation marks around three or more words tied to the reference: cited
+  right after the closing mark (`"…" (John 3:16)`), or introduced a few words
+  before the opening mark (`Isaiah 40:25 says, "…"`); or, with no marks, the
+  reference in brackets closing a clause of three or more words. A quotation
+  of someone else next to a verse that is only mentioned does not count, and
+  only the reference(s) citing the quotation are named (not a "see also").
+  The reference in the source is marked.
 
 Ignored: vowel marks (Arabic tashkeel, shadda, sukun, superscript alef),
 tatweel, hamza and alef-wasla spellings, punctuation and case. A partial quote

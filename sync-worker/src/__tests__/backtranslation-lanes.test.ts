@@ -194,6 +194,73 @@ describe('back-translation reads are lane-specific', () => {
   })
 })
 
+describe('target.cell.delete removes only that lane\'s back-translations', () => {
+  async function btRows(db: TestDb): Promise<Array<{ target_event_id: string; lane_id: string | null; bt_text: string }>> {
+    const r = await db.pg.query<{ target_event_id: string; lane_id: string | null; bt_text: string }>(
+      `SELECT target_event_id, lane_id, bt_text FROM cell_backtranslations
+        WHERE project_id = $1
+        ORDER BY target_event_id`,
+      [PROJECT],
+    )
+    return r.rows
+  }
+
+  async function deleteLane(db: TestDb, id: string, parentId: string, targetLang: string): Promise<void> {
+    const parentKey = targetLang ? `${parentId}@lane:${targetLang}` : parentId
+    await db.db.prepare(
+      `INSERT INTO chain_claims (project_id, file_id, cell_id, parent_key, event_id)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind(PROJECT, FILE, CELL, parentKey, id).run()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db.db,
+      ev({
+        kind: 'target.cell.delete',
+        id,
+        parentId,
+        payload: targetLang ? { targetLang } : {},
+      }),
+      stmts,
+      {
+        deferFileCounters: true,
+        chainGate: { projectId: PROJECT, fileId: FILE, cellId: CELL, parentKey },
+      },
+    )
+    for (const s of stmts) await s.run()
+  }
+
+  it('deletes the named lane alone, and the default lane takes the NULL rows with it', async () => {
+    await seedLanes(t)
+    await project(t, [
+      ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: CELL, value: 'Hello' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-default', parentId: 'src-1', payload: { value: 'Hi' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-es', parentId: 'src-1', payload: { value: 'Hola', targetLang: 'es' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-fr', parentId: 'src-1', payload: { value: 'Bonjour', targetLang: 'fr' } }),
+      DEFAULT_BT,
+      ES_BT,
+      FR_BT,
+    ])
+    await t.pg.query(
+      `INSERT INTO cell_backtranslations (
+         project_id, file_id, cell_id, target_event_id, bt_text, polished, author, event_id, created_at, lane_id
+       ) VALUES ($1, $2, $3, 'evt-legacy', 'legacy reading', 0, 'alice', 'evt-bt-legacy', 1, NULL)`,
+      [PROJECT, FILE, CELL],
+    )
+
+    await deleteLane(t, 'td-fr', 'tc-fr', 'fr')
+    expect((await btRows(t)).map((row) => row.bt_text).sort()).toEqual([
+      'en el principio',
+      'in the beginning',
+      'legacy reading',
+    ])
+
+    await deleteLane(t, 'td-default', 'tc-default', '')
+    expect(await btRows(t)).toEqual([
+      { target_event_id: 'tc-es', lane_id: ES_LANE, bt_text: 'en el principio' },
+    ])
+  })
+})
+
 describe('lane_id resolution — live projection and rebuild', () => {
   it('rebuild lands the same lane_id the live projection did', async () => {
     await seedLanes(t)

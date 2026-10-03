@@ -27,7 +27,12 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
-import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import {
+  backtranslationLaneMatchBinds,
+  backtranslationLaneMatchSql,
+  laneIdResolveBinds,
+  laneIdResolveSql,
+} from './lane-id-sql'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 
@@ -1295,8 +1300,10 @@ export function buildEventProjectionStmts(
             .bind(...dependentBinds, ...dependentGateBinds),
         )
       } else {
-        // A target delete removes ONE lane. Only that lane's validators go;
-        // the cell and every sibling lane stay exactly as they were.
+        // A target delete removes ONE lane. Only that lane's validators and
+        // back-translations go; the cell and every sibling lane stay.
+        // NULL lane_id is the pre-backfill default lane, so those rows go
+        // only when this delete addresses legacy_tag ''.
         stmts.push(
           db
             .prepare(
@@ -1304,6 +1311,19 @@ export function buildEventProjectionStmts(
                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
             )
             .bind(...dependentBinds, lane, ...dependentGateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_backtranslations
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${backtranslationLaneMatchSql()}${dependentGateAnd}`,
+            )
+            .bind(
+              ...dependentBinds,
+              ...backtranslationLaneMatchBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
         )
       }
 
@@ -1332,7 +1352,7 @@ export function buildEventProjectionStmts(
             'cell_backtranslations',
             'cell_word_morph',
           ]
-        : ['cells', 'files', 'cell_validators']
+        : ['cells', 'files', 'cell_validators', 'cell_backtranslations']
     }
 
     case 'source.cell.reorder':

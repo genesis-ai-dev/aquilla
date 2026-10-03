@@ -1273,12 +1273,17 @@ export function MediaVideoPane({
           AQU-1565 follow-up: keyboard focus reveals it too. The sound menu is
           the only way to hear an uploaded recording on a YouTube file, and a
           hover-only corner left a keyboard user tabbing onto an invisible
-          control. */}
+          control.
+          And on a YouTube file with an uploaded recording it stays on screen.
+          The YouTube player is a cross-origin frame that swallows the pointer,
+          so hovering the picture itself never revealed the corner: only the
+          black bars around it did, and the sound menu is the one way to hear
+          the recording (browser pass, 2026-10-02). */}
       <div
         data-testid="video-audio-overlay"
         className={cn(
           "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
-          modeRevealed || audioMenuOpen || soundMenuOpen
+          modeRevealed || audioMenuOpen || soundMenuOpen || offerSoundSource
             ? "opacity-100"
             : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         )}

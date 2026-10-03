@@ -1132,9 +1132,16 @@ describe("a YouTube link over an uploaded recording", () => {
   })
 
   it("shows the corner controls to keyboard focus, not only to hover", () => {
-    renderPane({ src: YT })
+    renderPane({ src: "https://cdn/episode.webm" })
     // CSS cannot run here; pin the reveal rule so a refactor cannot drop it.
     expect(screen.getByTestId("video-audio-overlay").className).toContain("has-[:focus-visible]:opacity-100")
+  })
+
+  it("keeps the sound menu on screen over a YouTube picture, which swallows hover", () => {
+    renderPane({ src: YT })
+    const overlay = screen.getByTestId("video-audio-overlay")
+    expect(overlay.className).toContain("opacity-100")
+    expect(overlay.className).not.toContain("pointer-events-none")
   })
 
   it("starts on the recording when that was the stored choice", () => {

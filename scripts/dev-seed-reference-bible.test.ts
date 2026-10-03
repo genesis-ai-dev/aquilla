@@ -28,6 +28,7 @@ class FakeStack {
   files = new Map<string, { deleted: boolean }>()
   cells: Cell[] = []
   credentials: { id: string; name: string; revokedAt: string | null }[] = []
+  members = new Map<string, number>()
   calls: string[] = []
   eventsPosted: { cellId: string; parentId: string; payload: { value: string; targetLang?: string } }[][] = []
 
@@ -58,6 +59,10 @@ class FakeStack {
       this.settings = { ...this.settings, targetLanes: [...((this.settings.targetLanes as string[]) ?? []), body.language] }
       this.version++
       return json({ lane: this.lanes.at(-1) }, 201)
+    }
+    if (route === `POST id${p}/members`) {
+      this.members.set(body.username, body.role)
+      return json({ username: body.username, role: { level: body.role } })
     }
     const archive = new RegExp(`^POST id${p}/lanes/([^/]+)/archive$`).exec(route)
     if (archive) {
@@ -157,6 +162,7 @@ describe("dev-seed-reference-bible (AQU-1573)", () => {
       referenceBibleVersions: { "": "arb-vandyck", en: "eng-kjv" },
     })
     expect(stack.lanes.filter((l) => l.legacyTag === "en")).toHaveLength(1)
+    expect(stack.members).toEqual(new Map([["carol", 400]]))
     const fileId = demoFileId(0)
     for (const row of rows) {
       expect(stack.target(fileId, row.cellId), `row ${row.n}`).toBe(row.targets[""] || undefined)
@@ -164,6 +170,7 @@ describe("dev-seed-reference-bible (AQU-1573)", () => {
     }
     expect(output.join("\n")).toContain(`/project/${DEMO_PROJECT_ID}/editor/file/${fileId}`)
     expect(output.join("\n")).toContain("Bearer aqk_1")
+    expect(output.join("\n")).toContain("__dev/login?as=carol")
   })
 
   it("changes nothing on a second run, and replaces the demo token", async () => {

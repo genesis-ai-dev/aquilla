@@ -7,10 +7,10 @@
  *
  * Builds "Sermon demo — reference Bible" in the dev org, signed in as `dev`:
  * source English, default lane Arabic quoting Van Dyck, an extra lane "Plain
- * English" quoting the KJV, Bible resources off, and one sermon file of twelve
- * rows that cover a correct quote, a quote typed without vowel marks, a
- * changed word, a fresh translation, a mere mention, an allusion, and blank
- * rows to draft. The rows and what each should show live in
+ * English" quoting the KJV, Bible resources off, carol as a contributor (to
+ * see the settings card read-only), and one sermon file of twelve rows that
+ * cover a correct quote, a quote typed without vowel marks, a changed word, a
+ * fresh translation, a mere mention, an allusion, and blank rows to draft. The rows and what each should show live in
  * scripts/reference-bible-demo.ts (unit-tested); every quoted draft is derived
  * from the committed Bible text, so it cannot drift from what the stack loaded.
  *
@@ -56,6 +56,8 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
 const TOKEN_NAME = "Reference Bible demo (dev seed)"
+/** Below the maintainer floor, so the Reference Bible card shows read-only. */
+const READ_ONLY_MEMBER = { username: "carol", role: 400 } as const
 
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(name)
@@ -218,6 +220,15 @@ async function ensureProject(session: Session): Promise<void> {
 
   // Last, so the lane it names exists: one Bible per language.
   await writeSettings(session.jwt, { referenceBibleVersions: { ...DEMO_SETTINGS.referenceBibleVersions } })
+
+  // A contributor, so a tester can see the Reference Bible card read-only.
+  // carol is a dev-seed user; her org role (contributor) opens no project on
+  // its own, so she needs this direct grant. Re-granting the same role is a
+  // no-op upsert.
+  await call(`add ${READ_ONLY_MEMBER.username} as a contributor`, `${IDENTITY}/api/v2/projects/${DEMO_PROJECT_ID}/members`, {
+    token: session.jwt,
+    body: { username: READ_ONLY_MEMBER.username, role: READ_ONLY_MEMBER.role },
+  })
 }
 
 // ── The file ─────────────────────────────────────────────────────────────────
@@ -459,6 +470,10 @@ export async function main(): Promise<void> {
   )
   console.log(`  project: ${DEMO_PROJECT_NAME}`)
   console.log(`  open:    ${WEB}/project/${DEMO_PROJECT_ID}/editor/file/${fileId}`)
+  console.log(
+    `  read-only: ${READ_ONLY_MEMBER.username} is a contributor here; sign in at ` +
+      `${WEB}/__dev/login?as=${READ_ONLY_MEMBER.username} to see the Reference Bible card greyed out.`,
+  )
   console.log(`  rows:`)
   for (const row of rows) {
     const shows = Object.entries(row.expect).map(([lane, e]) => `${lane || "Arabic"}: ${e}`).join(", ")

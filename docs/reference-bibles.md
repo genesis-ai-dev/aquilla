@@ -113,7 +113,8 @@ npx tsx scripts/dev-seed-reference-bible.ts \
 
 It builds **Sermon demo — reference Bible** in the dev org: source English,
 default lane Arabic quoting Van Dyck, a **Plain English** lane quoting the KJV,
-Bible resources off, and one sermon file of twelve rows. It prints the link,
+Bible resources off, `carol` as a contributor (sign in as her to see the
+Settings card read-only), and one sermon file of twelve rows. It prints the link,
 what each row should show, and (unless `--no-token`) a fresh Agent API token
 with ready-to-paste curl lines. It is re-runnable: settings and every seeded
 draft are put back to the demo state, and a deleted demo file is replaced by a

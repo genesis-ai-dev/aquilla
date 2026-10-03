@@ -6675,7 +6675,10 @@ export function ProjectWorkspace() {
       ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
       : false
     if (ok || step.last) giveUp()
-  }, [activeFileId, cellStore, cellStoreVersion, lens])
+  // `centerSurface`: coming back from comments/agent/memory remounts the
+  // editor without touching the cell store or the file, so without it the
+  // per-file last-cell park sat unconsumed until the next keystroke.
+  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId

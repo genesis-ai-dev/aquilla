@@ -2189,7 +2189,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
       return
     }
-    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    // A jump already asked for a page (revealCellPage — e.g. the workspace
+    // restoring the last cell when the editor remounts) outranks the row at
+    // the top; otherwise this re-run would turn the page straight back.
+    const requested = pendingJumpCellIdRef.current
+    const visibleId = requested && milestoneKeyByCellId.has(requested)
+      ? requested
+      : fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
     const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
     if (!key) return
     const subsectionKey = idmlMilestoneNavigation && visibleId

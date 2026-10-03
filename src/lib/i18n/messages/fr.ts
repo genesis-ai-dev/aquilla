@@ -4669,7 +4669,7 @@ export const fr: Catalog = {
   "projectSettings.autoPropagateRepetitions.off": "Ne pas propager",
   "projectSettings.autoPropagateRepetitions.saveFailed": "Impossible d’enregistrer cette modification",
   "projectSettings.section.referenceBible": "Bible de référence",
-  "projectSettings.referenceBible.description": "Choisissez la Bible que chaque langue cite. Quand une ligne source cite un verset en donnant sa référence, comme Ésaïe 40:25, l'IA copie les mots cités depuis cette Bible au lieu de les traduire, et une vérification vous avertit quand une citation ne correspond pas. Un verset seulement mentionné est traduit normalement. Ce réglage est distinct des ressources bibliques.",
+  "projectSettings.referenceBible.description": "Choisissez la Bible que chaque langue cite. Quand une ligne source cite un verset en donnant sa référence, comme Ésaïe 40:25, l'IA copie les mots cités depuis cette Bible au lieu de les traduire, et une vérification vous avertit quand une citation ne correspond pas. Un verset seulement mentionné est traduit normalement. Il fonctionne que les ressources bibliques soient activées ou non : utilisez-le pour les sermons, les méditations, les programmes d'enseignement et les livres qui citent l'Écriture.",
   "projectSettings.referenceBible.defaultLane": "Langue par défaut",
   "projectSettings.referenceBible.none": "Aucune",
   "projectSettings.referenceBible.notInstalled": "{id} (non installée)",

@@ -4698,7 +4698,7 @@ export const id: Catalog = {
   "projectSettings.autoPropagateRepetitions.off": "Jangan propagasikan",
   "projectSettings.autoPropagateRepetitions.saveFailed": "Tidak dapat menyimpan perubahan itu",
   "projectSettings.section.referenceBible": "Alkitab acuan",
-  "projectSettings.referenceBible.description": "Pilih Alkitab yang dikutip oleh setiap bahasa. Jika sebuah baris sumber mengutip ayat dan menyebut rujukannya, misalnya Yesaya 40:25, AI menyalin kata-kata yang dikutip dari Alkitab ini alih-alih menerjemahkannya, dan sebuah pemeriksaan memberi peringatan jika kutipan tidak cocok. Ayat yang hanya disebut diterjemahkan seperti biasa. Ini terpisah dari sumber Alkitab.",
+  "projectSettings.referenceBible.description": "Pilih Alkitab yang dikutip oleh setiap bahasa. Jika sebuah baris sumber mengutip ayat dan menyebut rujukannya, misalnya Yesaya 40:25, AI menyalin kata-kata yang dikutip dari Alkitab ini alih-alih menerjemahkannya, dan sebuah pemeriksaan memberi peringatan jika kutipan tidak cocok. Ayat yang hanya disebut diterjemahkan seperti biasa. Ini berfungsi baik sumber Alkitab aktif maupun tidak: gunakan untuk khotbah, renungan, kurikulum, dan buku yang mengutip Kitab Suci.",
   "projectSettings.referenceBible.defaultLane": "Bahasa bawaan",
   "projectSettings.referenceBible.none": "Tidak ada",
   "projectSettings.referenceBible.notInstalled": "{id} (tidak terpasang)",

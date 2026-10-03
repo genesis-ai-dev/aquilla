@@ -597,7 +597,8 @@ export const projectSettings = defineNamespace({
       "Choose the Bible each language quotes from. When a source line quotes a verse and " +
       "gives its reference, such as Isaiah 40:25, the AI copies the quoted words from this " +
       "Bible instead of translating them, and a check warns when a quote does not match. " +
-      "A verse that is only mentioned is translated as usual. This is separate from Bible resources.",
+      "A verse that is only mentioned is translated as usual. It works whether or not Bible resources " +
+      "is on: use it for sermons, devotionals, curriculum and books that quote Scripture.",
     "projectSettings.referenceBible.defaultLane": "Default language",
     "projectSettings.referenceBible.none": "None",
     "projectSettings.referenceBible.optionLabel": "{name} ({language})",

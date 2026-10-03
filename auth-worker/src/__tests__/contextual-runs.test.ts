@@ -296,8 +296,12 @@ describe("durable sanitized activity", () => {
     const executor: PgExecutor = {
       async run(sql, params) {
         // AQU-1610: the store resolves the lane ref to a lane id before it
-        // writes, so the adapter has to answer that lookup too.
+        // writes, and asks which column the live-row indexes are keyed on, so
+        // the adapter has to answer both lookups too.
         if (sql.includes("FROM lanes")) return { rows: [{ id: LANE_DEFAULT }], rowCount: 1 }
+        if (sql.includes("FROM pg_indexes")) {
+          return { rows: [{ indexdef: "… (project_id, file_id, cell_id, lane_id) …" }], rowCount: 1 }
+        }
         if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
         if (sql.includes("FROM contextual_runs WHERE id")) {
           return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }

@@ -385,6 +385,22 @@ textarea,
   opacity: 0.6;
 }
 
+/* Smart edits: a straight, quieter underline than a rule violation's wavy
+   one — a suggestion from the team's own edits, not a broken rule. */
+.smart-edit-blot {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
+  cursor: pointer;
+}
+.smart-edit-blot-jev { text-decoration-style: dotted; }
+.smart-edit-blot-llm {
+  text-decoration-style: dashed;
+  text-decoration-color: color-mix(in oklch, var(--color-sky-500, oklch(0.685 0.169 237.323)) 75%, transparent);
+}
+
 /* Managed terminology uses one quiet, marker-like treatment. Target terms add
    this class only when their editor display preference calls for it. */
 .terminology-highlight,

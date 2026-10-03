@@ -247,6 +247,8 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import {
   useCellPresence,
   type CellPresencePeer,
@@ -2773,7 +2775,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  // Smart edits (flag `smartEdits`): one passage request around the active
+  // cell; rows read their own suggestions through SmartEditsProvider.
+  const smartEditsContext = useSmartEditsPassage({
+    enabled: isFlagEnabled(project, "smartEdits"),
+    llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
+    projectId: project.id,
+    lane: activeLane,
+    cellIds: displayCellIds,
+    activeCellId: activeEditorCellId,
+    activeText: readAtVersion(cellStoreVersion, () =>
+      activeEditorCellId ? cellStore.getCellView(activeEditorCellId)?.translated : undefined),
+    getCell: (id) => {
+      const view = cellStore.getCellView(id)
+      return view ? { fileId: view.fileId, cellId: id, source: effectiveSourceText(view), target: view.translated } : null
+    },
+  })
+
   return (
+    <SmartEditsProvider value={smartEditsContext}>
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
@@ -3013,6 +3033,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </SmartEditsProvider>
   )
 })
 
@@ -5240,6 +5261,7 @@ function EditorRow({
    *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
   const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const { suggestions: smartEdits, feedback: onSmartEditFeedback, askLlm: onAskLlmEdits } = useSmartEditsForCell(cell.id, visibleTranslated)
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
@@ -7673,6 +7695,9 @@ function EditorRow({
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
+                    smartEdits={smartEdits}
+                    onSmartEditFeedback={onSmartEditFeedback}
+                    onAskLlmEdits={onAskLlmEdits}
                     audioTimings={highlightTimings}
                     audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}

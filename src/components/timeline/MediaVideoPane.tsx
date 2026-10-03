@@ -49,7 +49,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
-import { recordingDrivesPlayback, setPlaybackSource, usePlaybackSource } from "@/lib/audio/playback-source"
+import { recordingDrivesPlayback, setPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
@@ -260,6 +261,19 @@ export function MediaVideoPane({
   const offerSoundSource = youTube && recordingCell != null
   const recordingName = recordingCell?.original.trim() || null
   const [soundMenuOpen, setSoundMenuOpen] = useState(false)
+  /**
+   * Switching sound mid-play hands the transport from one player to the other
+   * (queue <-> picture). Neither stops the other on its own: picking the
+   * video's sound unmutes a picture that is still running while the queue
+   * plays on underneath it, and the playback bar then drives only the picture.
+   * So everything stops first, and the person presses play on the new source.
+   * Nothing resumes by itself, the house rule for every pause here.
+   */
+  const chooseSoundSource = (next: PlaybackSource) => {
+    if (next === playbackSource) return
+    pauseAllTransports()
+    setPlaybackSource(fileId, next)
+  }
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
@@ -1238,14 +1252,18 @@ export function MediaVideoPane({
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
       {/* Bottom right (Sam, 2026-08-18). On the FIELD rather than the picture,
           like the two caption controls above and for the same reason: it keeps
-          its corner when the picture is letterboxed down to a small box. */}
+          its corner when the picture is letterboxed down to a small box.
+          AQU-1565 follow-up: keyboard focus reveals it too. The sound menu is
+          the only way to hear an uploaded recording on a YouTube file, and a
+          hover-only corner left a keyboard user tabbing onto an invisible
+          control. */}
       <div
         data-testid="video-audio-overlay"
         className={cn(
           "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
           modeRevealed || audioMenuOpen || soundMenuOpen
             ? "opacity-100"
-            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         )}
       >
         <div className="flex items-center gap-1.5">
@@ -1253,7 +1271,7 @@ export function MediaVideoPane({
             <VideoSoundSourcePicker
               value={playbackSource}
               recordingName={recordingName}
-              onChange={(next) => setPlaybackSource(fileId, next)}
+              onChange={chooseSoundSource}
               onOpenChange={setSoundMenuOpen}
             />
           )}

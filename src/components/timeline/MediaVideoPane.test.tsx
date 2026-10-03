@@ -40,6 +40,13 @@ vi.mock("@/lib/audio/play-queue", () => ({
   setQueueAudibility: () => {},
 }))
 
+// AQU-1565 follow-up: the sound menu stops both players before it hands the
+// transport over. Spied, so a test can see the pause without real audio.
+const pauseAllTransports = vi.fn()
+vi.mock("@/lib/audio/transport-pause", () => ({
+  pauseAllTransports: () => pauseAllTransports(),
+}))
+
 vi.mock("youtube-video-element", () => {
   class FakeYouTubeVideo extends HTMLElement {
     paused = true
@@ -1074,6 +1081,27 @@ describe("a YouTube link over an uploaded recording", () => {
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
     expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
     expect(localStorage.getItem(playbackSourceKey("f1"))).toBe("recording")
+  })
+
+  it("stops whatever is playing when the person switches sound, so the two never play together", async () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    renderPane({ src: YT })
+    pauseAllTransports.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pauseAllTransports).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+    // Picking the source that is already on changes nothing and stops nothing.
+    pauseAllTransports.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pauseAllTransports).not.toHaveBeenCalled()
+  })
+
+  it("shows the corner controls to keyboard focus, not only to hover", () => {
+    renderPane({ src: YT })
+    // CSS cannot run here; pin the reveal rule so a refactor cannot drop it.
+    expect(screen.getByTestId("video-audio-overlay").className).toContain("has-[:focus-visible]:opacity-100")
   })
 
   it("starts on the recording when that was the stored choice", () => {

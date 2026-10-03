@@ -540,6 +540,8 @@ export const agent = defineNamespace({
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
     "agent.validation.roleCannotValidate": "Your role can't validate in this project",
+    "agent.validation.selfValidationBlocked":
+      "Not applicable — this project doesn't allow validating your own edit",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -1294,6 +1296,14 @@ export const agent = defineNamespace({
         description:
           "Tooltip on a disabled per-row Validate button in the validation queue " +
           "when the signed-in user's project role is below the validation floor.",
+      },
+      "agent.validation.selfValidationBlocked": {
+        description:
+          "Shown in place of the per-row Validate button when the project has " +
+          "\"Allow self-validation\" off and the signed-in user is the line's last " +
+          "editor, so the server would refuse the validation. States that the " +
+          "prepared validation does not apply to this reader and why, rather than " +
+          "offering a button that fails.",
       },
       "agent.team.inspector.resize": {
         description:

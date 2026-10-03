@@ -57,6 +57,10 @@ export interface AgentDockViewProps {
   rules: TranslationRule[]
   /** Live cell lookup from useCells. */
   resolveCell?: (cellId: string) => CellData | undefined
+  /** AQU-1630: project's "Allow self-validation" setting, so a prepared
+   *  validation of this reader's own line reads as not applicable rather than
+   *  failing on Apply. */
+  allowSelfValidation?: boolean
   /** Post-apply hook: flush outbox + revalidate the touched cells. */
   onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
   /** One-tap prompts shown above the composer (e.g. Summarize book/chapter). */
@@ -98,6 +102,7 @@ function ScopedAgentDockView({
   context,
   rules,
   resolveCell,
+  allowSelfValidation,
   onApplied,
   suggestedActions,
   pendingPrompt,
@@ -273,6 +278,7 @@ function ScopedAgentDockView({
                             resolveCell={resolveCell}
                             applyContext={applyContext}
                             onApplied={onApplied}
+                            allowSelfValidation={allowSelfValidation}
                           />
                         )
                       }

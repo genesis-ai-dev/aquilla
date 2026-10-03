@@ -165,6 +165,12 @@ export interface CellData {
    *  recency without re-fetching. Undefined for source-only cells or cells
    *  that have never been edited. */
   lastEditAt?: number
+  /** AQU-1630: who last edited the TARGET row (`cells.last_editor`). The
+   *  server's self-validation refusal compares this against the caller, so a
+   *  client that wants to answer "may I validate this line?" before enqueuing
+   *  a `cell.validate` needs the same value. Null when no target row has been
+   *  projected yet; undefined on a cell read without one. */
+  lastEditor?: string | null
 }
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -222,6 +228,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.validationStatus === b.validationStatus &&
     a.endorsementCount === b.endorsementCount &&
     a.lastEditAt === b.lastEditAt &&
+    a.lastEditor === b.lastEditor &&
     a.startTime === b.startTime &&
     a.endTime === b.endTime &&
     a.sequenceIndex === b.sequenceIndex &&
@@ -390,6 +397,7 @@ export function buildCellData(
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
     waivers: stats?.waivers ?? EMPTY_WAIVERS,
     lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
+    lastEditor: target?.lastEditor ?? null,
     startTime,
     endTime,
     sequenceIndex,

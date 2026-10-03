@@ -4221,6 +4221,8 @@ export const id: Catalog = {
   "projectSettings.terminology.title": "Pustaka Peristilahan",
   "projectSettings.terminology.description": "Kelola istilah yang disetujui, padanannya, dan peristilahan proyek (basis istilah).",
   "projectSettings.terminology.openButton": "Buka Pustaka Peristilahan",
+  "projectSettings.validation.textGroup": "Validasi teks",
+  "projectSettings.validation.audioGroup": "Validasi audio",
   "projectSettings.validation.requiredTextLabel": "Validator yang diwajibkan (teks)",
   "projectSettings.validation.requiredTextDescription": "Sel memerlukan sebanyak ini validator yang berbeda agar terhitung tervalidasi penuh.",
   "projectSettings.validation.requiredAudioLabel": "Validator yang diwajibkan (audio)",

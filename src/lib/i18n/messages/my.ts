@@ -3685,6 +3685,8 @@ export const my: Catalog = {
   "projectSettings.terminology.title": "ဝေါဟာရ စာကြည့်တိုက်",
   "projectSettings.terminology.description": "အတည်ပြုထားသော ဝေါဟာရများ၊ ပြန်ဆိုချက်များနှင့် ပရောဂျက် ဝေါဟာရဘဏ်ကို စီမံပါ။",
   "projectSettings.terminology.openButton": "ဝေါဟာရ စာကြည့်တိုက် ဖွင့်ရန်",
+  "projectSettings.validation.textGroup": "စာသား စိစစ်ခြင်း",
+  "projectSettings.validation.audioGroup": "အသံ စိစစ်ခြင်း",
   "projectSettings.validation.requiredTextLabel": "လိုအပ်သော စိစစ်သူများ (စာသား)",
   "projectSettings.validation.requiredTextDescription": "ဆဲလ်များသည် အပြည့်အဝ စိစစ်ပြီးဟု မှတ်ယူရန် ဤမျှလောက် ကွဲပြားသော စိစစ်သူ လိုအပ်သည်။",
   "projectSettings.validation.requiredAudioLabel": "လိုအပ်သော စိစစ်သူများ (အသံ)",

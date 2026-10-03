@@ -3700,6 +3700,8 @@ export const zh_Hant: Catalog = {
   "projectSettings.terminology.title": "術語庫",
   "projectSettings.terminology.description": "管理已核准的術語、譯法，以及專案術語（術語庫）。",
   "projectSettings.terminology.openButton": "開啟術語庫",
+  "projectSettings.validation.textGroup": "文字驗證",
+  "projectSettings.validation.audioGroup": "音訊驗證",
   "projectSettings.validation.requiredTextLabel": "所需驗證者人數（文字）",
   "projectSettings.validation.requiredTextDescription": "單元格必須有這麼多位不同的驗證者，才算完全驗證通過。",
   "projectSettings.validation.requiredAudioLabel": "所需驗證者人數（音訊）",

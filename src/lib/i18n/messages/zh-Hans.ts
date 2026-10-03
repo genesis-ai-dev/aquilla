@@ -3700,6 +3700,8 @@ export const zh_Hans: Catalog = {
   "projectSettings.terminology.title": "术语库",
   "projectSettings.terminology.description": "管理已核准的术语、译法与项目术语（术语库）。",
   "projectSettings.terminology.openButton": "打开术语库",
+  "projectSettings.validation.textGroup": "文字验证",
+  "projectSettings.validation.audioGroup": "音频验证",
   "projectSettings.validation.requiredTextLabel": "所需验证者人数（文字）",
   "projectSettings.validation.requiredTextDescription": "单元格必须有这么多位不同的验证者，才算完全验证通过。",
   "projectSettings.validation.requiredAudioLabel": "所需验证者人数（音频）",

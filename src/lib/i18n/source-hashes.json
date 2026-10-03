@@ -3618,7 +3618,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7229,7 +7231,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10825,7 +10829,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14437,7 +14443,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19356,7 +19364,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -24275,7 +24285,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -29926,7 +29938,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35684,7 +35698,9 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41351,6 +41367,8 @@
     "editor.selection.validatePartial": "f3e4b14fc3768bc3",
     "editor.selection.validatePartialNamed": "e55c151644d8d1af",
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
-    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1",
+    "projectSettings.validation.textGroup": "ac65019018918a51",
+    "projectSettings.validation.audioGroup": "8e111d8446334a31"
   }
 }

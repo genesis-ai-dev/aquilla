@@ -3684,6 +3684,8 @@ export const ms: Catalog = {
   "projectSettings.terminology.title": "Pustaka Istilah",
   "projectSettings.terminology.description": "Urus istilah yang diluluskan, terjemahan, dan istilah projek (pangkalan istilah).",
   "projectSettings.terminology.openButton": "Buka Pustaka Istilah",
+  "projectSettings.validation.textGroup": "Pengesahan teks",
+  "projectSettings.validation.audioGroup": "Pengesahan audio",
   "projectSettings.validation.requiredTextLabel": "Pengesah diperlukan (teks)",
   "projectSettings.validation.requiredTextDescription": "Sel memerlukan bilangan pengesah berbeza ini untuk dikira sebagai disahkan sepenuhnya.",
   "projectSettings.validation.requiredAudioLabel": "Pengesah diperlukan (audio)",

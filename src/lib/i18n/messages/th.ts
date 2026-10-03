@@ -3686,6 +3686,8 @@ export const th: Catalog = {
   "projectSettings.terminology.title": "คลังคำศัพท์",
   "projectSettings.terminology.description": "จัดการคำศัพท์ที่อนุมัติ คำแปล และคลังคำศัพท์ของโปรเจกต์ (term base)",
   "projectSettings.terminology.openButton": "เปิดคลังคำศัพท์",
+  "projectSettings.validation.textGroup": "การตรวจสอบข้อความ",
+  "projectSettings.validation.audioGroup": "การตรวจสอบเสียง",
   "projectSettings.validation.requiredTextLabel": "จำนวนผู้ตรวจสอบที่ต้องการ (ข้อความ)",
   "projectSettings.validation.requiredTextDescription": "เซลล์ต้องมีผู้ตรวจสอบที่แตกต่างกันตามจำนวนนี้จึงจะถือว่าตรวจสอบครบถ้วน",
   "projectSettings.validation.requiredAudioLabel": "จำนวนผู้ตรวจสอบที่ต้องการ (เสียง)",

@@ -4216,6 +4216,8 @@ export const fr: Catalog = {
   "projectSettings.terminology.title": "Bibliothèque terminologique",
   "projectSettings.terminology.description": "Gérez les termes approuvés, les rendus et la terminologie du projet (base terminologique).",
   "projectSettings.terminology.openButton": "Ouvrir la bibliothèque terminologique",
+  "projectSettings.validation.textGroup": "Validation du texte",
+  "projectSettings.validation.audioGroup": "Validation audio",
   "projectSettings.validation.requiredTextLabel": "Validateurs requis (texte)",
   "projectSettings.validation.requiredTextDescription": "Les cellules ont besoin d'autant de validateurs distincts pour être considérées comme pleinement validées.",
   "projectSettings.validation.requiredAudioLabel": "Validateurs requis (audio)",

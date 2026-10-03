@@ -3689,6 +3689,8 @@ export const ar: Catalog = {
   "projectSettings.terminology.title": "مكتبة المصطلحات",
   "projectSettings.terminology.description": "أدِر المصطلحات المعتمدة، والصياغات المقابلة، ومسرد المشروع (قاعدة المصطلحات).",
   "projectSettings.terminology.openButton": "فتح مكتبة المصطلحات",
+  "projectSettings.validation.textGroup": "التحقّق من النص",
+  "projectSettings.validation.audioGroup": "التحقّق من الصوت",
   "projectSettings.validation.requiredTextLabel": "المتحقِّقون المطلوبون (نص)",
   "projectSettings.validation.requiredTextDescription": "تحتاج الخلايا إلى هذا العدد من المتحقِّقين المختلفين لتُعَدّ متحقَّقًا منها بالكامل.",
   "projectSettings.validation.requiredAudioLabel": "المتحقِّقون المطلوبون (صوتيات)",

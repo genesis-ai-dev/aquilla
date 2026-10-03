@@ -4286,6 +4286,8 @@ export const ru: Catalog = {
   "projectSettings.terminology.title": "Библиотека терминологии",
   "projectSettings.terminology.description": "Управляйте утверждёнными терминами, их переводами и терминологией проекта (базой терминов).",
   "projectSettings.terminology.openButton": "Открыть библиотеку терминологии",
+  "projectSettings.validation.textGroup": "Проверка текста",
+  "projectSettings.validation.audioGroup": "Проверка аудио",
   "projectSettings.validation.requiredTextLabel": "Требуется проверяющих (текст)",
   "projectSettings.validation.requiredTextDescription": "Столько разных проверяющих нужно ячейке, чтобы считаться полностью подтверждённой.",
   "projectSettings.validation.requiredAudioLabel": "Требуется проверяющих (аудио)",

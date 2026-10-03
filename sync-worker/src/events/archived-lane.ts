@@ -39,6 +39,20 @@ function rowsFor(db: AquillaDb, projectId: string, cache: RequestCache): Promise
 }
 
 /**
+ * AQU-1612: the project's target lane rows, memoized per request. The lane
+ * resolver needs them to turn an event's `laneId` into the lane's frozen tag;
+ * sharing the archived-lane list means an id-bearing batch pays for the lane
+ * list once, not once per event.
+ */
+export function targetLaneRowsFor(
+  db: AquillaDb,
+  projectId: string,
+  cache: RequestCache,
+): Promise<ArchiveLaneRow[]> {
+  return rowsFor(db, projectId, cache)
+}
+
+/**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
  * exactly `tag` — the same match the projection's lane_id lookup uses. The
  * default lane (`''`) always counts as present. Shares the per-request lane

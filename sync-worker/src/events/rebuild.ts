@@ -21,6 +21,7 @@ import {
   type PersistedEvent,
 } from './event-projection'
 import { ChainHeadReplay } from './chain-head-replay'
+import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
@@ -104,7 +105,12 @@ export async function handleRebuildProjectionRequest(
   // 3. Head compare-and-swap, tracked in memory per (file, cell, side, lane)
   //    — the same row key `cells` uses. Shared with the live-link mirror fold
   //    (AQU-1574); see chain-head-replay.ts.
-  const replay = new ChainHeadReplay()
+  //
+  //    AQU-1612: the project's target lane rows go in so replay resolves each
+  //    event's lane by `laneId` first and falls back to the `targetLang` tag.
+  //    Pre-1612 events carry only the tag and key exactly as they always did,
+  //    so a full replay still reproduces the live projection byte for byte.
+  const replay = new ChainHeadReplay(await loadTargetLanes(db, projectId))
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0

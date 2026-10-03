@@ -17,7 +17,8 @@ import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/wri
 import { visibleLaneTags } from '../../../src/lib/lanes/read-wall'
 import { laneTagForArchiveCheck, writesLaneRow } from '../../../src/lib/lanes/archived-lane'
 import { loadLaneGrants } from '../../../db/shared/lane-visibility'
-import { refusalForArchivedLane, targetLaneRowExists } from './archived-lane'
+import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
+import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -383,6 +384,30 @@ export async function authorize<K extends EventKind>(
   // at Viewer or above reveals the lane. An external commit token omits
   // laneGrants (the SPA token carries them), so those grants are read here
   // and are not handed to the write wall below.
+  // AQU-1612: an event may name its lane by `laneId` as well as by the frozen
+  // `targetLang` tag. Resolve the two forms into ONE lane here, before
+  // anything downstream keys off the tag — the archive check below, the write
+  // wall, the chain slot, the `cells` row key and replay all read the tag, so
+  // an id that resolved to a different lane than the tag it travelled with
+  // would arbitrate as two chains and let two commits on one cell both win.
+  //
+  // Nothing is loaded for an event that sent no id, so the pre-1612 path pays
+  // nothing. When an id IS present the tag is filled in from the lane row, so
+  // the stored event carries both forms and every tag-shaped key keeps working.
+  if (eventLaneIdOf(raw.payload) !== null) {
+    if (db == null || !settings) {
+      return { ok: false, status: 422, reason: 'resolving a lane id requires a database' }
+    }
+    const resolved = resolveEventLane(
+      raw.payload,
+      await targetLaneRowsFor(db, raw.projectId, settings),
+    )
+    if (!resolved.ok) return { ok: false, status: 422, reason: resolved.reason }
+    if (resolved.tag !== '') {
+      raw = { ...raw, payload: { ...raw.payload, targetLang: resolved.tag } }
+    }
+  }
+
   const archiveTag = laneTagForArchiveCheck(raw.kind, raw.payload)
   const wallOn = laneReadWallEnabled(laneReadWall)
   if (db != null && settings && archiveTag) {

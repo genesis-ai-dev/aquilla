@@ -295,7 +295,9 @@ function ProgressSummary({ translated, validated, total }: {
 }) {
   const t = useT()
   const f = useFormat()
-  const asPercent = (part: number) => f.percent(total > 0 ? part / total : 0)
+  // AQU-1493: the visible figure follows the same never-100-while-work-is-left
+  // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
     <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine

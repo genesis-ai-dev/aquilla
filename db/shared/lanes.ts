@@ -26,31 +26,16 @@ import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
-// AQU-1585: name and lang_code move together or not at all. They used to
-// drift apart — the name was kept but `COALESCE(excluded.lang_code, …)` always
-// took the incoming code — so correcting the source language on Project Info
-// left the lane reading "English" with lang_code 'el'. There is no source-lane
-// rename (renameTargetLane refuses source rows), so settings names this lane:
-// a real label renames it and re-codes it as one change, and a write that
-// carries no language (the placeholder) leaves both alone.
 const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
    VALUES (?, ?, 'source', ?, ?, NULL, ?)
    ON CONFLICT (project_id) WHERE role = 'source' DO UPDATE SET
      name = CASE
-       WHEN excluded.name IN ('${SOURCE_LANE_PLACEHOLDER}') THEN lanes.name
-       ELSE excluded.name
+       WHEN lanes.name IN ('${SOURCE_LANE_PLACEHOLDER}') THEN excluded.name
+       ELSE lanes.name
      END,
-     lang_code = CASE
-       WHEN excluded.name IN ('${SOURCE_LANE_PLACEHOLDER}') THEN lanes.lang_code
-       ELSE excluded.lang_code
-     END,
+     lang_code = COALESCE(excluded.lang_code, lanes.lang_code),
      updated_at = now()`
 
-// AQU-1585: a target lane's name is the human's (renameTargetLane), so only a
-// placeholder is ever promoted — and the code now rides on that same promotion
-// instead of being overwritten unconditionally. Before, changing the project
-// target language from Spanish to Portuguese left the default lane named
-// "Spanish" with lang_code 'pt'.
 const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
    VALUES (?, ?, 'target', ?, ?, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO UPDATE SET
@@ -58,11 +43,7 @@ const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, name, lang_code,
        WHEN lanes.name IN ('${BLANK_LANE_PLACEHOLDER}') THEN excluded.name
        ELSE lanes.name
      END,
-     lang_code = CASE
-       WHEN lanes.name IN ('${BLANK_LANE_PLACEHOLDER}')
-         THEN COALESCE(excluded.lang_code, lanes.lang_code)
-       ELSE lanes.lang_code
-     END,
+     lang_code = COALESCE(excluded.lang_code, lanes.lang_code),
      updated_at = now()`
 
 export type LaneSettingsBlob = {

@@ -455,6 +455,47 @@ describe("GET /files with the lane read wall", () => {
     expect(body.files[0]).toMatchObject({ cellCount: 36, filledCount: 7, approvedCount: 2 })
   })
 
+  it("does not borrow another lane's fill when the default lane has no progress row", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "frlane01", project_id: "proj-a", role: "target", name: "French", legacy_tag: "fr" },
+      ],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ countStructuralCells: false }),
+        version: 1,
+      }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, structural_cell_count: 2,
+        filled_count: 8, structural_filled_count: 4,
+        approved_count: 3, structural_approved_count: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+        target_lang: "fr", lane_id: "frlane01",
+        total_count: 10, structural_count: 2,
+        filled_count: 8, structural_filled_count: 1,
+        validator_histogram: { "1": 3 },
+        structural_validator_histogram: { "1": 1 },
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-gen", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      file: { cellCount: number; filledCount: number; approvedCount: number }
+    }
+    expect(body.file).toMatchObject({ cellCount: 8, filledCount: 0, approvedCount: 0 })
+  })
+
   it("sorts and reports lastEditAt from the granted lanes", async () => {
     const { db } = await makeTestDb({
       lanes: [

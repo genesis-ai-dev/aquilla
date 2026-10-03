@@ -156,8 +156,9 @@ export interface ExternalFileQuality {
   coverage: ExternalFileCoverage
   /** Endorsements a cell needs to count as validated in this project. */
   validationCount: number
-  /** `file-counter-fallback` means the progress projection has no rows for
-   *  this file yet and the `files` counters answered instead. */
+  /** `file-counter-fallback` means this lane has no progress rows yet.
+   *  The total is `files.cell_count`; filled and validated are 0, because
+   *  `files.filled_count` and `files.approved_count` sum every target lane. */
   coverageSource: FileProgressResponse["source"]
 }
 

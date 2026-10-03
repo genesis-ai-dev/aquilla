@@ -238,13 +238,15 @@ export async function handleFilesReadRequest(
   // see, and the list sorts by it.
   const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
-  // Threshold-aware approved count. `files.approved_count` (maintained by
-  // fileCountersRecomputeStmt) counts `cells.validated`, which ignores the
-  // project's validationCount, so it is only the fallback for files that have
-  // no projected progress row. For projected files the count is the histogram
-  // mass at or above the threshold. The threshold is resolved ONCE in a CTE:
-  // the previous shape re-parsed `project_settings.settings` as jsonb inside a
-  // correlated subquery, i.e. per histogram bucket per file row.
+  // Threshold-aware approved count from the default lane's progress row.
+  // `files.filled_count` and `files.approved_count` sum every target lane, so
+  // a missing progress row is an empty lane (0), not those columns. The
+  // denominator still falls back to `files.cell_count`: that one is distinct
+  // cells, shared by every lane. For a projected file the approved count is
+  // the histogram mass at or above the threshold. The threshold is resolved
+  // ONCE in a CTE: the previous shape re-parsed `project_settings.settings`
+  // as jsonb inside a correlated subquery, i.e. per histogram bucket per file
+  // row.
   //
   // AQU-1083: the same CTE resolves whether this project counts structural
   // cells — its own answer, else its org's, else yes — from the STORED
@@ -258,11 +260,12 @@ export async function handleFilesReadRequest(
     // existed can carry a structural count without a matching total, and a
     // negative denominator would render as a nonsense percentage.
     `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
-    `CASE WHEN p.file_id IS NULL
-            THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
+    `CASE WHEN p.file_id IS NULL THEN 0
             ELSE GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
           END AS approved_count, ` +
-    `GREATEST(0, COALESCE(p.filled_count, f.filled_count) - ${less("COALESCE(p.structural_filled_count, f.structural_filled_count)")}) AS filled_count, ` +
+    `CASE WHEN p.file_id IS NULL THEN 0
+            ELSE GREATEST(0, p.filled_count - ${less("p.structural_filled_count")})
+          END AS filled_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
   // Anchored on the bound project id rather than on either table, so the CTE

@@ -90,7 +90,8 @@ describe("POST /api/v1/ai/harmonize/passage", () => {
   it("spends no Jev call on a passage with nothing to ask", async () => {
     const jwt = await seedMember()
     const fetchSpy = vi.spyOn(globalThis, "fetch")
-    const fixed = JOHN_6.map((c, i) => (i === 1 ? { ...c, target: c.target + "”" } : c))
+    // Quotations closed and every cell validated: neither check has a question.
+    const fixed = JOHN_6.map((c, i) => ({ ...(i === 1 ? { ...c, target: c.target + "”" } : c), validated: true }))
     const res = await post(jwt, fixed)
     expect(await res.json()).toEqual({ suggestions: [], jev: "skipped" })
     expect(fetchSpy).not.toHaveBeenCalled()

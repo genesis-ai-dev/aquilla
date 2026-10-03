@@ -15,7 +15,7 @@ import {
   quotationCheck,
 } from "./quotes"
 import { harmonizerFindings, planHarmonizer } from "./runner"
-import type { HarmonizerCell } from "./types"
+import type { HarmonizerCell, HarmonyCheck } from "./types"
 
 const JOHN_6: HarmonizerCell[] = [
   {
@@ -105,7 +105,7 @@ describe("planHarmonizer + harmonizerFindings — end to end on John 6", () => {
 
   it("asks one batched request, every question id namespaced by its check", () => {
     expect(run.request).not.toBeNull()
-    const ids = Object.keys(run.request!.questions)
+    const ids = Object.keys(run.request!.questions).filter((id) => id.startsWith("h0_"))
     expect(ids).toEqual(["h0_s0", "h0_s0_end0", "h0_s0_end1"])
     expect(run.request!.state.cells[1]).toMatchObject({ index: 1, ref: "JHN 6:27" })
   })
@@ -151,6 +151,6 @@ describe("planHarmonizer + harmonizerFindings — end to end on John 6", () => {
 
   it("asks nothing at all for a passage with no quotation problems", () => {
     const fixed = JOHN_6.map((c, i) => (i === 1 ? { ...c, target: c.target + "”" } : c))
-    expect(planHarmonizer(fixed, "m").request).toBeNull()
+    expect(planHarmonizer(fixed, "m", [quotationCheck as HarmonyCheck<unknown>]).request).toBeNull()
   })
 })

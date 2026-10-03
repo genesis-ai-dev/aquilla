@@ -22,6 +22,7 @@
 // which books they hold, and asking twice invites the two answers to differ.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import { laneIndependentProgressSql, targetLaneIdSql } from "./lane-sql"
 
 /**
  * Which files can hold plan units.
@@ -137,12 +138,24 @@ export interface PlanUnitRow {
  *
  * LANE FALLBACK, and the asymmetry is deliberate. Totals, audio counts and
  * activity are lane-independent facts about the unit, so when the requested
- * lane has no projection row yet they fall back to the default-lane row.
+ * lane has no projection row yet they fall back to the SOURCE lane's row (`pd`)
+ * — which is where AQU-1599 put them, because they are facts about the source
+ * text and not about whichever target lane happened to be created first.
  * Filled and validated counts do NOT fall back: a lane with no target rows is
  * genuinely 0% translated, and borrowing another lane's progress would claim
  * work that does not exist. When no projection row exists at all — a file
  * imported before the projection, or mid-backfill — total falls back to
  * files.cell_count, the same last resort the progress read uses.
+ *
+ * `pd` and `ps` used to be pinned to `target_lang = ''`. Two things broke that
+ * pin: archiving the former default lane took the board's totals away with it,
+ * and the source lane's own row carries '' in `target_lang` as well (its
+ * `legacy_tag` is NULL), so the pin now matches two rows and would sum them.
+ * Both are now laterals that take the source lane's row and, until AQU-1616's
+ * batch recompute has given a file one, any lane's — see
+ * laneIndependentProgressSql. `pl` resolves the lane ID the caller asked for,
+ * so a request for the former default lane can no longer land on the source
+ * lane's row.
  *
  * THE CUE SHEET (AQU-1278). A dubbing project does not record against its
  * subtitles. The importer writes a hidden `role: 'audio-cues'` sibling
@@ -231,16 +244,19 @@ export function readPlanUnitsSql(extraScope = ""): string {
             pu.target_date, pu.done_at, pu.done_by,
             pu.updated_at AS plan_updated_at, pu.updated_by AS plan_updated_by
        FROM units u
-       LEFT JOIN file_section_progress pd
-         ON pd.project_id = u.project_id AND pd.file_id = u.file_id
-        AND pd.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
-        AND pd.section_key = u.section_key
-        AND pd.target_lang = ''
+       LEFT JOIN LATERAL (
+         ${laneIndependentProgressSql({
+           projectCol: "u.project_id",
+           fileCol: "u.file_id",
+           scopeSql: "CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END",
+           sectionKeySql: "u.section_key",
+         })}
+       ) pd ON TRUE
        LEFT JOIN file_section_progress pl
          ON pl.project_id = u.project_id AND pl.file_id = u.file_id
         AND pl.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
         AND pl.section_key = u.section_key
-        AND pl.target_lang = ?
+        AND pl.lane_id = ${targetLaneIdSql("u.project_id")}
        LEFT JOIN LATERAL (
          SELECT s.id, s.cell_count
            FROM files s
@@ -278,11 +294,14 @@ export function readPlanUnitsSql(extraScope = ""): string {
             AND sc.anchor_file_id = u.file_id
             AND sc.role = 'audio-cues'
        ) cst ON TRUE
-       LEFT JOIN file_section_progress ps
-         ON ps.project_id = u.project_id AND ps.file_id = cs.id
-        AND ps.scope = 'file'
-        AND ps.section_key = ''
-        AND ps.target_lang = ''
+       LEFT JOIN LATERAL (
+         ${laneIndependentProgressSql({
+           projectCol: "u.project_id",
+           fileCol: "cs.id",
+           scopeSql: "'file'",
+           sectionKeySql: "''",
+         })}
+       ) ps ON TRUE
        LEFT JOIN plan_units pu
          ON pu.project_id = u.project_id AND pu.file_id = u.file_id
         AND pu.section_key = u.section_key

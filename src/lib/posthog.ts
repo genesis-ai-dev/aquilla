@@ -1,7 +1,7 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
 import { resolveAppEnv } from "@/lib/analytics-env"
-import { dropNoisyExceptions, installResizeObserverNoiseGuard } from "@/lib/analytics-exception-filter"
+import { installResizeObserverNoiseGuard } from "@/lib/analytics-noise"
 import { redactCaptureEvent } from "@/lib/analytics-redaction"
 import { resolvePosthogHost } from "@/lib/posthog-host"
 
@@ -11,8 +11,10 @@ const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
 if (typeof window !== "undefined" && KEY) {
-  // AQU-1572: ahead of init, so the benign ResizeObserver warning never reaches
-  // the exception rate limiter that real errors share (see the guard).
+  // AQU-1572: ahead of init, so the benign ResizeObserver message never reaches
+  // the exception rate limiter that real errors share. The `$exception` noise
+  // filter itself runs inside `redactCaptureEvent` below; this guard is the
+  // part a `before_send` hook cannot do (see analytics-noise.ts).
   installResizeObserverNoiseGuard(window)
   posthog.init(KEY, {
     api_host: HOST,
@@ -32,14 +34,9 @@ if (typeof window !== "undefined" && KEY) {
     // credential in the URL, and PostHog attaches `$current_url`/`$pathname` to
     // every event (plus the replay's own rrweb `href` and the `$initial_*`
     // person properties). Redact by route position and query-parameter name so
-    // no capture site has to remember to do it.
-    //
-    // AQU-1572: `dropNoisyExceptions` runs first and discards `$exception`
-    // noise (the benign ResizeObserver loop warning, and anything captured on
-    // a localhost build). posthog-js runs the array in order and stops at the
-    // first null, and redaction stays last so nothing after it can put a URL
-    // back.
-    before_send: [dropNoisyExceptions, redactCaptureEvent],
+    // no capture site has to remember to do it. AQU-1572's `$exception` noise
+    // filter composes inside it (analytics-noise.ts).
+    before_send: redactCaptureEvent,
     disable_session_recording: !isAnalyticsEnabled(),
     session_recording: {
       // Keep the page visible so replays are actually diagnosable. Inputs are

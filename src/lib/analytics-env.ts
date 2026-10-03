@@ -5,8 +5,8 @@
  * dev.aquilla.app, PR previews and production — so without a marker the
  * dashboards cannot tell a developer's crash from a translator's. `posthog.ts`
  * registers the value below as the `app_env` super-property, and
- * `analytics-exception-filter.ts` applies the same rule to keep localhost
- * `$exception`s out of the project altogether.
+ * `analytics-noise.ts` applies the same rule to keep localhost `$exception`s
+ * out of the project altogether.
  *
  * Derived from the page's own origin rather than from a build-time env var:
  * the deploy scripts upload one `dist/` to an immutable version-preview URL,

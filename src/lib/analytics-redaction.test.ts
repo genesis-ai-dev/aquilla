@@ -129,10 +129,9 @@ describe("redactCaptureEvent", () => {
   })
 
   it("redacts an $exception's page URL and leaves its exception payload alone", () => {
-    // AQU-1572: `dropNoisyExceptions` runs ahead of this in posthog.ts's
-    // before_send chain and has already dropped the noise; what survives must
-    // keep its message, stack and `app_env` intact — only URL-shaped
-    // properties change.
+    // AQU-1572: the noise filter that runs first (analytics-noise.ts) keeps a
+    // real exception from a deployed page; what survives must keep its
+    // message, stack and `app_env` intact — only URL-shaped properties change.
     const exceptionList = [
       {
         type: "TypeError",

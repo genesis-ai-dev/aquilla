@@ -262,8 +262,20 @@ export const settings = defineNamespace({
 
     // ── OrgSettingsIdentity ──
     "settings.orgIdentity.nameDescription": "Shown across the organization.",
+    "settings.orgIdentity.deleteOrganization": "Delete organization",
+    "settings.orgIdentity.deleteRowDescription":
+      "Permanently delete this organization and everything that belongs only to it. Projects must be removed first.",
+    "settings.orgIdentity.deleteConfirmBody":
+      "This permanently deletes {name}, including its members, invites, and connections. This cannot be undone.",
+    "settings.orgIdentity.deleteBlockedProjects":
+      "This organization still has projects. Remove them before deleting the organization.",
+    "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
+    // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
+    // "Delete '{name}'?" → org.teamDetail.deleteConfirmTitle (identical text)
+    // "Deleting…" → org.teamDetail.deletingButton (identical text)
+    // "Confirm" → common.confirm, "Cancel" → common.cancel
 
     // ── OrgSettingsIndex ──
     // Rendered via <RichMessage> so the embedded <Link to="/preferences"> stays
@@ -416,6 +428,14 @@ export const settings = defineNamespace({
           link:
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
+        },
+      },
+      "settings.orgIdentity.deleteConfirmBody": {
+        description:
+          "Body of the confirm dialog that deletes an organization. Names the " +
+          "organization so the owner can see which workspace they are about to remove.",
+        placeholders: {
+          name: "The organization's name — not translated.",
         },
       },
       "settings.notifications.groupLabel": {

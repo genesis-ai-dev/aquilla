@@ -111,6 +111,85 @@ export async function renameOrg(env: Env, orgId: number, name: string): Promise<
   ).bind(name, orgId).run()
 }
 
+export type DeleteOrganizationResult =
+  | { ok: true }
+  | { ok: false; reason: "has_projects"; projectCount: number }
+
+/**
+ * Hard-delete an organization and the rows that belong only to it.
+ *
+ * AQU-1108 decisions, taken from the ticket's acceptance tests:
+ * - Any project row (including archived) blocks the delete. There is no
+ *   hard-delete for projects, so cascading them would orphan or destroy
+ *   translation data. `projects.org_id` is never left pointing at a missing org.
+ * - Members, teams, invites, org-scoped PATs, device grants, integrations,
+ *   billing, and usage rows are removed in the same transaction.
+ * - The personal workspace may be deleted. `GET /orgs/me` and an empty
+ *   `listUserOrgs` lazily create a fresh one.
+ *
+ * Caller authorization stays in the route: membership role >= owner, with no
+ * platform-admin elevation.
+ */
+export async function deleteOrganization(
+  env: Env,
+  orgId: number,
+): Promise<DeleteOrganizationResult> {
+  return env.AQUILLA_PG.transaction(async (tx) => {
+    const counted = await tx.prepare(
+      "SELECT COUNT(*) AS n FROM projects WHERE org_id = ?",
+    ).bind(orgId).first<{ n: number | string }>()
+    const projectCount = Number(counted?.n ?? 0)
+    if (projectCount > 0) return { ok: false, reason: "has_projects", projectCount }
+
+    const orgText = String(orgId)
+    // Child tables first. Some of these FKs cascade and some do not; deleting
+    // explicitly keeps the same result on a database whose FKs were omitted.
+    const byOrgId = [
+      "DELETE FROM workspace_plan_change_reviews WHERE org_id = ?",
+      "DELETE FROM workspace_subscription_state WHERE org_id = ?",
+      "DELETE FROM workspace_usage_requests WHERE org_id = ?",
+      "DELETE FROM workspace_checkout_attempts WHERE org_id = ?",
+      "DELETE FROM workspace_plan_entitlements WHERE org_id = ?",
+      "DELETE FROM billing_price_cohorts WHERE org_id = ?",
+      "DELETE FROM org_billing_events WHERE org_id = ?",
+      "DELETE FROM org_word_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_credit_usage_daily WHERE org_id = ?",
+      "DELETE FROM tts_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_billing WHERE org_id = ?",
+      "DELETE FROM rule_applicability WHERE rule_id IN (SELECT id FROM style_rules WHERE org_id = ?)",
+      "DELETE FROM style_rules WHERE org_id = ?",
+      "DELETE FROM knowledge_docs WHERE org_id = ?",
+      "DELETE FROM org_invites WHERE org_id = ?",
+      "DELETE FROM org_settings WHERE org_id = ?",
+      "DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM group_project_grants WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM groups WHERE org_id = ?",
+      "DELETE FROM org_members WHERE org_id = ?",
+    ]
+    for (const sql of byOrgId) {
+      await tx.prepare(sql).bind(orgId).run()
+    }
+    const byOrgText = [
+      `DELETE FROM integration_item_links WHERE link_id IN (
+         SELECT l.id FROM integration_links l
+         JOIN integration_connections c ON c.id = l.connection_id
+         WHERE c.org_id = ?
+       )`,
+      `DELETE FROM integration_links WHERE connection_id IN (
+         SELECT id FROM integration_connections WHERE org_id = ?
+       )`,
+      "DELETE FROM integration_connections WHERE org_id = ?",
+      "DELETE FROM api_credentials WHERE org_id = ?",
+      "DELETE FROM agent_authorizations WHERE org_id = ?",
+    ]
+    for (const sql of byOrgText) {
+      await tx.prepare(sql).bind(orgText).run()
+    }
+    await tx.prepare("DELETE FROM organizations WHERE id = ?").bind(orgId).run()
+    return { ok: true }
+  })
+}
+
 export interface UserOrgSummary {
   id: number
   name: string | null

@@ -93,11 +93,19 @@ const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProj
 vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
-  audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
-  // AQU-1093: denominator is totalCells, so the tile agrees with the plan
+  // AQU-1566: audio is measured against the server's audio total (a dubbing
+  // file's cue sheet), falling back to totalCells for an older server.
+  audioDenominator: (p: { audioTotalCells?: number; totalCells: number }) => p.audioTotalCells ?? p.totalCells,
+  audioPct: (p: { audioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? p.audioCells / total : 0
+  },
+  // AQU-1093: denominator is the whole file, so the tile agrees with the plan
   // board's bars. The of-recorded ratio moved to the tooltip.
-  audioValidatedPct: (p: { validatedAudioCells: number; totalCells: number }) =>
-    (p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0),
+  audioValidatedPct: (p: { validatedAudioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? Math.min(1, p.validatedAudioCells / total) : 0
+  },
   audioValidatedOfRecordedPct: (p: { validatedAudioCells: number; audioCells: number }) =>
     (p.audioCells > 0 ? Math.min(1, p.validatedAudioCells / p.audioCells) : 0),
   translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),

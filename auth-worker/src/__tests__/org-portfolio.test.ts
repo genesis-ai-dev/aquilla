@@ -1277,6 +1277,29 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
     expect(owner).toMatchObject({ audioCells: 2, recordedMs: 5000 })
   })
 
+  it("measures audio against the cue sheet, not the subtitles the text total now counts", async () => {
+    await seedEpisodeWithHiddenFiles()
+    // The episode's audio is recorded against its 40-cue sheet (the plan
+    // board's audio_total_count), so 2 takes read 2/40 and never 2/6.
+    // A file with no sheet is measured against itself.
+    await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e5', 1, 'pa', 'file.create', 'owner', '{}', 5, 5, 5), ('e6', 1, 'pa', 'file.create', 'owner', '{}', 6, 6, 6)")
+    await sql(
+      `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count, deleted_at) VALUES
+        ('f-doc',     'pa', 'Notes',            NULL,         'codex', NULL,   'e5', 10, NULL),
+        ('f-cue-old', 'pa', 'Old cue sheet',    'audio-cues', 'vtt',   'f-ep', 'e6', 999, 1700000000000)`,
+    )
+    const owner = await rowFor(1)
+    expect(owner).toMatchObject({ totalCells: 16, audioTotalCells: 50, audioCells: 2 })
+    // Behind the read wall the text total shrinks to the granted lanes; the
+    // audio total does not (a take is shared by every language).
+    env.LANE_READ_WALL = "1"
+    try {
+      expect(await rowFor(2)).toMatchObject({ audioTotalCells: 50 })
+    } finally {
+      env.LANE_READ_WALL = undefined
+    }
+  })
+
   it("counts machine drafts per lane on the same files behind the read wall", async () => {
     await seedEpisodeWithHiddenFiles()
     env.LANE_READ_WALL = "1"

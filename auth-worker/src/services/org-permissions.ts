@@ -1172,7 +1172,7 @@ export interface PortfolioLane {
   archived?: boolean
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -1196,6 +1196,8 @@ interface PortfolioDbRow {
   filled_cells: number
   ai_drafted_cells: number
   last_edit_at: number | null
+  /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
+  audio_total_cells: number
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
@@ -1235,6 +1237,8 @@ function mapPortfolioRow(
     filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
     lastEditAt: visibleText ? visibleText.lastEditAt : r.last_edit_at,
+    // Lane-independent like the audio counts, so the read wall leaves it alone.
+    audioTotalCells: Number(r.audio_total_cells) || 0,
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1562,7 +1566,8 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
             ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
-            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,
+            ${lessStructural('COALESCE(SUM(COALESCE(cue.cell_count, f.cell_count)), 0)', 'COALESCE(SUM(COALESCE(cue.structural_cell_count, f.structural_cell_count)), 0)')} AS audio_total_cells,`
 
 /**
  * Shared join tail — the org default now has to reach the rollups too.
@@ -1578,6 +1583,7 @@ const PORTFOLIO_CELL_COLUMNS = `
  */
 const PORTFOLIO_JOINS = `
        LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN cue ON cue.project_id = f.project_id AND cue.anchor_file_id = f.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
@@ -1730,6 +1736,24 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM au_cells c
          JOIN policy pol ON pol.project_id = c.project_id
         GROUP BY c.project_id
+     ), cue AS MATERIALIZED (
+       -- AQU-1566: each counted file's cue sheet, for the AUDIO denominator.
+       -- A dubbing project records against its hidden audio-cues sibling, not
+       -- its subtitles, and the two do not share a cell count (646 subtitle
+       -- rows against 548 cues on The Chosen's first episode). The text total
+       -- above no longer carries the sheet, so dividing the sheet's takes by
+       -- it read a part-recorded episode as 100% recorded. This is the plan
+       -- board's own rule (readPlanUnitsSql): measure the recording against
+       -- the newest live sheet where there is one, else against the file
+       -- itself. DISTINCT ON keeps the join 1:1 with its file, so the SUMs
+       -- beside it do not fan out. Scoped through policy, which is already
+       -- bounded to the org set, so it needs no binds of its own.
+       SELECT DISTINCT ON (s.project_id, s.anchor_file_id)
+              s.project_id, s.anchor_file_id, s.cell_count, s.structural_cell_count
+         FROM files s
+         JOIN policy pol ON pol.project_id = s.project_id
+        WHERE s.role = 'audio-cues' AND s.deleted_at IS NULL AND s.anchor_file_id IS NOT NULL
+        ORDER BY s.project_id, s.anchor_file_id, s.id DESC
      ), pu AS MATERIALIZED (
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`

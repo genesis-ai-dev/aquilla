@@ -42,7 +42,7 @@ import {
   useDownloadProgress,
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
@@ -2079,7 +2079,7 @@ export function ProjectOverview() {
                         <StatBar
                           label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audio.audioCells}
-                          total={audio.totalCells}
+                          total={audioDenominator(audio)}
                           fillClass="bg-sky-500"
                           suffix={t("org.projectOverview.cellsSuffix")}
                         />

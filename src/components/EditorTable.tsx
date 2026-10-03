@@ -200,6 +200,7 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { closeRuleCard, openRuleCard, useOpenRuleId } from "@/lib/rules/open-rule-card"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
@@ -5106,7 +5107,13 @@ function EditorRow({
     return () => clearTimeout(timer)
   }, [holdingRemoteDraft])
   const overlayDraftText = liveRemoteDraft ?? heldRemoteDraft?.text
-  const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  // AQU-1634: the rule card is one app-wide surface, so its open state lives in
+  // a shared store rather than per-row state — opening another row's underline
+  // replaces the open card instead of stacking a second one.
+  const openRuleId = useOpenRuleId(cell.id)
+  // Teardown (virtualisation, lane switch, file change) closes this row's card,
+  // matching the per-row lifetime the card had before the store.
+  useEffect(() => () => closeRuleCard(cell.id), [cell.id])
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
@@ -5484,7 +5491,7 @@ function EditorRow({
   )
 
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
     // (useCellsAuditStatsWithOverlay) reflects it on `cell.waivers` instantly
@@ -5509,7 +5516,7 @@ function EditorRow({
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     void emitCellUnwaive({
       projectId: project.id,
@@ -6747,8 +6754,14 @@ function EditorRow({
   // produces one violation surface.
   const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
-    setOpenRuleId(ruleId)
-  }, [])
+    openRuleCard(cell.id, ruleId)
+  }, [cell.id])
+
+  // Same card, opened from the cell's Issues tab instead of an inline blot.
+  const handleOpenRuleCard = useCallback(
+    (ruleId: string) => openRuleCard(cell.id, ruleId),
+    [cell.id],
+  )
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
   // rule explanation; mouse-out clears it. Snapshotting mirrors openInlineRule
@@ -8441,7 +8454,7 @@ function EditorRow({
                   waivedInfractions={waivedInfractions}
                   ruleMap={ruleMap}
                   editable={editable}
-                  onOpenRule={setOpenRuleId}
+                  onOpenRule={handleOpenRuleCard}
                   onWaive={handleWaive}
                   onUnwaive={handleUnwaive}
                 />
@@ -8480,13 +8493,13 @@ function EditorRow({
           <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) setOpenRuleId(null)
+              if (!next) closeRuleCard(cell.id)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             onOpenRule={(ruleId) => {
-              setOpenRuleId(null)
+              closeRuleCard(cell.id)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}

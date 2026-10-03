@@ -2766,6 +2766,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
     enabled: isFlagEnabled(project, "smartEdits"),
+    llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
     projectId: project.id,
     lane: activeLane,
     cellIds: displayCellIds,
@@ -5241,7 +5242,7 @@ function EditorRow({
    *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
   const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
-  const { suggestions: smartEdits, feedback: onSmartEditFeedback } = useSmartEditsForCell(cell.id, visibleTranslated)
+  const { suggestions: smartEdits, feedback: onSmartEditFeedback, askLlm: onAskLlmEdits } = useSmartEditsForCell(cell.id, visibleTranslated)
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
@@ -7671,6 +7672,7 @@ function EditorRow({
                     onLiveTextChange={setLiveTargetText}
                     smartEdits={smartEdits}
                     onSmartEditFeedback={onSmartEditFeedback}
+                    onAskLlmEdits={onAskLlmEdits}
                     audioTimings={highlightTimings}
                     audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}

@@ -127,3 +127,22 @@ describe("suggestions", () => {
     expect(selectForDisplay(scored)).toHaveLength(2)
   })
 })
+
+describe("parseLlmEdits (LLM output → exact-span edits only)", () => {
+  it("keeps an edit only where its old phrase is really in the text", async () => {
+    const { parseLlmEdits } = await import("./llm")
+    const target = "the Lord is my shepherd, the Lord"
+    const edits = parseLlmEdits(
+      '```json\n{"edits":[{"old":"the Lord","new":"Yahweh","reason":"r"},{"old":"the Lord","new":"Yahweh","reason":"second"},{"old":"made up","new":"x"}]}\n```',
+      target,
+    )
+    // The same phrase twice claims its two separate occurrences; the invented one is dropped.
+    expect(edits.map((e) => [e.start, e.end])).toEqual([[0, 8], [25, 33]])
+  })
+
+  it("drops rewrites dressed up as edits and garbage replies", async () => {
+    const { parseLlmEdits } = await import("./llm")
+    expect(parseLlmEdits('{"edits":[{"old":"the Lord is my shepherd","new":"Yahweh shepherds me"}]}', "the Lord is my shepherd")).toEqual([])
+    expect(parseLlmEdits("not json", "x")).toEqual([])
+  })
+})

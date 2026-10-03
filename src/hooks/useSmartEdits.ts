@@ -11,6 +11,7 @@ import { readAtVersion } from "./useActiveCellStore"
 import { useFrontierSession } from "./useFrontierSession"
 import {
   fetchSmartEdits,
+  requestLlmEdits,
   sendSmartEditFeedback,
   type SmartEditPassageCell,
   type SmartEditSuggestion,
@@ -21,10 +22,21 @@ import { SmartEditStore } from "@/lib/smart-edits/store"
 export const PASSAGE_RADIUS = 10
 const DEBOUNCE_MS = 400
 
+/** Result of an on-request LLM ask. `reveal` puts the suggestions on screen —
+ *  the caller runs it once its loading animation has finished. */
+export type AskLlmResult =
+  | { ok: true; count: number; reveal: () => void }
+  | { ok: false; reason: "allowance" | "failed" }
+
 export interface SmartEditsContextValue {
   store: SmartEditStore
   feedback: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
+  /** Present only when the opt-in `smartEditsLlm` flag is on. */
+  askLlm?: (cellId: string, text: string) => Promise<AskLlmResult>
 }
+
+/** Cells either side sent with an LLM ask, for context. */
+const LLM_NEIGHBOR_RADIUS = 3
 
 const SmartEditsContext = createContext<SmartEditsContextValue | null>(null)
 export const SmartEditsProvider = SmartEditsContext.Provider
@@ -38,6 +50,7 @@ export function passageWindow(cellIds: readonly string[], activeId: string, radi
 
 export function useSmartEditsPassage(options: {
   enabled: boolean
+  llmEnabled: boolean
   projectId: string
   lane: string
   cellIds: readonly string[]
@@ -46,7 +59,7 @@ export function useSmartEditsPassage(options: {
   activeText: string | undefined
   getCell: (cellId: string) => SmartEditPassageCell | null
 }): SmartEditsContextValue | null {
-  const { enabled, projectId, lane, cellIds, activeCellId, activeText } = options
+  const { enabled, llmEnabled, projectId, lane, cellIds, activeCellId, activeText } = options
   const { session } = useFrontierSession()
   const token = session?.jwt
   const store = useMemo(() => new SmartEditStore(), [])
@@ -73,16 +86,39 @@ export function useSmartEditsPassage(options: {
     }
   }, [enabled, token, projectId, lane, cellIds, activeCellId, activeText, store])
 
+  const cellIdsRef = useRef(cellIds)
+  useEffect(() => {
+    cellIdsRef.current = cellIds
+  })
+
   return useMemo(() => {
     if (!enabled || !token) return null
+    const askLlm = llmEnabled
+      ? async (cellId: string, text: string): Promise<AskLlmResult> => {
+          const cell = getCellRef.current(cellId)
+          if (!cell) return { ok: false, reason: "failed" }
+          const neighbors = passageWindow(cellIdsRef.current, cellId, LLM_NEIGHBOR_RADIUS)
+            .filter((id) => id !== cellId)
+            .map((id) => getCellRef.current(id))
+            .filter((c): c is SmartEditPassageCell => c !== null)
+            .map((c) => ({ source: c.source, target: c.target }))
+          const result = await requestLlmEdits(
+            { projectId, lane, fileId: cell.fileId, cellId, source: cell.source, target: text, neighbors },
+            token,
+          )
+          if (!result.ok) return result
+          return { ok: true, count: result.suggestions.length, reveal: () => store.addForCell(cellId, text, result.suggestions) }
+        }
+      : undefined
     return {
       store,
       feedback: (s, action) => {
         store.hide(s)
         sendSmartEditFeedback({ projectId, lane, suggestion: s, action }, token)
       },
+      askLlm,
     }
-  }, [enabled, token, store, projectId, lane])
+  }, [enabled, llmEnabled, token, store, projectId, lane])
 }
 
 const NO_SUGGESTIONS: SmartEditSuggestion[] = []
@@ -93,6 +129,7 @@ const zero = () => 0
 export function useSmartEditsForCell(cellId: string, text: string): {
   suggestions: SmartEditSuggestion[]
   feedback: SmartEditsContextValue["feedback"] | undefined
+  askLlm: (() => Promise<AskLlmResult>) | undefined
 } {
   const ctx = useContext(SmartEditsContext)
   const store = ctx?.store
@@ -101,5 +138,7 @@ export function useSmartEditsForCell(cellId: string, text: string): {
     () => (store ? readAtVersion(version, () => store.forCell(cellId, text)) : NO_SUGGESTIONS),
     [store, version, cellId, text],
   )
-  return { suggestions: suggestions.length ? suggestions : NO_SUGGESTIONS, feedback: ctx?.feedback }
+  const ask = ctx?.askLlm
+  const askLlm = useMemo(() => (ask ? () => ask(cellId, text) : undefined), [ask, cellId, text])
+  return { suggestions: suggestions.length ? suggestions : NO_SUGGESTIONS, feedback: ctx?.feedback, askLlm }
 }

@@ -38,6 +38,16 @@ export class SmartEditStore {
     this.bump()
   }
 
+  /** Add on-request (LLM) suggestions for a cell's current text, replacing any
+   *  earlier ones for the same span. */
+  addForCell(cellId: string, text: string, suggestions: readonly SmartEditSuggestion[]): void {
+    const entry = this.byCell.get(cellId)
+    const kept = entry && entry.text === text ? entry.suggestions : []
+    const ids = new Set(suggestions.map(suggestionId))
+    this.byCell.set(cellId, { text, suggestions: [...kept.filter((s) => !ids.has(suggestionId(s))), ...suggestions] })
+    this.bump()
+  }
+
   forCell(cellId: string, text: string): SmartEditSuggestion[] {
     const entry = this.byCell.get(cellId)
     if (!entry || entry.text !== text) return []

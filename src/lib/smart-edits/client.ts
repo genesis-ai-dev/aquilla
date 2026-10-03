@@ -6,6 +6,7 @@ import { AUTH_BASE } from "@/lib/frontier/auth"
 
 export const SMART_EDITS_SUGGEST_URL = `${AUTH_BASE}/api/v1/ai/smart-edits/suggest`
 export const SMART_EDITS_FEEDBACK_URL = `${AUTH_BASE}/api/v1/ai/smart-edits/feedback`
+export const SMART_EDITS_LLM_URL = `${AUTH_BASE}/api/v1/ai/smart-edits/llm`
 
 export interface SmartEditExample {
   source: string
@@ -27,7 +28,9 @@ export interface SmartEditSuggestion {
   new: string
   newNorm: string
   confidence: number
-  tier: "memory" | "jev"
+  tier: "memory" | "jev" | "llm"
+  /** LLM tier only: the model's one-sentence reason. */
+  reason?: string
   support: { strong: number; weak: number; keeps: number }
   examples: SmartEditExample[]
 }
@@ -47,7 +50,7 @@ function isSuggestion(v: unknown): v is SmartEditSuggestion {
     typeof s.start === "number" && typeof s.end === "number" &&
     typeof s.old === "string" && typeof s.new === "string" &&
     typeof s.oldNorm === "string" && typeof s.newNorm === "string" &&
-    (s.tier === "memory" || s.tier === "jev") && Array.isArray(s.examples)
+    (s.tier === "memory" || s.tier === "jev" || s.tier === "llm") && Array.isArray(s.examples)
   )
 }
 
@@ -68,6 +71,31 @@ export async function fetchSmartEdits(
     return Array.isArray(body.suggestions) ? body.suggestions.filter(isSuggestion) : []
   } catch {
     return []
+  }
+}
+
+export type LlmEditsResult =
+  | { ok: true; suggestions: SmartEditSuggestion[] }
+  | { ok: false; reason: "allowance" | "failed" }
+
+/** Tier 2, on request: never throws; an allowance/credit cap is its own reason
+ *  so the UI can say so instead of a generic failure. */
+export async function requestLlmEdits(
+  input: { projectId: string; lane: string; fileId: string; cellId: string; source: string; target: string; neighbors: { source: string; target: string }[] },
+  identityToken: string,
+): Promise<LlmEditsResult> {
+  try {
+    const res = await fetch(SMART_EDITS_LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${identityToken}`, "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(input),
+    })
+    if (res.status === 429) return { ok: false, reason: "allowance" }
+    if (!res.ok) return { ok: false, reason: "failed" }
+    const body = (await res.json()) as { suggestions?: unknown }
+    return { ok: true, suggestions: Array.isArray(body.suggestions) ? body.suggestions.filter(isSuggestion) : [] }
+  } catch {
+    return { ok: false, reason: "failed" }
   }
 }
 

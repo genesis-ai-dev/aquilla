@@ -33,6 +33,12 @@ export function SmartEditPopover({
             <span aria-hidden>→</span>
             <span className="font-medium">{suggestion.new}</span>
           </div>
+          {suggestion.tier === "llm" && (
+            <div className="space-y-1 text-xs">
+              {suggestion.reason && <p>{suggestion.reason}</p>}
+              <p className="text-muted-foreground">{t("smartEdits.fromAi")}</p>
+            </div>
+          )}
           {count > 0 && <p className="text-xs text-muted-foreground">{t("smartEdits.evidence", { count })}</p>}
           {example && (
             <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs">

@@ -396,6 +396,10 @@ textarea,
   cursor: pointer;
 }
 .smart-edit-blot-jev { text-decoration-style: dotted; }
+.smart-edit-blot-llm {
+  text-decoration-style: dashed;
+  text-decoration-color: color-mix(in oklch, var(--color-sky-500, oklch(0.685 0.169 237.323)) 75%, transparent);
+}
 
 /* Managed terminology uses one quiet, marker-like treatment. Target terms add
    this class only when their editor display preference calls for it. */

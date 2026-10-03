@@ -181,3 +181,40 @@ describe("POST /api/v1/ai/smart-edits/suggest", () => {
     expect(out).toEqual({ suggestions: [], disabled: true })
   })
 })
+
+describe("POST /api/v1/ai/smart-edits/llm", () => {
+  const llmEnv = () => testEnv({ OPENROUTER_BASE_URL: "http://127.0.0.1:9456/api/v1/", AI_BUDGET_ENFORCE: "false" })
+  const body = (extra: Record<string, unknown> = {}) => JSON.stringify({
+    projectId: PROJECT_ID, fileId: FILE, cellId: "c3", source: `${YHWH} רֹעִי`, target: "the Lord is my shepherd", ...extra,
+  })
+  const reply = (content: unknown) => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(content) } }], usage: { cost: 0.0004 },
+  }), { status: 200 })
+
+  it("is for contributors and up — it spends credits", async () => {
+    await seedMember()
+    await seedUser(9, "viewer")
+    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 9, 100)").bind(PROJECT_ID).run()
+    const res = await app.request("/api/v1/ai/smart-edits/llm", { method: "POST", headers: authHeader(await jwtFor("viewer")), body: body() }, llmEnv())
+    expect(res.status).toBe(403)
+  })
+
+  it("gives the model the team's own corrections and returns only exact-span edits", async () => {
+    const jwt = await seedMember()
+    await seedTwoCorrections()
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({
+      edits: [
+        { old: "the Lord", new: "Yahweh", reason: "The team renders the divine name as Yahweh." },
+        { old: "not in the text", new: "x", reason: "invented" },
+        { old: "the Lord is my shepherd", new: "Yahweh shepherds me", reason: "whole-segment rewrite" },
+      ],
+    }))
+    const res = await app.request("/api/v1/ai/smart-edits/llm", { method: "POST", headers: authHeader(jwt), body: body() }, llmEnv())
+    expect(res.status).toBe(200)
+    const prompt = String(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)).messages[1].content)
+    expect(prompt).toContain("after: for Yahweh is good")
+    const out = (await res.json()) as { suggestions: { old: string; new: string; start: number; end: number; tier: string }[] }
+    expect(out.suggestions).toEqual([expect.objectContaining({ old: "the Lord", new: "Yahweh", start: 0, end: 8, tier: "llm" })])
+  })
+})
+

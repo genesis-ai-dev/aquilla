@@ -19,6 +19,12 @@ export const smartEdits = defineNamespace({
     "smartEdits.fromAiDraft": "Corrected from an AI draft",
     "smartEdits.exampleBefore": "Before",
     "smartEdits.exampleAfter": "After",
+    "smartEdits.askAi": "Ask AI for edits",
+    "smartEdits.askingAi": "Asking AI for edits",
+    "smartEdits.noLlmEdits": "No edits suggested",
+    "smartEdits.llmFailed": "Couldn't get suggestions",
+    "smartEdits.allowanceReached": "AI allowance reached",
+    "smartEdits.fromAi": "Suggested by AI. Check it against the source before accepting.",
   },
   context: {
     _context: {
@@ -40,6 +46,11 @@ export const smartEdits = defineNamespace({
           "Line in the suggestion card saying how many other cells the team made the same correction in.",
         placeholders: { count: "How many other cells in the project had this same edit made by a translator." },
       },
+      "smartEdits.askAi": { description: "Small button inside the active cell editor, shown only when the opt-in AI wording setting is on and the cell has no suggestions. Clicking it spends AI credits.", maxLength: 24 },
+      "smartEdits.askingAi": { description: "Screen-reader name of the progress bar shown while waiting for the AI." },
+      "smartEdits.noLlmEdits": { description: "Brief status after asking the AI when it suggested nothing.", maxLength: 28 },
+      "smartEdits.llmFailed": { description: "Brief status when the AI request failed.", maxLength: 28 },
+      "smartEdits.allowanceReached": { description: "Brief status when the workspace's AI credits/allowance are used up.", maxLength: 28 },
       "smartEdits.evidenceVerified": {
         description: "Small note when a second check (a fast classifier model named Jev) confirmed the suggestion fits this verse. Keep the name Jev untranslated.",
       },

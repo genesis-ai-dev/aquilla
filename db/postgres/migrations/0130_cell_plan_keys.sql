@@ -36,3 +36,16 @@ CREATE TABLE IF NOT EXISTS cell_plan_keys (
     depth       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (project_id, file_id, cell_id)
 );
+
+-- The same row-level-security backstop as file_section_progress (0053), the
+-- progress rows these placements are counted into: read and written by the
+-- same projection and read routes, for one project at a time.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE cell_plan_keys TO app_runtime;
+ALTER TABLE cell_plan_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cell_plan_keys FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rls_cell_plan_keys_project_access ON cell_plan_keys;
+CREATE POLICY rls_cell_plan_keys_project_access ON cell_plan_keys
+  AS PERMISSIVE
+  FOR ALL
+  TO app_runtime
+  USING (app_user_can_access_project(project_id));

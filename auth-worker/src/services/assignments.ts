@@ -1046,8 +1046,7 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id = ?
-     ), units AS (${planUnitsSql("f.project_id = ?")}
-     )
+     ), units AS (${planUnitsSql("f.project_id = ?")})
      SELECT u.file_id           AS file_id,
             u.section_key       AS section_key,
             a.assignee_user_id  AS user_id,

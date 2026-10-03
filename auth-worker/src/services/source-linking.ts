@@ -21,6 +21,7 @@
 // `source.cell.commit` events to keep projections aligned.
 
 import { sign } from "hono/jwt"
+import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { Env } from "../types"
 
 /** Server-generated event id for identity-side maintenance events. */
@@ -1128,4 +1129,80 @@ export async function snapshotSourceCells(
   }
 
   return emitted
+}
+
+/**
+ * AQU-1605: resolve the UPSTREAM lane a link is being pointed at.
+ *
+ * The caller chooses the lane, so the server has to be the one that says the
+ * choice is legitimate — the picker it came from lists only what the user may
+ * see, and a request that did not come from that picker must not be able to
+ * reach further. Three things are checked, in the order that makes the error
+ * useful:
+ *
+ *  1. The lane belongs to THIS upstream project, in the role the link's
+ *     `consumes` implies — a `'target'` link consumes one of the upstream's
+ *     translations, a `'source'` link its source lane. Lane ids are globally
+ *     unique (AQU-1606), so a lane id from another project resolves to a real
+ *     row and would otherwise be stored as a lane this upstream has never had.
+ *  2. The lane is not archived. An archived lane is frozen (AQU-1462), so a
+ *     link to one can only ever mirror a corpus nobody may still edit; the
+ *     pickers do not offer one, and accepting it here would create a link that
+ *     looks live and never moves.
+ *  3. The caller may SEE the lane. Linking already requires viewer+ on the
+ *     upstream, but the lane read wall can narrow that to a subset of its
+ *     lanes — and a link is a read: it copies the lane's text into a project the
+ *     caller controls. Without this check, a member granted one lane of an
+ *     upstream could mirror any other lane's translations out of it.
+ *
+ * `null` lane id is the pre-AQU-1605 shape and resolves to "not specified":
+ * every reader then falls back to the upstream's former default lane.
+ */
+export type UpstreamLaneChoice =
+  | { ok: true; laneId: string | null }
+  | { ok: false; error: string; status: 400 | 403 }
+
+export async function resolveUpstreamLinkLane(
+  env: Env,
+  args: {
+    upstreamProjectId: string
+    consumes: "source" | "target"
+    laneId: string | null | undefined
+    userId: number
+    upstreamRole: number
+  },
+): Promise<UpstreamLaneChoice> {
+  const { upstreamProjectId, consumes, laneId, userId, upstreamRole } = args
+  if (!laneId) return { ok: true, laneId: null }
+  const role = consumes === "target" ? "target" : "source"
+  const lane = await env.AQUILLA_PG.prepare(
+    `SELECT id, role, archived_at FROM lanes WHERE id = ? AND project_id = ?`,
+  )
+    .bind(laneId, upstreamProjectId)
+    .first<{ id: string; role: string; archived_at: string | null }>()
+  if (!lane || lane.role !== role) {
+    return {
+      ok: false,
+      status: 400,
+      error: `lane not found on the source project (expected one of its ${role} lanes)`,
+    }
+  }
+  if (lane.archived_at) {
+    return { ok: false, status: 400, error: "that lane is archived" }
+  }
+  // The read wall only ever restricts TARGET lanes, and only below Maintainer;
+  // `visible === null` is an unrestricted caller.
+  if (role === "target") {
+    const { visible } = await visibleTagsForMember(
+      env.AQUILLA_PG,
+      env.LANE_READ_WALL,
+      upstreamProjectId,
+      userId,
+      upstreamRole,
+    )
+    if (visible !== null && !visible.has(laneId)) {
+      return { ok: false, status: 403, error: "no access to that lane of the source project" }
+    }
+  }
+  return { ok: true, laneId }
 }

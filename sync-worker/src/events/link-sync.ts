@@ -210,6 +210,11 @@ export interface LinkRow {
   /** AQU-1560: files being added to this link, as `SourceLinkBackfill` JSON,
    *  or null when nothing is pending. Read through `parseSourceLinkBackfill`. */
   source_link_backfill?: string | null
+  /** AQU-1605: the UPSTREAM lane this link consumes, by `lanes.id`. Null (every
+   *  row before AQU-1616's backfill) means the upstream's `legacy_tag = ''`
+   *  lane — what every link consumed before this slice. Resolved to the tag the
+   *  upstream's events name it by via `resolveConsumedLaneTag`, never read raw. */
+  source_link_lane_id?: string | null
 }
 
 export async function loadLink(db: AquillaDb, downstreamProjectId: string): Promise<LinkRow | null> {
@@ -251,7 +256,59 @@ export async function loadLink(db: AquillaDb, downstreamProjectId: string): Prom
   } catch {
     link.source_link_backfill = null
   }
+  // AQU-1605: same posture again for the consumed lane (migration 0129).
+  // Unreadable = the default lane, which is what every link that predates the
+  // column consumes, so a database without it keeps syncing instead of every
+  // target-consumption link failing closed on a column that is simply not there
+  // yet.
+  try {
+    const row = await db
+      .prepare('SELECT source_link_lane_id FROM projects WHERE id = ?')
+      .bind(downstreamProjectId)
+      .first<{ source_link_lane_id: string | null }>()
+    link.source_link_lane_id = row?.source_link_lane_id ?? null
+  } catch {
+    link.source_link_lane_id = null
+  }
   return link
+}
+
+/**
+ * AQU-1605: the upstream lane a `consumes: 'target'` link reads, as the
+ * `target_lang` tag the upstream's events and projection rows name it by.
+ *
+ * The link stores a lane id (stable across renames and language edits); the
+ * events store a tag. `lanes.legacy_tag` is the immutable bridge between them,
+ * and `uq_lanes_project_legacy_tag` makes the translation lossless. This is the
+ * same "resolve the lane, then use the existing tag-shaped key" move AQU-1612
+ * prescribes for `chain_claims.parent_key` — it keeps the fold's hot queries
+ * tag-shaped, so nothing downstream of here changes when events start carrying
+ * `laneId`.
+ *
+ * - No configured lane → `''`, the default lane: exactly today's behaviour, and
+ *   what every link consumes until AQU-1616's backfill names its lane.
+ * - A configured lane that does not resolve to a target lane of THIS upstream
+ *   (wrong project, archived away to nothing, a source lane, a null tag) →
+ *   `null`, and the caller mirrors nothing. Failing closed is the whole point:
+ *   falling back to the default lane here would quietly pour another language's
+ *   translations into the downstream's source, and a mirrored cell is not
+ *   something the downstream team can tell apart from their own text later.
+ */
+export async function resolveConsumedLaneTag(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  laneId: string | null | undefined,
+): Promise<string | null> {
+  if (!laneId) return ''
+  const row = await db
+    .prepare(
+      `SELECT legacy_tag FROM lanes
+        WHERE id = ? AND project_id = ? AND role = 'target'`,
+    )
+    .bind(laneId, upstreamProjectId)
+    .first<{ legacy_tag: string | null }>()
+  if (!row || row.legacy_tag === null) return null
+  return row.legacy_tag
 }
 
 /**
@@ -855,6 +912,14 @@ interface UpstreamTargetState {
   validated: boolean
 }
 
+/** AQU-1605: the lane a target-side event payload names, normalised. An absent
+ *  or non-string `targetLang` is the default lane (`''`) — the shape the oldest
+ *  events carry — so "absent" never reads as "a lane other than the one this
+ *  link consumes". */
+function laneTagOfPayload(payload: Record<string, unknown>): string {
+  return typeof payload.targetLang === 'string' ? payload.targetLang : ''
+}
+
 /** Fold upstream target-lane events (server_seq > cursor) to latest
  *  commit-state per cell, tracking whether the CURRENT commit has an active
  *  validation (needed for gate='validated'). Mirrors the projection's own
@@ -869,6 +934,8 @@ async function loadUpstreamTargetDelta(
   upstreamProjectId: string,
   sinceSeq: number,
   untilSeq: number,
+  /** AQU-1605: the consumed upstream lane, as its `legacy_tag`. */
+  laneTag: string,
   /** AQU-1560: restrict the read to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
 ): Promise<{ states: Map<string, UpstreamTargetState>; touchedKeys: Set<string> }> {
@@ -907,18 +974,18 @@ async function loadUpstreamTargetDelta(
       continue
     }
 
-    // AQU-538 lanes: v1 target-consumption links consume the upstream's
-    // DEFAULT lane only ('' / absent targetLang). A commit on a non-default
-    // upstream lane is not part of the consumed stream — skip it entirely
-    // (it doesn't mark the cell "touched" either: nothing about the consumed
-    // lane changed). Validate/unvalidate events stay lane-blind here — a
-    // validate of a non-default-lane commit falls through to the
-    // current-state read, which is itself pinned to the default lane.
-    if (
-      row.kind === 'target.cell.commit' &&
-      typeof payload.targetLang === 'string' &&
-      payload.targetLang !== ''
-    ) {
+    // AQU-538 lanes: a target-consumption link consumes ONE upstream lane. A
+    // commit on any other lane is not part of the consumed stream — skip it
+    // entirely (it doesn't mark the cell "touched" either: nothing about the
+    // consumed lane changed). Validate/unvalidate events stay lane-blind here —
+    // a validate of another lane's commit falls through to the current-state
+    // read, which is itself pinned to the consumed lane.
+    //
+    // AQU-1605: `laneTag` is that lane, resolved from `source_link_lane_id`
+    // once per sync. An absent `targetLang` is the default lane ('') — that is
+    // how the oldest events spell it — so the comparison normalises before it
+    // compares rather than treating "absent" as "some other lane".
+    if (row.kind === 'target.cell.commit' && laneTagOfPayload(payload) !== laneTag) {
       continue
     }
     // AQU-1574: a translation the upstream rejected (it lost the head
@@ -970,16 +1037,18 @@ async function loadUpstreamTargetDelta(
 async function loadUpstreamTargetCurrentState(
   db: AquillaDb,
   upstreamProjectId: string,
+  /** AQU-1605: the consumed upstream lane, as its `legacy_tag`. */
+  laneTag: string,
   cellKeys: readonly { fileId: string; cellId: string }[],
 ): Promise<Map<string, { eventId: string; value: string; valueHtml: string | null; validated: boolean }>> {
   const state = new Map<string, { eventId: string; value: string; valueHtml: string | null; validated: boolean }>()
   const results = await selectByCellKeys<{ file_id: string; cell_id: string; event_id: string; value: string; value_html: string | null; validated: number | boolean }>(
     db,
     cellKeys,
-    [upstreamProjectId],
+    [upstreamProjectId, laneTag],
     (placeholders) =>
       `SELECT file_id, cell_id, event_id, value, value_html, validated FROM cells
-       WHERE project_id = ? AND side = 'target' AND target_lang = '' AND (file_id, cell_id) IN (${placeholders})`,
+       WHERE project_id = ? AND side = 'target' AND target_lang = ? AND (file_id, cell_id) IN (${placeholders})`,
   )
   for (const r of results) {
     state.set(`${r.file_id}\0${r.cell_id}`, {
@@ -1101,6 +1170,10 @@ async function loadDeltaTargetConsumption(
    *  every earlier window ended below it and every later one starts above it. */
   untilSeq: number,
   gate: string | null,
+  /** AQU-1605: the upstream lane this link consumes, as its `legacy_tag`. Both
+   *  target reads below are pinned to it; the structural read is lane-blind
+   *  (source rows all store `target_lang = ''`). */
+  laneTag: string,
   /** AQU-1560: restrict both lane reads to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
 ): Promise<{ cells: Map<string, FoldedCell>; fileIds: Set<string> }> {
@@ -1115,6 +1188,7 @@ async function loadDeltaTargetConsumption(
     upstreamProjectId,
     sinceSeq,
     untilSeq,
+    laneTag,
     onlyFileIds,
   )
 
@@ -1135,7 +1209,7 @@ async function loadDeltaTargetConsumption(
   //    delta row — e.g. cast.assign or a retime with no accompanying
   //    commit), we still need the upstream's CURRENT target state to know
   //    whether a mirror row should exist / what text it carries.
-  const currentTargetState = await loadUpstreamTargetCurrentState(db, upstreamProjectId, keyList)
+  const currentTargetState = await loadUpstreamTargetCurrentState(db, upstreamProjectId, laneTag, keyList)
 
   // 4. Structure always comes from the upstream's current source row.
   const structure = await loadUpstreamSourceStructure(db, upstreamProjectId, keyList)
@@ -1507,6 +1581,20 @@ export async function mirrorSync(
   // or a target-only change would never trip `head > cursor`.
   const consumes = link.source_link_consumes === 'target' ? 'target' : 'source'
   const gate = link.source_link_gate === 'head' ? 'head' : 'validated'
+  // AQU-1605: which of the upstream's lanes this link consumes, resolved once
+  // per sync (the fold's hot queries stay tag-shaped — see
+  // resolveConsumedLaneTag). A configured lane that no longer resolves to a
+  // target lane of this upstream mirrors NOTHING rather than silently falling
+  // back to the former default lane, whose text belongs to a different
+  // language: the cursor stays where it is, so the moment the lane resolves
+  // again the window that was skipped is still there to fold.
+  const laneTag = await resolveConsumedLaneTag(db, upstreamProjectId, link.source_link_lane_id)
+  if (laneTag === null) {
+    console.warn(
+      `[link-sync] ${downstreamProjectId}: configured upstream lane ${link.source_link_lane_id} is not a target lane of ${upstreamProjectId} — skipping sync`,
+    )
+    return NOOP_RESULT
+  }
   // AQU-1559: read once per sync and handed to every window — the selection is
   // a property of the link, not of a window. AQU-1560: `let`, because a
   // backfill that finishes below moves its files into it.
@@ -1559,6 +1647,7 @@ export async function mirrorSync(
       upstreamProjectId,
       consumes,
       gate,
+      laneTag,
       cursor,
       head,
       backfill,
@@ -1595,6 +1684,7 @@ export async function mirrorSync(
       upstreamProjectId,
       consumes,
       gate,
+      laneTag,
       fileFilter: followedFileIds,
       sinceSeq,
       untilSeq,
@@ -1612,6 +1702,8 @@ interface RunBackfillArgs {
   upstreamProjectId: string
   consumes: LinkConsumes
   gate: 'head' | 'validated'
+  /** AQU-1605: the consumed upstream lane, as its `legacy_tag`. */
+  laneTag: string
   /** The link's cursor: where the replay ends and the forward fold begins. */
   cursor: number
   /** The run's fenced lane-relevant head, for `deletedByHead`'s lookahead. */
@@ -1677,6 +1769,7 @@ async function runBackfill(db: AquillaDb, args: RunBackfillArgs): Promise<RunBac
       upstreamProjectId,
       consumes: args.consumes,
       gate: args.gate,
+      laneTag: args.laneTag,
       fileFilter,
       sinceSeq: doneSeq,
       untilSeq,
@@ -1804,6 +1897,11 @@ interface MirrorWindowArgs {
   /** The run's (fenced) lane-relevant upstream head — where the last window
    *  ends. Read past `untilSeq` only by `deletedByHead`. */
   head: number
+  /** AQU-1605: the upstream lane a `consumes: 'target'` window folds, as its
+   *  `legacy_tag`. Resolved once per sync from `source_link_lane_id`; `''` (the
+   *  former default lane) for every link that has not named one. Ignored by a
+   *  `consumes: 'source'` window — source rows are not lane-scoped. */
+  laneTag: string
 }
 
 interface MirrorWindowResult {
@@ -1876,11 +1974,11 @@ async function newlyBroughtDeletedUpstreamFiles(
  * `untilSeq`. Everything this holds in memory is bounded by the window.
  */
 async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<MirrorWindowResult> {
-  const { downstreamProjectId, upstreamProjectId, consumes, gate, fileFilter, backfill, sinceSeq, untilSeq, head } = args
+  const { downstreamProjectId, upstreamProjectId, consumes, gate, fileFilter, backfill, sinceSeq, untilSeq, head, laneTag } = args
   const onlyFileIds = backfill?.fileIds
   const { cells: folded, fileIds: deltaFileIds } =
     consumes === 'target'
-      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, onlyFileIds)
+      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, laneTag, onlyFileIds)
       : await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds)
 
   // AQU-1559: a link that follows a fixed list of upstream files drops the rest

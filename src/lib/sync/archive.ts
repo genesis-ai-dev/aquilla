@@ -156,6 +156,10 @@ export interface LinkProjectSourceResult {
   consumes: "source" | "target"
   gate: "head" | "validated"
   previousSourceProjectId: string | null
+  /** AQU-1605: the upstream lane this link consumes, as stored. Null = the
+   *  upstream's former default lane, which is what every link made before that
+   *  slice consumes. Absent from an older server's response. */
+  laneId?: string | null
   /** AQU-476/QA-BUG-1: true if the server-side seed (clone snapshot or the
    *  first live mirror sync) actually ran. False means the caller should
    *  fall back to `triggerLinkSync` before assuming content is present —
@@ -189,6 +193,14 @@ export async function linkProjectSource(
      * because "follow no files" is a mistake rather than a link.
      */
     fileIds?: string[]
+    /**
+     * AQU-1605: WHICH of the upstream's lanes this link consumes, by `lanes.id`.
+     * Omit for the upstream's former default lane — what every link consumed
+     * before that slice. Required in practice whenever the upstream has more
+     * than one lane the user may see and `consumes` is `'target'`: the server
+     * accepts the omission, but it then picks the lane for them.
+     */
+    laneId?: string
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {

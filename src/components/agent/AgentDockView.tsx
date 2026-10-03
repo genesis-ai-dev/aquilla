@@ -11,7 +11,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bot, Paperclip, X } from "lucide-react"
+import { Bot, CheckIcon, CopyIcon, Paperclip, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
@@ -27,6 +29,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, FileCandidate } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { chatTranscript } from "@/lib/agent/transcript"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -326,6 +329,7 @@ function ScopedAgentDockView({
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton className="shadow-sm" />
+            {state.runs.length > 0 && <CopyChatButton text={() => chatTranscript(state.runs)} />}
           </MessageScroller>
         </MessageScrollerProvider>
       )}
@@ -404,5 +408,35 @@ function ScopedAgentDockView({
         }
       />
     </div>
+  )
+}
+
+/** Copies the whole conversation as plain text. Hover-revealed on pointer
+ *  devices (like the step inspector), always visible on touch. */
+function CopyChatButton({ text }: { text: () => string }) {
+  const t = useT()
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  const label = t(copied ? "agent.dock.copiedChat" : "agent.dock.copyChat")
+  return (
+    <AppTooltip content={label} side="left" delay={150}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        data-testid="agent-copy-chat"
+        className="absolute right-2 top-2 z-10 bg-background/80 shadow-sm [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message-scroller:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100"
+        onClick={() => {
+          void navigator.clipboard?.writeText(text()).then(() => setCopied(true), () => {})
+        }}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </AppTooltip>
   )
 }

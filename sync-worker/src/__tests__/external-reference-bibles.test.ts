@@ -55,6 +55,22 @@ async function memberToken(level: number): Promise<{ token: string; userId: numb
   return { token, userId }
 }
 
+/** An ordinary unscoped token for a user who is not a member of PROJECT. */
+async function outsiderToken(): Promise<string> {
+  const userId = nextUserId++
+  await tdb.pg.query(
+    `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, 'h')`,
+    [userId, `u${userId}`, `u${userId}@x.com`],
+  )
+  const { token, tokenHash, tokenPrefix } = await mintApiToken()
+  await tdb.pg.query(
+    `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+     VALUES ($1, $2, 'test', $3, $4, 'act', NULL, NULL)`,
+    [`00000000-0000-0000-0000-${String(++nextCred).padStart(12, '0')}`, String(userId), tokenPrefix, tokenHash],
+  )
+  return token
+}
+
 async function prepare(token: string, command: Record<string, unknown>) {
   const res = (await handleExternalChangesetsRequest(
     new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
@@ -235,6 +251,39 @@ describe('ProjectSetup settings.referenceBibleVersions', () => {
     })
     expect(res.status).toBe(400)
     expect(body.error.details.field).toBe('settings.referenceBibleVersions')
+  })
+
+  // Review 2026-10-02: the lane check's error names the target language and
+  // every lane, so it must not run before the role floor.
+  it('a caller without the role gets permission_denied, not the lane list', async () => {
+    const callers = [await outsiderToken(), (await memberToken(400)).token]
+    for (const token of callers) {
+      const { res, body } = await prepare(token, {
+        kind: 'ProjectSetup',
+        projectId: PROJECT,
+        settings: { referenceBibleVersions: { zz: 'arb-vandyck' } },
+      })
+      expect(res.status).toBe(403)
+      expect(body.error.code).toBe('permission_denied')
+      const text = JSON.stringify(body)
+      expect(text).not.toContain('Arabic')
+      expect(text).not.toContain('Lanes')
+    }
+  })
+
+  it('a caller without the role is not shown the current policy values either', async () => {
+    await tdb.pg.query(`UPDATE project_settings SET settings = $1 WHERE project_id = $2`, [
+      JSON.stringify({ sourceLanguage: 'English', targetLanguage: 'Arabic', targetLanes: ['Arabic', 'en'], validationCount: 3 }),
+      PROJECT,
+    ])
+    const { res, body } = await prepare(await outsiderToken(), {
+      kind: 'ProjectSetup',
+      projectId: PROJECT,
+      settings: { validationCount: 1 },
+    })
+    expect(res.status).toBe(403)
+    expect(body.error.message).toBe('insufficient project role to stage this project setup')
+    expect(JSON.stringify(body)).not.toContain('loosening')
   })
 
   it('stages a valid choice, including one for a lane the same plan registers', async () => {

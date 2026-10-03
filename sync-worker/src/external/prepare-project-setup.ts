@@ -152,6 +152,30 @@ export async function prepareProjectSetup(
     if (problem) return fieldError('validation_failed', `settings.${op.key}`, problem)
   }
 
+  // ── brief sections ───────────────────────────────────────────────────────
+  for (const sectionId of Object.keys(cmd.brief?.parameters ?? {})) {
+    if (!isBriefFieldId(sectionId)) {
+      return fieldError(
+        'validation_failed',
+        `brief.parameters.${sectionId}`,
+        `unknown brief section "${sectionId}" — call describe_command("SetBrief") for the section ids`,
+      )
+    }
+  }
+
+  // ── role floor (live) ────────────────────────────────────────────────────
+  const requiredRole = await projectSetupFloor(db, urlProjectId, cmd, ops)
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
+  if (!role || role.level < requiredRole) {
+    return errorResponse('permission_denied', 'insufficient project role to stage this project setup', {
+      requiredRole,
+    })
+  }
+
+  // Checks that read the project's live settings come AFTER the role floor:
+  // their errors echo lane names, the target language and current policy
+  // values, which a caller without the role must not learn (review
+  // 2026-10-02; PatchSettings orders it the same way).
   const current = await loadProjectSettings(db, urlProjectId)
 
   // AQU-1573: the shape passed above; the Bible must be installed and each lane
@@ -172,26 +196,6 @@ export async function prepareProjectSetup(
         loosening: loosening.map(({ key, current: c, proposed, reason }) => ({ key, current: c, proposed, reason })),
       },
     )
-  }
-
-  // ── brief sections ───────────────────────────────────────────────────────
-  for (const sectionId of Object.keys(cmd.brief?.parameters ?? {})) {
-    if (!isBriefFieldId(sectionId)) {
-      return fieldError(
-        'validation_failed',
-        `brief.parameters.${sectionId}`,
-        `unknown brief section "${sectionId}" — call describe_command("SetBrief") for the section ids`,
-      )
-    }
-  }
-
-  // ── role floor (live) ────────────────────────────────────────────────────
-  const requiredRole = await projectSetupFloor(db, urlProjectId, cmd, ops)
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
-  if (!role || role.level < requiredRole) {
-    return errorResponse('permission_denied', 'insufficient project role to stage this project setup', {
-      requiredRole,
-    })
   }
 
   const warnings: ChangesetWarning[] = []

@@ -256,6 +256,56 @@ describe("a heading counts with the verse below it (AQU-1493)", () => {
     expect(await row(db, "section", "GEN 2")).toEqual({ total_count: 2, filled_count: 0 })
   })
 
+  // Decision 2026-10-02: a book's title, header, TOC and introduction are the
+  // BOOK's front matter, as USFM has it and as the lossless importer keys them
+  // ("GEN:mt1:1"). The plain USFM importer gives "\mt1 Genesis" no reference;
+  // it must not land in chapter 1 because of which importer was used.
+  it("keeps a book's title at the top of the file in front matter, and its first heading in chapter 1", async () => {
+    const { db } = await makeTestDb({
+      cells: chain([
+        { id: "mt", type: "paratext" },
+        { id: "toc", type: "paratext" },
+        { id: "h1", type: "heading" },
+        { id: "g11", ref: "GEN 1:1" },
+      ]),
+    })
+    await recompute(db)
+    expect(await row(db, "section", "GEN")).toEqual({ total_count: 2, filled_count: 0 })
+    expect(await row(db, "section", "GEN 1")).toEqual({ total_count: 2, filled_count: 0 })
+    expect(await row(db, "book", "GEN")).toEqual({ total_count: 4, filled_count: 0 })
+  })
+
+  it("puts the next book's title on that book's front matter in a file of several", async () => {
+    const { db } = await makeTestDb({
+      cells: chain([
+        { id: "g50", ref: "GEN 50:26" },
+        { id: "xAdded" },
+        { id: "mtExo", type: "paratext" },
+        { id: "hExo", type: "heading" },
+        { id: "e11", ref: "EXO 1:1" },
+      ]),
+    })
+    await recompute(db)
+    // The line added under 50:26 stays with it; the title opens Exodus.
+    expect(await row(db, "section", "GEN 50")).toEqual({ total_count: 2, filled_count: 0 })
+    expect(await row(db, "section", "EXO")).toEqual({ total_count: 1, filled_count: 0 })
+    expect(await row(db, "section", "EXO 1")).toEqual({ total_count: 2, filled_count: 0 })
+    expect(await row(db, "book", "EXO")).toEqual({ total_count: 3, filled_count: 0 })
+  })
+
+  it("lets paratext under a book's first heading follow the heading", async () => {
+    const { db } = await makeTestDb({
+      cells: chain([
+        { id: "h1", type: "heading" },
+        { id: "r", type: "paratext" },
+        { id: "g11", ref: "GEN 1:1" },
+      ]),
+    })
+    await recompute(db)
+    expect(await keys(db, "section")).toEqual(["GEN 1"])
+    expect(await row(db, "section", "GEN 1")).toEqual({ total_count: 3, filled_count: 0 })
+  })
+
   it("falls back to the line above for a heading with no verse below it", async () => {
     const { db } = await makeTestDb({
       cells: chain([

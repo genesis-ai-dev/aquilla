@@ -112,6 +112,16 @@ function introducesSql(alias: string): string {
 }
 
 /**
+ * Whether a cell is a SECTION heading — the introducing type that introduces a
+ * chapter's verses. The other one, paratext, is a book's title, running header,
+ * table of contents or introduction, which introduces the BOOK: at the start
+ * of a book it stays on that book's front matter (see `inheritedKeysSql`).
+ */
+function isSectionHeadingSql(alias: string): string {
+  return `(COALESCE(${alias}.type, '') = 'heading')`
+}
+
+/**
  * AQU-1493: where a line with no verse reference is COUNTED — one row per such
  * source cell, as a self-contained query to use as a CTE body. `filesSql`
  * yields the (project_id, file_id) rows to look in (see `oneScriptureFileSql`)
@@ -129,9 +139,19 @@ function introducesSql(alias: string): string {
  *   Genesis 1, every chapter-opening heading in the chapter before it, and a
  *   book's opening heading in the previous book. With no referenced line
  *   below (end of file) a heading falls back to the line above.
+ * - a book's title, header, table of contents or introduction (paratext, as
+ *   opposed to a section heading) at the START of a book — at the top of the
+ *   file, or between the last verse of one book and the first of the next —
+ *   belongs to that book's FRONT MATTER, not its chapter 1 (decision,
+ *   2026-10-02). The plain USFM importer gives "\mt1 Genesis" no reference,
+ *   while the lossless one keys the same line "GEN:mt1:1", already front
+ *   matter; the board's answer should not depend on the importer. Paratext in
+ *   the middle of a book (\ms, \r) introduces what follows like a heading.
  * Applied together, per RUN (a maximal stretch of lines with no reference):
  * lines before the run's first heading take the line above; that heading and
- * EVERYTHING after it in the run take the line below. So a line added right
+ * EVERYTHING after it in the run take the line below — except, in a run that
+ * starts a book, the paratext before the run's first section heading, which
+ * takes the front matter of the book below. So a line added right
  * under "The Seventh Day" counts where the heading counts (Genesis 2), and one
  * added after 1:31, above the heading, stays in Genesis 1 — "the line above"
  * for an added line is the heading when there is one. The editor's own chapter
@@ -174,20 +194,21 @@ export function inheritedKeysSql(filesSql: string): string {
              ${filesSql}
            ), ik_unref AS MATERIALIZED (
              SELECT u.project_id, u.file_id, u.cell_id, u.anchor_cell_id,
-                    ${introducesSql('u')} AS introduces
+                    ${introducesSql('u')} AS introduces,
+                    ${isSectionHeadingSql('u')} AS section_heading
                FROM ik_files f
                JOIN cells u ON u.project_id = f.project_id AND u.file_id = f.file_id
                            AND u.side = 'source'
               WHERE ${own('u')} = ''
            ), ik_run (project_id, file_id, cell_id, run_id, above_key, above_ref,
-                      depth, own_key, own_ref, after_intro) AS (
+                      depth, own_key, own_ref, after_intro, after_heading) AS (
              -- A run starts at a line with no reference hanging below a
              -- referenced line (above_key = that line's chapter), or at the
              -- head of the file (above_key NULL). Its first line names it.
              SELECT u.project_id, u.file_id, u.cell_id, u.cell_id,
                     CASE WHEN u.anchor_cell_id IS NULL THEN NULL::text ELSE ${own('a')} END,
                     COALESCE(a.canonical_ref, ''::text),
-                    1, ''::text, NULL::text, u.introduces
+                    1, ''::text, NULL::text, u.introduces, u.section_heading
                FROM ik_unref u
                LEFT JOIN cells a ON a.project_id = u.project_id AND a.file_id = u.file_id
                                 AND a.side = 'source' AND a.cell_id = u.anchor_cell_id
@@ -196,10 +217,12 @@ export function inheritedKeysSql(filesSql: string): string {
              -- …and runs down the chain to the first referenced line below it,
              -- which is included (own_key <> '') and goes no further. A cell has
              -- one anchor, so this is a tree walk from a root outside the run:
-             -- it cannot cycle. after_intro: a heading at or above this line.
+             -- it cannot cycle. after_intro: a heading or paratext at or above
+             -- this line in the run; after_heading: a section heading.
              SELECT n.project_id, n.file_id, n.cell_id, r.run_id, r.above_key, r.above_ref,
                     r.depth + 1, ${own('n')}, n.canonical_ref,
-                    r.after_intro OR ${introducesSql('n')}
+                    r.after_intro OR ${introducesSql('n')},
+                    r.after_heading OR ${isSectionHeadingSql('n')}
                FROM ik_run r
                JOIN cells n ON n.project_id = r.project_id AND n.file_id = r.file_id
                            AND n.side = 'source' AND n.anchor_cell_id = r.cell_id
@@ -231,8 +254,15 @@ export function inheritedKeysSql(filesSql: string): string {
                ) firsts
               ORDER BY project_id, file_id, depth, first_key
            ), ik_placed AS (
+             -- to_front: paratext opening a book (the run is at the top of the
+             -- file, or the book changes across it) and above its first
+             -- section heading — the book below's front matter.
              SELECT r.project_id, r.file_id, r.cell_id,
                     (r.after_intro AND e.below_key IS NOT NULL) AS to_below,
+                    (r.after_intro AND NOT r.after_heading AND e.below_key IS NOT NULL
+                      AND (r.above_key IS NULL
+                           OR SPLIT_PART(r.above_key, ' ', 1) <> SPLIT_PART(e.below_key, ' ', 1)))
+                      AS to_front,
                     r.above_key, r.above_ref, r.depth,
                     e.below_key, e.below_ref, e.below_depth, fr.book_key
                FROM ik_run r
@@ -242,7 +272,8 @@ export function inheritedKeysSql(filesSql: string): string {
               WHERE r.own_key = ''
            )
            SELECT p.project_id, p.file_id, p.cell_id,
-                  CASE WHEN p.to_below THEN p.below_key
+                  CASE WHEN p.to_front THEN SPLIT_PART(p.below_key, ' ', 1)
+                       WHEN p.to_below THEN p.below_key
                        ELSE COALESCE(p.above_key, p.book_key) END AS section_key,
                   CASE WHEN p.to_below THEN p.below_ref
                        WHEN p.above_key IS NOT NULL THEN p.above_ref

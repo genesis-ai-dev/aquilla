@@ -594,10 +594,10 @@ export const projectSettings = defineNamespace({
     // AQU-1573 — the Bible each target language copies quoted verses from.
     "projectSettings.section.referenceBible": "Reference Bible",
     "projectSettings.referenceBible.description":
-      "Choose the Bible each language quotes from. When a source line gives a verse " +
-      "reference, such as Isaiah 40:25, the AI copies that verse from this Bible instead " +
-      "of translating it, and a check warns when a quoted verse does not match. This is " +
-      "separate from Bible resources.",
+      "Choose the Bible each language quotes from. When a source line quotes a verse and " +
+      "gives its reference, such as Isaiah 40:25, the AI copies the quoted words from this " +
+      "Bible instead of translating them, and a check warns when a quote does not match. " +
+      "A verse that is only mentioned is translated as usual. This is separate from Bible resources.",
     "projectSettings.referenceBible.defaultLane": "Default language",
     "projectSettings.referenceBible.none": "None",
     "projectSettings.referenceBible.optionLabel": "{name} ({language})",

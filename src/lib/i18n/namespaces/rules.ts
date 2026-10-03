@@ -87,7 +87,7 @@ export const rules = defineNamespace({
       "ALL-CAPS abbreviations from source missing in translation.",
     "rules.builtin.referenceQuote.name": "Reference Bible quotes",
     "rules.builtin.referenceQuote.description":
-      "A verse the source cites must be quoted word for word from the language's reference Bible. Vowel marks and punctuation are ignored, and a partial quote is fine.",
+      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",

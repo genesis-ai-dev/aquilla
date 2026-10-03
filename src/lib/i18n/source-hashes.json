@@ -40737,7 +40737,7 @@
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
     "workspace.analysis.skipped": "e23b1f00abf0439f",
     "projectSettings.section.referenceBible": "a421af95909ebf88",
-    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.description": "9c4041bf3848885d",
     "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
     "projectSettings.referenceBible.none": "dc937b59892604f5",
     "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
@@ -40749,7 +40749,7 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47319,7 +47319,7 @@
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
     "workspace.analysis.skipped": "e23b1f00abf0439f",
     "projectSettings.section.referenceBible": "a421af95909ebf88",
-    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.description": "9c4041bf3848885d",
     "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
     "projectSettings.referenceBible.none": "dc937b59892604f5",
     "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
@@ -47331,7 +47331,7 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53812,7 +53812,7 @@
     "workspace.analysis.ratesNote": "1850285e66a7d5f9",
     "workspace.analysis.skipped": "e23b1f00abf0439f",
     "projectSettings.section.referenceBible": "a421af95909ebf88",
-    "projectSettings.referenceBible.description": "f86ef1eff38773eb",
+    "projectSettings.referenceBible.description": "9c4041bf3848885d",
     "projectSettings.referenceBible.defaultLane": "730f861754ffc2d7",
     "projectSettings.referenceBible.none": "dc937b59892604f5",
     "projectSettings.referenceBible.notInstalled": "2ec56f8a6f3966f2",
@@ -53824,6 +53824,6 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "83c7f7e1fc1523f9"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
   }
 }

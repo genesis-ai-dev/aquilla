@@ -154,7 +154,7 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     id: "reference-quote",
     name: "Reference Bible quotes",
     description:
-      "A verse the source cites must be quoted word for word from the language's reference Bible. Vowel marks and punctuation are ignored, and a partial quote is fine.",
+      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine.",
     defaultSeverity: "minor",
     defaultEnabled: true,
     runsOnEmptyTarget: false,

@@ -1216,7 +1216,11 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // AQU-1609: the lane is identified by `laneId`. `lane` remains accepted as
   // the legacy target-language tag, resolved below, so a client deployed before
   // this change keeps working — the SPA and the Worker ship separately.
-  const laneIdParam = c.req.query("laneId")
+  // An EMPTY `laneId` counts as absent, not as "the lane whose id is ''": no
+  // lane carries that id, so honouring it literally would read every count as
+  // zero — and a client mid-migration that has the param wired but not yet a
+  // lane id to put in it is exactly the caller that would send it empty.
+  const laneIdParam = c.req.query("laneId")?.trim() || undefined
   const laneTag = c.req.query("lane") ?? ""
 
   const role = await resolveProjectRole(c.env, user, projectId)

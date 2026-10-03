@@ -207,6 +207,20 @@ describe("AQU-1609: GET /assignments/unit identifies the lane by id", () => {
     expect(body.assignments.find((a) => a.assignmentId === "as-one")?.validated).toBe(1)
   })
 
+  it("treats an empty laneId as absent and falls back to the lane tag", async () => {
+    await seedTwoSameLanguageLanes()
+    const res = await app.request(
+      "/api/v2/projects/pb/assignments/unit?fileId=f1&section=ACT&laneId=&lane=Spanish",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { assignments: Array<{ assignmentId: string; validated: number }> }
+    // No lane has the id '', so honouring an empty laneId literally would read
+    // every count as zero and look like nobody had done any work.
+    expect(body.assignments.find((a) => a.assignmentId === "as-one")?.validated).toBe(1)
+  })
+
   it("prefers laneId over a lane tag naming a different lane", async () => {
     await seedTwoSameLanguageLanes()
     const res = await app.request(

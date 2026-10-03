@@ -118,9 +118,17 @@ interface Grounding {
   scripture: boolean
 }
 
-/** "MRK 4:12" / "MRK 4": a cell of a Bible book, as opposed to a sermon's own labels. */
-function isScriptureRef(ref: string | null): boolean {
-  const m = ref?.trim().match(/^([1-3A-Z][A-Z0-9]{2})\s+\d+/)
+/**
+ * A cell of a Bible book or a Bible story, as opposed to a sermon's own
+ * labels: "MRK 4:12" / "MRK 4", the USFM front matter and headings the
+ * importer refs "GEN:h:1" / "GEN:mt1:1", and Open Bible Stories frames
+ * "OBS 1:1". Every one of these was drafted as "a scripture translation
+ * project" before AQU-1573 and must stay so (review 2026-10-02).
+ */
+export function isScriptureRef(ref: string | null): boolean {
+  const trimmed = ref?.trim() ?? ""
+  if (/^OBS\s+\d/.test(trimmed)) return true
+  const m = trimmed.match(/^([1-3A-Z][A-Z0-9]{2})(?:\s+\d|:)/)
   return !!m && isKnownBookCode(m[1])
 }
 

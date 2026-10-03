@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
 import { AliasMap } from "../lib/agent/compress"
 import type { EmitStageContext } from "../lib/agent/emit-stage"
-import { executeDraft } from "../lib/agent/tools/draft"
+import { executeDraft, isScriptureRef } from "../lib/agent/tools/draft"
 import { installFixtureReferenceBibles } from "../../../db/shared/reference-bible-fixtures"
 import { lookupPassages } from "../../../db/shared/reference-bible"
 import { REFERENCE_VERSES_HEADING } from "../../../src/lib/completion/prompt-build"
@@ -172,5 +172,19 @@ describe("agent draft — reference Bible verses (AQU-1573)", () => {
     await executeDraft(env.AQUILLA_PG, { ref: "MRK 4" }, ctx(), MODEL)
     expect(requests[0].messages[0].content).toContain("You draft for a scripture translation project.")
     expect(requests[0].messages[0].content).not.toContain(REFERENCE_VERSES_HEADING)
+  })
+})
+
+describe("isScriptureRef (AQU-1573 review)", () => {
+  it("keeps every Scripture ref shape on the scripture wording", () => {
+    for (const ref of ["MRK 4:12", "MRK 4", "1CO 13:4", "GEN:h:1", "GEN:mt1:1", "PSA:d:1", "OBS 1:1", " JHN 3:16 "]) {
+      expect(isScriptureRef(ref), ref).toBe(true)
+    }
+  })
+
+  it("treats a sermon's own labels and empty refs as not Scripture", () => {
+    for (const ref of [null, "", "Session 1", "§2", "S1:3", "ABC 1:1", "XYZ:h:1", "OBS", "Intro 1"]) {
+      expect(isScriptureRef(ref), String(ref)).toBe(false)
+    }
   })
 })

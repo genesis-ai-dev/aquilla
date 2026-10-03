@@ -111,6 +111,7 @@
     "deploy:honeycomb": "npm run build:honeycomb && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
     "prepare": "husky",
+    "worktree:new": "tsx scripts/worktree-new.ts",
     "seams:eval": "tsx scripts/seam-eval.ts",
     "tags:eval": "tsx scripts/passage-tags-eval.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",

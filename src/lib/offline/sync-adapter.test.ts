@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
-import { schema, tables, events, cellRowId } from "./schema"
+import { schema, tables, events, cellRowId, DEFAULT_LANE_KEY, localLaneKey } from "./schema"
 import { createOfflineSyncAdapter, type MintToken } from "./sync-adapter"
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
@@ -136,7 +136,7 @@ describe("createOfflineSyncAdapter", () => {
     })
 
     const row = store.query(
-      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target") }).first(),
+      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first(),
     )
     expect(row).toMatchObject({ value: "En el principio", eventId: "evt-1" })
 
@@ -182,7 +182,7 @@ describe("createOfflineSyncAdapter", () => {
     ws.receive({ t: "event.stale", id: "q1", reason: "parent mismatch" })
 
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
-    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target"))).toBe(true)
+    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY))).toBe(true)
 
     adapter.close()
   })
@@ -282,7 +282,7 @@ describe("flushNow", () => {
     await adapter.flushNow()
 
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
-    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target"))).toBe(true)
+    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY))).toBe(true)
 
     adapter.close()
   })
@@ -576,7 +576,7 @@ describe("catch-up", () => {
     adapter.close()
   })
 
-  it("ignores rows for non-default target lanes in live frames", async () => {
+  it("stores every target lane's rows from a live frame, keyed per lane (AQU-1614)", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const adapter = createOfflineSyncAdapter({
       projectId: "proj1",
@@ -611,10 +611,68 @@ describe("catch-up", () => {
       rows: [row("", "In the beginning"), row("es", "En el principio")],
     })
 
-    const stored = store.query(
-      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target") }).first(),
-    )
-    expect(stored).toMatchObject({ value: "In the beginning", eventId: "evt-default" })
+    const laneRow = (laneKey: string) =>
+      store.query(
+        tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", laneKey) }).first(),
+      )
+    expect(laneRow(DEFAULT_LANE_KEY)).toMatchObject({
+      value: "In the beginning",
+      eventId: "evt-default",
+      targetLang: "",
+    })
+    expect(laneRow(localLaneKey(null, "es"))).toMatchObject({
+      value: "En el principio",
+      eventId: "evt-es",
+      targetLang: "es",
+    })
+    // The second lane no longer overwrites the first: two rows, not one.
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", fileId: "file1" }))).toHaveLength(2)
+
+    adapter.close()
+  })
+
+  it("keys a live frame's row by lanes.id once the server sends one (AQU-1614)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.receive({
+      t: "event.applied",
+      id: "evt-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      rows: [
+        {
+          cellId: "GEN 1:1",
+          side: "target",
+          targetLang: "es",
+          laneId: "lane-es",
+          value: "En el principio",
+          valueHtml: null,
+          eventId: "evt-es",
+          sourceEventId: null,
+          validated: false,
+          aiDrafted: false,
+          sequenceIndex: 0,
+          canonicalRef: null,
+        },
+      ],
+    })
+
+    expect(
+      store.query(
+        tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", "lane-es") }).first(),
+      ),
+    ).toMatchObject({ value: "En el principio", laneId: "lane-es", targetLang: "es" })
 
     adapter.close()
   })

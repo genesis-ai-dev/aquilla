@@ -44,6 +44,12 @@ describe("findScriptureReferences (AQU-1573)", () => {
     expect(canon("Ps 23:1")).toEqual(["PSA 23:1"])
     expect(canon("Revelation 3:20 and Revelations 21:4")).toEqual(["REV 3:20", "REV 21:4"])
     expect(canon("Phil 4:13 and Philem 6")).toEqual(["PHP 4:13", "PHM 1:6"])
+    // Forms PR #1080's table knew and this one lacked: "Phlm" and the USFM-style
+    // three-letter codes some study Bibles print.
+    expect(canon("Phlm 6")).toEqual(["PHM 1:6"])
+    expect(canon("Sng 2:4, Jol 2:28, Amo 5:24, Oba 15 and Nam 1:7")).toEqual(
+      ["SNG 2:4", "JOL 2:28", "AMO 5:24", "OBA 1:15", "NAM 1:7"],
+    )
   })
 
   it("reads ranges, cross-chapter ranges and dot separators", () => {

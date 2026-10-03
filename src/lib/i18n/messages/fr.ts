@@ -4675,7 +4675,7 @@ export const fr: Catalog = {
   "projectSettings.referenceBible.notInstalled": "{id} (non installée)",
   "projectSettings.referenceBible.noneInstalled": "Aucune Bible de référence n'est encore installée sur ce serveur.",
   "projectSettings.referenceBible.loading": "Chargement des Bibles…",
-  "projectSettings.referenceBible.loadFailed": "Impossible de charger la liste des Bibles. Réessayez plus tard.",
+  "projectSettings.referenceBible.loadFailed": "Impossible de charger la liste des Bibles.",
   "projectSettings.referenceBible.selectLabel": "Bible de référence pour {lane}",
   "projectSettings.referenceBible.saveFailed": "Impossible d'enregistrer cette modification",
   "projectSettings.validation.allowSelfLabel": "Autoriser l'auto-validation",

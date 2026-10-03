@@ -605,7 +605,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.referenceBible.noneInstalled":
       "No reference Bibles are installed on this server yet.",
     "projectSettings.referenceBible.loading": "Loading the Bibles…",
-    "projectSettings.referenceBible.loadFailed": "Could not load the list of Bibles. Try again later.",
+    "projectSettings.referenceBible.loadFailed": "Could not load the list of Bibles.",
     "projectSettings.referenceBible.selectLabel": "Reference Bible for {lane}",
     "projectSettings.referenceBible.saveFailed": "Could not save that change",
 
@@ -1107,13 +1107,17 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.referenceBible.noneInstalled": {
-        description: "Shown in the Reference Bible card, instead of the dropdowns, when the server has no Bibles loaded.",
+        description:
+          "Shown in the Reference Bible card when the server has no Bibles loaded: on its own, or above " +
+          "the dropdowns when a language still names a Bible from before.",
       },
       "projectSettings.referenceBible.loading": {
         description: "Shown in the Reference Bible card while the list of Bibles loads.",
       },
       "projectSettings.referenceBible.loadFailed": {
-        description: "Shown in the Reference Bible card when the list of Bibles could not be loaded.",
+        description:
+          "Shown in the Reference Bible card when the list of Bibles could not be loaded, next to a " +
+          "Retry button.",
       },
       "projectSettings.referenceBible.selectLabel": {
         description: "Accessible name of one language's Bible dropdown (read by screen readers).",

@@ -4741,7 +4741,7 @@ export const ru: Catalog = {
   "projectSettings.referenceBible.notInstalled": "{id} (не установлена)",
   "projectSettings.referenceBible.noneInstalled": "На этом сервере пока не установлено ни одной Библии для цитат.",
   "projectSettings.referenceBible.loading": "Загрузка списка Библий…",
-  "projectSettings.referenceBible.loadFailed": "Не удалось загрузить список Библий. Повторите попытку позже.",
+  "projectSettings.referenceBible.loadFailed": "Не удалось загрузить список Библий.",
   "projectSettings.referenceBible.selectLabel": "Библия для цитат: {lane}",
   "projectSettings.referenceBible.saveFailed": "Не удалось сохранить это изменение",
   "projectSettings.validation.allowSelfLabel": "Разрешить самоподтверждение",

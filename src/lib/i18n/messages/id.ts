@@ -4704,7 +4704,7 @@ export const id: Catalog = {
   "projectSettings.referenceBible.notInstalled": "{id} (tidak terpasang)",
   "projectSettings.referenceBible.noneInstalled": "Belum ada Alkitab acuan yang terpasang di server ini.",
   "projectSettings.referenceBible.loading": "Memuat daftar Alkitab…",
-  "projectSettings.referenceBible.loadFailed": "Tidak dapat memuat daftar Alkitab. Coba lagi nanti.",
+  "projectSettings.referenceBible.loadFailed": "Tidak dapat memuat daftar Alkitab.",
   "projectSettings.referenceBible.selectLabel": "Alkitab acuan untuk {lane}",
   "projectSettings.referenceBible.saveFailed": "Tidak dapat menyimpan perubahan itu",
   "projectSettings.validation.allowSelfLabel": "Izinkan validasi mandiri",

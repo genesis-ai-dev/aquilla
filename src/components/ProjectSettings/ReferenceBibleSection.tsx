@@ -15,6 +15,7 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
 import { SettingsBlock, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
@@ -66,14 +67,21 @@ export function ReferenceBibleSection({
   const t = useT()
   const [versions, setVersions] = useState<ReferenceBibleSummary[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
+  /** Bumped by "Retry" to load the list again. */
+  const [attempt, setAttempt] = useState(0)
   const [busyLane, setBusyLane] = useState<string | null>(null)
   const [errorLane, setErrorLane] = useState<{ lane: string; message: string } | null>(null)
 
+  // Re-runs when the session token refreshes (loadVersions changes) and on
+  // "Retry". A later success clears an earlier failure; a failed refetch keeps
+  // a list that already loaded rather than replacing it with the error.
   useEffect(() => {
     let cancelled = false
     loadVersions()
       .then((list) => {
-        if (!cancelled) setVersions(list)
+        if (cancelled) return
+        setVersions(list)
+        setLoadFailed(false)
       })
       .catch(() => {
         if (!cancelled) setLoadFailed(true)
@@ -81,7 +89,7 @@ export function ReferenceBibleSection({
     return () => {
       cancelled = true
     }
-  }, [loadVersions])
+  }, [loadVersions, attempt])
 
   const rows = referenceBibleLaneRows(targetLanguage, targetLanes, archivedLanes, laneRecords)
   const settings = { referenceBibleVersions: value, targetLanguage }
@@ -99,11 +107,28 @@ export function ReferenceBibleSection({
     setBusyLane(null)
   }
 
+  // A lane can name a Bible the server lacks (copied settings, a database the
+  // loader has not run on): its row still shows, so the choice can be seen and
+  // cleared, even when no Bible at all is installed.
+  const anyChosen = rows.some((row) => referenceBibleForLane(settings, row.tag) !== null)
+
   let body: ReactNode
-  if (loadFailed) {
+  if (versions === null && loadFailed) {
     body = (
-      <SettingsBlock className="text-sm text-muted-foreground">
-        {t("projectSettings.referenceBible.loadFailed")}
+      <SettingsBlock className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>{t("projectSettings.referenceBible.loadFailed")}</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="reference-bible-retry"
+          onClick={() => {
+            setLoadFailed(false)
+            setAttempt((n) => n + 1)
+          }}
+        >
+          {t("common.retry")}
+        </Button>
       </SettingsBlock>
     )
   } else if (versions === null) {
@@ -112,17 +137,18 @@ export function ReferenceBibleSection({
         {t("projectSettings.referenceBible.loading")}
       </SettingsBlock>
     )
-  } else if (versions.length === 0) {
+  } else if (versions.length === 0 && !anyChosen) {
     body = (
       <SettingsBlock className="text-sm text-muted-foreground" data-testid="reference-bible-none-installed">
         {t("projectSettings.referenceBible.noneInstalled")}
       </SettingsBlock>
     )
   } else {
-    body = rows.map((row) => {
+    const installedList = versions
+    const laneRows = rows.map((row) => {
       const current = referenceBibleForLane(settings, row.tag)
-      const installed = current ? versions.some((v) => v.id === current) : true
-      const sorted = sortBiblesForLane(versions, row.language)
+      const installed = current ? installedList.some((v) => v.id === current) : true
+      const sorted = sortBiblesForLane(installedList, row.language)
       const options = [
         { value: NONE, label: t("projectSettings.referenceBible.none") },
         ...(current && !installed
@@ -176,6 +202,16 @@ export function ReferenceBibleSection({
         />
       )
     })
+    body = installedList.length === 0 ? (
+      <>
+        <SettingsBlock className="text-sm text-muted-foreground" data-testid="reference-bible-none-installed">
+          {t("projectSettings.referenceBible.noneInstalled")}
+        </SettingsBlock>
+        {laneRows}
+      </>
+    ) : (
+      laneRows
+    )
   }
 
   return (

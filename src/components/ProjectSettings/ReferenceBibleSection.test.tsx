@@ -121,6 +121,51 @@ describe("ReferenceBibleSection", () => {
     expect(await screen.findByText(/Could not load the list of Bibles/)).toBeTruthy()
   })
 
+  it("keeps a stored choice visible, and clearable, when no Bible is installed (review 2026-10-02)", async () => {
+    const { onPatch } = renderCard({ value: { "": "arb-vandyck" }, loadVersions: () => Promise.resolve([]) })
+    expect(await screen.findByTestId("reference-bible-none-installed")).toHaveTextContent(
+      "No reference Bibles are installed on this server yet.",
+    )
+    const arabic = screen.getByRole("combobox", { name: "Reference Bible for Arabic" })
+    expect(arabic).toHaveTextContent("arb-vandyck (not installed)")
+    expect(screen.getByRole("combobox", { name: "Reference Bible for Plain English" })).toHaveTextContent("None")
+    await pick(arabic, "None")
+    await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ referenceBibleVersions: {} }))
+  })
+
+  it("offers Retry after a failed load, and shows the list once it loads (review 2026-10-02)", async () => {
+    const loadVersions = vi
+      .fn<() => Promise<ReferenceBibleSummary[]>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue([KJV, VAN_DYCK])
+    renderCard({ loadVersions })
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
+    expect(await screen.findByRole("combobox", { name: "Reference Bible for Arabic" })).toBeTruthy()
+    expect(screen.queryByText(/Could not load the list of Bibles/)).toBeNull()
+    expect(loadVersions).toHaveBeenCalledTimes(2)
+  })
+
+  it("clears the error when a refetch (a refreshed session) succeeds, and keeps a loaded list when one fails", async () => {
+    const failing = () => Promise.reject(new Error("offline"))
+    const { rerender, onPatch } = renderCard({ loadVersions: failing })
+    expect(await screen.findByText(/Could not load the list of Bibles/)).toBeTruthy()
+    const base = {
+      value: undefined as unknown,
+      targetLanguage: "Arabic",
+      targetLanes: ["Arabic", "en", "fr"],
+      archivedLanes: ["fr"],
+      laneRecords: LANES,
+      onPatch,
+    }
+    rerender(<ReferenceBibleSection {...base} loadVersions={() => Promise.resolve([KJV, VAN_DYCK])} />)
+    expect(await screen.findByRole("combobox", { name: "Reference Bible for Arabic" })).toBeTruthy()
+    expect(screen.queryByText(/Could not load the list of Bibles/)).toBeNull()
+    rerender(<ReferenceBibleSection {...base} loadVersions={() => Promise.reject(new Error("blip"))} />)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(screen.getByRole("combobox", { name: "Reference Bible for Arabic" })).toBeTruthy()
+    expect(screen.queryByText(/Could not load the list of Bibles/)).toBeNull()
+  })
+
   it("is read-only for someone who cannot edit shared settings", async () => {
     renderCard({ disabled: true, disabledTooltip: "Only Maintainers can modify" })
     const trigger = await screen.findByRole("combobox", { name: "Reference Bible for Arabic" })

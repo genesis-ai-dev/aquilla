@@ -1134,14 +1134,21 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
 
 /**
  * AQU-538: per-target-language-lane rollup for a project. Aggregated from
- * `file_section_progress` file-scope rows (`scope='file'`) grouped by
- * `target_lang`. `lane: ''` is the default lane (the project's configured
- * `targetLanguage`, labeled client-side) and is always present whenever the
- * project has any file-scope progress rows. `validatedCells` mirrors the
- * per-file progress route: cells whose endorsement count meets the project's
- * `validationCount` threshold (default 1, cap 15). `lastEditAt` is the most
- * recent progress-projection update in the lane (updated on every edit /
- * validation that touches the lane), which avoids a heavy per-lane cells scan.
+ * `file_section_progress` file-scope rows (`scope='file'`) grouped by the
+ * lane's tag. `lane: ''` is the former default lane (the project's configured
+ * `targetLanguage`, labeled client-side) and is present whenever the project
+ * has a lane row or file-scope progress rows for it.
+ *
+ * `validatedCells` mirrors the per-file progress route: cells whose endorsement
+ * count meets the project's `validationCount` threshold (default 1, cap 15).
+ * `lastEditAt` is the most recent progress-projection update in the lane
+ * (updated on every edit / validation that touches the lane), which avoids a
+ * heavy per-lane cells scan.
+ *
+ * AQU-1599: `totalCells` on a lane with no progress rows of its own is borrowed
+ * from the SOURCE lane's rows, not from the `''` lane's — the source-cell count
+ * is a fact about the source text, and reading it off the former default target
+ * lane meant archiving that lane zeroed every other lane's denominator.
  */
 export interface PortfolioLane {
   lane: string
@@ -1241,7 +1248,14 @@ const MAX_VALIDATION_LEVEL = 15
 
 interface LaneDbRow {
   project_id: string
-  target_lang: string
+  target_lang: string | null
+  /**
+   * AQU-1599: which lane this progress row belongs to. `'source'` rows are the
+   * project's lane-independent numbers (the source-cell denominator), not a
+   * language anyone translates into, so they feed the denominator below and
+   * never become a lane chip.
+   */
+  lane_role: string
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
@@ -1295,7 +1309,11 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * Per-lane rollup for the given org's non-archived projects, keyed by project
  * id. Derive-on-read over `file_section_progress` file-scope rows (one row per
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
- * ordered default ('') first, then by tag, for deterministic output.
+ * ordered by `lanes.position`, with the tag as a tiebreak for rows that have no
+ * lane row to carry a position. AQU-1599 dropped the "default ('') first" rule
+ * that sat in front of it: the former default lane is an ordinary lane and
+ * sorts where its position says, including after a lane added later and moved
+ * above it.
  */
 async function fetchPortfolioLanes(
   env: Env,
@@ -1313,7 +1331,13 @@ async function fetchPortfolioLanes(
   const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
   const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
-      `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
+      // AQU-1599: the lane comes from the `lanes` row the projection wrote this
+      // progress row under, not from `fsp.target_lang`. The source lane's row
+      // carries '' there as well (its `legacy_tag` is NULL), so grouping by the
+      // column would fold the source lane's denominator into the former default
+      // lane's chip and double its cells.
+      `SELECT fsp.project_id AS project_id, l.legacy_tag AS target_lang,
+              l.role AS lane_role,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
               fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
               fsp.structural_count AS structural_count,
@@ -1321,6 +1345,7 @@ async function fetchPortfolioLanes(
               fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
+         JOIN lanes l ON l.project_id = fsp.project_id AND l.id = fsp.lane_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
@@ -1364,19 +1389,52 @@ async function fetchPortfolioLanes(
       .filter((row) => row.count_structural === "false")
       .map((row) => row.project_id),
   )
-  // Accumulate one lane entry per (project, target_lang).
+  // Accumulate one lane entry per (project, lane tag).
   const acc = new Map<string, Map<string, PortfolioLane>>()
+  // AQU-1599: the project's source-cell count, summed over the SOURCE lane's
+  // file rows. The lane-independent denominator every lane without progress
+  // rows of its own borrows, and the number that used to be read off the ''
+  // lane's chip.
+  const sourceTotals = new Map<string, number>()
+  /**
+   * AQU-1599: the lane-independent denominator a lane with no progress rows of
+   * its own borrows — the project's source-cell count, from the SOURCE lane's
+   * file rows.
+   *
+   * Falls back to the largest denominator any lane DOES report, because a
+   * project whose rows were projected before AQU-1599 has no source-lane rows
+   * until AQU-1616's batch recompute (AQU-1419's "work before and after the
+   * backfill" rule), and every lane's rows carried the same denominator then.
+   * Deliberately not "the '' lane's", which is the pin this ticket removes.
+   */
+  const laneIndependentTotal = (projectId: string): number => {
+    const fromSource = sourceTotals.get(projectId)
+    if (fromSource != null) return fromSource
+    const lanes = acc.get(projectId)
+    if (!lanes) return 0
+    let best = 0
+    for (const entry of lanes.values()) best = Math.max(best, entry.totalCells)
+    return best
+  }
   for (const row of laneRows.results ?? []) {
     const threshold = thresholds.get(row.project_id) ?? 1
+    // AQU-1083: subtract per file row, then clamp — a partially backfilled
+    // project must never contribute a negative number to the lane's sum.
+    const drop = excluding.has(row.project_id)
+    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    if (row.lane_role === "source") {
+      sourceTotals.set(
+        row.project_id,
+        (sourceTotals.get(row.project_id) ?? 0)
+          + Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
+      )
+      continue
+    }
     let lanes = acc.get(row.project_id)
     if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
     const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
     if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
-    // AQU-1083: subtract per file row, then clamp — a partially backfilled
-    // project must never contribute a negative number to the lane's sum.
-    const drop = excluding.has(row.project_id)
-    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
     const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
     const structuralValidated = drop
       ? validatedFromHistogram(row.structural_validator_histogram, threshold)
@@ -1394,9 +1452,10 @@ async function fetchPortfolioLanes(
   }
   // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
   // who just added a language must see its 0% chip immediately, not after the
-  // first translation lands. The denominator is borrowed from the '' row
-  // (source-cell count is lane-independent); no '' row means the project has
-  // no progress rows at all and the registered lane stays 0/0.
+  // first translation lands. The denominator is borrowed from the SOURCE lane's
+  // rows (AQU-1599; source-cell count is lane-independent); no source-lane rows
+  // means the project has no progress rows at all, and the registered lane
+  // stays 0/0.
   // AQU-1473: the primary language is the '' lane even when create also wrote
   // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
@@ -1407,7 +1466,7 @@ async function fetchPortfolioLanes(
       lanes = new Map()
       acc.set(row.project_id, lanes)
     }
-    const denominator = lanes.get("")?.totalCells ?? 0
+    const denominator = laneIndependentTotal(row.project_id)
     for (const lane of registered) {
       if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
@@ -1422,8 +1481,8 @@ async function fetchPortfolioLanes(
     }
     let entry = lanes.get(tag)
     if (!entry) {
-      const denominator = lanes.get("")?.totalCells ?? 0
-      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
+      const denominator = laneIndependentTotal(row.project_id)
+      entry = { lane: tag, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
       lanes.set(tag, entry)
     }
     entry.name = row.name
@@ -1463,13 +1522,14 @@ async function fetchPortfolioLanes(
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
+      // AQU-1599: position, then the tag purely as a tiebreak so the output is
+      // deterministic. A lane with no `lanes` row has no position and sorts
+      // last; the former default lane gets no head start.
       [...lanes.values()].sort((a, b) => {
-        const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
-        const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
+        const ap = a.position ?? 1_000_000
+        const bp = b.position ?? 1_000_000
         if (ap !== bp) return ap - bp
         if (a.lane === b.lane) return 0
-        if (a.lane === "") return -1
-        if (b.lane === "") return 1
         return a.lane < b.lane ? -1 : 1
       }),
     )

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeTestDb } from './helpers/pg-test-db'
+import { progressRowsForLane } from './helpers/progress-rows'
 import { makeTestToken } from './helpers/auth'
 import {
   fileProgressRecomputeStmt,
@@ -59,23 +60,39 @@ async function fixture() {
 
 describe('file_section_progress projection', () => {
   it('stores one file row and one compact histogram per canonical section', async () => {
-    const { db, rows } = await fixture()
+    const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
 
-    const projected = await rows<{
+    interface Row {
       scope: string
       section_key: string
       total_count: number
       filled_count: number
       validator_histogram: Record<string, number>
       revision: number
-    }>('file_section_progress')
-    // file + GEN 1 + GEN 2 + the AQU-1093 book row for GEN.
+    }
+    // AQU-1599: four keys (file + GEN 1 + GEN 2 + the AQU-1093 book row for
+    // GEN) on each of the project's two lanes.
+    expect(await rows('file_section_progress')).toHaveLength(8)
+    const projected = await progressRowsForLane<Row>(pg, PROJECT, 'target')
     expect(projected).toHaveLength(4)
     expect(projected.find((row) => row.scope === 'file')).toMatchObject({
       total_count: 3,
       filled_count: 2,
       revision: 7,
+    })
+    // AQU-1599: the source lane's row carries the lane-independent denominator
+    // — the numbers readers used to take from the manufactured '' row — and no
+    // lane's translations, so archiving a target lane cannot take them away.
+    const sourceRows = await progressRowsForLane<Row>(pg, PROJECT, 'source')
+    expect(sourceRows.find((row) => row.scope === 'file')).toMatchObject({
+      total_count: 3,
+      filled_count: 0,
+      revision: 7,
+    })
+    expect(sourceRows.find((row) => row.scope === 'book')).toMatchObject({
+      section_key: 'GEN',
+      total_count: 3,
     })
     // The book row sums its chapters: GEN 1 (2 cells) + GEN 2 (1).
     expect(projected.find((row) => row.scope === 'book')).toMatchObject({
@@ -91,7 +108,7 @@ describe('file_section_progress projection', () => {
   })
 
   it('recomputes only a touched target section plus the file rollup', async () => {
-    const { db, pg, rows } = await fixture()
+    const { db, pg } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     await pg.query(
       `UPDATE cells SET value = 'dos', endorsement_count = 2
@@ -102,7 +119,7 @@ describe('file_section_progress projection', () => {
       fileProgressRecomputeStmt(db, PROJECT, FILE, 101),
       sectionsProgressRecomputeStmt(db, PROJECT, FILE, 101, ['c2']),
     ])
-    const projected = await rows<{ scope: string; section_key: string; filled_count: number }>('file_section_progress')
+    const projected = await progressRowsForLane<{ scope: string; section_key: string; filled_count: number }>(pg, PROJECT, 'target')
     expect(projected.find((row) => row.scope === 'file')?.filled_count).toBe(3)
     expect(projected.find((row) => row.section_key === 'GEN 1')?.filled_count).toBe(2)
     expect(projected.find((row) => row.section_key === 'GEN 2')?.filled_count).toBe(1)
@@ -111,7 +128,7 @@ describe('file_section_progress projection', () => {
   it('full rebuild removes section rows that no longer exist', async () => {
     const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
-    expect(await rows('file_section_progress')).toHaveLength(4)
+    expect(await rows('file_section_progress')).toHaveLength(8)
 
     await pg.query(
       `UPDATE cells SET canonical_ref = NULL
@@ -121,8 +138,9 @@ describe('file_section_progress projection', () => {
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
     // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
+    // Three surviving keys, on both lanes (AQU-1599).
     const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
-    expect(projected).toHaveLength(3)
+    expect(projected).toHaveLength(6)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
     expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
@@ -359,12 +377,12 @@ async function mediaFixture() {
 
 describe('file_section_progress time buckets (AQU-805)', () => {
   it('groups media source cells into 5-minute time sections', async () => {
-    const { db, rows } = await mediaFixture()
+    const { db, pg } = await mediaFixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
 
-    const projected = await rows<{ scope: string; section_key: string; total_count: number; filled_count: number }>(
-      'file_section_progress',
-    )
+    const projected = await progressRowsForLane<{
+      scope: string; section_key: string; total_count: number; filled_count: number
+    }>(pg, PROJECT, 'target')
     const sections = projected.filter((row) => row.scope === 'section')
     // Buckets: 0ms (m1,m2), 600000ms (m3), 1200000ms (m4).
     expect(sections.map((row) => row.section_key).sort()).toEqual([
@@ -380,7 +398,7 @@ describe('file_section_progress time buckets (AQU-805)', () => {
   })
 
   it('recomputes only the touched time section plus the file rollup', async () => {
-    const { db, pg, rows } = await mediaFixture()
+    const { db, pg } = await mediaFixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
     await pg.query(
       `UPDATE cells SET value = 'cuatro' WHERE project_id = $1 AND file_id = $2 AND cell_id = 'm4' AND side = 'target'`,
@@ -390,7 +408,7 @@ describe('file_section_progress time buckets (AQU-805)', () => {
       fileProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101),
       sectionsProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101, ['m4']),
     ])
-    const projected = await rows<{ scope: string; section_key: string; filled_count: number }>('file_section_progress')
+    const projected = await progressRowsForLane<{ scope: string; section_key: string; filled_count: number }>(pg, PROJECT, 'target')
     expect(projected.find((row) => row.section_key === 't:000001200000')?.filled_count).toBe(1)
     expect(projected.find((row) => row.scope === 'file')?.filled_count).toBe(3)
   })

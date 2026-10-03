@@ -294,7 +294,8 @@ async function verify(db: AquillaDb): Promise<boolean> {
             COALESCE((SELECT SUM(value::int) FROM jsonb_each_text(p.structural_validator_histogram)
                        WHERE key::int >= ?), 0)::int AS structural_validated_count
        FROM file_section_progress p
-      WHERE p.project_id = ? AND p.scope = 'book' AND p.target_lang = ''
+       JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+      WHERE p.project_id = ? AND p.scope = 'book' AND l.role = 'target' AND l.legacy_tag = ''
       ORDER BY p.section_key`,
   ).bind(VALIDATION_COUNT, VALIDATION_COUNT, PROJECT_ID).all<BookRow>()).results
 

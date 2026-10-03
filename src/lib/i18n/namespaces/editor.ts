@@ -595,6 +595,14 @@ export const editor = defineNamespace({
     "editor.selection.voiceNeedTwo": "Select at least two translated lines",
     "editor.selection.voiceTooltip": "Voice {count} lines as one clip",
     "editor.selection.voiceTogetherFailed": "Couldn't voice these lines together",
+    "editor.selection.voiceTogetherInworldNotConfigured":
+      "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
+    "editor.selection.voiceTogetherInworldFailed":
+      "Inworld TTS couldn't voice these lines. This is not a Gemini key problem.",
+    "editor.selection.voiceTogetherSeedVcNotConfigured":
+      "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
+    "editor.selection.voiceTogetherSeedVcFailed":
+      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -4360,6 +4368,32 @@ export const editor = defineNamespace({
           "Heading of the error notice shown when 'Voice together' fails. The " +
           "notice's body gives the reason in plain words. 'Voice' is a verb: " +
           "produce one spoken recording of the selected lines.",
+      },
+      "editor.selection.voiceTogetherInworldNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the lines use the " +
+          "hosted Inworld voice engine and this server has no Inworld setup. Says " +
+          "plainly that adding a Gemini key would not help. 'Inworld TTS', " +
+          "'Gemini' and 'API key' are product and technical names: keep them.",
+      },
+      "editor.selection.voiceTogetherInworldFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the hosted Inworld " +
+          "voice engine failed on the selected lines. Says plainly that this is " +
+          "not about the Gemini key. Keep 'Inworld TTS' and 'Gemini'.",
+      },
+      "editor.selection.voiceTogetherSeedVcNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the chosen clone voice " +
+          "needs the Seed-VC voice-conversion step and this server has none. Keep " +
+          "'Seed-VC' and 'Inworld'; a clone voice is a voice copied from a " +
+          "recording.",
+      },
+      "editor.selection.voiceTogetherSeedVcFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the Seed-VC " +
+          "voice-conversion step failed on the selected lines. Says plainly that " +
+          "this is not about the Gemini key. Keep 'Seed-VC' and 'Gemini'.",
       },
       "editor.selection.translate": {
         description:

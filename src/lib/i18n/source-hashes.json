@@ -29892,6 +29892,10 @@
     "editor.validation.ownEditTooltip": "af0d0f50dd563070",
     "editor.selection.validateOwnEdits": "f63c604bde619146",
     "editor.selection.voiceTogetherFailed": "2d6243c63f98e381",
+    "editor.selection.voiceTogetherInworldNotConfigured": "ad553612c4b5d22d",
+    "editor.selection.voiceTogetherInworldFailed": "47a05eb015280e1f",
+    "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
+    "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
     "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
   },
@@ -35641,6 +35645,10 @@
     "editor.validation.ownEditTooltip": "af0d0f50dd563070",
     "editor.selection.validateOwnEdits": "f63c604bde619146",
     "editor.selection.voiceTogetherFailed": "2d6243c63f98e381",
+    "editor.selection.voiceTogetherInworldNotConfigured": "ad553612c4b5d22d",
+    "editor.selection.voiceTogetherInworldFailed": "47a05eb015280e1f",
+    "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
+    "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
     "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
   },
@@ -41299,6 +41307,10 @@
     "editor.validation.ownEditTooltip": "af0d0f50dd563070",
     "editor.selection.validateOwnEdits": "f63c604bde619146",
     "editor.selection.voiceTogetherFailed": "2d6243c63f98e381",
+    "editor.selection.voiceTogetherInworldNotConfigured": "ad553612c4b5d22d",
+    "editor.selection.voiceTogetherInworldFailed": "47a05eb015280e1f",
+    "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
+    "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
     "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
   }

@@ -35,7 +35,8 @@ import { isBulkValidatableByMe } from "@/lib/review/bulk-validation"
 import { isOwnTextEdit, textValidationScope } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { categorizeAiError } from "@/lib/audio/ai-error"
+import { categorizeAiError, type ErrorCategory } from "@/lib/audio/ai-error"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useFormat } from "@/lib/i18n/format"
 import {
   batchValidateTelemetry,
@@ -46,6 +47,15 @@ import {
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
 import { reportQueued, reportValidation } from "@/lib/review-telemetry"
+
+/** "Voice together" failures whose usual body speaks of ONE line, in the
+ *  words that fit the several lines this action voices. */
+const VOICE_TOGETHER_ENGINE_BODY: Partial<Record<ErrorCategory, MessageKey>> = {
+  "hosted-tts-not-configured": "editor.selection.voiceTogetherInworldNotConfigured",
+  "hosted-tts-failed": "editor.selection.voiceTogetherInworldFailed",
+  "seed-vc-not-configured": "editor.selection.voiceTogetherSeedVcNotConfigured",
+  "seed-vc-failed": "editor.selection.voiceTogetherSeedVcFailed",
+}
 
 interface Props {
   project: ProjectRecord
@@ -456,13 +466,19 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // the whole run, and the only one for a failure before any row was
       // touched (signed out, too few lines, lines too long).
       const reason = categorizeAiError(err instanceof Error ? err.message : String(err))
+      // The engine bodies are written for ONE line's badge ("This line uses
+      // Inworld TTS…"); this notice is about several, so those four speak of
+      // "these lines" instead (walk 10-02).
+      const engineBody = VOICE_TOGETHER_ENGINE_BODY[reason.category]
       toast.add({
         type: "error",
         title: t("editor.selection.voiceTogetherFailed"),
         // A toast has no "technical detail" disclosure to point at, so the
         // two generic bodies that send the reader there give way to their
         // heading; the line's badge still carries the raw text.
-        description: /technical detail below/i.test(reason.body) ? reason.title : reason.body,
+        description: engineBody
+          ? t(engineBody)
+          : /technical detail below/i.test(reason.body) ? reason.title : reason.body,
       })
       // Catching it removes the automatic `$exception` that was the only
       // trace of this failure, so report it by hand.

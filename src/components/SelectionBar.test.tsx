@@ -1026,6 +1026,30 @@ describe("SelectionBar — Voice together failure", () => {
     vi.restoreAllMocks()
   })
 
+  // Walk 10-02: a two-line run read "This line uses Inworld TTS…", the
+  // single line's badge text. The notice speaks of the lines it voiced.
+  it("speaks of these lines, not one line, when a voice engine is the reason", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error("voice/tts failed (503): TTS not configured")),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description:
+        "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
+    })))
+    const description = (added.mock.calls.at(-1)?.[0] as { description?: string }).description ?? ""
+    expect(description).not.toMatch(/this line/i)
+    expect(description).not.toContain("—")
+    vi.restoreAllMocks()
+  })
+
   // A toast has no "technical detail" disclosure, so a body that points at
   // one gives way to its heading.
   it("never points a toast reader at a technical detail it does not have", async () => {

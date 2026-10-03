@@ -24,8 +24,9 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
-import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export interface MemberLaneScopeEditorProps {
@@ -38,6 +39,31 @@ export interface MemberLaneScopeEditorProps {
   /** Called with the freshly-saved scopes so the caller's chip cache can be
    * updated in place without a full matrix refetch. */
   onSaved: (scopes: MemberScope[]) => void
+}
+
+/** A lane row's display string: its name, else its tag, else "main language". */
+function laneOptionLabel(lane: ProjectLaneView, mainLanguageLabel: string): string {
+  const name = lane.name.trim()
+  if (name !== "") return name
+  const tag = (lane.legacyTag ?? "").trim()
+  return tag !== "" ? tag : mainLanguageLabel
+}
+
+/**
+ * AQU-1607: stored lane scopes as lane ids. A value that already is one is
+ * kept; a legacy tag naming exactly one lane becomes that lane's id; one
+ * naming none or two is left alone so it still shows (and can be unticked).
+ */
+function normalizeLaneScopes(
+  scopes: readonly MemberScope[],
+  lanes: readonly ProjectLaneView[],
+): MemberScope[] {
+  if (lanes.length === 0) return [...scopes]
+  return scopes.map((scope) => {
+    if (scope.kind !== "lane") return scope
+    const resolved = resolveLaneScopeValue(scope.value, lanes)
+    return resolved.ok ? { kind: "lane", value: resolved.laneId } : scope
+  })
 }
 
 /** Freeform lane/file scope editor. Fetches the member's current scopes
@@ -70,17 +96,30 @@ export function MemberLaneScopeEditor({
     setLoading(true)
     void Promise.all([fetchMemberScopes(jwt, projectId, userId), fetchProjectSettings(jwt, projectId)]).then(
       ([scopes, settings]) => {
-        setDraft(scopes ?? [])
+        // AQU-1607: a lane scope is a lane id, so the checkboxes are the
+        // project's lane ROWS — two lanes of one language are two boxes. A
+        // scope still holding a legacy tag is resolved to its lane id as it
+        // loads, so it shows ticked against the right lane and saves as an
+        // id. A server predating lane rows keeps the old tag list.
+        const rows = (settings?.lanes ?? []).filter(
+          (lane) => lane.role === "target" && !lane.archivedAt,
+        )
+        setDraft(normalizeLaneScopes(scopes ?? [], rows))
         setLaneOptions(
-          settings
-            ? [
-                {
-                  value: "",
-                  label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
-                },
-                ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
-              ]
-            : null,
+          rows.length > 0
+            ? rows.map((lane) => ({
+                value: lane.id,
+                label: laneOptionLabel(lane, t("org.memberLaneScopeEditor.mainLanguageFallback")),
+              }))
+            : settings
+              ? [
+                  {
+                    value: "",
+                    label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
+                  },
+                  ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
+                ]
+              : null,
         )
         setLoading(false)
       },

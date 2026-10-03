@@ -121,7 +121,8 @@ describe('cell.backtranslation.set projection', () => {
       stmts,
     )
     const args = recorded[0].args
-    // project_id, file_id, cell_id, target_event_id, bt_text, bt_html, polished, author, event_id, server_seq, created_at
+    // project_id, file_id, cell_id, target_event_id, bt_text, bt_html, polished,
+    // author, event_id, server_seq, created_at, then lane resolve (project, tag).
     expect(args[0]).toBe('p1')
     expect(args[1]).toBe('f1')
     expect(args[2]).toBe('c1')
@@ -133,6 +134,30 @@ describe('cell.backtranslation.set projection', () => {
     expect(args[8]).toBe('evt-bt-1')  // event_id
     expect(args[9]).toBe(5)           // server_seq
     expect(args[10]).toBe(100)        // created_at = serverTs
+    expect(recorded[0].sql).toContain('lane_id')
+    expect(recorded[0].sql).toContain("legacy_tag = ?")
+    // Absent targetLang resolves to the lane whose legacy_tag is ''.
+    expect(args[11]).toBe('p1')
+    expect(args[12]).toBe('')
+  })
+
+  it('resolves lane_id from targetLang, not from a lane name', () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeBtEvent({
+        payload: {
+          btText: 'hola',
+          targetEventId: 'evt-target-es',
+          polished: false,
+          targetLang: 'es',
+        },
+      }),
+      stmts,
+    )
+    expect(recorded[0].args[11]).toBe('p1')
+    expect(recorded[0].args[12]).toBe('es')
   })
 
   it('serializes polished=false as 0', () => {

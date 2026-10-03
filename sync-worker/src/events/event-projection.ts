@@ -156,6 +156,10 @@ export function buildBulkTargetCellCommitStmt(
  * non-default lanes, of the AD-2 chain slot (chain-claims.ts
  * laneQualifiedParentKey).
  *
+ * `cell.backtranslation.set` uses the same tag (AQU-1589). It is not a cells
+ * row, but its `lane_id` is resolved from this tag — `legacy_tag`, never the
+ * lane's name. Absent or '' is the lane whose `legacy_tag` is ''.
+ *
  * AQU-1240 (the replay shim): `projectDefaultLane` is the real lane tag the
  * eliminated '' default lane was named for this project (under v2, the
  * lanes table's legacy_tag; resolver wired at the enable step). When known, a
@@ -180,7 +184,7 @@ export function laneOfEvent(
   payload: unknown,
   projectDefaultLane?: string | null,
 ): string {
-  if (!kind.startsWith('target.cell.')) return ''
+  if (!kind.startsWith('target.cell.') && kind !== 'cell.backtranslation.set') return ''
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   if (typeof lang === 'string' && lang !== '') return lang
   return projectDefaultLane != null && projectDefaultLane !== '' ? projectDefaultLane : ''
@@ -2480,17 +2484,23 @@ case 'cell.audio.attach': {
       // cell_validators or endorsement_count. Upserts into cell_backtranslations,
       // keying the latest BT per (project_id, file_id, cell_id). Historical BTs
       // are queryable via the target_event_id key.
+      //
+      // AQU-1589: lane_id is the event's lane (laneOfEvent). Absent/'' resolves
+      // to legacy_tag ''. COALESCE so a later write that cannot see the lane
+      // does not wipe an id already stored.
       const p = event.payload as EventPayloads['cell.backtranslation.set']
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      const lane = laneOfEvent(event.kind, p, opts?.projectDefaultLane)
       stmts.push(
         db
           .prepare(
             `INSERT INTO cell_backtranslations (
               project_id, file_id, cell_id, target_event_id,
-              bt_text, bt_html, polished, author, event_id, server_seq, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              bt_text, bt_html, polished, author, event_id, server_seq, created_at,
+              lane_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')})
             ON CONFLICT(project_id, file_id, cell_id, target_event_id) DO UPDATE SET
               bt_text     = excluded.bt_text,
               bt_html     = excluded.bt_html,
@@ -2498,7 +2508,8 @@ case 'cell.audio.attach': {
               author      = excluded.author,
               event_id    = excluded.event_id,
               server_seq  = excluded.server_seq,
-              created_at  = excluded.created_at`,
+              created_at  = excluded.created_at,
+              lane_id     = COALESCE(excluded.lane_id, cell_backtranslations.lane_id)`,
           )
           .bind(
             event.projectId,
@@ -2512,6 +2523,7 @@ case 'cell.audio.attach': {
             event.id,
             event.serverSeq ?? null,
             event.serverTs,
+            ...laneIdResolveBinds('target', event.projectId, lane),
           ),
       )
       return ['cell_backtranslations']

@@ -142,6 +142,9 @@ export interface AiDraftProvenance {
   exampleIds: string[]
   generatedAt: number
   mode: "single" | "batch" | "paragraph" | "agent" | "read"
+  /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
+   *  output. A row is current while the cell's draft still carries its id. */
+  interventionId?: string
   projectState: {
     sourceLanguage: string
     targetLanguage: string

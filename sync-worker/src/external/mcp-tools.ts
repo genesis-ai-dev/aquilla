@@ -166,7 +166,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+      'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
       'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
       'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
       'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +

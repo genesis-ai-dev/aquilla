@@ -585,6 +585,25 @@ describe('ProjectSetup — prepare rejections name the field', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  // AQU-1571: the audio validation keys go through the same door, and used to
+  // land in the plain (unchecked) half of the settings split.
+  it('refuses loosening an AUDIO validation key, naming it', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    await patchProjectSettingsShared(tdb.db, {
+      projectId: PROJECT,
+      ops: [{ key: 'allowSelfValidationAudio', value: false }],
+      ifMatchVersion: 1,
+      updatedBy: 99,
+    })
+    const { res, body } = await prepare(env, caller.token, setupCommand({ settings: { allowSelfValidationAudio: true } }))
+    expect(res.status).toBe(403)
+    expect(body.error?.code).toBe('permission_denied')
+    expect(body.error?.details?.field).toBe('settings.allowSelfValidationAudio')
+    expect((body.error?.details?.loosening as { key: string }[])[0].key).toBe('allowSelfValidationAudio')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('refuses an unknown brief section', async () => {
     const env = makeEnv(tdb.db, bucket)
     const caller = await memberToken(700)

@@ -31,6 +31,7 @@ import {
 import { CellActionRail } from "@/components/CellActionRail"
 import { TargetDraftActions, TargetReferenceActions } from "@/components/cell/TargetCellActions"
 import { TargetValidationControl } from "@/components/cell/TargetValidationControl"
+import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
 import { HealthRibbon } from "@/components/HealthRibbon"
 import { TranslatedEditor, type TranslatedEditorCommit } from "../TranslatedEditor"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -54,6 +55,9 @@ export interface AgentWorkbenchCell {
   activeValidators?: string[]
   validationHistory?: EditValidationSummary[]
   canValidate?: boolean
+  /** AQU-1571: the project text rule refusing this viewer's vote here, if any
+   *  (already folded into `canValidate`); it chooses the tooltip's words. */
+  validationBlock?: TextValidationBlock | null
 }
 
 /**
@@ -309,6 +313,7 @@ export function AgentContextRows({
                 validationRequirement={validationRequirement}
                 canValidate={canValidate}
                 canValidateThisCell={Boolean(cell.canValidate)}
+                blockedReason={cell.validationBlock ?? null}
                 onValidationChange={(validated) => handleValidationChange(cell.cellId, validated)}
               />
             ) : null

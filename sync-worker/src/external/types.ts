@@ -20,6 +20,13 @@ export type ExternalEnv = EventsRouteEnv & {
    *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
    *  same server-to-server pattern as monday-notify.ts. */
   AUTH_WORKER_URL?: string
+  /** AQU-1572: PostHog project token for the validation and audio events of
+   *  committed changesets (review-telemetry.ts). Blank or unset = no events. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host. Defaults to EU (posthog-logs.ts, AQU-854). */
+  POSTHOG_HOST?: string
+  /** Deployment profile ("production", "development", "local"), sent as `app_env`. */
+  ENVIRONMENT?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */

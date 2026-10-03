@@ -1581,6 +1581,28 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
       )
+      // AQU-1571: a re-attach that changes the take's `url` puts DIFFERENT
+      // audio under the same take id. Every routine re-attach (transcription,
+      // timings, a duration heal, a transcript correction) sends the stored url
+      // back unchanged, so only a swap reaches this. The votes on the take were
+      // cast on the audio it used to play, so they go — otherwise a reviewer
+      // could put their own recording under somebody else's take and inherit
+      // its votes — and the upsert below credits the new audio to whoever
+      // attached it. Runs before the upsert, which is what changes the url.
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cell_audio_validators v
+              WHERE v.project_id = ? AND v.file_id = ? AND v.cell_id = ? AND v.audio_id = ?
+                AND EXISTS (
+                  SELECT 1 FROM cell_audio a
+                   WHERE a.project_id = v.project_id AND a.file_id = v.file_id
+                     AND a.cell_id = v.cell_id AND a.audio_id = v.audio_id
+                     AND a.url IS DISTINCT FROM ?
+                )`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, p.url),
+      )
       // SUB-49: a re-attach may only ADD to what is known about a clip. The
       // COALESCE'd columns describe the clip ITSELF, and producers routinely
       // send a partial payload — transcription re-attaches carrying only its
@@ -1629,7 +1651,12 @@ case 'cell.audio.attach': {
               -- would hand a take's authorship to the last person who touched
               -- it, which on a project with self-validation off would then
               -- refuse the real recorder permission to validate their own take.
-              created_by         = COALESCE(cell_audio.created_by, excluded.created_by),
+              -- AQU-1571: except when the re-attach swaps the audio itself (a
+              -- different url): that is a new recording, and it is credited
+              -- to whoever attached it (see the vote reset above).
+              created_by         = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url
+                                        THEN excluded.created_by
+                                        ELSE COALESCE(cell_audio.created_by, excluded.created_by) END,
               -- role is NOT NULL (pre-0096 rows defaulted to 'dub'), so it
               -- cannot be COALESCEd into place. It may only ever be PROMOTED to
               -- 'source': a re-import is authoritative and repairs a row the
@@ -1681,9 +1708,13 @@ case 'cell.audio.attach': {
             )
             .bind(p.transcription, event.projectId, event.fileId, event.cellId),
         )
-        return ['cell_audio', 'cells']
+        stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+        return ['cell_audio', 'cell_audio_validators', 'cells']
       }
-      return ['cell_audio']
+      // AQU-1571: the take's count follows the vote reset above (a no-op
+      // unless the audio was swapped).
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
     }
 
     case 'cell.audio.select': {

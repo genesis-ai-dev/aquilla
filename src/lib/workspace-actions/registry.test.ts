@@ -394,6 +394,38 @@ describe("batch-validate confirmation body", () => {
   })
 })
 
+// Walk 10-02: a reader off the named-validator list could tick the box and
+// press "Validate text", which sent nothing and toasted the body back at them.
+describe("batch-validate can be confirmed only when the run will validate something", () => {
+  const action = workspaceActions.find((a) => a.id === "batch-validate")!
+  const canConfirm = (
+    candidates: BatchValidateCandidate[],
+    over: Partial<Parameters<typeof summarizeBatchValidate>[1]> = {},
+    activeFileId: string | null = "f1",
+  ) => {
+    const summary = summarizeBatchValidate(candidates, summarizeOptions(over))
+    return action.requiresConfirmation!.canConfirm!(ctx({ activeFileId, batchValidateSummary: () => summary }))
+  }
+
+  it("allows a run with eligible cells, including a partial one", () => {
+    expect(canConfirm(eligibleCells(2))).toBe(true)
+    expect(canConfirm([...eligibleCells(1), ...aiDraftCells(2)])).toBe(true)
+  })
+
+  it("blocks every outcome that validates nothing", () => {
+    expect(canConfirm(eligibleCells(3), { canValidate: false, noPermissionReason: "allowlist" })).toBe(false)
+    expect(canConfirm(eligibleCells(3), { canValidate: false })).toBe(false)
+    expect(canConfirm(eligibleCells(3), { hasTarget: false })).toBe(false)
+    expect(canConfirm([])).toBe(false)
+    expect(canConfirm([...untranslatedCells(2), ...aiDraftCells(1)])).toBe(false)
+  })
+
+  it("blocks when no file is open or the summary cannot be computed", () => {
+    expect(canConfirm(eligibleCells(2), {}, null)).toBe(false)
+    expect(action.requiresConfirmation!.canConfirm!(ctx({ activeFileId: "f1" }))).toBe(false)
+  })
+})
+
 describe("getVisibleActions", () => {
   it("filters out unavailable actions", () => {
     const acts: WorkspaceAction[] = [

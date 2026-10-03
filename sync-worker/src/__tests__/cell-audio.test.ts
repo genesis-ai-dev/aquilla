@@ -65,18 +65,32 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio"])
-    expect(stmts).toHaveLength(2)
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators"])
+    expect(stmts).toHaveLength(4)
 
     // First: deselect other clips in the same slot (never this audio_id).
     expect(recorded[0].sql).toContain("UPDATE cell_audio SET selected = 0")
     expect(recorded[0].sql).toContain("slot = ? AND audio_id != ?")
     expect(recorded[0].args).toEqual(["p1", "f1", "c1", "generatedVoice", "audio-x.wav"])
 
-    // Second: upsert this clip as selected + live, timings serialized.
-    expect(recorded[1].sql).toContain("INSERT INTO cell_audio")
-    expect(recorded[1].sql).toContain("ON CONFLICT(project_id, file_id, cell_id, audio_id)")
-    const a = recorded[1].args
+    // AQU-1571: then drop the take's votes, but only if this attach swaps its
+    // audio (a different url) — votes were cast on the audio it used to play.
+    expect(recorded[1].sql).toContain("DELETE FROM cell_audio_validators")
+    expect(recorded[1].sql).toContain("a.url IS DISTINCT FROM ?")
+    expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-x.wav", "frontier-audio://audio-x.wav"])
+
+    // Then: upsert this clip as selected + live, timings serialized.
+    expect(recorded[2].sql).toContain("INSERT INTO cell_audio")
+    expect(recorded[2].sql).toContain("ON CONFLICT(project_id, file_id, cell_id, audio_id)")
+    // A swapped url is a new recording, credited to whoever attached it; any
+    // other re-attach leaves the recorder alone (fill-only).
+    expect(recorded[2].sql).toContain(
+      "created_by = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN excluded.created_by " +
+        "ELSE COALESCE(cell_audio.created_by, excluded.created_by) END",
+    )
+    // Last: the take's vote count follows the reset.
+    expect(recorded[3].sql).toContain("SET validator_count")
+    const a = recorded[2].args
     expect(a[0]).toBe("p1")
     expect(a[3]).toBe("audio-x.wav")
     expect(a[4]).toBe("generatedVoice")
@@ -105,7 +119,7 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    const a = recorded[1].args
+    const a = recorded[2].args
     expect(a[6]).toBeNull() // mime_type
     expect(a[7]).toBeNull() // voice_id
     expect(a[8]).toBeNull() // reference_audio_id
@@ -282,11 +296,11 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio", "cells"])
-    expect(stmts).toHaveLength(3)
-    expect(recorded[2].sql).toContain("UPDATE cells SET transcription = ?")
-    expect(recorded[2].sql).toContain("side = 'source'")
-    expect(recorded[2].args).toEqual(["hello imported world", "p1", "f1", "c1"])
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators", "cells"])
+    expect(stmts).toHaveLength(5)
+    expect(recorded[3].sql).toContain("UPDATE cells SET transcription = ?")
+    expect(recorded[3].sql).toContain("side = 'source'")
+    expect(recorded[3].args).toEqual(["hello imported world", "p1", "f1", "c1"])
   })
 
   it("attach without transcription: cells table is untouched", () => {
@@ -302,8 +316,8 @@ describe("cell-audio projection", () => {
       }),
       stmts,
     )
-    expect(touches).toEqual(["cell_audio"])
-    expect(stmts).toHaveLength(2)
+    expect(touches).toEqual(["cell_audio", "cell_audio_validators"])
+    expect(stmts).toHaveLength(4)
     for (const r of recorded) expect(r.sql).not.toContain("UPDATE cells")
   })
 })

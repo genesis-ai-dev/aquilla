@@ -74,4 +74,35 @@ describe("AgentChatOptions", () => {
     expect(within(dialog).getByRole("button", { name: "Reset chat" })).toBeDisabled()
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled()
   })
+
+  // AQU-1652: copying the thread is a read, so it runs on the click with no
+  // confirmation — and it is never offered as a live action on an empty chat.
+  it("copies the chat on the first click, with no confirmation step", async () => {
+    const user = userEvent.setup()
+    const onCopyChat = vi.fn()
+    render(<AgentChatOptions onReset={vi.fn()} onCopyChat={onCopyChat} />)
+    await user.click(screen.getByRole("button", { name: "Chat options" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Copy chat" }))
+    expect(onCopyChat).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("shows Copy chat inert rather than hidden while the conversation is empty", async () => {
+    const user = userEvent.setup()
+    const onCopyChat = vi.fn()
+    render(<AgentChatOptions onReset={vi.fn()} onCopyChat={onCopyChat} copyDisabled />)
+    await user.click(screen.getByRole("button", { name: "Chat options" }))
+    const item = await screen.findByRole("menuitem", { name: "Copy chat" })
+    expect(item).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(item)
+    expect(onCopyChat).not.toHaveBeenCalled()
+  })
+
+  it("omits Copy chat on a surface that passes no copy handler", async () => {
+    const user = userEvent.setup()
+    render(<AgentChatOptions onReset={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: "Chat options" }))
+    expect(await screen.findByRole("menuitem", { name: "Reset chat…" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Copy chat" })).not.toBeInTheDocument()
+  })
 })

@@ -178,7 +178,11 @@ export function AgentRunView({
   const suggestions =
     run.status === "ok" && onSuggestionSend && parsed ? parsed.suggestions.slice(0, 2) : []
   return (
-    <div className="flex flex-col gap-2">
+    // AQU-1652: the app-chrome rule in index.css kills drag-select everywhere
+    // by default, which left the reader unable to highlight or copy a single
+    // answer. A transcript is reading material, so it opts back in here —
+    // covering every surface that renders a run (dock view, Team channel).
+    <div className="flex select-text flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
       <Message align="end">
         <MessageContent>

@@ -216,4 +216,17 @@ describe("AgentRunView", () => {
     expect(screen.queryByRole("button", { name: "Draft the next chapter" })).toBeNull()
     expect(screen.queryByText(/NEXT:/)).toBeNull()
   })
+
+  // AQU-1652: index.css kills drag-select across the app chrome; every surface
+  // that renders a run opts the transcript back in, or the reader cannot
+  // highlight or copy an answer at all.
+  it("keeps the transcript selectable, prompt and reply alike", () => {
+    render(
+      <AgentRunView run={makeRun({ items: [{ id: "t1", kind: "text", text: "Here is a draft." }] })} />,
+    )
+    const prompt = screen.getByText("Draft the untranslated verses in this chapter")
+    const reply = screen.getByText("Here is a draft.")
+    expect(prompt.closest(".select-text")).not.toBeNull()
+    expect(reply.closest(".select-text")).not.toBeNull()
+  })
 })

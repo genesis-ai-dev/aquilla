@@ -27,6 +27,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, FileCandidate } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { useTranscriptSelectAll } from "@/lib/agent/use-transcript-select-all"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -120,6 +121,9 @@ function ScopedAgentDockView({
   // scrolled up to read history.
   const [sendSignal, setSendSignal] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
+  // The transcript region Cmd/Ctrl+A selects (AQU-1652).
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  useTranscriptSelectAll(transcriptRef)
   const draftStore = composerDraftStore(draftScope)
   const { attachments, attachmentError: attachError } = useComposerDraft(draftStore)
   const mountedRef = useRef(true)
@@ -258,7 +262,15 @@ function ScopedAgentDockView({
           <MessageScroller className="flex-1">
             <MessageScrollerEndOnSignal signal={sendSignal} />
             <MessageScrollerViewport>
-              <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
+              {/* AQU-1652: the transcript is one selectable region, and it is
+                  what Cmd/Ctrl+A selects — so Select All inside the chat takes
+                  the conversation, not the whole workspace around it. The
+                  composer sits outside it and keeps the browser's own. */}
+              <MessageScrollerContent
+                ref={transcriptRef}
+                data-testid="agent-transcript"
+                className="mx-auto w-full max-w-2xl select-text gap-5 px-4 pb-3 pt-4"
+              >
                 {conversationPrelude}
                 {state.runs.map((run, runIndex) => (
                   <MessageScrollerItem

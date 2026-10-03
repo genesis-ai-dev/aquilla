@@ -170,6 +170,13 @@ UI chrome that used to be one smoke file per click is covered under
 - Unified Agent conversation/document/knowledge navigation and same-task
   re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
   The former competing Team/Chat tabs and mandatory three-pane layout are retired.
+- Agent chat transcript selection, scoped Select All, and whole-thread Copy chat
+  (AQU-1652): covered in RTL and unit (`AgentRunView.test.tsx`,
+  `AgentDockView.test.tsx`, `AgentChatOptions.test.tsx`, `AgentWorkbench.test.tsx`,
+  `src/lib/agent/transcript-copy.test.ts`,
+  `src/lib/agent/use-transcript-select-all.test.tsx`). No new smoke: nothing here
+  can lose data, access or a committed artifact — a regression means a reader
+  has to retype what is already on screen.
 - Unsent Agent messages, context chips, and attachment ownership across views,
   conversations, and accounts: covered in composer draft-store and composer RTL.
 - Focused task-draft review stays on the Agent route, preserves the task language

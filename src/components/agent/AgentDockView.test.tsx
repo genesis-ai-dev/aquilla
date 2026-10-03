@@ -217,3 +217,29 @@ describe("AgentDockView shared Team chat", () => {
     expect(serializeDocJSON(createComposerDraftStore(scope).getSnapshot().document).text).toContain("Unsent Team chat")
   })
 })
+
+// AQU-1652: the reader could not highlight or copy an answer, because the
+// app-chrome rule in index.css turns drag-select off everywhere by default.
+// The transcript is one selectable region, and Select All inside it takes the
+// conversation rather than the whole workspace.
+describe("AgentDockView transcript selection", () => {
+  const withRun = () => {
+    state.runs = [{ localId: "run-1", prompt: "Draft MRK 4:1", runId: "r1", items: [], status: "ok" }]
+    return render(<AgentDockView {...props} />)
+  }
+
+  it("marks the transcript selectable", () => {
+    withRun()
+    expect(screen.getByTestId("agent-transcript")).toHaveClass("select-text")
+  })
+
+  it("selects the transcript on Cmd+A from inside it, and leaves the composer alone", () => {
+    withRun()
+    const transcript = screen.getByTestId("agent-transcript")
+    expect(fireEvent.keyDown(transcript, { key: "a", metaKey: true })).toBe(false)
+    const selection = window.getSelection()!
+    expect(selection.getRangeAt(0).commonAncestorContainer).toBe(transcript)
+
+    expect(fireEvent.keyDown(screen.getByRole("textbox"), { key: "a", metaKey: true })).toBe(true)
+  })
+})

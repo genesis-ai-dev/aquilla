@@ -21,6 +21,11 @@ export interface ContextChip {
 }
 
 export const CHIP_PLACEHOLDER_RE = /⟦chip:([^⟧]+)⟧/g
+/** First line of the chip legend appended to the WIRE message. Exported so a
+ *  reader of a stored wire message (the transcript copier, AQU-1652) finds the
+ *  legend by the same literal that writes it instead of guessing at it. */
+export const CONTEXT_LEGEND_HEADING =
+  "## Context (attached cells — previews truncated; read full text with one SQL query on file_id+cell_id if needed)"
 export const FULL_INLINE_MAX = 280
 export const PREVIEW_MAX = 200
 export const MAX_CHIPS = 8
@@ -114,9 +119,7 @@ export function serializeWithChips(
   const wireText = replace((_c, n) => `⟦ctx:${n}⟧`)
   const display = replace((c) => `[${c.canonicalRef ?? "source"}]`)
 
-  const lines: string[] = [
-    "## Context (attached cells — previews truncated; read full text with one SQL query on file_id+cell_id if needed)",
-  ]
+  const lines: string[] = [CONTEXT_LEGEND_HEADING]
   for (const c of kept) {
     const n = indexById.get(c.chipId)!
     const quoted = c.selection.length <= FULL_INLINE_MAX ? c.selection : c.preview
@@ -129,4 +132,49 @@ export function serializeWithChips(
   if (legend.length > LEGEND_MAX) legend = legend.slice(0, LEGEND_MAX) + "\n…"
 
   return { wire: `${wireText}\n\n${legend}`, display }
+}
+
+/**
+ * Reads a wire message built by `serializeWithChips` back as prose a human can
+ * read: every `⟦ctx:N⟧` token becomes the chip's own quoted wording from the
+ * legend, and the legend itself is dropped (AQU-1652 — "Copy chat" must carry
+ * what the reader attached, not an opaque token).
+ *
+ * Returns the input unchanged when there is no legend, which is how a caller
+ * tells "no chips were attached" from "chips expanded".
+ */
+export function expandChipQuotes(wire: string): string {
+  // Last occurrence: the legend is always appended after the prose, so a
+  // reader who happened to type the heading themselves keeps their own text.
+  const at = wire.lastIndexOf(CONTEXT_LEGEND_HEADING)
+  if (at < 0) return wire
+  const quotes = new Map<number, string>()
+  const refs = new Map<number, string>()
+  let pending: number | null = null
+  for (const line of wire.slice(at).split("\n")) {
+    const header = /^⟦ctx:(\d+)⟧\s*(.*)$/.exec(line)
+    if (header) {
+      pending = Number(header[1])
+      const ref = header[2].split(" · ")[0].trim()
+      if (ref) refs.set(pending, ref)
+      continue
+    }
+    // A legend capped at LEGEND_MAX can lose its closing quote mid-entry; such
+    // an entry simply has no quote and falls back to its reference below.
+    const quoted = /^\s+"([\s\S]*)"\s*$/.exec(line)
+    if (quoted && pending !== null) {
+      quotes.set(pending, quoted[1])
+      pending = null
+    }
+  }
+  return wire
+    .slice(0, at)
+    .replace(/⟦ctx:(\d+)⟧/g, (token, n: string) => {
+      const index = Number(n)
+      const quote = quotes.get(index)
+      if (quote) return `"${quote}"`
+      const ref = refs.get(index)
+      return ref ? `[${ref}]` : token
+    })
+    .trimEnd()
 }

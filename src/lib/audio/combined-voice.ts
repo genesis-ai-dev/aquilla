@@ -222,6 +222,9 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         mimeType: combinedMime,
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        // AQU-1572: one event per cell the clip was attached to, matching the
+        // per-cell shape of every other audio event.
+        audioOrigin: "generate",
         author: username,
       })
     }

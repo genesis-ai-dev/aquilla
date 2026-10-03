@@ -28,6 +28,10 @@ import {
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
+// AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
+// the one seam every such gesture already passes through.
+import { captureAudioAction, captureCellValidation } from "@/lib/cell-telemetry"
+import type { AudioOrigin, TelemetrySource } from "@/lib/cell-telemetry"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -343,6 +347,11 @@ export interface CellValidateInput {
    * OMITTED from the wire payload, so N=1 validations are byte-identical.
    */
   targetLang?: string
+  /**
+   * AQU-1572: who performed the gesture — telemetry only, never written to the
+   * wire payload. Defaults to a person in the UI.
+   */
+  source?: TelemetrySource
   author: string
   clientTs?: number
 }
@@ -378,6 +387,18 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     },
     clientTs: input.clientTs,
   })
+  // AQU-1572: the per-gesture event, which the milestone above cannot stand in
+  // for — that one fires once per session, so it can say somebody validated
+  // and never how much. Counted after the enqueue, so a write that threw is
+  // not reported as a validation that happened.
+  captureCellValidation(true, {
+    medium: "text",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
+  })
   return eventId
 }
 
@@ -396,6 +417,14 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
       ...(input.targetLang ? { targetLang: input.targetLang } : {}),
     },
     clientTs: input.clientTs,
+  })
+  captureCellValidation(false, { // AQU-1572
+    medium: "text",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
   })
   return eventId
 }
@@ -496,6 +525,19 @@ export interface CellAudioAttachInput {
   transcription?: string
   /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
   targetLang?: string
+  /**
+   * AQU-1572: which gesture produced this clip — telemetry only, never on the
+   * wire. ONLY the originating gesture passes one (an upload or LinkMedia
+   * attach, a synthesis, a recorder save). The derived re-attaches — denoise,
+   * the transcription's timings write-back, diarization, the recorder's heal
+   * path — deliberately leave it undefined and emit nothing, because they all
+   * re-attach a clip that was already counted once.
+   */
+  audioOrigin?: AudioOrigin
+  /** AQU-1572: synthesis backend, for `audioOrigin: "generate"`. Telemetry only. */
+  ttsProvider?: string
+  /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
+  source?: TelemetrySource
   author: string
   clientTs?: number
 }
@@ -526,6 +568,23 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
     },
     clientTs: input.clientTs,
   })
+  // AQU-1572: only the ORIGINATING gesture reports; a derived re-attach passes
+  // no origin and so cannot double-count a clip. After the enqueue, because a
+  // throw here aborts the attach (attach-file deletes the orphaned R2 object).
+  if (input.audioOrigin) {
+    captureAudioAction({
+      origin: input.audioOrigin,
+      projectId: input.projectId,
+      fileId: input.fileId,
+      cellId: input.cellId,
+      slot: input.slot,
+      lane: input.targetLang,
+      source: input.source,
+      ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
+      ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+    })
+  }
   return eventId
 }
 
@@ -995,6 +1054,8 @@ export interface CellAudioValidateInput {
   audioId: string
   /** AQU-1462: lane the member is working in. The vote itself stays shared. */
   targetLang?: string
+  /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
+  source?: TelemetrySource
   author: string
   clientTs?: number
 }
@@ -1010,6 +1071,14 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     author: input.author,
     payload: { audioId: input.audioId, ...namedTargetLane(input.targetLang) },
     clientTs: input.clientTs,
+  })
+  captureCellValidation(true, { // AQU-1572
+    medium: "audio",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
   })
   return eventId
 }
@@ -1039,6 +1108,14 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
       ...namedTargetLane(input.targetLang),
     },
     clientTs: input.clientTs,
+  })
+  captureCellValidation(false, { // AQU-1572
+    medium: "audio",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
   })
   return eventId
 }

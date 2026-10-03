@@ -1378,6 +1378,9 @@ export function AudioRecordingModal({
           ...takeTrimWindow,
           label: takeLabel,
           ...(laneTag ? { targetLang: laneTag } : {}),
+          // AQU-1572: the recorder's own save path — the heal re-attach above
+          // passes no origin, so a take counts exactly once.
+          audioOrigin: "record",
           author: username,
         })
       } catch (emitErr) {

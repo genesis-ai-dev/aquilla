@@ -42,6 +42,7 @@
 //
 // Flags: --apply  --project <id>  --limit <n>  --verbose
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
+import { retryingLaneIdCollision } from '../db/shared/lanes'
 import { resolveProjectRoleIncludingArchivedShared } from '../db/shared/project-roles'
 import { makePostgres, type AquillaDb } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
@@ -413,11 +414,13 @@ async function main(): Promise<void> {
 
       if (apply) {
         for (const [i, l] of plan.entries()) {
-          if (l.role === 'source') {
-            await db.prepare(INSERT_SOURCE).bind(newLaneId(), p.id, l.name, l.langCode, i).run()
-          } else {
-            await db.prepare(INSERT_TARGET).bind(newLaneId(), p.id, l.name, l.langCode, l.legacyTag, i).run()
-          }
+          await retryingLaneIdCollision(async () => {
+            if (l.role === 'source') {
+              await db.prepare(INSERT_SOURCE).bind(newLaneId(), p.id, l.name, l.langCode, i).run()
+            } else {
+              await db.prepare(INSERT_TARGET).bind(newLaneId(), p.id, l.name, l.langCode, l.legacyTag, i).run()
+            }
+          })
         }
         for (const table of TARGET_ONLY_TABLES) {
           const r = await db.prepare(targetOnlyUpdate(table)).bind(p.id).run()

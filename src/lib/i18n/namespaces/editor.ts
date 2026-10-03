@@ -1376,7 +1376,17 @@ export const editor = defineNamespace({
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.play": "Play this line",
-    "editor.voice.clone": "Clone a voice from this take",
+    "editor.voice.clone": "Clone voice from take",
+    "editor.voice.generateFromText": "Generate audio from text",
+    "editor.voice.changeVoice": "Change voice",
+    "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
+    "editor.voice.changeVoiceNeedsClone": "{name} has no reference clip. Assign a cloned voice to change this take.",
+    "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
+    "editor.voice.changeVoiceQuality": "Quality",
+    "editor.voice.changeVoiceQuality.fast": "Fast",
+    "editor.voice.changeVoiceQuality.standard": "Standard",
+    "editor.voice.changeVoiceQuality.high": "High",
+    "editor.voice.changeVoiceQualityTooltip": "How closely the converted take matches the voice. Higher takes longer.",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
@@ -5061,7 +5071,75 @@ export const editor = defineNamespace({
         description:
           "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
           "recording into a reusable synthetic voice for the project's cast. " +
-          "'Clone' is the voice-synthesis term for copying a speaker's sound.",
+          "'Clone' is the voice-synthesis term for copying a speaker's sound. " +
+          "Keep it a short label, like the English.",
+        maxLength: 24,
+      },
+      "editor.voice.generateFromText": {
+        description:
+          "Label of the button that synthesizes this line's translated text as " +
+          "speech in the assigned voice. On a line that already has a take it is " +
+          "an icon, and this same phrase is its tooltip and screen-reader name. " +
+          "'From text' contrasts it with 'Change voice', which works from existing " +
+          "audio instead.",
+        maxLength: 28,
+      },
+      "editor.voice.changeVoice": {
+        description:
+          "Name of the icon on a line that already has a take, and of the button " +
+          "inside the popover it opens. It keeps the recording and makes it sound " +
+          "like the assigned cloned voice. No new speech is generated from text.",
+        maxLength: 18,
+      },
+      "editor.voice.changeVoiceTooltip": {
+        description:
+          "Tooltip on 'Change voice'. The words and their timing stay as recorded; " +
+          "only who the speaker sounds like changes.",
+        placeholders: {
+          name: "The assigned voice's name from the project's cast — user data, never translate it.",
+        },
+      },
+      "editor.voice.changeVoiceNeedsClone": {
+        description:
+          "Tooltip on the disabled 'Change voice' button when the assigned voice is a " +
+          "stock voice with no reference recording to copy the sound from.",
+        placeholders: {
+          name: "The assigned voice's name from the project's cast — user data, never translate it.",
+        },
+      },
+      "editor.voice.changeVoiceUpToDate": {
+        description:
+          "Tooltip on the disabled 'Change voice' button when the selected take was " +
+          "already converted into this voice from its current reference recording.",
+        placeholders: {
+          name: "The assigned voice's name from the project's cast — user data, never translate it.",
+        },
+      },
+      "editor.voice.changeVoiceQuality": {
+        description:
+          "Accessible name of the quality menu beside Change voice. The options are " +
+          "Fast, Standard and High.",
+        maxLength: 12,
+      },
+      "editor.voice.changeVoiceQuality.fast": {
+        description:
+          "Change voice quality option. The quickest conversion and the roughest match.",
+        maxLength: 10,
+      },
+      "editor.voice.changeVoiceQuality.standard": {
+        description:
+          "Change voice quality option, and the default. Seed-VC's normal setting.",
+        maxLength: 12,
+      },
+      "editor.voice.changeVoiceQuality.high": {
+        description:
+          "Change voice quality option. The closest match, and the slowest.",
+        maxLength: 10,
+      },
+      "editor.voice.changeVoiceQualityTooltip": {
+        description:
+          "Tooltip on the Change voice quality menu. Explains that the choice is a " +
+          "trade of likeness against waiting time.",
       },
       "editor.voice.voicing": {
         description:

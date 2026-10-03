@@ -205,6 +205,9 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
+import { CHANGE_VOICE_QUALITIES, CHANGE_VOICE_QUALITY_STEPS, type ChangeVoiceQuality } from "@/lib/audio/change-voice"
+import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
+import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality, setChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
@@ -9222,15 +9225,22 @@ export function ProjectWorkspace() {
   // carries a `selectedAudioId` there. That zero hid "Transcribe all
   // recordings" from the menu outright on exactly the files this branch is for.
   const audioCounts = useMemo(() => {
-    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
+    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0, voiceChangeable: 0 }
     // The cue list is already merged with its own file's attachments, and it
     // includes the ~10 heard lines an episode that no subtitle is linked to —
     // a take on one of those needs transcribing like any other.
     const holders = audioCueCells ?? batchAudioCells
     let untranscribed = 0
     for (const c of holders) if (needsTranscription(c)) untranscribed++
-    return { untranscribed, unsynthesized: synthTargets.length }
-  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets])
+    // Includes takes already in the current voice. The menu stays so a quality
+    // change or a new reference clip can overwrite them. The dialog counts only
+    // the cells the chosen quality will actually convert.
+    const plan = planChangeVoiceAll(holders, tts.settings)
+    // Takes a voice is using as its reference clip are not converted, but the
+    // menu stays so the confirmation can say how many were left out.
+    const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"] + plan.skipped["voice-reference"]
+    return { untranscribed, unsynthesized: synthTargets.length, voiceChangeable }
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings])
 
   /**
    * AQU-490: takes this viewer could still validate — the number the bulk
@@ -9363,6 +9373,10 @@ export function ProjectWorkspace() {
     },
     [t, formatLocaleList],
   )
+
+  // Read at confirm time. The batch dialog owns the quality; this stays out of
+  // the actionArgs dependency list so picking a quality does not rebuild it.
+  const batchVoiceQualityRef = useRef<ChangeVoiceQuality>(getChangeVoiceQuality())
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -9613,17 +9627,56 @@ export function ProjectWorkspace() {
         })
       })
     },
+    runChangeVoiceAll: () => {
+      if (!activeFileId || !project) return
+      const fileCells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
+      void runChangeVoiceAll({
+        projectId: project.id,
+        cells: audioCueCells ?? fileCells,
+        settings: tts.settings,
+        session: frontierSession ?? null,
+        author: currentUsername,
+        diffusionSteps: CHANGE_VOICE_QUALITY_STEPS[batchVoiceQualityRef.current],
+      }).then(({ converted, failed, skipped }) => {
+        const notCloned = skipped["not-cloned"]
+        const voiceReference = skipped["voice-reference"]
+        toast.add({
+          type: failed > 0 ? "warning" : "success",
+          title: t("audio.changeVoice.batchDone", { count: converted }),
+          description: [
+            failed > 0 ? t("audio.changeVoice.batchFailed", { count: failed }) : null,
+            notCloned > 0 ? t("audio.changeVoice.batchSkippedNotCloned", { count: notCloned }) : null,
+            voiceReference > 0 ? t("audio.changeVoice.batchSkippedVoiceReference", { count: voiceReference }) : null,
+          ].filter(Boolean).join(" ") || undefined,
+        })
+        revalidateCells?.()
+      })
+    },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, activeLane, t, reportBatchValidate, batchValidateSummary])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
   // actions with `requiresConfirmation` route through the ConfirmActionDialog
   // (rendered below) instead of running immediately.
   const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
+  const [batchVoiceQuality, setBatchVoiceQuality] = useState<ChangeVoiceQuality>(() => getChangeVoiceQuality())
+  const changeVoicePlan = useMemo(() => {
+    if (pendingActionConfirm?.id !== "change-voice-all") return null
+    return planChangeVoiceAll(
+      audioCueCells ?? batchAudioCells,
+      tts.settings,
+      CHANGE_VOICE_QUALITY_STEPS[batchVoiceQuality],
+    )
+  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, batchVoiceQuality])
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
     if (action.requiresConfirmation) {
+      if (action.id === "change-voice-all") {
+        const quality = getChangeVoiceQuality()
+        batchVoiceQualityRef.current = quality
+        setBatchVoiceQuality(quality)
+      }
       setPendingActionConfirm(action)
     } else {
       action.run(actionCtx, actionArgs)
@@ -14321,9 +14374,45 @@ export function ProjectWorkspace() {
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
+          description={pendingActionConfirm.id === "change-voice-all"
+            ? t("nav.workspaceActions.changeVoiceAll.description", {
+                n: changeVoicePlan?.targets.length ?? 0,
+                quality: t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality]),
+              })
+            : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
+          notice={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
+            ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
+            : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
+          confirmDisabled={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.targets.length ?? 0) === 0}
+          extra={pendingActionConfirm.id === "change-voice-all" ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">{t("editor.voice.changeVoiceQuality")}</span>
+              <Select
+                value={batchVoiceQuality}
+                onValueChange={(value) => {
+                  if (value != null && (CHANGE_VOICE_QUALITIES as readonly string[]).includes(value)) {
+                    const quality = value as ChangeVoiceQuality
+                    batchVoiceQualityRef.current = quality
+                    setBatchVoiceQuality(quality)
+                    setChangeVoiceQuality(quality)
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full!" aria-label={t("editor.voice.changeVoiceQuality")}>
+                  {t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality])}
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false} align="start">
+                  <SelectGroup>
+                    {CHANGE_VOICE_QUALITIES.map((q) => (
+                      <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : undefined}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}

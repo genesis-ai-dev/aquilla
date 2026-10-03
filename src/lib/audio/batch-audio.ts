@@ -16,7 +16,7 @@ import { useSyncExternalStore } from "react"
 // Progress store
 // ---------------------------------------------------------------------------
 
-export type BatchKind = "transcribe" | "synth" | "measure"
+export type BatchKind = "transcribe" | "synth" | "measure" | "changeVoice"
 
 export interface BatchProgress {
   kind: BatchKind
@@ -62,7 +62,7 @@ const CONCURRENCY = 2
  * Stops accepting new work when `isCancelled()` returns true (in-flight jobs
  * complete naturally).
  */
-async function runBatch<T>(
+export async function runBatch<T>(
   items: T[],
   fn: (item: T) => Promise<unknown>,
   opts: {

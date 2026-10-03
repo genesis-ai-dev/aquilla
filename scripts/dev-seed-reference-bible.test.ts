@@ -179,6 +179,17 @@ describe("dev-seed-reference-bible (AQU-1573)", () => {
     expect(output.join("\n")).toContain("__dev/login?as=carol")
   })
 
+  // AQU-1573 walk: an ask-mode token's change applies only after Approve AND a
+  // second commit call; the printed lines used to stop at "approve".
+  it("prints the commit step that applies an approved PatchSettings change", async () => {
+    await seed()
+    const text = output.join("\n")
+    expect(text).toContain("nothing changes until it is approved AND committed")
+    expect(text).toContain(
+      `curl -s -X POST -H "Authorization: Bearer aqk_1" -H "Content-Type: application/json" ${SYNC}/api/v1/external/projects/${DEMO_PROJECT_ID}/changesets/<id>/commit -d '{}'`,
+    )
+  })
+
   it("changes nothing on a second run, and replaces the demo token", async () => {
     await seed()
     const imports = stack.calls.filter((c) => c === "POST sync/import").length

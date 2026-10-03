@@ -93,11 +93,12 @@ export function handleAssignmentEvent(
     )
 
     // 2. Resolve each scope entry -> source cells from the live cells
-    //    projection. One INSERT...SELECT per entry (per chunk for 'cells'). The cells projection
-    //    hard-deletes on *.cell.delete (no deleted_at column), so a plain
-    //    side='source' filter is the live set. Chapter scope narrows by
-    //    canonical_ref (e.g. "GEN 1" -> LIKE 'GEN 1:%', which excludes
-    //    "GEN 11:1" because the ':' anchors the chapter boundary).
+    //    projection. One INSERT...SELECT per entry, or per chunk for a
+    //    'cells' scope. The cells projection hard-deletes on *.cell.delete
+    //    (no deleted_at column), so a plain side='source' filter is the live
+    //    set. Chapter scope narrows by canonical_ref (e.g. "GEN 1" -> LIKE
+    //    'GEN 1:%', which excludes "GEN 11:1" because the ':' anchors the
+    //    chapter boundary).
     for (const entry of p.scope) {
       if (entry.cellIds) {
         // AQU-1628: an explicit line set ('cells' scope — the editor's current

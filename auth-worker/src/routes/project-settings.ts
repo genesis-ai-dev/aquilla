@@ -64,6 +64,7 @@ import {
 } from "../../../db/shared/projects"
 import {
   insertTargetLane,
+  laneDisplayNameSql,
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
@@ -223,7 +224,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
 async function targetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const rows = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)

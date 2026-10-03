@@ -18,8 +18,13 @@ import {
   listProjectLanes,
   renameTargetLane,
   setTargetLaneArchived,
+  laneDisplayNameSql,
   updateTargetLane,
 } from "../../../db/shared/lanes"
+import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { loadTargetLanes } from "../events/lane-read-wall"
+import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import { lanesForRequestedTag } from "../../../src/lib/lanes/read-wall"
 import {
   BLANK_LANE_PLACEHOLDER,
   SOURCE_LANE_PLACEHOLDER,
@@ -364,5 +369,42 @@ describe("rename and archive a target lane", () => {
       legacyTag: "aabbccdd",
       langCode: "yo-NG",
     })
+  })
+})
+
+describe("readers that select lane rows directly see the display name", () => {
+  it("a lane that stores only its language is matched, labelled, and granted by that language", async () => {
+    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await insertTargetLane(t.db, PROJECT, {
+      id: "aabbccdd",
+      language: "Yoruba",
+      name: null,
+      langCode: null,
+      legacyTag: "aabbccdd",
+    })
+
+    for (const identities of [await loadTargetLanes(t.db, PROJECT), await loadTargetLaneIdentities(t.db, PROJECT)]) {
+      expect(identities.find((lane) => lane.id === "aabbccdd")?.name).toBe("Yoruba")
+      expect(lanesForRequestedTag(identities, "Yoruba").map((lane) => lane.id)).toEqual(["aabbccdd"])
+      const plan = planLaneGrants({ roleLevel: 300, laneScopes: ["Yoruba"], lanes: identities })
+      expect(plan.grants.map((grant) => grant.laneId)).toEqual(["aabbccdd"])
+    }
+  })
+
+  it("falls back to the role placeholder, and stays NULL when no lane row joined", async () => {
+    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    const placeholders = await t.pg.query<{ role: string; label: string }>(
+      `SELECT role, ${laneDisplayNameSql("lanes")} AS label FROM lanes WHERE project_id = $1 ORDER BY role`,
+      [PROJECT],
+    )
+    expect(placeholders.rows).toEqual([
+      { role: "source", label: SOURCE_LANE_PLACEHOLDER },
+      { role: "target", label: BLANK_LANE_PLACEHOLDER },
+    ])
+    const missing = await t.pg.query<{ label: string | null }>(
+      `SELECT ${laneDisplayNameSql("ln")} AS label
+         FROM (SELECT 1) AS one LEFT JOIN lanes ln ON ln.id = 'no-such-lane'`,
+    )
+    expect(missing.rows).toEqual([{ label: null }])
   })
 })

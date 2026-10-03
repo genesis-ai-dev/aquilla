@@ -163,6 +163,18 @@ export async function ensureProjectLanes(
   if (stmts.length > 0) await db.batch(stmts)
 }
 
+/**
+ * SQL twin of `laneDisplayName` for queries that read lane rows without going
+ * through {@link listProjectLanes}. `name` is NULL on any lane that only shows
+ * its language, and grant planning and the read wall match on this string, so
+ * a bare `name` silently drops those lanes. NULL when the joined row is
+ * missing (a LEFT JOIN that found no lane).
+ */
+export function laneDisplayNameSql(alias: string): string {
+  return `COALESCE(NULLIF(btrim(${alias}.name), ''), NULLIF(btrim(${alias}.language), ''),
+    CASE ${alias}.role WHEN 'source' THEN '${SOURCE_LANE_PLACEHOLDER}' WHEN 'target' THEN '${BLANK_LANE_PLACEHOLDER}' END)`
+}
+
 export interface ProjectLaneRecord {
   id: string
   role: "source" | "target"

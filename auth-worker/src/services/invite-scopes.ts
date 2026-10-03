@@ -15,6 +15,7 @@ import { ROLE } from "../types"
 import type { Env } from "../types"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 import type { LaneIdentity } from "../../../src/lib/lanes/read-wall"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
 
 /** Max distinct lanes a single invite may carry (defensive bound). */
 export const MAX_INVITE_SCOPE_LANES = 50
@@ -120,7 +121,7 @@ async function applyInviteLaneGrants(
   finalRole: number,
 ): Promise<void> {
   const { results } = await env.AQUILLA_PG.prepare(
-    `SELECT id, name, legacy_tag FROM lanes
+    `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
       WHERE project_id = ? AND role = 'target'`,
   )
     .bind(projectId)

@@ -10,7 +10,11 @@ import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
 
 /** Reason keys the harmonizer may send. A key the client does not know (a
  *  newer server) shows no reason rather than a raw key. */
-const HARMONIZER_REASONS = ["harmonizer.quotes.closeHere"] as const
+const HARMONIZER_REASONS = [
+  "harmonizer.quotes.closeHere",
+  "harmonizer.reference.unclearSubject",
+  "harmonizer.reference.impliedSubject",
+] as const
 type HarmonizerReason = (typeof HARMONIZER_REASONS)[number]
 function isHarmonizerReason(key: string): key is HarmonizerReason {
   return (HARMONIZER_REASONS as readonly string[]).includes(key)
@@ -37,11 +41,15 @@ export function SmartEditPopover({
       <PopoverContent className="w-80 p-3 text-sm" sideOffset={6} anchor={anchor}>
         <div className="space-y-3" data-testid="smart-edit-popover">
           <div className="text-xs font-medium text-muted-foreground">{t("smartEdits.popoverTitle")}</div>
-          <div className="flex flex-wrap items-baseline gap-2">
-            <span className="text-muted-foreground line-through">{suggestion.old}</span>
-            <span aria-hidden>→</span>
-            <span className="font-medium">{suggestion.new}</span>
-          </div>
+          {suggestion.flagOnly ? (
+            <div className="font-medium">{suggestion.old}</div>
+          ) : (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-muted-foreground line-through">{suggestion.old}</span>
+              <span aria-hidden>→</span>
+              <span className="font-medium">{suggestion.new}</span>
+            </div>
+          )}
           {suggestion.tier === "harmonize" && (
             <div className="space-y-1 text-xs">
               {suggestion.reasonKey && isHarmonizerReason(suggestion.reasonKey) && (
@@ -67,7 +75,7 @@ export function SmartEditPopover({
           {suggestion.tier === "jev" && <p className="text-xs text-muted-foreground">{t("smartEdits.evidenceVerified")}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={onDismiss}>{t("smartEdits.dismiss")}</Button>
-            <Button size="sm" onClick={onAccept}>{t("smartEdits.accept")}</Button>
+            {!suggestion.flagOnly && <Button size="sm" onClick={onAccept}>{t("smartEdits.accept")}</Button>}
           </div>
         </div>
       </PopoverContent>

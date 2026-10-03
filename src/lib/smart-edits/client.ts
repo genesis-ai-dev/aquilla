@@ -31,6 +31,8 @@ export interface SmartEditSuggestion {
   tier: "memory" | "jev" | "llm" | "harmonize"
   /** LLM tier only: the model's one-sentence reason. */
   reason?: string
+  /** Harmonize tier only (AQU-1658): a flag with no replacement — no Accept. */
+  flagOnly?: boolean
   /** Harmonize tier only (AQU-1657): i18n key + values explaining the check. */
   reasonKey?: string
   reasonValues?: Record<string, string>

@@ -174,6 +174,18 @@ describe("POST /api/v1/ai/smart-edits/suggest", () => {
     expect(out.suggestions).toEqual([])
   })
 
+  it("answers with no suggestions, not a 500, when the edit memory cannot be read", async () => {
+    const jwt = await seedMember()
+    await env.AQUILLA_PG.prepare("ALTER TABLE smart_edit_observations RENAME TO smart_edit_observations_gone").run()
+    try {
+      const res = await suggest(jwt, { cells: [SHEPHERD] })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ suggestions: [], unavailable: true })
+    } finally {
+      await env.AQUILLA_PG.prepare("ALTER TABLE smart_edit_observations_gone RENAME TO smart_edit_observations").run()
+    }
+  })
+
   it("honours the SMART_EDITS kill switch", async () => {
     const jwt = await seedMember()
     await seedTwoCorrections()
@@ -197,6 +209,19 @@ describe("POST /api/v1/ai/smart-edits/llm", () => {
     await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 9, 100)").bind(PROJECT_ID).run()
     const res = await app.request("/api/v1/ai/smart-edits/llm", { method: "POST", headers: authHeader(await jwtFor("viewer")), body: body() }, llmEnv())
     expect(res.status).toBe(403)
+  })
+
+  it("still asks the model, without team evidence, when the edit memory cannot be read", async () => {
+    const jwt = await seedMember()
+    await env.AQUILLA_PG.prepare("ALTER TABLE smart_edit_observations RENAME TO smart_edit_observations_gone").run()
+    try {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({ edits: [{ old: "the Lord", new: "Yahweh", reason: "r" }] }))
+      const res = await app.request("/api/v1/ai/smart-edits/llm", { method: "POST", headers: authHeader(jwt), body: body() }, llmEnv())
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { suggestions: unknown[] }).suggestions).toHaveLength(1)
+    } finally {
+      await env.AQUILLA_PG.prepare("ALTER TABLE smart_edit_observations_gone RENAME TO smart_edit_observations").run()
+    }
   })
 
   it("gives the model the team's own corrections and returns only exact-span edits", async () => {

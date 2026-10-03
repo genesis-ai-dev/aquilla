@@ -160,11 +160,20 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
 
   const cellsById = new Map(input.cells.map((cell) => [cellKeyOf(cell.fileId, cell.cellId, input.lane), cell]))
   const passage = [...cellsById.entries()].map(([id, cell]) => ({ id, source: cell.source, target: cell.target }))
-  const observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys(passage.map((p) => p.target)))
-  const candidates = findCandidates(passage, observations)
-  if (candidates.length === 0) return c.json({ suggestions: [], jev: "skipped" })
-
-  const scoreInputs = await loadScoreInputs(db, input.projectId, input.lane, candidates, observations)
+  // An unreadable memory (e.g. migration 0130 not yet applied on this
+  // database) is "no suggestions", never a 500 — nobody asked for these.
+  let observations: Observation[]
+  let candidates: ReturnType<typeof findCandidates>
+  let scoreInputs: Awaited<ReturnType<typeof loadScoreInputs>>
+  try {
+    observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys(passage.map((p) => p.target)))
+    candidates = findCandidates(passage, observations)
+    if (candidates.length === 0) return c.json({ suggestions: [], jev: "skipped" })
+    scoreInputs = await loadScoreInputs(db, input.projectId, input.lane, candidates, observations)
+  } catch (err) {
+    console.warn("[smart-edits] memory unavailable:", err)
+    return c.json({ suggestions: [], unavailable: true })
+  }
   const selected = selectForDisplay(scoreCandidates(candidates, scoreInputs))
 
   const shown: { s: ScoredSuggestion; tier: "memory" | "jev" }[] = selected
@@ -302,7 +311,14 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   } catch (err) {
     console.warn("[smart-edits] mine pass failed:", err)
   }
-  const observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys([input.target]))
+  // The team's corrections are context, not a precondition: if the memory
+  // cannot be read, the model still gets the source and the passage.
+  let observations: Observation[] = []
+  try {
+    observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys([input.target]))
+  } catch (err) {
+    console.warn("[smart-edits] memory unavailable for llm:", err)
+  }
   const messages = buildLlmMessages(
     { source: input.source, target: input.target, neighbors: input.neighbors },
     rankEvidence(observations, input.source),

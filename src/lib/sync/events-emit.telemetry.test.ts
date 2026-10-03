@@ -136,6 +136,61 @@ describe("audio validation telemetry", () => {
   })
 })
 
+describe("automatic votes (AQU-1572)", () => {
+  // The vote your own edit casts for itself, and the recorder's vote for its
+  // fresh take, fire on every saved edit and every take. They are still sent,
+  // so the totals stay true, but marked, so "how much reviewing happened"
+  // can leave them out with one filter.
+  it("marks a text validation the app cast by itself as auto", async () => {
+    await emitCellValidate({ ...CELL, editEventId: "ev1", auto: true })
+    expect(captured(CELL_VALIDATED)).toEqual([expect.objectContaining({ auto: true })])
+  })
+
+  it("marks the recorder's vote for its own take as auto", async () => {
+    await emitCellAudioValidate({ ...CELL, audioId: "a1.wav", auto: true })
+    expect(captured(CELL_VALIDATED)).toEqual([expect.objectContaining({ medium: "audio", auto: true })])
+  })
+
+  it("reports every other validation as auto: false, never leaving it out", async () => {
+    await emitCellValidate({ ...CELL, editEventId: "ev1" })
+    await emitCellUnvalidate({ ...CELL, editEventId: "ev1" })
+    await emitCellAudioValidate({ ...CELL, audioId: "a1.wav" })
+    await emitCellAudioUnvalidate({ ...CELL, audioId: "a1.wav" })
+    const all = [...captured(CELL_VALIDATED), ...captured(CELL_UNVALIDATED)]
+    expect(all).toHaveLength(4)
+    for (const props of all) expect(props.auto).toBe(false)
+  })
+})
+
+describe("telemetry-only inputs never reach the wire (AQU-1572)", () => {
+  // Every field a validation emit takes only for telemetry, set at once. The
+  // payload each one queues must be exactly what it was before telemetry
+  // existed, so the server, the event log and every other client see no
+  // difference.
+  const TELEMETRY_ONLY = { source: "agent", auto: true } as const
+
+  async function payloadOf(emit: () => Promise<unknown>): Promise<Record<string, unknown>> {
+    const { enqueueOutboxEvent } = await import("./outbox")
+    vi.mocked(enqueueOutboxEvent).mockClear()
+    await emit()
+    return (vi.mocked(enqueueOutboxEvent).mock.calls[0][0] as { payload: Record<string, unknown> }).payload
+  }
+
+  it("text validate and unvalidate queue only the edit and the lane", async () => {
+    for (const emit of [emitCellValidate, emitCellUnvalidate]) {
+      const payload = await payloadOf(() => emit({ ...CELL, editEventId: "ev1", targetLang: "spa", ...TELEMETRY_ONLY }))
+      expect(payload).toEqual({ editEventId: "ev1", targetLang: "spa" })
+    }
+  })
+
+  it("audio validate and unvalidate queue only the take and the lane", async () => {
+    for (const emit of [emitCellAudioValidate, emitCellAudioUnvalidate]) {
+      const payload = await payloadOf(() => emit({ ...CELL, audioId: "a1.wav", targetLang: "spa", ...TELEMETRY_ONLY }))
+      expect(Object.keys(payload).sort()).toEqual(["audioId", "targetLang"])
+    }
+  })
+})
+
 describe("audio action telemetry", () => {
   const ATTACH = { ...CELL, audioId: "a1.wav", url: "frontier-audio://a1.wav", slot: "recording" }
 

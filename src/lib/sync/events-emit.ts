@@ -352,6 +352,13 @@ export interface CellValidateInput {
    * wire payload. Defaults to a person in the UI.
    */
   source?: TelemetrySource
+  /**
+   * AQU-1572: this validation was added BY the app, not asked for: the vote
+   * your own edit casts for itself (`shouldAutoValidateHumanEdit`). Telemetry
+   * only, never on the wire. Reported as `auto: true` so a dashboard can
+   * count deliberate reviews apart from it; everything else reports `false`.
+   */
+  auto?: boolean
   author: string
   clientTs?: number
 }
@@ -398,6 +405,7 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
   })
   return eventId
 }
@@ -425,6 +433,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
   })
   return eventId
 }
@@ -1056,6 +1065,12 @@ export interface CellAudioValidateInput {
   targetLang?: string
   /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
   source?: TelemetrySource
+  /**
+   * AQU-1572: the recorder's own vote for a fresh take
+   * (`shouldAutoValidateFreshRecording`), not a listener's review. Telemetry
+   * only, never on the wire; reported as `auto: true`.
+   */
+  auto?: boolean
   author: string
   clientTs?: number
 }
@@ -1079,6 +1094,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
   })
   return eventId
 }
@@ -1116,6 +1132,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
   })
   return eventId
 }

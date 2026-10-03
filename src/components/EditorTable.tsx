@@ -5746,6 +5746,8 @@ function EditorRow({
           // landed on the MAIN language: editing Spanish silently validated the
           // German row, and a member limited to Spanish had it refused.
           targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
         }).then(() => {
           // AQU-1484: validated — the repetitions are owed this text. Paid
           // right here when the commit came from a settled gesture (the blur

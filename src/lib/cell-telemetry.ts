@@ -87,6 +87,12 @@ export interface CellValidationTelemetry {
   /** The lane's tag. `''` (the default lane) is reported as `''`, not dropped. */
   lane?: string
   source?: TelemetrySource
+  /**
+   * The app cast this vote by itself (your own edit, your own fresh take)
+   * rather than a person asking for it. Sent as `auto`, always present, so a
+   * filter on `auto = false` keeps exactly the deliberate reviews.
+   */
+  auto?: boolean
 }
 
 /** Emit `cell validated` / `cell unvalidated` for one validation gesture. */
@@ -101,6 +107,7 @@ export function captureCellValidation(
     cell_id: t.cellId,
     lane: t.lane ?? "",
     source: t.source ?? "ui",
+    auto: t.auto ?? false,
   })
 }
 

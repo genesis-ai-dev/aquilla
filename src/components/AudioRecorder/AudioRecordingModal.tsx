@@ -1448,6 +1448,8 @@ export function AudioRecordingModal({
           audioId: savedTakeId,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
+          // AQU-1572: the recorder's own vote for its fresh take, not a review.
+          auto: true,
         }).catch((err) => {
           // Non-blocking, as for text: the take itself already landed.
           console.warn("[audio auto-validate] emit failed:", err)

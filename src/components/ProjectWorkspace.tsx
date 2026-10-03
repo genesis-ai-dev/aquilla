@@ -11750,6 +11750,8 @@ export function ProjectWorkspace() {
           editEventId: eventId,
           author: currentUsername,
           targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
         })
         // Only a validation that actually landed owes the repetitions anything.
         autoValidated = true

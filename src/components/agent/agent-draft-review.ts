@@ -207,6 +207,10 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
         editEventId: queued.eventId, author: session.username, targetLang: lane,
         // AQU-1572: the agent applying its own draft review, not a person.
         source: "agent",
+        // …and only because the accepted text is the person's own edit now,
+        // which validates itself under the same rule as typing it
+        // (`validationNeeded` above). Nobody asked for this vote.
+        auto: true,
       })
       onQueued({ ...queued })
     }

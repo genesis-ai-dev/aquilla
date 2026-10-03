@@ -119,6 +119,8 @@ describe("AudioRecordingModal — a fresh recording validates itself (AQU-490)",
     await waitFor(() => expect(emitValidate).toHaveBeenCalledTimes(1))
     expect(emitValidate.mock.calls[0][0]).toMatchObject({
       projectId: "p1", fileId: "f1", cellId: "c1", audioId: "audio-c1-1-new.webm", author: "sam",
+      // AQU-1572: reported, but as the recorder's own vote, not a review.
+      auto: true,
     })
     // The order is the rule: the vote names a take that must already exist.
     expect(emitAttach.mock.invocationCallOrder[0]).toBeLessThan(emitValidate.mock.invocationCallOrder[0])

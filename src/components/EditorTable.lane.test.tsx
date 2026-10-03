@@ -191,6 +191,8 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({
       fileId: "file-1", cellId: "cell-1", targetLang: "fr",
     }))
+    // A click is a review: not marked as the app's own vote.
+    expect(emitCellValidate).not.toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
     expect(captureCellValidation).not.toHaveBeenCalled()
   })
 
@@ -220,6 +222,9 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
     expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
+    // AQU-1572: the vote an edit casts for itself is still reported, marked
+    // auto so the deliberate reviews can be counted without it.
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
     emitTargetCellCommit.mockClear()
   })
 

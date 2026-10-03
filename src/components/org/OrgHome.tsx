@@ -357,12 +357,10 @@ export function ProjectTable({
   projects,
   now,
   showOrg,
-  defaultLaneLabelByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
-  defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   const { t } = useI18n()
   return (
@@ -487,7 +485,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -794,14 +792,6 @@ export function OrgHome() {
   // Hide org-rollup chrome when there is nothing to roll up — a project-only
   // invitee still gets the same projects table, just without fake 0/0/0 stats.
   const showOrgRollup = orgs.length > 0
-  // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language. This all-orgs view has no per-file language hints to join,
-  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
-  // project-level `targetLanguage` off the row itself, so the chip still shows
-  // the real language and only a genuinely untargeted project falls back to the
-  // neutral placeholder.
-  const defaultLaneLabelByProjectId = new Map<string, string>()
-
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
       const orgProjects = projects.filter((project) => project.orgId === org.id)
@@ -957,7 +947,6 @@ export function OrgHome() {
                         showOrg
                         layout="embedded"
                         testId="project-table"
-                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         searchValue={projectQuery}
                         onSearchChange={setProjectQuery}

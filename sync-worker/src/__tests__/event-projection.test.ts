@@ -660,10 +660,50 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].sql).toContain('INSERT INTO files')
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
+    // AQU-1596: the payload field name is wire history, but what lands in
+    // `meta` says what it actually is — the language this file *declared*,
+    // which is import information and never the language of a lane.
     expect(JSON.parse(recorded[0].args.at(-1) as string)).toEqual({
-      sourceLanguage: 'en',
+      declaredSourceLanguage: 'en',
       aquillaImport: { version: 1, profileId: 'builtin:usfm-lossless' },
     })
+  })
+
+  it('records both declared languages and writes neither legacy key (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        targetLanguage: 'fra',
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    expect(meta).toEqual({ declaredSourceLanguage: 'hbo', declaredTargetLanguage: 'fra' })
+    expect(meta).not.toHaveProperty('sourceLanguage')
+    expect(meta).not.toHaveProperty('targetLanguage')
+  })
+
+  it('leaves a legacy key already in projectionMeta untouched beside the declared one (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        projectionMeta: { sourceLanguage: 'eng', orderedBy: 'time' },
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    // History is never rewritten: the old key stays, the declared key wins on read.
+    expect(meta.sourceLanguage).toBe('eng')
+    expect(meta.declaredSourceLanguage).toBe('hbo')
+    expect(meta.orderedBy).toBe('time')
   })
 })
 

@@ -32,6 +32,7 @@ import {
   type MatchBand,
 } from './import-content-match'
 import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
+import { assignDeclaredLanguages, readDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { ROLE } from './role-policy'
@@ -717,8 +718,10 @@ function buildGatedTargetInsert(
 
 function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<string, unknown> {
   const meta = { ...objectRecord(existing) }
-  if (incoming.sourceLanguage) meta.sourceLanguage = incoming.sourceLanguage
-  if (incoming.targetLanguage) meta.targetLanguage = incoming.targetLanguage
+  // AQU-1596: a re-import's language claim is recorded as declared, next to
+  // whatever legacy keys the existing blob already carries (left untouched —
+  // readers prefer the declared keys).
+  assignDeclaredLanguages(meta, incoming.sourceLanguage, incoming.targetLanguage)
   if (incoming.sourceTextDirection) meta.sourceTextDirection = incoming.sourceTextDirection
   if (incoming.targetTextDirection) meta.targetTextDirection = incoming.targetTextDirection
   if (incoming.orderedBy) meta.orderedBy = incoming.orderedBy
@@ -869,6 +872,7 @@ export async function handleImportReconcileRequest(
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
   let serverTs = Date.now()
   const mergedMeta = mergeFileMeta(file.meta, body.file)
+  const declaredForPayload = readDeclaredLanguages(mergedMeta)
   const filePayload: EventPayloads['file.create'] = {
     name: file.name,
     fileType: body.file.fileType ?? file.kind ?? file.role ?? 'codex',
@@ -879,8 +883,11 @@ export async function handleImportReconcileRequest(
     anchorFileId: file.anchor_file_id ?? undefined,
     importFormat: typeof mergedMeta.importFormat === 'string' ? mergedMeta.importFormat : undefined,
     parserVersion: typeof mergedMeta.parserVersion === 'string' ? mergedMeta.parserVersion : undefined,
-    sourceLanguage: typeof mergedMeta.sourceLanguage === 'string' ? mergedMeta.sourceLanguage : undefined,
-    targetLanguage: typeof mergedMeta.targetLanguage === 'string' ? mergedMeta.targetLanguage : undefined,
+    // AQU-1596: `mergeFileMeta` records the claim under the declared keys, so
+    // read it back through the same contract (which still accepts the legacy
+    // keys an untouched blob carries) rather than off the raw camelCase key.
+    sourceLanguage: declaredForPayload.declaredSourceLanguage ?? undefined,
+    targetLanguage: declaredForPayload.declaredTargetLanguage ?? undefined,
     sourceTextDirection: mergedMeta.sourceTextDirection === 'ltr' || mergedMeta.sourceTextDirection === 'rtl'
       ? mergedMeta.sourceTextDirection : undefined,
     targetTextDirection: mergedMeta.targetTextDirection === 'ltr' || mergedMeta.targetTextDirection === 'rtl'

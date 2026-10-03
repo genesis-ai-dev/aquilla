@@ -208,16 +208,23 @@ describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCK
   /**
    * Simulates the handleImported decision for language patch without the React
    * and IDB layers. Returns { newSource, newTarget } after applying the logic.
+   *
+   * AQU-1596: the non-explicit branch no longer fills anything. A language that
+   * came off the file's header is a *declaration* — import information that can
+   * disagree with the lane — so only the user's explicit answer may set a
+   * lane's language. `warns` reports the disagreement the user is told about
+   * instead.
    */
   function computeLanguagePatch(
     currentSource: string,
     currentTarget: string,
     inferredLanguages: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
-  ): { newSource: string; newTarget: string; shouldPatch: boolean } {
+  ): { newSource: string; newTarget: string; shouldPatch: boolean; warns: boolean } {
     const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
 
     let newSource: string
     let newTarget: string
+    let warns = false
 
     if (explicit) {
       // BLOCKER 1: explicit answer from DirectionPanel wins.
@@ -227,8 +234,12 @@ describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCK
         ? (inTgt?.trim() || currentTarget)
         : currentTarget
     } else {
-      newSource = currentSource || inSrc?.trim() || ""
-      newTarget = currentTarget || inTgt?.trim() || ""
+      // AQU-1596: declared values never become the lane's language; a
+      // disagreement with the lane warns instead.
+      const declaredTarget = inTgt?.trim() || ""
+      warns = Boolean(declaredTarget && currentTarget && !languagesEqual(declaredTarget, currentTarget))
+      newSource = currentSource
+      newTarget = currentTarget
     }
 
     const sourceDiffers = newSource !== currentSource
@@ -236,7 +247,7 @@ describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCK
     const resultDistinct = !languagesEqual(newSource, newTarget)
     const shouldPatch = (sourceDiffers || targetDiffers) && resultDistinct && !!(newSource || newTarget)
 
-    return { newSource, newTarget, shouldPatch }
+    return { newSource, newTarget, shouldPatch, warns }
   }
 
   it("explicit confirm repairs source==target broken state (BLOCKER 1 primary case)", () => {
@@ -275,26 +286,54 @@ describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCK
     expect(result.shouldPatch).toBe(false)
   })
 
-  it("inferred-only does NOT override existing target (fill-empty-only)", () => {
-    // Project already has "English"/"Spanish"; inferred says "eng"/"fra".
+  it("inferred-only does NOT override existing target", () => {
+    // Project already has "English"/"Spanish"; the file declares "eng"/"fra".
     const result = computeLanguagePatch("English", "Spanish", {
       sourceLanguage: "eng",
       targetLanguage: "fra",
       explicit: false,
     })
-    // No change — slots were already filled.
     expect(result.shouldPatch).toBe(false)
   })
 
-  it("inferred-only fills empty source slot", () => {
+  // AQU-1596 regression guards: a declared language can disagree with the lane,
+  // so import may only suggest or warn — never write the claim into the lane's
+  // language, not even into an empty slot.
+  it("inferred-only does NOT fill an empty slot from the file's declaration", () => {
     const result = computeLanguagePatch("", "", {
       sourceLanguage: "arb",
       targetLanguage: "fra",
       explicit: false,
     })
-    expect(result.newSource).toBe("arb")
-    expect(result.newTarget).toBe("fra")
-    expect(result.shouldPatch).toBe(true)
+    expect(result.newSource).toBe("")
+    expect(result.newTarget).toBe("")
+    expect(result.shouldPatch).toBe(false)
+  })
+
+  it("warns, rather than blocking or patching, when the declaration disagrees with the lane", () => {
+    const result = computeLanguagePatch("English", "French", {
+      targetLanguage: "Spanish",
+      explicit: false,
+    })
+    expect(result.warns).toBe(true)
+    expect(result.shouldPatch).toBe(false)
+    expect(result.newTarget).toBe("French")
+  })
+
+  it("does not warn when the declaration agrees with the lane after normalization", () => {
+    const result = computeLanguagePatch("English", "French", {
+      targetLanguage: "fra",
+      explicit: false,
+    })
+    expect(result.warns).toBe(false)
+  })
+
+  it("does not warn when the lane has no language of its own to disagree with", () => {
+    const result = computeLanguagePatch("English", "", {
+      targetLanguage: "Spanish",
+      explicit: false,
+    })
+    expect(result.warns).toBe(false)
   })
 
   it("shouldPatch is false when result would be source==target (normalizer-aware)", () => {

@@ -21,6 +21,55 @@
 ALTER TABLE cell_audio            ADD COLUMN IF NOT EXISTS lane_id TEXT;
 ALTER TABLE cell_audio_validators ADD COLUMN IF NOT EXISTS lane_id TEXT;
 
+-- The same composite FK every other lane_id column carries. NOT VALID then
+-- VALIDATE keeps the add itself from scanning under a long lock; a NULL
+-- lane_id is exempt.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'cell_audio_lane_id_fkey' AND conrelid = 'public.cell_audio'::regclass
+  ) THEN
+    ALTER TABLE public.cell_audio
+      ADD CONSTRAINT cell_audio_lane_id_fkey
+      FOREIGN KEY (project_id, lane_id) REFERENCES public.lanes (project_id, id)
+      NOT VALID;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'cell_audio_lane_id_fkey' AND conrelid = 'public.cell_audio'::regclass AND NOT convalidated
+  ) THEN
+    ALTER TABLE public.cell_audio VALIDATE CONSTRAINT cell_audio_lane_id_fkey;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'cell_audio_validators_lane_id_fkey' AND conrelid = 'public.cell_audio_validators'::regclass
+  ) THEN
+    ALTER TABLE public.cell_audio_validators
+      ADD CONSTRAINT cell_audio_validators_lane_id_fkey
+      FOREIGN KEY (project_id, lane_id) REFERENCES public.lanes (project_id, id)
+      NOT VALID;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'cell_audio_validators_lane_id_fkey' AND conrelid = 'public.cell_audio_validators'::regclass AND NOT convalidated
+  ) THEN
+    ALTER TABLE public.cell_audio_validators VALIDATE CONSTRAINT cell_audio_validators_lane_id_fkey;
+  END IF;
+END $$;
+
 -- The per-file read and the progress audio CTE both now filter on the lane
 -- beside the file. Partial on deleted = 0, mirroring idx_cell_audio_file.
 CREATE INDEX IF NOT EXISTS idx_cell_audio_lane

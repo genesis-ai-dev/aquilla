@@ -1358,12 +1358,16 @@ export const org = defineNamespace({
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
-    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneTooltip": "You can unmark this later.",
     "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
-    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.unmarkDone": "Unmark",
     "org.projectOverview.plan.notMarkedDone": "Not marked done.",
     "org.projectOverview.plan.aMaintainer": "a maintainer",
     "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    // AQU-1494: a unit someone marked done that has work in it again — a
+    // setting that counts more cells, a line added, an edit that un-validated
+    // one. It stays done (that is a person's call); this says what came back.
+    "org.projectOverview.plan.markedDoneWithWork": "Marked done \u00b7 {work}",
     "org.projectOverview.plan.doneBelowFullNudge":
       "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
     "org.projectOverview.plan.progress": "Progress",
@@ -1426,6 +1430,10 @@ export const org = defineNamespace({
     // not in the string, the same arrangement the summary pills use.
     "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
     "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
+    // AQU-1493: when the book's front matter is short too (a title, or a line
+    // added above its first verse). Front matter alone reuses the grid tile's
+    // own words, `org.projectOverview.plan.frontMatter`.
+    "org.projectOverview.plan.shortfallWhereWithFrontMatter": "front matter and {chapters}",
     // The links out of the plan and into the editor, landing on the first cell
     // that is actually missing something. Two keys rather than one with a
     // {kind} placeholder: an inflecting language cannot build "first
@@ -1478,6 +1486,34 @@ export const org = defineNamespace({
     // question the grid poses at a glance — how much of this is left — for a
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    // AQU-1493: front matter is not a chapter, so when it is short it is named
+    // in its own words rather than counted as one more chapter.
+    "org.projectOverview.plan.frontMatterShort": "Front matter short",
+    "org.projectOverview.plan.frontMatterAndChaptersShort": plural({
+      one: "Front matter and {count} chapter short",
+      other: "Front matter and {count} chapters short",
+    }),
+    "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
+    "org.projectOverview.plan.headingLine": "Heading",
+    // AQU-1493: the same chip when the heading has a verse below it — the verse
+    // it introduces, so a row of headings says where each one is.
+    "org.projectOverview.plan.headingChipAt": "Heading \u00b7 {verse}",
+    "org.projectOverview.plan.titleLine": "Title or intro",
+    "org.projectOverview.plan.headingBefore": "Heading before {verse}",
+    "org.projectOverview.plan.headingAfter": "Heading after {verse}",
+    "org.projectOverview.plan.unnumberedBefore": "Unnumbered line before {verse}",
+    "org.projectOverview.plan.unnumberedAfter": "Unnumbered line after {verse}",
+    "org.projectOverview.plan.wordChipOrdinal": "{line} ({index} of {count})",
+    "org.projectOverview.plan.unnumberedInChapter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
+    }),
+    // AQU-1493: the same note on a book's front-matter card, which is not a
+    // chapter: lines added above a book's first verse count there.
+    "org.projectOverview.plan.unnumberedInFrontMatter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with the book\u2019s front matter.",
+    }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
     // read: the catalog already spends that string on autopilot.status.complete
@@ -1504,8 +1540,9 @@ export const org = defineNamespace({
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
-    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
-    // matter — cells with no chapter number, filed before chapter 1.
+    // AQU-1278: a book's USFM front matter — cells with no chapter number,
+    // filed before chapter 1. Lower case for a plan row's fragment; the grid's
+    // tile and its card capitalise it (`useFrontMatterLabel`).
     "org.projectOverview.plan.frontMatter": "front matter",
     "org.projectOverview.plan.tileAria": plural({
       one: "Chapter {chapter}: {count} cell short",
@@ -2951,9 +2988,9 @@ export const org = defineNamespace({
         description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
         maxLength: 14,
       },
-      "org.projectOverview.plan.markDoneHint": {
-        description: "Reassurance beside Mark done that the action can be reversed.",
-        maxLength: 14,
+      "org.projectOverview.plan.markDoneTooltip": {
+        description: "Hover tooltip on Mark done: reassurance that the mark can be removed again afterwards. Must read as reversible, never as \"cannot be undone\".",
+        maxLength: 60,
       },
       "org.projectOverview.plan.markDoneAnyway": {
         description: "Confirms marking a unit done although its validated percentage is below 100.",
@@ -2974,6 +3011,13 @@ export const org = defineNamespace({
       "org.projectOverview.plan.markedDoneBy": {
         description: "Provenance line: when a unit was marked done and by whom.",
         placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.markedDoneWithWork": {
+        description:
+          "Amber note on a plan row, and in the side panel beside 'Unmark', for a unit someone marked done that has outstanding cells again (a setting change, an added line, or an edit since). The unit stays in the Done group; this says that it was marked done AND what is left. Joined the way the board joins two fragments (see shortfallPair).",
+        placeholders: {
+          work: "What is left, already translated: one or two shortfall terms, e.g. '6 cells to translate' or '2 to translate \u00b7 3 to validate'.",
+        },
       },
       "org.projectOverview.plan.doneBelowFullNudge": {
         description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",
@@ -3103,6 +3147,13 @@ export const org = defineNamespace({
         placeholders: {
           list: "The first few chapter numbers, already joined for this locale.",
           count: "How many further chapters are short — a number. The plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.shortfallWhereWithFrontMatter": {
+        description:
+          "Replaces the chapter list on a plan row when the book's front matter (its title, introduction, or a line added above the first verse) is short as well as some chapters: \"front matter and chapters 2 and 3\". Lower case: a fragment after a separator. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: {
+          chapters: "The chapter part, already translated: shortfallWhere or shortfallWhereMore, e.g. 'chapters 2 and 3'.",
         },
       },
       "org.projectOverview.plan.goToFirstUntranslated": {
@@ -3240,10 +3291,79 @@ export const org = defineNamespace({
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
       },
+      "org.projectOverview.plan.unnumberedLine": {
+        description:
+          "Chip in the plan inspector's chapter card for a line that has no verse reference — usually one added by hand in the editor — where a numbered verse's chip would print '12:4'. The line counts with the chapter of the line above it. It may already hold text, so do not call it empty.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingLine": {
+        description:
+          "Chip in the plan inspector's chapter card for a section heading, such as 'The Creation', where a numbered verse's chip would print '12:4'. Opens that line in the editor. A heading with a verse below it shows headingChipAt instead; this bare word is for one at the end of a chapter.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingChipAt": {
+        description:
+          "Chip in the plan inspector's chapter card for a section heading that has a verse below it: the word 'Heading' and the verse the heading introduces, joined the way the board joins two fragments (see shortfallPair). Use the same word as headingLine. Its tooltip is headingBefore.",
+        placeholders: { verse: "The verse just below the heading, as its chip prints it, e.g. '1:6'. Not translated." },
+        maxLength: 28,
+      },
+      "org.projectOverview.plan.titleLine": {
+        description:
+          "Chip on the plan inspector's front-matter card (the part of a book before chapter 1) for a book's title, running header, table-of-contents line or introduction paragraph. Opens that line in the editor.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingBefore": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card, saying which line it opens: the heading printed just before that verse.",
+        placeholders: { verse: "The verse below the heading, as its chip prints it, e.g. '3:1'." },
+      },
+      "org.projectOverview.plan.headingAfter": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card for a heading at the end of a chapter with no verse below it: the heading printed just after that verse.",
+        placeholders: { verse: "The verse above the heading, as its chip prints it, e.g. '3:24'." },
+      },
+      "org.projectOverview.plan.unnumberedBefore": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just before that verse.",
+        placeholders: { verse: "The verse below the line, as its chip prints it, e.g. '2:1'." },
+      },
+      "org.projectOverview.plan.unnumberedAfter": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just after that verse.",
+        placeholders: { verse: "The verse above the line, as its chip prints it, e.g. '2:5'." },
+      },
+      "org.projectOverview.plan.wordChipOrdinal": {
+        description:
+          "Tooltip and screen-reader name of a chip that prints a word instead of a verse number, when several such chips on the card would otherwise have the same name (two headings stacked before one verse, or several title lines on a book's front matter). Says which of them this is, in file order, e.g. 'Heading before 3:1 (2 of 2)'.",
+        placeholders: {
+          line: "The chip's name without the count, already translated: e.g. 'Heading before 3:1' or 'Title or intro'.",
+          index: "Its position among the chips with that word — a number.",
+          count: "How many chips on the card print that word — a number.",
+        },
+      },
+      "org.projectOverview.plan.unnumberedInChapter": {
+        description:
+          "Note in the plan inspector's chapter card, shown only when the selected chapter holds lines with no verse reference. Explains that they count toward this chapter's progress because the line above them is in it.",
+        placeholders: { count: "Lines with no verse reference in this chapter — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.unnumberedInFrontMatter": {
+        description:
+          "The same note as unnumberedInChapter, on the card for a book's front matter (the part before chapter 1: its title, introduction, and any line someone added above the first verse). Front matter is not a chapter, so it names the book's front matter instead. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Lines with no verse reference in the front matter — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.chaptersShort": {
         description:
           "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
         placeholders: { count: "Chapters with outstanding cells — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.frontMatterShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the only outstanding cells sit in the book's front matter (its title, introduction, or a line added above the first verse), which is not a chapter. Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+      },
+      "org.projectOverview.plan.frontMatterAndChaptersShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the book's front matter AND some chapters still have outstanding cells: \"Front matter and 2 chapters short\". Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Chapters with outstanding cells, not counting the front matter — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chaptersComplete": {
         description:
@@ -3295,7 +3415,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.frontMatter": {
         description:
-          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+          "A Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Written in lower case, because on a plan row it is read as a fragment in the slot where 'chapters 2 and 3' would sit: where the outstanding cells are when only the front matter is short. The tile beneath the inspector's chapter grid and the title of that tile's card show it with its first letter capitalised, as labels standing alone.",
         maxLength: 14,
       },
       "org.projectOverview.plan.tileAria": {

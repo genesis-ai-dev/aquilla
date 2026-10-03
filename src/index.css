@@ -528,7 +528,11 @@ textarea,
   transition: background-color 80ms linear;
 }
 
-.codex-search-flash {
+/* AQU-1493: an attribute, not a class. The row's className is React's, and
+   React rewrites it whole whenever it changes, which wiped a class added from
+   outside. React leaves alone an attribute it does not render. See
+   src/lib/editor/row-flash.ts. */
+[data-row-flash] {
   animation: codex-search-flash 1.8s ease-out;
   border-radius: 4px;
 }

@@ -707,6 +707,22 @@ CREATE TABLE file_section_progress (
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
 CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
+-- AQU-1493: where each line with no verse reference counts on the plan, as last
+-- projected (0130). Written ONLY by the full progress recompute's first
+-- statement (db/shared/plan-keys.ts `planKeysRefreshSql`), which every path
+-- that moves lines or changes a reference or type already runs; read by the
+-- incremental recompute, the chapter card, "Go to first ...", assignments.
+-- One row per unreferenced source cell of a Scripture file.
+CREATE TABLE cell_plan_keys (
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    section_key TEXT NOT NULL,
+    place_ref   TEXT NOT NULL DEFAULT '',
+    depth       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_id, file_id, cell_id)
+);
+
 -- AQU-1094/1095: per-unit planning metadata — the target date a manager plans
 -- against and the explicit mark that a unit is finished. section_key is '' for
 -- a file-grain unit and a Bible book code for a sub-file one, mirroring

@@ -102,6 +102,7 @@ import { activeWordRange, findActiveTimingIndex } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
+import { startRowFlash } from "@/lib/editor/row-flash"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -1575,17 +1576,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
-  // both defer to the next frame (the list may still be scrolling, so the DOM
-  // node may not exist yet).
+  // both go through here.
+  //
+  // AQU-1493: through `startRowFlash`, which waits until the row is actually
+  // on screen and paints the pulse as an attribute React does not own. The old
+  // body added a CLASS one frame after the scroll, so a row whose className
+  // React rewrote a moment later (the row strip arriving with the line-editing
+  // permission) lost its pulse after ~30ms, and a row far down the file pulsed
+  // off screen while the list was still settling. See lib/editor/row-flash.ts.
+  // One pulse at a time: a new one takes the last one off its row.
+  //
+  // Deliberately NOT cancelled on unmount. A pulse ends by itself (a bounded
+  // wait, then 1.8s), and an unmount cleanup is exactly what StrictMode
+  // replays on a freshly mounted table — right after the workspace's
+  // deep-link effect has asked for the pulse, so every link that opened the
+  // editor lost its pulse in dev.
+  const rowFlashCancelRef = useRef<(() => void) | null>(null)
   const flashCellDom = useCallback((cellId: string) => {
-    requestAnimationFrame(() => {
-      const root = getListQueryRoot()
-      if (!root) return
-      const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-      if (!el) return
-      el.classList.add("codex-search-flash")
-      window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-    })
+    rowFlashCancelRef.current?.()
+    rowFlashCancelRef.current = startRowFlash(getListQueryRoot, cellId)
   }, [getListQueryRoot])
 
   // AQU-646 round 8: two short beats on a set of rows, with NO selection — the

@@ -32,19 +32,26 @@ export function runCheck(source: string, target: string, ctx?: BuiltinCheckConte
   if (findings.length === 0) return null
 
   const spans: InfractionSpan[] = []
-  const labels: string[] = []
-  let kind: "differs" | "missing" = "differs"
+  const differs: string[] = []
+  const missing: string[] = []
   for (const f of findings) {
     if (f.kind === "differs") {
       spans.push({ side: "target", start: f.targetStart, end: f.targetEnd, matchedText: target.slice(f.targetStart, f.targetEnd) })
-      if (!labels.includes(f.label)) labels.push(f.label)
+      if (!differs.includes(f.label)) differs.push(f.label)
     } else {
-      // "missing" is only reported when no referenced passage was quoted at
-      // all, so it never shares a cell with a "differs".
-      kind = "missing"
       spans.push({ side: "source", start: f.sourceStart, end: f.sourceEnd, matchedText: source.slice(f.sourceStart, f.sourceEnd) })
-      for (const label of f.labels) if (!labels.includes(label)) labels.push(label)
+      for (const label of f.labels) if (!missing.includes(label)) missing.push(label)
     }
   }
-  return { spans, params: { kind, refs: labels.join(", "), version: bible.versionName } }
+  const version = bible.versionName
+  // A cell can quote two verses: one copied with a word changed, the other
+  // translated fresh. The rule engine keeps one reason per check per cell, so
+  // "both" carries each list on its own; naming both verses in the "missing"
+  // sentence would tell the translator a copied verse was never used.
+  if (differs.length > 0 && missing.length > 0) {
+    return { spans, params: { kind: "both", refs: differs.join(", "), missingRefs: missing.join(", "), version } }
+  }
+  return missing.length > 0
+    ? { spans, params: { kind: "missing", refs: missing.join(", "), version } }
+    : { spans, params: { kind: "differs", refs: differs.join(", "), version } }
 }

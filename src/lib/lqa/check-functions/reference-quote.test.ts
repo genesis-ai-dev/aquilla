@@ -61,6 +61,19 @@ describe("reference-quote built-in check (AQU-1573)", () => {
     expect(spans).toEqual([{ side: "source", start: source.indexOf("Ps 23:1"), end: source.indexOf("Ps 23:1") + 7, matchedText: "Ps 23:1" }])
   })
 
+  it("names a changed quote and a fresh one apart when one cell has both", () => {
+    const source =
+      "Romans 8:28: \"And we know that in all things God works for the good.\" " +
+      "The psalmist writes, \"The Lord is my shepherd, I lack nothing\" (Ps 23:1)."
+    const changed = ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")
+    const draft = `رومية 8: 28: «${changed}» يكتب المرنم: «الرب هو راعيّ، لن أحتاج إلى شيء» (مزمور 23: 1).`
+    const { spans, params } = runCheck(source, draft, ctx) as { spans: { side: string; matchedText: string }[]; params: Record<string, string> }
+    expect(params).toEqual({ kind: "both", refs: "Romans 8:28", missingRefs: "Psalm 23:1", version: "Van Dyck" })
+    expect(spans.map((s) => s.side)).toEqual(["target", "source"])
+    expect(spans[0].matchedText).toContain("لِلصَّلَاحِ")
+    expect(spans[1].matchedText).toBe("Ps 23:1")
+  })
+
   it("stays quiet when the source only mentions a verse", () => {
     expect(runCheck("Later we'll look at Philippians 4:13.", "سننظر لاحقًا في فيلبي 4: 13.", ctx)).toBeNull()
   })

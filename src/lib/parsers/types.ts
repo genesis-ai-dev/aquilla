@@ -201,9 +201,11 @@ export interface RuleInfraction {
    * `t()`, only interpolated as a variable.
    * `source-requires-target`: `sourceCount` and `targetCount` (instance
    * counts as decimal strings).
-   * `builtin:reference-quote` (AQU-1573): `kind` ("differs" | "missing"),
-   * `refs` (the cited references' reader labels, joined) and `version` (the
-   * reference Bible's name) — none of them translatable text.
+   * `builtin:reference-quote` (AQU-1573): `kind` ("differs" | "missing" |
+   * "both"), `refs` (the cited references' reader labels, joined; for "both"
+   * the changed quotes, with `missingRefs` the ones not taken from the
+   * Bible) and `version` (the reference Bible's name) — none of them
+   * translatable text.
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable

@@ -42,7 +42,15 @@ export function formatInfractionReason(infraction: RuleInfraction, t: TFunction)
     // (the Bible's name) are data, interpolated, never translated.
     const refs = infraction.reasonParams?.refs ?? ""
     const version = infraction.reasonParams?.version ?? ""
-    return infraction.reasonParams?.kind === "missing"
+    const kind = infraction.reasonParams?.kind
+    if (kind === "both") {
+      // One cell with a changed quote AND a quote not taken from the Bible:
+      // both sentences, each naming only its own verses.
+      const missingRefs = infraction.reasonParams?.missingRefs ?? ""
+      return `${t("rules.infraction.builtin.referenceQuoteDiffers", { refs, version })}. ` +
+        t("rules.infraction.builtin.referenceQuoteMissing", { refs: missingRefs, version })
+    }
+    return kind === "missing"
       ? t("rules.infraction.builtin.referenceQuoteMissing", { refs, version })
       : t("rules.infraction.builtin.referenceQuoteDiffers", { refs, version })
   }

@@ -88,6 +88,9 @@ lane's Bible:
   only the reference(s) citing the quotation are named (not a "see also").
   The reference in the source is marked.
 
+A cell with both (one quote changed, another not taken from the Bible) shows
+both sentences, each naming only its own verses.
+
 Ignored: vowel marks (Arabic tashkeel, shadda, sukun, superscript alef),
 tatweel, hamza and alef-wasla spellings, punctuation and case. A partial quote
 passes; an ellipsis or a `[bracketed insertion]` splits a quote into parts that

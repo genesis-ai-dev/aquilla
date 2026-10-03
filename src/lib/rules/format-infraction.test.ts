@@ -24,4 +24,16 @@ describe("formatInfractionReason — reference Bible quotes", () => {
       "The source quotes Psalm 23:1, but the translation does not use the Van Dyck wording",
     )
   })
+
+  it("says both, each naming its own verses, when one cell has a changed quote and a fresh one", () => {
+    expect(
+      formatInfractionReason(
+        infraction({ kind: "both", refs: "Romans 8:28", missingRefs: "Psalm 23:1", version: "Van Dyck" }),
+        t,
+      ),
+    ).toBe(
+      "The quote of Romans 8:28 does not match Van Dyck word for word. " +
+        "The source quotes Psalm 23:1, but the translation does not use the Van Dyck wording",
+    )
+  })
 })

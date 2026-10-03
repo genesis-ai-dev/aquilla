@@ -238,13 +238,19 @@ export async function handleFilesReadRequest(
   // see, and the list sorts by it.
   const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
-  // Threshold-aware approved count. `files.approved_count` (maintained by
-  // fileCountersRecomputeStmt) counts `cells.validated`, which ignores the
-  // project's validationCount, so it is only the fallback for files that have
-  // no projected progress row. For projected files the count is the histogram
-  // mass at or above the threshold. The threshold is resolved ONCE in a CTE:
-  // the previous shape re-parsed `project_settings.settings` as jsonb inside a
-  // correlated subquery, i.e. per histogram bucket per file row.
+  // Threshold-aware approved count from the default lane's progress row.
+  // `files.filled_count` and `files.approved_count` sum every target lane.
+  // A missing progress row uses them only when the project has at most one
+  // target lane — none yet counts as one, because the lanes row may not
+  // exist yet, and an archived lane still counts, because its cells stay in
+  // the sum. Then the sum is that lane, and it is the only fill before the
+  // first progress row. Two or more target lanes make a missing row an empty
+  // lane (0). The denominator still falls back to `files.cell_count` either
+  // way: distinct cells, shared by every lane. For a projected file the
+  // approved count is the histogram mass at or above the threshold. The
+  // threshold, and that lane count, are resolved ONCE in a CTE: the previous
+  // shape re-parsed `project_settings.settings` as jsonb inside a correlated
+  // subquery, i.e. per histogram bucket per file row.
   //
   // AQU-1083: the same CTE resolves whether this project counts structural
   // cells — its own answer, else its org's, else yes — from the STORED
@@ -258,11 +264,18 @@ export async function handleFilesReadRequest(
     // existed can carry a structural count without a matching total, and a
     // negative denominator would render as a nonsense percentage.
     `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
-    `CASE WHEN p.file_id IS NULL
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+            WHEN thr.one_target_lane
             THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
-            ELSE GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+            ELSE 0
           END AS approved_count, ` +
-    `GREATEST(0, COALESCE(p.filled_count, f.filled_count) - ${less("COALESCE(p.structural_filled_count, f.structural_filled_count)")}) AS filled_count, ` +
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.filled_count - ${less("p.structural_filled_count")})
+            WHEN thr.one_target_lane
+            THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
+            ELSE 0
+          END AS filled_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
   // Anchored on the bound project id rather than on either table, so the CTE
@@ -272,7 +285,8 @@ export async function handleFilesReadRequest(
   const thresholdCte =
     "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
     "THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n, " +
-    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural " +
+    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
+    "(SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
     "FROM (SELECT ?::text AS id) q " +
     "LEFT JOIN project_settings ps ON ps.project_id = q.id " +
     "LEFT JOIN projects pr ON pr.id = q.id " +
@@ -413,9 +427,12 @@ function visibleLastEditSql(tagCount: number): string {
  * The files list is pinned to the default lane (`target_lang ''`) so a project
  * with several lanes does not fan out into one row per lane. That pin is the
  * default lane's counts. When the wall is on and this caller was not granted
- * that lane, replace the three text counters with the sum of the lanes they
- * were granted. A grant of the default lane leaves the pin alone: it is one
- * lane they can see, not a sum of the others.
+ * that lane, replace those counts with the lanes they were granted. Every
+ * lane's progress row carries a copy of the same source-cell denominator
+ * (`total_count`, `structural_count`), so that denominator is taken once;
+ * filled and validated are the work on each lane and are summed. A grant of
+ * the default lane leaves the pin alone: it is one lane they can see, not a
+ * sum of the others.
  */
 async function hideUngrantedDefaultLaneCounts(
   env: FilesReadEnv,
@@ -456,7 +473,7 @@ async function hideUngrantedDefaultLaneCounts(
          LEFT JOIN org_settings os ON os.org_id = pr.org_id
      )
      SELECT p.file_id AS file_id,
-            SUM(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
+            MAX(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
             SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
             SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
        FROM file_section_progress p

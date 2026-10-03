@@ -2309,3 +2309,30 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gm.added_by::BIGINT, gm.added_at
     FROM group_members gm
    WHERE gm.role_level IS NOT NULL;
+
+-- Migration 0131 (AQU-1656): AI intervention audit trail. One row per cell per
+-- model call; the prompt + raw output live in R2 at `trace_key`. `id` is also
+-- written into the committed draft's `ai_draft.interventionId`.
+CREATE TABLE IF NOT EXISTS ai_interventions (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  call_id text NOT NULL,
+  lane text NOT NULL DEFAULT '',
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('draft', 'smart_edit', 'harmonize')),
+  mode text NOT NULL,
+  outcome text NOT NULL DEFAULT 'applied',
+  model text NOT NULL,
+  provider text NOT NULL,
+  based_on_event_id text,
+  output text NOT NULL,
+  example_cell_ids text NOT NULL DEFAULT '[]',
+  scores text,
+  trace_key text,
+  user_id text NOT NULL,
+  created_at bigint NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_interventions_cell_idx
+  ON ai_interventions (project_id, cell_id, created_at DESC);

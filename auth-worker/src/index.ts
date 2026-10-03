@@ -98,6 +98,7 @@ import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
+import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
@@ -295,6 +296,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 // file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
 // keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
 app.route("/api/v2/projects", agentMemoryRoutes)
+// AI intervention audit trail (AQU-1656): prompts, outputs and examples
+// behind each AI draft. Sibling router (routes/ai-interventions.ts).
+app.route("/api/v2/projects", aiInterventionRoutes)
 // Scene briefs (contextual translation pipeline §9). Sibling router — same
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)

@@ -408,6 +408,13 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /**
+   * Whether the org lets bulk text validation take untouched AI drafts. On
+   * this response for the same reason as the line above, and because a project
+   * member outside the org cannot read the org's settings at all. Null when
+   * the project has no org; optional on an older server.
+   */
+  orgAllowBulkValidateAiDrafts?: boolean | null
   /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
   lanes?: ProjectLaneView[]
 }

@@ -53,6 +53,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
+  getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
 } from "../services/org-permissions"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
@@ -189,11 +190,15 @@ async function withOrgDefaults(
   env: AuthHonoEnv["Bindings"],
   projectId: string,
   response: ProjectSettingsResponse,
-): Promise<ProjectSettingsResponse & { orgCountStructuralCells: boolean | null }> {
-  return {
-    ...response,
-    orgCountStructuralCells: await getOrgCountStructuralCellsForProject(env, projectId),
-  }
+): Promise<ProjectSettingsResponse & {
+  orgCountStructuralCells: boolean | null
+  orgAllowBulkValidateAiDrafts: boolean | null
+}> {
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts] = await Promise.all([
+    getOrgCountStructuralCellsForProject(env, projectId),
+    getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
+  ])
+  return { ...response, orgCountStructuralCells, orgAllowBulkValidateAiDrafts }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

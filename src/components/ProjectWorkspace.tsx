@@ -4738,7 +4738,7 @@ export function ProjectWorkspace() {
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
     // Whether bulk text validation may sign off untouched AI drafts (Sam,
     // 2026-10-01). Off unless the org opts in; both bulk paths read it.
-    allowBulkValidateAiDrafts,
+    allowBulkValidateAiDrafts: orgSettingsAllowBulkValidateAiDrafts,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -4748,6 +4748,13 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
+  // The project's own settings response carries the org's switch first: a
+  // member who is not in the org cannot read the org's settings (403), so the
+  // org read alone left the switch off for them whatever the org chose. That
+  // response is also the one re-read on focus and remote changes. The org read
+  // covers a server that predates the field.
+  const allowBulkValidateAiDrafts =
+    projectSettings?.orgAllowBulkValidateAiDrafts ?? orgSettingsAllowBulkValidateAiDrafts
 
   const { rules } = useRules(
     project ?? null,

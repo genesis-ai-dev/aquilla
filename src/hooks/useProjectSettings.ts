@@ -268,6 +268,10 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /** The org's "Allow bulk validation of AI drafts", carried on the project's
+   *  own settings response so a member outside the org sees it too. Null when
+   *  the project has no org, or before the first response that carries it. */
+  orgAllowBulkValidateAiDrafts: boolean | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -478,12 +482,16 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
+    }
+    if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
+      setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
     }
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
@@ -950,6 +958,7 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
     lanes,
     isOnline,
     canEdit,

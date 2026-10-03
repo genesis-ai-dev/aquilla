@@ -148,6 +148,11 @@ export async function lookupPassages(
   return { passages, unresolved }
 }
 
+/** Mark as truncated the passages whose reference the finder cut short. */
+export function markCut<P extends { canonical: string; truncated?: boolean }>(passages: readonly P[], cut: ReadonlySet<string>): P[] {
+  return passages.map((p) => (cut.has(p.canonical) && !p.truncated ? { ...p, truncated: true } : p))
+}
+
 export interface SourcePassages {
   /** The lane's Bible, or null when the setting names one that is not installed. */
   version: ReferenceBibleSummary | null
@@ -174,8 +179,13 @@ export async function loadReferencePassagesForSources(
   if (!version) return { version: null, passages: [], unresolved: [], missingVersionId: versionId }
   const canonicals: string[] = []
   const seen = new Set<string>()
+  // A long range the finder already cut to its first verses ("Psalm 119:1-176"
+  // → PSA 119:1-30): the lookup sees a complete 30-verse range, so the cut is
+  // carried over here for the block's "the rest is not shown" note.
+  const cut = new Set<string>()
   for (const source of input.sources) {
     for (const f of findScriptureReferences(source ?? "")) {
+      if (f.truncated) cut.add(f.canonical)
       if (seen.has(f.canonical) || canonicals.length >= MAX_REFERENCES_PER_LOOKUP) continue
       seen.add(f.canonical)
       canonicals.push(f.canonical)
@@ -183,7 +193,7 @@ export async function loadReferencePassagesForSources(
   }
   if (canonicals.length === 0) return { version, passages: [], unresolved: [] }
   const { passages, unresolved } = await lookupPassages(db, version.id, canonicals)
-  return { version, passages, unresolved }
+  return { version, passages: markCut(passages, cut), unresolved }
 }
 
 export type ReferenceBibleSettingCheck = { ok: true } | { ok: false; message: string }

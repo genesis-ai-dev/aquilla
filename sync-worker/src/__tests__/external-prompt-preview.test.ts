@@ -687,6 +687,14 @@ describe("external prompt preview", () => {
       expect(body.warnings[0].message).toContain("spa-rv1909")
     })
 
+    it("says when a long cited range was cut to its first 30 verses (review 2026-10-02)", async () => {
+      await insertCell(testDb, { cellId: "cell-long", seq: 3, source: "Read Isaiah 40:1-31 tonight." })
+      const { body } = await preview(testDb, token, "cell-long")
+      const [passage] = body.parts.referenceVerses!.passages as { canonical: string; verses: unknown[]; truncated?: boolean }[]
+      expect([passage.canonical, passage.verses.length, passage.truncated]).toEqual(["ISA 40:1-30", 30, true])
+      expect(body.parts.referenceVerses!.block).toContain("(the rest of this passage is not shown)")
+    })
+
     it("warns about a cited verse the Bible does not have", async () => {
       await insertCell(testDb, { cellId: "cell-bad", seq: 3, source: "Isaiah 40:99 and John 3:16 say so." })
       const { body } = await preview(testDb, token, "cell-bad")

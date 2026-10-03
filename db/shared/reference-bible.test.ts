@@ -182,6 +182,14 @@ describe("loadReferencePassagesForSources (AQU-1573)", () => {
     expect(result?.unresolved).toEqual(["ISA 40:99"])
     expect(await loadReferencePassagesForSources(db, { settings, lane: "", sources: ["No references."] })).toMatchObject({ passages: [], unresolved: [] })
   })
+
+  it("marks a range the finder cut to 30 verses as truncated (review 2026-10-02)", async () => {
+    const result = await loadReferencePassagesForSources(db, { settings, lane: "", sources: ["Read Isaiah 40:1-31 tonight.", "Isaiah 40:25"] })
+    expect(result?.passages.map((p) => [p.canonical, p.verses.length, p.truncated ?? false])).toEqual([
+      ["ISA 40:1-30", 30, true],
+      ["ISA 40:25", 1, false],
+    ])
+  })
 })
 
 describe("validateReferenceBibleSetting (AQU-1573)", () => {

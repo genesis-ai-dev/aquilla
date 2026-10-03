@@ -7,9 +7,19 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { getProjectUnitAssignees } from "../services/assignments"
 import type { Env } from "../types"
+import { planKeysRefreshSql } from "../../../db/shared/plan-keys"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const testEnv = env as unknown as Env
+
+/**
+ * AQU-1493: store where each line with no reference counts, as the full
+ * progress recompute does for every projected file (`cell_plan_keys`). The
+ * readers under test join those rows rather than walking the chain.
+ */
+async function storePlanKeys(fileId: string): Promise<void> {
+  await testEnv.AQUILLA_PG.prepare(planKeysRefreshSql()).bind("pa", fileId, "pa", fileId).run()
+}
 
 // Org 1: wendi (owner 700), anna + bob + cara (contributors 400), outsider.
 // Project 'pa' holds TWO files:
@@ -129,6 +139,8 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
         ('as-dana','f3','h2'), ('as-erin','f1','n1')`,
     ).run()
+    await storePlanKeys("f1")
+    await storePlanKeys("f3")
     const rows = await getProjectUnitAssignees(testEnv, "pa")
     const unitsOf = (name: string) =>
       rows.filter((r) => r.username === name).map((r) => `${r.fileId}:${r.sectionKey}`)
@@ -155,6 +167,7 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
         ('as-dana', 'pa', 5, 'cells', 'heading', '', 1, NULL, 1, 2000, NULL, NULL)`,
     ).run()
     await db.prepare("INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-dana','f1','hb')").run()
+    await storePlanKeys("f1")
     const rows = await getProjectUnitAssignees(testEnv, "pa")
     expect(rows.filter((r) => r.username === "dana").map((r) => `${r.fileId}:${r.sectionKey}`)).toEqual(["f1:EXO"])
   })

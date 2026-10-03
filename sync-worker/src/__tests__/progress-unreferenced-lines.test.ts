@@ -456,14 +456,25 @@ describe("the backfill's --unreferenced-lines selector (AQU-1493)", () => {
     return (r.results ?? []).map((x) => x.id)
   }
 
-  it("selects a file whose chapters miss lines, and nothing once it is re-projected", async () => {
+  it("selects a file projected before line placements were stored, and nothing once it is re-projected", async () => {
     const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
     await recompute(db)
-    // What the projection before this change left behind: the added lines in
-    // the file's row and in no chapter.
+    // Production before AQU-1493, and this branch's earlier builds: progress
+    // rows, but no stored placement for any line with no reference.
+    await pg.query(`DELETE FROM cell_plan_keys WHERE project_id = $1 AND file_id = $2`, [P, F])
+    expect(await selected(db)).toEqual([F])
+    await recompute(db)
+    expect(await selected(db)).toEqual([])
+  })
+
+  it("selects a file whose stored placements an older rule wrote", async () => {
+    const { db, pg } = await makeTestDb({ cells: chain(GENESIS) })
+    await recompute(db)
+    // The first AQU-1493 rule: "The Seventh Day" with the line above it, in
+    // chapter 1. Its row exists; only its answer is out of date.
     await pg.query(
-      `UPDATE file_section_progress SET total_count = 2
-        WHERE project_id = $1 AND file_id = $2 AND scope = 'section' AND section_key = 'JON 2'`,
+      `UPDATE cell_plan_keys SET section_key = 'GEN 1', place_ref = 'GEN 1:31', depth = 1
+        WHERE project_id = $1 AND file_id = $2 AND cell_id = 'h2'`,
       [P, F],
     )
     expect(await selected(db)).toEqual([F])
@@ -471,21 +482,13 @@ describe("the backfill's --unreferenced-lines selector (AQU-1493)", () => {
     expect(await selected(db)).toEqual([])
   })
 
-  it("selects a file whose headings were counted in the chapter above, though its sums agree", async () => {
+  it("selects a file holding a placement for a line the walk no longer places", async () => {
     const { db, pg } = await makeTestDb({ cells: chain(GENESIS) })
     await recompute(db)
-    // What the first AQU-1493 rule wrote: "The Creation" on a front-matter row,
-    // "The Seventh Day" and the line under it in chapter 1. Every line is in
-    // some chapter, so chapters and file still add up — a sum test misses it.
     await pg.query(
-      `UPDATE file_section_progress SET total_count = CASE section_key WHEN 'GEN 1' THEN 5 ELSE 2 END
-        WHERE project_id = $1 AND file_id = $2 AND scope = 'section' AND target_lang = ''`,
+      `INSERT INTO cell_plan_keys (project_id, file_id, cell_id, section_key) VALUES ($1, $2, 'gone', 'GEN 1')`,
       [P, F],
     )
-    await pg.query(`CREATE TEMP TABLE front AS SELECT * FROM file_section_progress
-                     WHERE project_id = $1 AND file_id = $2 AND scope = 'section' AND section_key = 'GEN 2'`, [P, F])
-    await pg.query(`UPDATE front SET section_key = 'GEN', total_count = 1`)
-    await pg.query(`INSERT INTO file_section_progress SELECT * FROM front`)
     expect(await selected(db)).toEqual([F])
     await recompute(db)
     expect(await selected(db)).toEqual([])
@@ -519,11 +522,7 @@ describe("the backfill's --unreferenced-lines selector (AQU-1493)", () => {
     })
     await recompute(db)
     await recompute(db, F2)
-    await pg.query(
-      `UPDATE file_section_progress SET total_count = total_count + 1
-        WHERE project_id = $1 AND file_id = $2 AND scope = 'section' AND section_key = 'EXO 1'`,
-      [P, F2],
-    )
+    await pg.query(`DELETE FROM cell_plan_keys WHERE project_id = $1 AND file_id = $2`, [P, F2])
     expect(await selected(db)).toEqual([F2])
   })
 
@@ -572,8 +571,10 @@ describe("the plan's readers walk an added line where it sits (AQU-1493)", () =>
 
   it("sends 'go to first untranslated' to a book's top heading, or past it when headings do not count", async () => {
     const { db } = await makeTestDb({ files, project_settings: settings, cells: chain(GENESIS) })
+    await recompute(db)
     expect(await readFirstOpenCell(db, P, F, "GEN", "untranslated", "")).toBe("h1")
     const off = await makeTestDb({ files, ...noHeadings, cells: chain(GENESIS) })
+    await recompute(off.db)
     expect(await readFirstOpenCell(off.db, P, F, "GEN", "untranslated", "")).toBe("g12")
   })
 
@@ -587,6 +588,7 @@ describe("the plan's readers walk an added line where it sits (AQU-1493)", () =>
   it("sends 'go to first untranslated' to the added line before the verse below it", async () => {
     const lines = JONAH.map((l) => (l.id === "j22" ? { ...l, done: false } : l))
     const { db } = await makeTestDb({ files, project_settings: settings, cells: chain(lines) })
+    await recompute(db)
     expect(await readFirstOpenCell(db, P, F, "JON", "untranslated", "")).toBe("x1")
   })
 
@@ -641,5 +643,79 @@ describe("the plan's readers walk an added line where it sits (AQU-1493)", () =>
       ["g21", false, false],
       ["g22", false, false],
     ])
+  })
+})
+
+// AQU-1493 (perf): the walk is linear but not free — 65-80 ms on a whole-Bible
+// Hello AO import — and where a line counts only moves when lines move, gain
+// or lose a reference or change type, all of which run the FULL recompute. So
+// that recompute walks once and stores the answer (`cell_plan_keys`), and the
+// hot paths read it: each translation save's incremental recompute, the
+// chapter card, "Go to first ...". Inline, the save path went from ~47 ms to
+// ~135 ms on that file.
+describe("only the full recompute walks the anchor chain (AQU-1493)", () => {
+  const settings = [{ project_id: P, settings: JSON.stringify({ validationCount: 1 }), version: 1 }]
+  const files = [{ id: F, project_id: P, name: F, event_id: `fev-${F}` }]
+  const isWalk = (sql: string) => sql.includes("ik_run")
+
+  it("walks once per full recompute, and never on a save, a chapter card or a 'Go to first' click", async () => {
+    const statements: string[] = []
+    const { db, pg } = await makeTestDb(
+      { files, project_settings: settings, cells: chain(GENESIS) },
+      { onStatement: (sql) => statements.push(sql) },
+    )
+    await recompute(db)
+    expect(statements.filter(isWalk)).toHaveLength(1)
+
+    statements.length = 0
+    await pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, last_edit_at, event_id)
+       VALUES ($1, $2, 'h2', 'target', '', 'The Seventh Day', $3, 'tev-h2')`,
+      [P, F, TS],
+    )
+    await sectionsProgressRecomputeStmt(db, P, F, TS, ["h2"]).run()
+    expect(await readFirstOpenCell(db, P, F, "GEN", "untranslated", "")).toBe("h1")
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const url = `https://worker/api/v1/projects/${P}/files/${F}/progress/sections/${encodeURIComponent("GEN 2")}`
+    const res = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect((await res.json() as SectionProgressDetailResponse).verses.map((v) => v.cellId))
+      .toEqual(["h2", "x2", "g21", "g22"])
+    expect(statements.length).toBeGreaterThan(0)
+    expect(statements.filter(isWalk)).toEqual([])
+
+    // ...and the save still lands in the heading's chapter, from the stored row.
+    expect(await row(db, "section", "GEN 2")).toEqual({ total_count: 4, filled_count: 2 })
+  })
+
+  it("stores one placement per line with no reference, and rewrites none when nothing moved", async () => {
+    const { db, pg } = await makeTestDb({ cells: chain(GENESIS) })
+    await recompute(db)
+    const stored = await pg.query<{ cell_id: string; section_key: string }>(
+      `SELECT cell_id, section_key FROM cell_plan_keys WHERE project_id = $1 AND file_id = $2 ORDER BY cell_id`,
+      [P, F],
+    )
+    expect(stored.rows.map((r) => [r.cell_id, r.section_key])).toEqual([
+      ["h1", "GEN 1"], ["h2", "GEN 2"], ["x1", "GEN 1"], ["x2", "GEN 2"],
+    ])
+    const before = await pg.query<{ xmin: string }>(`SELECT xmin::text FROM cell_plan_keys ORDER BY cell_id`)
+    await recompute(db)
+    const after = await pg.query<{ xmin: string }>(`SELECT xmin::text FROM cell_plan_keys ORDER BY cell_id`)
+    expect(after.rows).toEqual(before.rows)
+  })
+
+  it("lets a line's own reference win over a stale stored placement", async () => {
+    const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
+    await recompute(db)
+    // A placement left behind for a cell that has since gained a reference by
+    // a path that ran no full recompute: it must not drag the verse along.
+    await pg.query(
+      `INSERT INTO cell_plan_keys (project_id, file_id, cell_id, section_key) VALUES ($1, $2, 'j11', 'JON 2')`,
+      [P, F],
+    )
+    await sectionsProgressRecomputeStmt(db, P, F, TS, ["j11"]).run()
+    expect(await row(db, "section", "JON 1")).toEqual({ total_count: 2, filled_count: 2 })
+    expect(await row(db, "section", "JON 2")).toEqual({ total_count: 4, filled_count: 2 })
   })
 })

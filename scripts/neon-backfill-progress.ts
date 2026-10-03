@@ -34,20 +34,22 @@ async function main(): Promise<void> {
     // every media project done while its audio counts sit at zero forever.
     // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
-    // AQU-1493: `--unreferenced-lines` re-runs Scripture files whose chapter
-    // rows do not hold what the projection counts in them now. A line with no
-    // reference used to count in the file and in no chapter or book; an added
-    // line now counts in the chapter of the line above it (front matter at the
-    // top of the file) and a heading in the chapter of the verse below it. The
-    // selector recomputes each candidate file's chapter totals from its cells
-    // (only files holding a line with no reference; each read once) and
-    // compares them with the stored rows, so it catches production's rows from
-    // before this change and rows written under the earlier line-above rule
-    // for headings alike, and a re-projected file drops out of it — safe to
-    // re-run. Combines with --missing-books (the dev stack passes both at
-    // boot). It starts with WITH, hence the parentheses in the UNION below.
-    // Production: `pnpm neon:backfill:progress:prod --unreferenced-lines` once
-    // after deploy (`:dev` for the preview database).
+    // AQU-1493: `--unreferenced-lines` re-runs Scripture files whose stored
+    // line placements (`cell_plan_keys`, migration 0130) are not what the
+    // projection would place now. A line with no reference used to count in
+    // the file and in no chapter or book; an added line now counts in the
+    // chapter of the line above it (front matter at the top of the file), a
+    // heading in the chapter of the verse below it, and a book's title on its
+    // front matter. The full recompute writes those placements and every
+    // progress row counted from them together. The selector walks only files
+    // holding a line with no reference and compares the walk with the stored
+    // rows cell by cell, so before the first run it picks every such file and
+    // afterwards none: safe to re-run. Combines with --missing-books (the dev
+    // stack passes both at boot). It starts with WITH, hence the parentheses
+    // in the UNION below.
+    // Production: apply migration 0130, deploy, then
+    // `pnpm neon:backfill:progress:prod --unreferenced-lines` once (`:dev` for
+    // the preview database).
     const unreferencedLines = process.argv.includes('--unreferenced-lines')
     const scoped = missingOnly || missingBooks || unreferencedLines
     const unreferencedSql = UNREFERENCED_LINES_STALE_FILES_SQL

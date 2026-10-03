@@ -27,11 +27,7 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
 import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
-import {
-  inheritedKeysSql,
-  oneScriptureFileSql,
-  unitSectionKeyExpr,
-} from '../../../../db/shared/plan-keys'
+import { planKeysJoinSql, unitSectionKeyExpr } from '../../../../db/shared/plan-keys'
 import type { DispatchResult } from './types'
 
 /** Cell ids per INSERT for a 'cells' scope — keeps one statement's parameter
@@ -111,19 +107,21 @@ export function handleAssignmentEvent(
     //    AQU-1493: a chapter entry takes the cells the plan board counts in
     //    that chapter, by the board's own key (`unitSectionKeyExpr`): a cell's
     //    chapter from its reference, or for a line with no reference the
-    //    chapter `inheritedKeysSql` gives it. Matching on `canonical_ref LIKE
+    //    chapter `inheritedKeysSql` gave it at the last full progress
+    //    recompute (stored in `cell_plan_keys`). Matching on `canonical_ref LIKE
     //    'JON 2:%'` alone missed every line added in the editor (the walk's
     //    FAIL: Carol's JON 2 row read "Nothing left" while chapter 2 still had
     //    a blank added line) and would miss every heading of an imported
     //    Bible, which now counts in the chapter it opens. Equality on the key
     //    also keeps "GEN 1" out of "GEN 11" without the LIKE's colon trick.
     //
-    //    The walk costs a pass over the file's unreferenced lines, so chapter
-    //    entries are grouped by file and resolved in ONE statement per file:
-    //    an assignment can pick 50 chapters of one book, and 50 walks inside
-    //    the write transaction would be 50 times the work for the same keys.
-    //    Chapters are expanded into placeholders rather than bound as an
-    //    array, which the shim does not promise to pass through.
+    //    Read from the stored placements, never walked here: this runs inside
+    //    the event's write transaction, where a full-file scan once showed up
+    //    as 200 ms+ lock waits on prod (route.ts). Chapter entries are still
+    //    grouped by file and resolved in ONE statement per file — an
+    //    assignment can pick 50 chapters of one book. Chapters are expanded
+    //    into placeholders rather than bound as an array, which the shim does
+    //    not promise to pass through.
     //
     //    Resolution happens once, here: an assignment is a snapshot of what a
     //    person was given, so a line added later does not join it, and
@@ -176,19 +174,15 @@ export function handleAssignmentEvent(
       stmts.push(
         db
           .prepare(
-            `WITH inherited_keys AS (
-               ${inheritedKeysSql(oneScriptureFileSql())}
-             )
-             INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+            `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
              SELECT ?, c.file_id, c.cell_id
                FROM cells c
-               LEFT JOIN inherited_keys ik ON ik.cell_id = c.cell_id
+               ${planKeysJoinSql('c', 'ik')}
               WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'
                 AND ${unitSectionKeyExpr('c', 'ik')} IN (${chapters.map(() => '?').join(', ')})
              ON CONFLICT DO NOTHING`,
           )
           .bind(
-            event.projectId, fileId, // inherited_keys (oneScriptureFileSql)
             p.assignmentId, event.projectId, fileId,
             ...chapters,
           ),

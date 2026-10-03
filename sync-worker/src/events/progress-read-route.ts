@@ -1,7 +1,7 @@
 import { verifyTokenForProject } from '../auth'
 import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
-import { inheritedKeysSql, oneScriptureFileSql } from '../../../db/shared/plan-keys'
+import { planKeysJoinSql } from '../../../db/shared/plan-keys'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
@@ -440,10 +440,12 @@ interface FirstOpenRow {
 }
 
 /**
- * AQU-1493: the inherited keys of one file, as a CTE to put first in a
- * statement. Binds (projectId, fileId) ahead of everything else.
+ * AQU-1493: where each line with no reference counts, as the full progress
+ * recompute last stored it (`cell_plan_keys`), joined onto source cell `s` as
+ * `ik`. Stored rather than walked here: on a whole Bible the walk alone took
+ * longer than the rest of either read below.
  */
-const INHERITED_KEYS_WITH = `WITH inherited_keys AS (${inheritedKeysSql(oneScriptureFileSql())})`
+const PLAN_KEYS_JOIN = planKeysJoinSql('s', 'ik')
 const INHERITED_COLUMNS = `ik.section_key AS inherited_key, ik.place_ref AS place_ref, ik.depth AS inherited_depth`
 
 /**
@@ -567,8 +569,7 @@ export async function readFirstOpenCell(
   const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio)
 
   const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`, INHERITED_COLUMNS]
-  // The inherited-keys CTE comes first in the statement, so its binds do too.
-  const binds: unknown[] = [projectId, fileId]
+  const binds: unknown[] = []
   if (wantsText) {
     columns.push(`COALESCE(t.value, '') AS target_value`,
       `COALESCE(t.endorsement_count, 0) AS endorsement_count`)
@@ -597,19 +598,18 @@ export async function readFirstOpenCell(
   if (unit) binds.push(unit, `${unit} %`, unit)
 
   const { results } = await db.prepare(
-    `${INHERITED_KEYS_WITH}
-     SELECT ${columns.join(`,
+    `SELECT ${columns.join(`,
             `)}
        FROM cells s
        ${targetJoin}
-       LEFT JOIN inherited_keys ik ON ik.cell_id = s.cell_id
+       ${PLAN_KEYS_JOIN}
       WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
         ${unit
           // AQU-1493: a line with no reference belongs to the book it is counted
           // in (the line above it's; a heading's, the verse below it's), as the
           // projection counts it (`unitBookKeyExpr`). Without this the board
           // said "3 cells to translate" and its link found none.
-          ? `AND (${key} = ? OR ${key} LIKE ? OR SPLIT_PART(ik.section_key, ' ', 1) = ?)`
+          ? `AND (${key} = ? OR ${key} LIKE ? OR (${key} = '' AND SPLIT_PART(ik.section_key, ' ', 1) = ?))`
           : ''}
         ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
         -- AQU-1424: a parked cell is never the NEXT THING TO WORK ON, whatever
@@ -736,8 +736,7 @@ export async function handleProgressReadRequest(
     ])
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
-        `${INHERITED_KEYS_WITH}
-         SELECT s.cell_id,
+        `SELECT s.cell_id,
                 s.canonical_ref,
                 ${structuralPredicateSql('s')} AS structural,
                 ${INHERITED_COLUMNS},
@@ -752,11 +751,12 @@ export async function handleProgressReadRequest(
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
             AND ${targetLaneDualReadSql('t')}
-           LEFT JOIN inherited_keys ik ON ik.cell_id = s.cell_id
+           ${PLAN_KEYS_JOIN}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1493: and the lines with no reference the projection counts
             -- in this chapter, so the list and the chapter's own count agree.
-            AND (${chapterKeySql('s')} = ? OR ik.section_key = ?)
+            -- A line's own reference wins over a stored placement.
+            AND (${chapterKeySql('s')} = ? OR (${chapterKeySql('s')} = '' AND ik.section_key = ?))
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}
             -- AQU-1424: and it is not one of the chapter's cells here either, so
             -- this detail read agrees with the projection's own count for the
@@ -765,7 +765,6 @@ export async function handleProgressReadRequest(
             AND ${visibleSourceSql('s')}
             AND ${liveSourceSql('s')}`,
       ).bind(
-        projectId, fileId,
         ...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey, sectionKey,
       ).all<{
         cell_id: string

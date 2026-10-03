@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { getUnitAssignments, resolveTargetLaneId } from "../services/assignments"
 import type { Env } from "../types"
+import { planKeysRefreshSql } from "../../../db/shared/plan-keys"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const testEnv = env as unknown as Env
@@ -27,6 +28,15 @@ async function laneIdFor(tag: string): Promise<string> {
   // progress assertion below into a zero that looks like a product bug.
   if (id === "") throw new Error(`no target lane for tag '${tag}' in project pa`)
   return id
+}
+
+/**
+ * AQU-1493: store where each line with no reference counts, as the full
+ * progress recompute does for every projected file (`cell_plan_keys`). The
+ * readers under test join those rows rather than walking the chain.
+ */
+async function storePlanKeys(fileId: string): Promise<void> {
+  await testEnv.AQUILLA_PG.prepare(planKeysRefreshSql()).bind("pa", fileId, "pa", fileId).run()
 }
 
 // Org 1: wendi (owner 700), anna + bob (contributors 400), outsider (nobody).
@@ -391,6 +401,8 @@ describe("lines added with no reference (AQU-1493)", () => {
         ('as-gen-only','f2','h1'), ('as-gen-only','f2','h2'),
         ('as-added-exo','f1','n1')`,
     ).run()
+    await storePlanKeys("f1")
+    await storePlanKeys("f2")
   }
 
   it("counts the added line toward the book of the line above it", async () => {
@@ -416,6 +428,7 @@ describe("lines added with no reference (AQU-1493)", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','hg2')",
     ).run()
+    await storePlanKeys("f1")
     const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
     expect(anna.assignmentId).toBe("as-anna")
     expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2], ["GEN 2", 2]])

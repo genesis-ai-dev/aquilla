@@ -336,6 +336,12 @@ function jonahChain(): CellRow[] {
 
 async function assignedCells(scope: Array<{ fileId: string; chapter?: string }>, cells: CellRow[]) {
   const { db, snapshot } = await makeTestDb({ cells })
+  // Every file is projected before anyone can assign from it, and the full
+  // recompute is what stores where each line with no reference counts
+  // (`cell_plan_keys`), which the resolution reads.
+  for (const fileId of new Set(cells.map((c) => c.file_id))) {
+    for (const stmt of fullProgressRecomputeStmts(db, 'proj-1', fileId, 1)) await stmt.run()
+  }
   const authed = await authorizeAssignment('assignment.create', {
     assignmentId: 'as-ch',
     scopeKind: 'chapters',

@@ -160,6 +160,9 @@ function isSectionHeadingSql(alias: string): string {
  *
  * Projection-time only: nothing is written to the cells, so imports, exports
  * and verse chips that read `canonical_ref` see exactly what they saw before.
+ * The answer is stored beside them instead (`cell_plan_keys`, written by the
+ * full progress recompute through `planKeysRefreshSql`), and every other
+ * reader joins that rather than running this walk.
  * The type test ignores the "count headings" policy on purpose: a heading the
  * project does not count still decides where the lines under it count.
  *
@@ -293,15 +296,75 @@ export function inheritedKeysSql(filesSql: string): string {
 }
 
 /**
- * AQU-1493: the section a source cell counts toward on the plan — its own key,
- * or for a line with no reference the one `inheritedKeysSql` gave it.
- * `inherited` is the caller's alias for a LEFT JOIN onto that CTE.
+ * AQU-1493: where `inheritedKeysSql` placed each line with no reference, as
+ * last projected — one row per such source cell of a Scripture file, with the
+ * walk's own columns (section_key, place_ref, depth). Migration 0130.
+ *
+ * STORED BECAUSE THE WALK IS NOT FREE AND ITS ANSWER RARELY MOVES. On a
+ * whole-Bible Hello AO import (34k cells, 3,206 headings with no reference)
+ * the walk takes 65-80 ms. Run inline, every translation save on the file paid
+ * it (the incremental recompute went from ~47 ms to ~135 ms, awaited before
+ * the response), a full recompute paid it twice, and so did every chapter card,
+ * every "Go to first ..." click, every board load's assignee chips and every
+ * assignment.create inside its write transaction. Yet where a line counts
+ * changes only when the file's lines move, gain or lose a reference, or change
+ * type — and every path that does any of that (source.cell.* events, imports,
+ * link syncs, merges, migrations, rebuilds) already runs the full recompute.
+ * So the full recompute is the ONE writer (`planKeysRefreshSql`, its first
+ * statement) and everything else reads these rows.
+ *
+ * A row the walk no longer produces is deleted by that same statement; a cell
+ * removed some other way leaves an orphan that matches no live cell. Readers
+ * prefer a cell's own reference over its row (`unitSectionKeyExpr`), so a
+ * stale row can never move a referenced line.
+ */
+export const PLAN_KEYS_TABLE = 'cell_plan_keys'
+
+/**
+ * AQU-1493: rewrite one file's `cell_plan_keys` rows from the walk. Binds
+ * (projectId, fileId) for the walk, then (projectId, fileId) for the delete.
+ * Writes only the rows that changed, so a recompute that moved nothing writes
+ * nothing. A file that is not Scripture walks nothing and is left with no rows.
+ */
+export function planKeysRefreshSql(): string {
+  return `WITH walked AS MATERIALIZED (
+             ${inheritedKeysSql(oneScriptureFileSql())}
+           ), gone AS (
+             DELETE FROM ${PLAN_KEYS_TABLE} k
+              WHERE k.project_id = ? AND k.file_id = ?
+                AND NOT EXISTS (SELECT 1 FROM walked w WHERE w.cell_id = k.cell_id)
+           )
+           INSERT INTO ${PLAN_KEYS_TABLE} (project_id, file_id, cell_id, section_key, place_ref, depth)
+           SELECT project_id, file_id, cell_id, section_key, place_ref, depth FROM walked
+           ON CONFLICT (project_id, file_id, cell_id) DO UPDATE SET
+             section_key = EXCLUDED.section_key,
+             place_ref = EXCLUDED.place_ref,
+             depth = EXCLUDED.depth
+           WHERE (${PLAN_KEYS_TABLE}.section_key, ${PLAN_KEYS_TABLE}.place_ref, ${PLAN_KEYS_TABLE}.depth)
+                 IS DISTINCT FROM (EXCLUDED.section_key, EXCLUDED.place_ref, EXCLUDED.depth)`
+}
+
+/**
+ * AQU-1493: LEFT JOIN a source cell `cellAlias` onto its stored placement, as
+ * `alias` (section_key, place_ref, depth; all NULL for a referenced line).
+ */
+export function planKeysJoinSql(cellAlias: string, alias = 'ik'): string {
+  return `LEFT JOIN ${PLAN_KEYS_TABLE} ${alias}
+             ON ${alias}.project_id = ${cellAlias}.project_id AND ${alias}.file_id = ${cellAlias}.file_id
+            AND ${alias}.cell_id = ${cellAlias}.cell_id`
+}
+
+/**
+ * AQU-1493: the section a source cell counts toward on the plan — its own
+ * key, or for a line with no reference the one `inheritedKeysSql` gave it.
+ * `inherited` is the caller's alias for that placement (`planKeysJoinSql`).
+ * A cell's own reference wins over any row, so an orphaned row is harmless.
  */
 export function unitSectionKeyExpr(alias: string, inherited: string): string {
-  return `COALESCE(${inherited}.section_key, ${sectionKeyExpr(alias)})`
+  return `COALESCE(NULLIF(${ownChapterExpr(alias)}, ''), ${inherited}.section_key, ${sectionKeyExpr(alias)})`
 }
 
 /** The book a source cell counts toward on the plan: see `unitSectionKeyExpr`. */
 export function unitBookKeyExpr(alias: string, inherited: string): string {
-  return `COALESCE(SPLIT_PART(${inherited}.section_key, ' ', 1), ${bookKeyExpr(alias)})`
+  return `COALESCE(NULLIF(${bookKeyExpr(alias)}, ''), SPLIT_PART(${inherited}.section_key, ' ', 1), ${bookKeyExpr(alias)})`
 }

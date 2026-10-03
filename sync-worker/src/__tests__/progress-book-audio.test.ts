@@ -471,9 +471,10 @@ describe("pruning", () => {
 
     const fileRows = await rows(db, "file")
     await db.prepare(`DELETE FROM cells WHERE project_id = ? AND file_id = ? AND side = 'source'`).bind(P, F).run()
-    // Exercise just the pruning statement with an empty source set. File
-    // counters are the recompute statement's responsibility, not the prune's.
-    await fullProgressRecomputeStmts(db, P, F, TS)[1].run()
+    // Exercise just the pruning statement (always the last) with an empty
+    // source set. File counters are the recompute statement's responsibility,
+    // not the prune's.
+    await fullProgressRecomputeStmts(db, P, F, TS).at(-1)!.run()
     expect(await rows(db, "section")).toEqual([])
     expect(await rows(db, "book")).toEqual([])
     expect(await rows(db, "file")).toEqual(fileRows)

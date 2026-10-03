@@ -88,6 +88,26 @@ export function targetLaneDualReadBinds(projectId: string, tag: string): unknown
 }
 
 /**
+ * A back-translation row belongs to one target lane (AQU-1589).
+ *
+ * `lane_id` stays nullable until the AQU-1616 backfill. A NULL `lane_id` is
+ * the lane whose `legacy_tag` is `''` — rows written before the column
+ * existed. A named lane does not see them. The tag is matched to
+ * `legacy_tag`, never to the lane's name.
+ *
+ * Binds: projectId, tag, tag ({@link backtranslationLaneMatchBinds}).
+ */
+export function backtranslationLaneMatchSql(alias = ''): string {
+  const col = alias ? `${alias}.` : ''
+  return `(${col}lane_id = ${laneIdResolveSql('target')} OR (${col}lane_id IS NULL AND ? = ''))`
+}
+
+/** Binds for {@link backtranslationLaneMatchSql}. */
+export function backtranslationLaneMatchBinds(projectId: string, tag: string): unknown[] {
+  return [...laneIdResolveBinds('target', projectId, tag), tag]
+}
+
+/**
  * Cells-read `?lane=` filter: source rows always included; target rows
  * dual-read by tag. Same binds as {@link targetLaneDualReadBinds}.
  */

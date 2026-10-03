@@ -385,6 +385,16 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
     expect(body.backtranslations).toHaveLength(0)
   })
 
+  it('400 when lane is longer than 64 characters', async () => {
+    const token = await makeTestToken(SECRET, { projectId: 'p1', fileId: 'f1', role: 100 })
+    const res = (await readReq(
+      { AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
+      token,
+      `?lane=${'e'.repeat(65)}`,
+    ))!
+    expect(res.status).toBe(400)
+  })
+
   it('500 without SYNC_SECRET_KEY configured', async () => {
     const res = (await readReq({ AQUILLA_PG: makeReadDb([]) }))!
     expect(res).not.toBeNull()

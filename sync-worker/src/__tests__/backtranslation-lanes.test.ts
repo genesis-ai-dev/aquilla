@@ -6,8 +6,10 @@
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
+import { handleCellBacktranslationsReadRequest } from '../events/cell-backtranslations-read-route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import type { EventKind } from '../events/types'
+import { makeTestToken } from './helpers/auth'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const PROJECT = 'proj-bt-lane'
@@ -135,6 +137,60 @@ describe('cell.backtranslation.set writes lane_id', () => {
       payload: { btText: 'al principio', targetEventId: 'tc-es', polished: false, targetLang: 'es' },
     })])
     expect(await laneIds(t)).toEqual([{ target_event_id: 'tc-es', lane_id: ES_LANE }])
+  })
+})
+
+async function readTexts(t: TestDb, lane?: string, wall = false): Promise<string[]> {
+  const query = lane === undefined ? '' : `?lane=${encodeURIComponent(lane)}`
+  const token = await makeTestToken(SECRET, {
+    projectId: PROJECT,
+    fileId: FILE,
+    role: 400,
+    laneGrants: [{ lane: ES_LANE, level: 400 }],
+  })
+  const res = await handleCellBacktranslationsReadRequest(
+    new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/backtranslations${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    {
+      AQUILLA_PG: t.db,
+      SYNC_SECRET_KEY: SECRET,
+      ...(wall ? { LANE_READ_WALL: '1' } : {}),
+    },
+  )
+  expect(res?.status).toBe(200)
+  const body = await res!.json() as { backtranslations: Array<{ btText: string }> }
+  return body.backtranslations.map((row) => row.btText).sort()
+}
+
+describe('back-translation reads are lane-specific', () => {
+  async function seedReadings(db: TestDb): Promise<void> {
+    await seedLanes(db)
+    await project(db, [DEFAULT_BT, ES_BT, FR_BT])
+    await db.pg.query(
+      `INSERT INTO cell_backtranslations (
+         project_id, file_id, cell_id, target_event_id, bt_text, polished, author, event_id, created_at, lane_id
+       ) VALUES ($1, $2, 'cell-legacy', 'evt-legacy', 'legacy reading', 0, 'alice', 'evt-bt-legacy', 1, NULL)`,
+      [PROJECT, FILE],
+    )
+  }
+
+  it('returns each lane on its own, and a NULL lane_id only on the default lane', async () => {
+    await seedReadings(t)
+    const onDefault = ['in the beginning', 'legacy reading']
+    expect(await readTexts(t)).toEqual(onDefault)
+    expect(await readTexts(t, '')).toEqual(onDefault)
+    // French is newer than Spanish on the same cell. Spanish still returns.
+    expect(await readTexts(t, 'es')).toEqual(['en el principio'])
+    expect(await readTexts(t, 'fr')).toEqual(['au commencement'])
+  })
+
+  it('hides a lane the caller was not granted when the read wall is on', async () => {
+    await seedReadings(t)
+    expect(await readTexts(t, 'fr', true)).toEqual([])
+    expect(await readTexts(t, undefined, true)).toEqual([])
+    expect(await readTexts(t, 'es', true)).toEqual(['en el principio'])
+    expect(await readTexts(t, 'fr', false)).toEqual(['au commencement'])
   })
 })
 

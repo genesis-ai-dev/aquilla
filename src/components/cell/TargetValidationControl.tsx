@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Circle, Trash2 } from "lucide-react"
 import type { EditValidationSummary, ValidationStatus } from "@/hooks/useCells"
 import { AppTooltip } from "@/components/ui/tooltip"
+import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -122,6 +123,11 @@ export function TargetValidationControl({
   const [popoverOpen, setPopoverOpen] = useState(false)
   // A click opened (or kept) the list, so the pointer leaving must not close it.
   const [popoverPinned, setPopoverPinned] = useState(false)
+  // Closes the list THROUGH Base UI. Setting `open` to false from outside
+  // leaves Base UI remembering the click that opened the list, and while it
+  // remembers a click it ignores hover, so the check never opened the list on
+  // hover again after "Remove your validation" (PR 1 area 5 step 6).
+  const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
   const [pendingValidation, setPendingValidation] = useState<{
     value: boolean
     authoritativeAtRequest: boolean
@@ -259,7 +265,7 @@ export function TargetValidationControl({
     <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
       {hasContent ? (
         hasValidatorInfo ? (
-          <Popover key="list" open={popoverOpen} onOpenChange={handleOpenChange}>
+          <Popover key="list" open={popoverOpen} onOpenChange={handleOpenChange} actionsRef={listActionsRef}>
             <PopoverTrigger
               openOnHover
               delay={400}
@@ -285,8 +291,13 @@ export function TargetValidationControl({
                             className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               changeValidation(false)
-                              setPopoverOpen(false)
-                              setPopoverPinned(false)
+                              // Goes through handleOpenChange ("imperative-action"),
+                              // which closes and unpins the list.
+                              if (listActionsRef.current) listActionsRef.current.close()
+                              else {
+                                setPopoverOpen(false)
+                                setPopoverPinned(false)
+                              }
                             }}
                           >
                             <Trash2 className="h-3 w-3" />

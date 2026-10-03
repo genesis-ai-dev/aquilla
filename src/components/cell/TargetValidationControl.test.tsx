@@ -275,5 +275,38 @@ describe("TargetValidationControl", () => {
       expect(onValidationChange).toHaveBeenCalledWith(false)
       await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
     })
+
+    // PR 1 area 5 step 6 (Sam, 2026-10-03): open the list with a click, remove
+    // your vote, and hovering the check never opened the list again. The
+    // trash button closed the list behind Base UI's back, so Base UI still
+    // remembered the CLICK that opened it, and it ignores hover while a list
+    // it thinks a click opened is around. Closing through Base UI clears that.
+    it("opens on hover again after Remove your validation closed a click-opened list", async () => {
+      const onValidationChange = vi.fn()
+      const props = {
+        cellRef: "Mark 1:1", hasContent: true, validationHistory: [], currentUsername: "alice",
+        validationRequirement: 2, canValidate: true, canValidateThisCell: true, onValidationChange,
+      }
+      const { rerender } = render(
+        <TargetValidationControl {...props} validationStatus="full-self" activeValidators={["alice", "bo"]} />,
+      )
+      const button = screen.getByRole("button", { name: /Validated/ })
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+      // The server agrees: only bo's vote is left, so there is still a list to show.
+      rerender(<TargetValidationControl {...props} validationStatus="others" activeValidators={["bo"]} />)
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+
+      const check = screen.getByRole("button", { name: /Validated by others/ })
+      fireEvent.mouseLeave(check, { relatedTarget: document.body })
+      await wait(150)
+      fireEvent.pointerEnter(check, { pointerType: "mouse" })
+      fireEvent.mouseEnter(check)
+      fireEvent.mouseMove(check, { movementX: 5, movementY: 5 })
+      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+      expect(screen.getByText("bo")).toBeInTheDocument()
+    })
   })
 })

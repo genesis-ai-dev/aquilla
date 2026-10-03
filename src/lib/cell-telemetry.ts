@@ -79,6 +79,40 @@ export type TelemetrySource = "ui" | "agent" | "api"
  */
 export type AudioOrigin = "attach" | "generate" | "record"
 
+/**
+ * Where in the app the gesture was made, so one line validated from its own
+ * row reads apart from forty validated by a selection or a batch. Optional:
+ * a path that has not said where it is simply sends no `surface`.
+ *
+ * - `cell` the line's own control in the editor row (or its TTS button)
+ * - `selection` the selection bar's bulk actions
+ * - `batch` the workspace's "Batch validate" actions for the open file
+ * - `agent-pane` the agent pane's target editor and validation control
+ * - `proposal` an agent proposal or prepared-validation queue, confirmed
+ * - `draft-review` accepting the agent's draft review of a line
+ * - `recorder` the recording modal (save, upload, generate, takes strip)
+ * - `recording-tab` the cell's Recording tab
+ * - `voice-panel` the cell's voice panel
+ * - `voice-together` the selection's "Voice together"
+ * - `generate-all` the file's "Generate all" voice run
+ * - `timeline` a file or link dropped onto the timeline
+ * - `api` the Agent API (sent by the sync-worker, never by this module)
+ */
+export type TelemetrySurface =
+  | "cell"
+  | "selection"
+  | "batch"
+  | "agent-pane"
+  | "proposal"
+  | "draft-review"
+  | "recorder"
+  | "recording-tab"
+  | "voice-panel"
+  | "voice-together"
+  | "generate-all"
+  | "timeline"
+  | "api"
+
 export interface CellValidationTelemetry {
   medium: ValidationMedium
   projectId: string
@@ -93,6 +127,7 @@ export interface CellValidationTelemetry {
    * filter on `auto = false` keeps exactly the deliberate reviews.
    */
   auto?: boolean
+  surface?: TelemetrySurface
 }
 
 /** Emit `cell validated` / `cell unvalidated` for one validation gesture. */
@@ -108,6 +143,7 @@ export function captureCellValidation(
     lane: t.lane ?? "",
     source: t.source ?? "ui",
     auto: t.auto ?? false,
+    ...(t.surface ? { surface: t.surface } : {}),
   })
 }
 
@@ -120,6 +156,7 @@ export interface AudioActionTelemetry {
   slot: string
   lane?: string
   source?: TelemetrySource
+  surface?: TelemetrySurface
   /** Generation only: the voice the clip was synthesized with. */
   voiceId?: string
   /** Generation only: which synthesis backend produced it. */
@@ -142,6 +179,7 @@ export function captureAudioAction(t: AudioActionTelemetry): void {
     slot: t.slot,
     lane: t.lane ?? "",
     source: t.source ?? "ui",
+    ...(t.surface ? { surface: t.surface } : {}),
     ...(t.voiceId !== undefined ? { voice_id: t.voiceId } : {}),
     ...(t.provider !== undefined ? { provider: t.provider } : {}),
     ...(t.durationMs !== undefined ? { duration_ms: Math.round(t.durationMs) } : {}),

@@ -11,6 +11,7 @@ import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
 export interface GenerateCellVoiceArgs {
   /**
@@ -53,7 +54,7 @@ export interface GenerateCellVoiceArgs {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
-  surface?: string
+  surface?: TelemetrySurface
 }
 
 /**

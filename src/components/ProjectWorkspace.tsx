@@ -9401,6 +9401,7 @@ export function ProjectWorkspace() {
               editEventId: cell.targetEventId!,
               author: currentUsername,
               targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+              surface: "batch", // AQU-1572
             })
           }
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -9470,6 +9471,7 @@ export function ProjectWorkspace() {
             audioId: target.audioId,
             ...(activeLane ? { targetLang: activeLane } : {}),
             author: currentUsername,
+            surface: "batch", // AQU-1572
           })
         }
         await refreshOutboxPending()
@@ -11752,6 +11754,7 @@ export function ProjectWorkspace() {
           targetLang: activeLane,
           // AQU-1572: the vote your own edit casts for itself, not a review.
           auto: true,
+          surface: "agent-pane",
         })
         // Only a validation that actually landed owes the repetitions anything.
         autoValidated = true
@@ -11793,6 +11796,9 @@ export function ProjectWorkspace() {
         editEventId: cell.targetEventId,
         author: currentUsername,
         targetLang: activeLane,
+        // AQU-1572: a person clicking the agent pane's control; the agent
+        // proposed nothing here, so the source stays "ui".
+        surface: "agent-pane",
       })
       await handleCellCommitted(cell.id)
       return true

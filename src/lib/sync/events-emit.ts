@@ -31,7 +31,7 @@ import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 // AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
 // the one seam every such gesture already passes through.
 import { captureAudioAction, captureCellValidation } from "@/lib/cell-telemetry"
-import type { AudioOrigin, TelemetrySource } from "@/lib/cell-telemetry"
+import type { AudioOrigin, TelemetrySource, TelemetrySurface } from "@/lib/cell-telemetry"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -359,6 +359,8 @@ export interface CellValidateInput {
    * count deliberate reviews apart from it; everything else reports `false`.
    */
   auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -406,6 +408,7 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     lane: input.targetLang,
     source: input.source,
     auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -434,6 +437,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     lane: input.targetLang,
     source: input.source,
     auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -547,6 +551,8 @@ export interface CellAudioAttachInput {
   ttsProvider?: string
   /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
   source?: TelemetrySource
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -589,6 +595,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       slot: input.slot,
       lane: input.targetLang,
       source: input.source,
+      surface: input.surface,
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
@@ -1071,6 +1078,8 @@ export interface CellAudioValidateInput {
    * only, never on the wire; reported as `auto: true`.
    */
   auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -1095,6 +1104,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     lane: input.targetLang,
     source: input.source,
     auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -1133,6 +1143,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     lane: input.targetLang,
     source: input.source,
     auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }

@@ -332,7 +332,7 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
     renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
     fireEvent.click(within(await rowOf("bonjour cell-1")).getByTestId("audio-validation-button"))
     await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1))
-    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a" })
+    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", surface: "cell" })
     expect(captureCellValidation).not.toHaveBeenCalled()
   })
 

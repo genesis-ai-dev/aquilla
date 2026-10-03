@@ -286,7 +286,7 @@ describe("applyStagedEvents — telemetry (AQU-1572)", () => {
     await applyStagedEvents([commitEvent(), validate("c-1"), validate("c-2"), validate("c-3", "es")], CTX)
     expect(captureCellValidation).toHaveBeenCalledTimes(3)
     expect(captureCellValidation.mock.calls.map(([validated, t]) => [validated, t])).toEqual([
-      [true, expect.objectContaining({ medium: "text", source: "agent", projectId: "proj-1", fileId: "f-1", cellId: "c-1", lane: "" })],
+      [true, expect.objectContaining({ medium: "text", source: "agent", surface: "proposal", projectId: "proj-1", fileId: "f-1", cellId: "c-1", lane: "" })],
       [true, expect.objectContaining({ cellId: "c-2", lane: "" })],
       [true, expect.objectContaining({ cellId: "c-3", lane: "es" })],
     ])

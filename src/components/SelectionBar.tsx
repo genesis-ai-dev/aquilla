@@ -453,6 +453,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           audioId: target.audioId,
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
+          surface: "selection", // AQU-1572
         })
       }
       toast.add({
@@ -487,6 +488,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           audioId: target.audioId,
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
+          surface: "selection", // AQU-1572
         })
       }
       toast.add({
@@ -584,6 +586,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           author: username,
           editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
+          surface: "selection", // AQU-1572
         }).catch((err) => console.warn("[validate] enqueue failed:", err))
       }
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
@@ -619,6 +622,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           author: username,
           editEventId: cell.targetEventId,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
+          surface: "selection", // AQU-1572
         }).catch((err) => console.warn("[unvalidate] enqueue failed:", err))
         removed++
       }

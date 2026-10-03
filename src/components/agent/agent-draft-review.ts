@@ -211,6 +211,7 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
         // which validates itself under the same rule as typing it
         // (`validationNeeded` above). Nobody asked for this vote.
         auto: true,
+        surface: "draft-review",
       })
       onQueued({ ...queued })
     }

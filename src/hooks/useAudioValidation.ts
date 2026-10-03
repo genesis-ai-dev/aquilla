@@ -20,6 +20,7 @@ import type { AudioValidationTake } from "@/components/cell/AudioValidationContr
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
 export interface UseAudioValidation {
   /** Every selected dub take on the cell, with the project's policy applied. */
@@ -47,7 +48,7 @@ export function useAudioValidation(opts: {
   /** AQU-1462: lane the member is working in. The vote itself stays shared. */
   targetLang?: string
   /** AQU-1572: where the vote was cast, for telemetry ("recording-tab", "recorder"). */
-  surface: string
+  surface: TelemetrySurface
 }): UseAudioValidation {
   const { project, fileId, cellId, username, onCommitted, jwt, targetLang, surface } = opts
   const { t } = useI18n()
@@ -92,6 +93,7 @@ export function useAudioValidation(opts: {
         audioId,
         author: username,
         ...(targetLang ? { targetLang } : {}),
+        surface, // AQU-1572
       })
       await onCommitted?.(cellId)
       // AQU-490: and the part `onCommitted` cannot do. It refreshes the CELLS

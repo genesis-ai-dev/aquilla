@@ -1382,6 +1382,7 @@ export function AudioRecordingModal({
           // AQU-1572: the recorder's own save path — the heal re-attach above
           // passes no origin, so a take counts exactly once.
           audioOrigin: "record",
+          surface: "recorder",
           author: username,
         })
       } catch (emitErr) {
@@ -1450,6 +1451,7 @@ export function AudioRecordingModal({
           author: username,
           // AQU-1572: the recorder's own vote for its fresh take, not a review.
           auto: true,
+          surface: "recorder",
         }).catch((err) => {
           // Non-blocking, as for text: the take itself already landed.
           console.warn("[audio auto-validate] emit failed:", err)

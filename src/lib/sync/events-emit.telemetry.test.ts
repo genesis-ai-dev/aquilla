@@ -162,12 +162,39 @@ describe("automatic votes (AQU-1572)", () => {
   })
 })
 
+describe("where it was done (AQU-1572)", () => {
+  // A bulk run and a single click send the same per-line events; `surface`
+  // is what tells forty lines validated from a selection apart from forty
+  // single clicks.
+  it("names the surface on every validation event when the caller gives one", async () => {
+    await emitCellValidate({ ...CELL, editEventId: "ev1", surface: "selection" })
+    await emitCellUnvalidate({ ...CELL, editEventId: "ev1", surface: "batch" })
+    await emitCellAudioValidate({ ...CELL, audioId: "a1.wav", surface: "recorder" })
+    await emitCellAudioUnvalidate({ ...CELL, audioId: "a1.wav", surface: "recording-tab" })
+    expect([...captured(CELL_VALIDATED), ...captured(CELL_UNVALIDATED)].map((p) => p.surface))
+      .toEqual(["selection", "recorder", "batch", "recording-tab"])
+  })
+
+  it("names it on an audio action too", async () => {
+    await emitCellAudioAttach({
+      ...CELL, audioId: "a1.wav", url: "frontier-audio://a1.wav", slot: "recording",
+      audioOrigin: "attach", surface: "timeline",
+    })
+    expect(captured(AUDIO_ATTACHED)).toEqual([expect.objectContaining({ surface: "timeline" })])
+  })
+
+  it("sends no surface at all when the caller gives none", async () => {
+    await emitCellValidate({ ...CELL, editEventId: "ev1" })
+    expect(captured(CELL_VALIDATED)[0]).not.toHaveProperty("surface")
+  })
+})
+
 describe("telemetry-only inputs never reach the wire (AQU-1572)", () => {
   // Every field a validation emit takes only for telemetry, set at once. The
   // payload each one queues must be exactly what it was before telemetry
   // existed, so the server, the event log and every other client see no
   // difference.
-  const TELEMETRY_ONLY = { source: "agent", auto: true } as const
+  const TELEMETRY_ONLY = { source: "agent", auto: true, surface: "selection" } as const
 
   async function payloadOf(emit: () => Promise<unknown>): Promise<Record<string, unknown>> {
     const { enqueueOutboxEvent } = await import("./outbox")
@@ -253,6 +280,7 @@ describe("audio action telemetry", () => {
       audioOrigin: "generate",
       ttsProvider: "inworld",
       source: "ui",
+      surface: "voice-together",
     })
 
     const enqueued = vi.mocked(enqueueOutboxEvent).mock.calls[0][0] as {
@@ -261,5 +289,6 @@ describe("audio action telemetry", () => {
     expect(enqueued.payload).not.toHaveProperty("audioOrigin")
     expect(enqueued.payload).not.toHaveProperty("ttsProvider")
     expect(enqueued.payload).not.toHaveProperty("source")
+    expect(enqueued.payload).not.toHaveProperty("surface")
   })
 })

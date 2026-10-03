@@ -187,6 +187,7 @@ export async function applyStagedEvent(
         cellId: ev.cellId,
         lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
         source: "agent",
+        surface: "proposal",
       })
       return eventId
     }

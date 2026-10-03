@@ -185,7 +185,7 @@ describe("AudioRecordingModal — upload a file", () => {
     renderModal()
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
-    expect(emitAttach.mock.calls[0][0]).toMatchObject({ fileId: "f1", cellId: "c1", audioOrigin: "attach" })
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ fileId: "f1", cellId: "c1", audioOrigin: "attach", surface: "recorder" })
   })
 
   it("keeping a take leaves every way of making another one live (2026-08-13)", async () => {

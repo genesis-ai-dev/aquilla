@@ -189,7 +189,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
     await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({
-      fileId: "file-1", cellId: "cell-1", targetLang: "fr",
+      fileId: "file-1", cellId: "cell-1", targetLang: "fr", surface: "cell",
     }))
     // A click is a review: not marked as the app's own vote.
     expect(emitCellValidate).not.toHaveBeenCalledWith(expect.objectContaining({ auto: true }))

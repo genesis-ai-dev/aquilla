@@ -619,7 +619,8 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["ok-1", "ok-2"])
+    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => [input.cellId, input.surface, input.auto]))
+      .toEqual([["ok-1", "selection", undefined], ["ok-2", "selection", undefined]])
     await Promise.resolve()
     expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
@@ -636,6 +637,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
 
     expect(emitCellUnvalidate).toHaveBeenCalledTimes(1)
+    expect(emitCellUnvalidate).toHaveBeenCalledWith(expect.objectContaining({ surface: "selection" }))
     await Promise.resolve()
     expect(events("cell unvalidated")).toHaveLength(0)
     vi.restoreAllMocks()
@@ -650,6 +652,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^validate audio/i }))
 
     await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    expect(emitCellAudioValidate).toHaveBeenCalledWith(expect.objectContaining({ surface: "selection" }))
     expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
   })

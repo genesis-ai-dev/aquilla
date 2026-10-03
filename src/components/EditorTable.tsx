@@ -5748,6 +5748,7 @@ function EditorRow({
           targetLang: activeLane,
           // AQU-1572: the vote your own edit casts for itself, not a review.
           auto: true,
+          surface: "cell",
         }).then(() => {
           // AQU-1484: validated — the repetitions are owed this text. Paid
           // right here when the commit came from a settled gesture (the blur
@@ -6106,6 +6107,7 @@ function EditorRow({
         editEventId,
         author: username,
         targetLang: activeLane,
+        surface: "cell", // AQU-1572
       })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
@@ -6912,6 +6914,7 @@ function EditorRow({
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
+        surface: "cell", // AQU-1572
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
       // control paints an optimistic vote and the underlying read never moved

@@ -8,7 +8,9 @@ import { renderHook, waitFor } from "@testing-library/react"
 const fetchAccessibleProjectsResult = vi.fn()
 const getPortfolio = vi.fn()
 
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// A partial mock, as the AQU-1357 guard requires (cloud-projects-mock-guard.test.ts).
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: (...a: unknown[]) => fetchAccessibleProjectsResult(...a),
 }))
 vi.mock("@/lib/frontier/portfolio", () => ({

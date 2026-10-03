@@ -173,6 +173,11 @@ export async function fetchMemberScopeView(
  * member's scopes. Requires project_lead (500+); throws on any non-2xx
  * (including the 400 "leads must stay unscoped" rejection) or network error
  * so the caller's save action can surface the failure.
+ *
+ * AQU-1607: returns the saved scopes AND the names of the lanes they name.
+ * A caller that renders a scope needs those: the lanes a member is scoped to
+ * after a save are not the ones they had before it, so a cache built at load
+ * time has no name for a lane just granted and would print its id.
  */
 export async function putMemberScopes(
   jwt: string,
@@ -180,7 +185,7 @@ export async function putMemberScopes(
   userId: number,
   scopes: MemberScope[],
   apiUrl: string = AUTH_API_URL,
-): Promise<MemberScope[]> {
+): Promise<MemberScopeView> {
   const res = await fetch(
     `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(String(userId))}/scopes`,
     {
@@ -198,6 +203,6 @@ export async function putMemberScopes(
     const message = detail.error ?? `HTTP ${res.status}`
     throw new Error(offenders.length > 0 ? `${message}: ${offenders.join(", ")}` : message)
   }
-  const body = (await res.json()) as { scopes?: MemberScope[] }
-  return body.scopes ?? []
+  const body = (await res.json()) as { scopes?: MemberScope[]; laneNames?: Record<string, string> }
+  return { scopes: body.scopes ?? [], laneNames: body.laneNames ?? {} }
 }

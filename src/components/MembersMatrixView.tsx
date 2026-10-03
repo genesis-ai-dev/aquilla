@@ -115,12 +115,22 @@ export function MembersMatrixView() {
     [jwt],
   )
 
-  const handleScopesSaved = useCallback((userId: number, projectId: string, saved: MemberScope[]) => {
+  const handleScopesSaved = useCallback((
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => {
     setScopesByMember((prev) => {
       const next = new Map(prev)
       const perProject = new Map(next.get(userId) ?? [])
-      // Keep the lane names already loaded: a save returns the same lanes.
-      perProject.set(projectId, { scopes: saved, laneNames: perProject.get(projectId)?.laneNames ?? {} })
+      // AQU-1607: the save's own lane names win — a lane granted by this save
+      // is absent from the names loaded on hover, so reusing those printed
+      // the lane's id in the chip.
+      perProject.set(projectId, {
+        scopes: saved,
+        laneNames: { ...(perProject.get(projectId)?.laneNames ?? {}), ...laneNames },
+      })
       next.set(userId, perProject)
       return next
     })
@@ -299,7 +309,12 @@ const MatrixRow = memo(function MatrixRow({
   jwt: string | null
   memberScopes: MemberScopeMap | undefined
   onHoverRow: (userId: number, projectIds: string[]) => void
-  onScopesSaved: (userId: number, projectId: string, saved: MemberScope[]) => void
+  onScopesSaved: (
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => void
 }) {
   const { t } = useI18n()
   function handleMemberClick() {
@@ -363,7 +378,7 @@ const MatrixRow = memo(function MatrixRow({
                   projectId={p.id}
                   userId={member.userId}
                   username={member.username}
-                  onSaved={(saved) => onScopesSaved(member.userId, p.id, saved)}
+                  onSaved={(saved, laneNames) => onScopesSaved(member.userId, p.id, saved, laneNames)}
                   trigger={
                     <LaneScopeChips
                       scopes={scopesForCell?.scopes}

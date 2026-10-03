@@ -10,7 +10,10 @@ import { fireEvent, render, screen } from "@testing-library/react"
 
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(),
-  putMemberScopes: vi.fn(async (_jwt: string, _p: string, _u: number, scopes: unknown) => scopes),
+  putMemberScopes: vi.fn(async (_jwt: string, _p: string, _u: number, scopes: unknown) => ({
+    scopes,
+    laneNames: {},
+  })),
 }))
 vi.mock("@/lib/sync/project-settings", () => ({ fetchProjectSettings: vi.fn() }))
 

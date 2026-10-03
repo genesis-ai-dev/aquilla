@@ -50,7 +50,7 @@ const { mockFetchMemberScopeView, mockPutMemberScopes } = vi.hoisted(() => ({
       _projectId: string,
       _userId: number,
       scopes: Array<{ kind: "lane" | "file"; value: string }>,
-    ) => scopes,
+    ) => ({ scopes, laneNames: {} as Record<string, string> }),
   ),
 }))
 

@@ -199,7 +199,8 @@ describe("SharePanel — member scopes wiring", () => {
   })
 
   it("onSave calls putMemberScopes and updates scopesByUser", async () => {
-    mockPutMemberScopes.mockResolvedValue([{ kind: "file", value: "f1" }])
+    // AQU-1607: the PUT answers with the saved scopes and the lanes' names.
+    mockPutMemberScopes.mockResolvedValue({ scopes: [{ kind: "file", value: "f1" }], laneNames: {} })
     renderPanel()
 
     await waitFor(() => {

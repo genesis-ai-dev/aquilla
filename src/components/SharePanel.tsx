@@ -341,7 +341,7 @@ function MembersTab({ projectId }: { projectId: string }) {
   const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
     if (!jwt) throw new Error("Sign in to manage scopes.")
     const saved = await putMemberScopes(jwt, projectId, userId, scopes)
-    setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
+    setScopesByUser((prev) => ({ ...prev, [userId]: saved.scopes }))
   }, [jwt, projectId])
 
   // AQU-1607: lane scopes are lane ids. A row written before the backfill

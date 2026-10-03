@@ -37,8 +37,10 @@ export interface MemberLaneScopeEditorProps {
   /** Rendered as the popover's clickable trigger (e.g. the chip row). */
   trigger: ReactNode
   /** Called with the freshly-saved scopes so the caller's chip cache can be
-   * updated in place without a full matrix refetch. */
-  onSaved: (scopes: MemberScope[]) => void
+   * updated in place without a full matrix refetch. AQU-1607: the lane names
+   * ride along, because a lane just granted is not in any cache the caller
+   * built before the save, and a chip would print its id. */
+  onSaved: (scopes: MemberScope[], laneNames: Record<string, string>) => void
 }
 
 /** A lane row's display string: its name, else its tag, else "main language". */
@@ -154,7 +156,7 @@ export function MemberLaneScopeEditor({
     setError(null)
     try {
       const saved = await putMemberScopes(jwt, projectId, userId, draft)
-      onSaved(saved)
+      onSaved(saved.scopes, saved.laneNames)
       setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

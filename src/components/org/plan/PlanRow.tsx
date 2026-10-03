@@ -191,6 +191,7 @@ export const PlanRow = memo(function PlanRow({
   onSelect,
   audioFiles,
   shortChapters,
+  frontMatterShort = false,
   onOpenShortfall,
   assignees,
 }: {
@@ -219,6 +220,11 @@ export const PlanRow = memo(function PlanRow({
   textFiles?: ReadonlySet<string>
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
+  /**
+   * AQU-1493: the book's front matter is short too (its title or intro, or a
+   * line added above its first verse), which no chapter label covers.
+   */
+  frontMatterShort?: boolean
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
   onOpenShortfall?: (unit: PlanUnit) => void
   assignees?: readonly PlanRowAssignee[]
@@ -292,6 +298,15 @@ export const PlanRow = memo(function PlanRow({
     whereText = rest > 0
       ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
       : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
+  }
+  // AQU-1493: front matter is not a chapter, so it is named in its own words,
+  // first because it comes first in the book. Without this a row whose open
+  // cells sat partly in a book's title or above its first verse named only
+  // chapters, and a row short only there named nothing.
+  if (leftToDo !== null && shortfallText !== null && frontMatterShort) {
+    whereText = whereText
+      ? t("org.projectOverview.plan.shortfallWhereWithFrontMatter", { chapters: whereText })
+      : t("org.projectOverview.plan.frontMatter")
   }
 
   /** Two fragments under the separator a translator chose, or whichever exists. */

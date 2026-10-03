@@ -50,7 +50,7 @@ import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
 import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
 import {
-  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+  assignmentsShowAudio, frontMatterShortUnits, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
 } from "./plan/plan-derive"
 import {
   numberedBookCodes,
@@ -860,6 +860,12 @@ export function ProjectOverview() {
   // can hold it still; this memo only caches it against the three inputs.
   const planShortChaptersByUnit = useMemo(
     () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
+  )
+  // AQU-1493: …and which of them are short in the book's front matter too, so
+  // the row names it rather than only chapters.
+  const planFrontMatterShortUnits = useMemo(
+    () => frontMatterShortUnits(planUnits, planFileSections, planAudioFiles, planTextFiles),
     [planUnits, planFileSections, planAudioFiles, planTextFiles],
   )
 
@@ -2128,6 +2134,7 @@ export function ProjectOverview() {
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
                 shortChaptersByUnit={planShortChaptersByUnit}
+                frontMatterShortUnits={planFrontMatterShortUnits}
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={handleOpenShortfall}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}

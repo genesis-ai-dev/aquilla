@@ -623,6 +623,23 @@ describe("what the third column says", () => {
     expect(dateCell()).toHaveTextContent("4, 9, 17 and 2 more")
   })
 
+  it("names the front matter, first, when cells before chapter 1 are short too (AQU-1493)", () => {
+    // A line added above a book's first verse counts in its front matter. The
+    // row used to name only the chapters, or nothing when only it was short.
+    withProps([nearlyDone()], {
+      shortChaptersByUnit: new Map([["f1:", ["2", "3"]]]),
+      frontMatterShortUnits: new Set(["f1:"]),
+    })
+    expect(dateCell()).toHaveTextContent("front matter and chapters 2 and 3")
+  })
+
+  it("names the front matter alone when no chapter is short (AQU-1493)", () => {
+    withProps([nearlyDone()], { frontMatterShortUnits: new Set(["f1:"]) })
+    expect(dateCell()).toHaveTextContent("4 cells to validate")
+    expect(dateCell()).toHaveTextContent("front matter")
+    expect(dateCell()).not.toHaveTextContent("chapter")
+  })
+
   it("says a finished unit is not marked done, rather than that it has no date", () => {
     withProps([unit({ filledCount: 100, validatedCount: 100, lastEditAt: NOW - 3600_000 })])
     const cell = dateCell()

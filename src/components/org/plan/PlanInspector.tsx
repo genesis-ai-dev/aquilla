@@ -224,10 +224,15 @@ export function PlanInspector({
     // recognise as "the bit before chapter 1". A document's own sections keep
     // the names they have; "Chapter Scene 4" would invent one that does not
     // exist.
+    // AQU-1493: the tile's words are lower case to sit among chapter numbers;
+    // heading a card, like "Chapter 3", they start with a capital. Cased here
+    // rather than a second catalogue string that differs only in case, which
+    // most of the target languages would translate twice for nothing.
+    const tileWords = t("org.projectOverview.plan.frontMatter")
     return kind.kind === "chapter"
       ? t("org.projectOverview.plan.chapterTitle", { chapter: kind.n })
       : kind.kind === "frontMatter"
-        ? t("org.projectOverview.plan.frontMatter")
+        ? tileWords.charAt(0).toLocaleUpperCase(locale) + tileWords.slice(1)
         : openSection.key
   })()
   const shortChapters = sections.filter(
@@ -893,7 +898,14 @@ function PlanChapterCard({
           and nowhere else. */}
       {unnumbered > 0 && (
         <p className="text-[11px] text-muted-foreground" data-testid="plan-chapter-unnumbered">
-          {t("org.projectOverview.plan.unnumberedInChapter", { count: unnumbered })}
+          {/* Front matter is not a chapter: a line added above a book's first
+              verse counts there, and the note says so in those words. */}
+          {t(
+            frontMatter
+              ? "org.projectOverview.plan.unnumberedInFrontMatter"
+              : "org.projectOverview.plan.unnumberedInChapter",
+            { count: unnumbered },
+          )}
         </p>
       )}
     </div>

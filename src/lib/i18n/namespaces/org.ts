@@ -1426,6 +1426,10 @@ export const org = defineNamespace({
     // not in the string, the same arrangement the summary pills use.
     "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
     "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
+    // AQU-1493: when the book's front matter is short too (a title, or a line
+    // added above its first verse). Front matter alone reuses the grid tile's
+    // own words, `org.projectOverview.plan.frontMatter`.
+    "org.projectOverview.plan.shortfallWhereWithFrontMatter": "front matter and {chapters}",
     // The links out of the plan and into the editor, landing on the first cell
     // that is actually missing something. Two keys rather than one with a
     // {kind} placeholder: an inflecting language cannot build "first
@@ -1489,6 +1493,12 @@ export const org = defineNamespace({
     "org.projectOverview.plan.unnumberedInChapter": plural({
       one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
       other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
+    }),
+    // AQU-1493: the same note on a book's front-matter card, which is not a
+    // chapter: lines added above a book's first verse count there.
+    "org.projectOverview.plan.unnumberedInFrontMatter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with the book\u2019s front matter.",
     }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
@@ -3117,6 +3127,13 @@ export const org = defineNamespace({
           count: "How many further chapters are short — a number. The plural form is selected by it.",
         },
       },
+      "org.projectOverview.plan.shortfallWhereWithFrontMatter": {
+        description:
+          "Replaces the chapter list on a plan row when the book's front matter (its title, introduction, or a line added above the first verse) is short as well as some chapters: \"front matter and chapters 2 and 3\". Lower case: a fragment after a separator. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: {
+          chapters: "The chapter part, already translated: shortfallWhere or shortfallWhereMore, e.g. 'chapters 2 and 3'.",
+        },
+      },
       "org.projectOverview.plan.goToFirstUntranslated": {
         description:
           "Link in the inspector that opens the editor on this unit, scrolled to the first cell with no target text. Separate from its unvalidated sibling rather than built from a shared phrase, because 'first untranslated' inflects as a whole in most languages.",
@@ -3301,6 +3318,11 @@ export const org = defineNamespace({
           "Note in the plan inspector's chapter card, shown only when the selected chapter holds lines with no verse reference. Explains that they count toward this chapter's progress because the line above them is in it.",
         placeholders: { count: "Lines with no verse reference in this chapter — a number; it also selects the plural form." },
       },
+      "org.projectOverview.plan.unnumberedInFrontMatter": {
+        description:
+          "The same note as unnumberedInChapter, on the card for a book's front matter (the part before chapter 1: its title, introduction, and any line someone added above the first verse). Front matter is not a chapter, so it names the book's front matter instead. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Lines with no verse reference in the front matter — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.chaptersShort": {
         description:
           "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
@@ -3356,7 +3378,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.frontMatter": {
         description:
-          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers. Also the title of that tile's card (shown with its first letter capitalised) and, on a plan row, where the outstanding cells are when only the front matter is short.",
         maxLength: 14,
       },
       "org.projectOverview.plan.tileAria": {

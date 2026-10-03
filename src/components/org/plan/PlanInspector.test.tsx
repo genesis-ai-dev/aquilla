@@ -772,6 +772,23 @@ describe("the chapter card", () => {
     expect(screen.getByTestId("plan-verse-chip-x1")).toHaveTextContent("Unnumbered line")
   })
 
+  it("says a line added above a book's first verse counts with its front matter, not 'this chapter' (AQU-1493)", async () => {
+    // Front matter is not a chapter. A line added at the very top of a file
+    // counts there, beside the book's title.
+    await openChapter(
+      nearlyDone({ sectionKey: "JON" }),
+      [section("JON", { totalCount: 2, filledCount: 0, validatedCount: 0 }), section("JON 1")],
+      [
+        verse("x0", "", { filled: false, validated: false, unnumbered: true }),
+        verse("fmt", "JON:mt1:1", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).not.toHaveTextContent("this chapter")
+  })
+
   it("calls a front-matter card's structural lines titles or intros, numbered among themselves (AQU-1493)", async () => {
     // JON:h:1, JON:mt1:1 and JON:ip:1: the book's running header, title and
     // introduction, all on the front matter before chapter 1. None is a heading.
@@ -1003,7 +1020,7 @@ describe("the chapter's verses belong to the language on screen", () => {
 })
 
 describe("the chapter card names front matter in words", () => {
-  it("titles a book's front matter 'front matter', not its bare book code", async () => {
+  it("titles a book's front matter 'Front matter', not its bare book code", async () => {
     // The tile already uses the word; the card's title kept the raw key, so a
     // reader opening the tile saw "GEN" as a title with no reason to know it
     // meant the bit before chapter 1.
@@ -1020,7 +1037,10 @@ describe("the chapter card names front matter in words", () => {
     await waitFor(() => expect(screen.getByTestId("plan-tile-GEN")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("plan-tile-GEN"))
     await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
-    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^front matter$/)
+    // AQU-1493: the tile's own words, starting with a capital as a heading
+    // does ("Chapter 3"); the tile beneath the grid stays lower case.
+    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^Front matter$/)
+    expect(screen.getByTestId("plan-tile-GEN")).toHaveTextContent("front matter")
   })
 })
 

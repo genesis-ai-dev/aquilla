@@ -30,7 +30,8 @@
  * plain message if they still are not there. Unless --no-token is passed it
  * also mints an Agent API token for `dev` (revoking the previous demo token)
  * and prints ready-to-paste curl lines; the token is printed once and never
- * written anywhere.
+ * written anywhere. If the server's mint rate limit refuses the token, the
+ * seed still succeeds and says to run again later or pass --no-token.
  */
 
 import { spawnSync } from "node:child_process"
@@ -68,8 +69,15 @@ const IDENTITY = (flag("--identity") ?? process.env.DEV_SEED_IDENTITY_BASE ?? "h
 const SYNC = (flag("--sync") ?? process.env.DEV_SEED_SYNC_BASE ?? "http://127.0.0.1:8789").replace(/\/$/, "")
 const WEB = (flag("--web") ?? process.env.DEV_SEED_WEB_BASE ?? "http://localhost:5173").replace(/\/$/, "")
 
-/** A seeding failure with a sentence a tester can act on. */
-class SeedError extends Error {}
+/** A seeding failure with a sentence a tester can act on. `status` is the
+ *  HTTP status when a route answered with an error. */
+class SeedError extends Error {
+  readonly status?: number
+  constructor(message: string, status?: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function call<T>(
   what: string,
@@ -93,7 +101,7 @@ async function call<T>(
     )
   }
   const text = await res.text()
-  if (!res.ok) throw new SeedError(`${what} failed: HTTP ${res.status} ${text.slice(0, 400)}`)
+  if (!res.ok) throw new SeedError(`${what} failed: HTTP ${res.status} ${text.slice(0, 400)}`, res.status)
   return (text ? JSON.parse(text) : {}) as T
 }
 
@@ -401,19 +409,31 @@ async function verify(token: string, generation: number, rows: readonly DemoRow[
 
 // ── Agent API token ──────────────────────────────────────────────────────────
 
-async function mintDemoToken(jwt: string): Promise<string> {
+/** Mint the demo token, then revoke the earlier ones. Minting first means a
+ *  refused mint leaves the previous token working. Returns null when the
+ *  identity worker refuses for its mint rate limit (auth-worker allows
+ *  CREDENTIAL_MINT_MAX_PER_USER = 10 per user per 15 minutes, and several
+ *  seed runs in a row reach it): the demo itself is ready by then, so that is
+ *  a skipped extra, not a failed seed (AQU-1573 walk). */
+async function mintDemoToken(jwt: string): Promise<string | null> {
   const { credentials } = await call<{ credentials: { id: string; name: string; revokedAt: string | null }[] }>(
     "list API tokens",
     `${IDENTITY}/api/v2/credentials`,
     { token: jwt },
   )
+  let minted: { token: string }
+  try {
+    minted = await call<{ token: string }>("mint an API token", `${IDENTITY}/api/v2/credentials`, {
+      token: jwt,
+      body: { name: TOKEN_NAME, mode: "ask" },
+    })
+  } catch (err) {
+    if (err instanceof SeedError && err.status === 429) return null
+    throw err
+  }
   for (const old of credentials.filter((c) => c.name === TOKEN_NAME && !c.revokedAt)) {
     await call("revoke the previous demo token", `${IDENTITY}/api/v2/credentials/${old.id}`, { method: "DELETE", token: jwt })
   }
-  const minted = await call<{ token: string }>("mint an API token", `${IDENTITY}/api/v2/credentials`, {
-    token: jwt,
-    body: { name: TOKEN_NAME, mode: "ask" },
-  })
   return minted.token
 }
 
@@ -482,6 +502,14 @@ export async function main(): Promise<void> {
 
   if (!process.argv.includes("--no-token")) {
     const apiToken = await mintDemoToken(session.jwt)
+    if (apiToken === null) {
+      console.log(
+        "\nThe demo project is ready. Agent API token skipped: too many API tokens were made in the last 15 minutes, " +
+          "so the server refused a new one (any earlier demo token still works). Run this again in 15 minutes for the " +
+          "Agent API curl lines, or pass --no-token to leave the token out.",
+      )
+      return
+    }
     const version = (await readSettings(session.jwt)).version ?? 0
     console.log("\nAgent API checks (token printed once, never saved; the previous demo token was revoked):")
     console.log(curlLines(apiToken, version, rows, fileId))

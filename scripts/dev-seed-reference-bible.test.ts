@@ -29,6 +29,8 @@ class FakeStack {
   cells: Cell[] = []
   credentials: { id: string; name: string; revokedAt: string | null }[] = []
   members = new Map<string, number>()
+  /** Mints the identity worker still allows before it answers 429. */
+  mintsLeft = Infinity
   calls: string[] = []
   eventsPosted: { cellId: string; parentId: string; payload: { value: string; targetLang?: string } }[][] = []
 
@@ -108,6 +110,10 @@ class FakeStack {
     }
     if (route === "GET id/api/v2/credentials") return json({ credentials: this.credentials })
     if (route === "POST id/api/v2/credentials") {
+      if (this.mintsLeft <= 0) {
+        return json({ error: "rate_limited", message: "Too many credentials minted recently. Please try again later." }, 429)
+      }
+      this.mintsLeft--
       this.credentials.push({ id: `cred-${this.credentials.length + 1}`, name: body.name, revokedAt: null })
       return json({ token: `aqk_${this.credentials.length}` }, 201)
     }
@@ -181,6 +187,18 @@ describe("dev-seed-reference-bible (AQU-1573)", () => {
     expect(stack.eventsPosted).toEqual([])
     expect(stack.lanes.filter((l) => l.legacyTag === "en")).toHaveLength(1)
     expect(stack.credentials.map((c) => c.revokedAt === null)).toEqual([false, true])
+  })
+
+  // AQU-1573 walk: several seed runs in 15 minutes reach the mint limit.
+  it("finishes the demo and keeps the old token when the server refuses a new one", async () => {
+    await seed()
+    stack.mintsLeft = 0
+    await seed()
+    // Not revoked: the tester can keep using the token from the first run.
+    expect(stack.credentials.map((c) => c.revokedAt === null)).toEqual([true])
+    const text = output.join("\n")
+    expect(text).toContain("The demo project is ready. Agent API token skipped")
+    expect(text).toContain("--no-token")
   })
 
   it("puts a hand-edited draft back with a commit on the current head", async () => {

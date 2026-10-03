@@ -239,14 +239,18 @@ export async function handleFilesReadRequest(
   const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
   // Threshold-aware approved count from the default lane's progress row.
-  // `files.filled_count` and `files.approved_count` sum every target lane, so
-  // a missing progress row is an empty lane (0), not those columns. The
-  // denominator still falls back to `files.cell_count`: that one is distinct
-  // cells, shared by every lane. For a projected file the approved count is
-  // the histogram mass at or above the threshold. The threshold is resolved
-  // ONCE in a CTE: the previous shape re-parsed `project_settings.settings`
-  // as jsonb inside a correlated subquery, i.e. per histogram bucket per file
-  // row.
+  // `files.filled_count` and `files.approved_count` sum every target lane.
+  // A missing progress row uses them only when the project has at most one
+  // target lane — none yet counts as one, because the lanes row may not
+  // exist yet, and an archived lane still counts, because its cells stay in
+  // the sum. Then the sum is that lane, and it is the only fill before the
+  // first progress row. Two or more target lanes make a missing row an empty
+  // lane (0). The denominator still falls back to `files.cell_count` either
+  // way: distinct cells, shared by every lane. For a projected file the
+  // approved count is the histogram mass at or above the threshold. The
+  // threshold, and that lane count, are resolved ONCE in a CTE: the previous
+  // shape re-parsed `project_settings.settings` as jsonb inside a correlated
+  // subquery, i.e. per histogram bucket per file row.
   //
   // AQU-1083: the same CTE resolves whether this project counts structural
   // cells — its own answer, else its org's, else yes — from the STORED
@@ -260,11 +264,17 @@ export async function handleFilesReadRequest(
     // existed can carry a structural count without a matching total, and a
     // negative denominator would render as a nonsense percentage.
     `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
-    `CASE WHEN p.file_id IS NULL THEN 0
-            ELSE GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
+            WHEN thr.one_target_lane
+            THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
+            ELSE 0
           END AS approved_count, ` +
-    `CASE WHEN p.file_id IS NULL THEN 0
-            ELSE GREATEST(0, p.filled_count - ${less("p.structural_filled_count")})
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.filled_count - ${less("p.structural_filled_count")})
+            WHEN thr.one_target_lane
+            THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
+            ELSE 0
           END AS filled_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
@@ -275,7 +285,8 @@ export async function handleFilesReadRequest(
   const thresholdCte =
     "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
     "THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n, " +
-    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural " +
+    "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
+    "(SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
     "FROM (SELECT ?::text AS id) q " +
     "LEFT JOIN project_settings ps ON ps.project_id = q.id " +
     "LEFT JOIN projects pr ON pr.id = q.id " +

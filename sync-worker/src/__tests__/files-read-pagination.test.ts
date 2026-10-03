@@ -93,8 +93,8 @@ describe("GET /files — approved count after the rewrite", () => {
       files: [
         { id: "f1", project_id: "proj-a", name: "One", approved_count: 99, last_edit_at: 2 },
         { id: "f2", project_id: "proj-a", name: "Two", approved_count: 99, last_edit_at: 1 },
-        // No progress row. files.approved_count sums every lane, so this
-        // default-lane list does not borrow it.
+        // No progress row. The progress rows above mint one target lane, so
+        // the files counter is that lane.
         { id: "f3", project_id: "proj-a", name: "Three", approved_count: 7, last_edit_at: 0 },
       ],
       project_settings: [{ project_id: "proj-a", settings: JSON.stringify({ validationCount: 2 }), version: 1 }],
@@ -106,7 +106,7 @@ describe("GET /files — approved count after the rewrite", () => {
       ],
     })
     const body = (await (await get(db, "/api/v1/projects/proj-a/files")).json()) as Page
-    expect(body.files.map((f) => [f.fileId, f.approvedCount])).toEqual([["f1", 5], ["f2", 0], ["f3", 0]])
+    expect(body.files.map((f) => [f.fileId, f.approvedCount])).toEqual([["f1", 5], ["f2", 0], ["f3", 7]])
   })
 
   it("treats a missing project_settings row as threshold 1", async () => {

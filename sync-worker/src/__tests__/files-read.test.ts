@@ -496,6 +496,52 @@ describe("GET /files with the lane read wall", () => {
     expect(body.file).toMatchObject({ cellCount: 8, filledCount: 0, approvedCount: 0 })
   })
 
+  it("uses the files counters for one target lane and not when a second lane is archived", async () => {
+    const file = {
+      name: "Genesis",
+      cell_count: 10, structural_cell_count: 2,
+      filled_count: 8, structural_filled_count: 4,
+      approved_count: 3, structural_approved_count: 1,
+    }
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srconly1", project_id: "proj-one", role: "source", name: "Source" },
+        { id: "onlylane", project_id: "proj-one", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "live0001", project_id: "proj-two", role: "target", name: "Spanish", legacy_tag: "" },
+        {
+          id: "arch0001", project_id: "proj-two", role: "target", name: "French", legacy_tag: "fr",
+          archived_at: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+      project_settings: [
+        { project_id: "proj-one", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+        { project_id: "proj-two", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+      ],
+      files: [
+        { id: "file-one", project_id: "proj-one", ...file },
+        { id: "file-two", project_id: "proj-two", ...file },
+      ],
+    })
+    const read = async (projectId: string, fileId: string) => {
+      const token = await makeTestToken(SECRET, { projectId, fileId })
+      const res = (await handleFilesReadRequest(
+        new Request(`https://w/api/v1/projects/${projectId}/files/${fileId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      return (await res.json()) as { file: { cellCount: number; filledCount: number; approvedCount: number } }
+    }
+    // 8 − 4 filled, 3 − 1 approved. A source lane does not count.
+    expect((await read("proj-one", "file-one")).file).toMatchObject({
+      cellCount: 8, filledCount: 4, approvedCount: 2,
+    })
+    expect((await read("proj-two", "file-two")).file).toMatchObject({
+      cellCount: 8, filledCount: 0, approvedCount: 0,
+    })
+  })
+
   it("sorts and reports lastEditAt from the granted lanes", async () => {
     const { db } = await makeTestDb({
       lanes: [

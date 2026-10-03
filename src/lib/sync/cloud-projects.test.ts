@@ -177,8 +177,9 @@ describe("minimalProjectRecord", () => {
     expect(record.files[0].name).toBe("GEN")
     expect(record.files[0].type).toBe("usfm")
     expect(record.files[0].cellCount).toBe(1533)
-    expect(record.files[0].sourceLanguage).toBe("en")
-    expect(record.files[0].targetLanguage).toBe("arb")
+    // AQU-1596: carried through as declarations, under names that say so.
+    expect(record.files[0].declaredSourceLanguage).toBe("en")
+    expect(record.files[0].declaredTargetLanguage).toBe("arb")
     expect(record.files[0].corpusMarker).toBe("Treasure Hunt Bible")
     expect(record.files[1].hasScriptureContent).toBe(true)
     expect(typeof record.files[0].createdAt).toBe("string")

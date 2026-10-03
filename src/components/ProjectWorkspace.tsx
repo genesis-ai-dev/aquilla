@@ -2135,7 +2135,7 @@ export function ProjectWorkspace() {
   // low-resource language keeps reporting English in the editor and in AI
   // prompts, and changing Settings can never clear it.
   const activeSourceLanguage = resolveActiveSourceLanguage(
-    activeFile?.sourceLanguage,
+    activeFile?.declaredSourceLanguage,
     project?.sourceLanguage,
   )
   // The DEFAULT (`''`) lane's target language — the PROJECT default only. Used to
@@ -2151,7 +2151,7 @@ export function ProjectWorkspace() {
   // the same rule so the target language actually changes on lane switch.
   const activeLaneTargetLanguage = resolveActiveTargetLanguage(
     activeLane,
-    activeFile?.targetLanguage,
+    activeFile?.declaredTargetLanguage,
     project?.targetLanguage,
   )
 
@@ -6756,8 +6756,13 @@ export function ProjectWorkspace() {
 
   const agentWorkbenchWorkspace = useMemo(() => {
     const scopeAvailable = Boolean(activeFileId && activeFile)
-    const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
-    const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
+    // AQU-1596: the already-resolved, lane-first values. This used to read the
+    // file's own declaration FIRST on the source side and as a fallback on the
+    // target side, so a file stamped `"en"` at import handed the agent English
+    // for a project configured for a low-resource language — the very shadowing
+    // AQU-848 / AQU-583 removed from the editor, still live on this path.
+    const sourceLanguage = activeSourceLanguage
+    const targetLanguage = activeLaneTargetLanguage ?? project?.targetLanguage
 
     // AQU-1104 / AQU-1068: the workbench is mounted only on the agent surface,
     // yet this memo re-ran on every cell commit and walked every cell view in

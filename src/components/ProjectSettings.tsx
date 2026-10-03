@@ -1646,8 +1646,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
+                // "icon", not "icon-sm": the group lines its halves up, so the
+                // arrow must be as tall as "Save changes" beside it.
                 <Button
-                  size="icon-sm"
+                  size="icon"
                   disabled={saving}
                   aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
                 >

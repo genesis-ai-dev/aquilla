@@ -14736,13 +14736,15 @@ export function ProjectWorkspace() {
               // with the same review reuses the staged file and receipt, while
               // an edit after a failure is new content and a new import.
               const importers = captionRowsImportersRef.current
+              // The signal goes with each press, not with the cached importer,
+              // so Cancel during a retry stops the retry.
               const importer = importers.get(input.source) ?? createCaptionRowsImporter({
                 projectId: project.id, fileId: captionDialogFileId, source: input.source,
-                getToken: getTokenForFile, signal: input.signal,
+                getToken: getTokenForFile,
               })
               importers.set(input.source, importer)
               try {
-                await importer()
+                await importer({ signal: input.signal })
               } catch (cause) {
                 if (isRowsAlreadyThereRefusal(cause)) {
                   void refreshAfterCaptionRows()

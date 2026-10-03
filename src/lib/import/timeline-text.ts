@@ -107,6 +107,18 @@ export interface CaptionRowsImportArgs {
   onProgress?: (uploaded: number, total: number) => void
 }
 
+/**
+ * What one press of the button brings with it. A cached importer outlives the
+ * press that built it: the dialog makes a fresh AbortController for every
+ * confirmation, and a retry that ran under the FIRST press's signal could not
+ * be cancelled, so the upload and the promotion went on after the person
+ * pressed Cancel. Each call passes its own.
+ */
+export interface CaptionRowsCall {
+  signal?: AbortSignal
+  onProgress?: (uploaded: number, total: number) => void
+}
+
 export interface CaptionRowsResult {
   fileId: string
   /** The hidden, deleted staging file the rows were copied from. */
@@ -148,7 +160,9 @@ export function createCaptionRowsImporter(args: CaptionRowsImportArgs) {
   let staged = false
   let published = false
   let pending: Promise<CaptionRowsResult> | undefined
-  async function commit() {
+  async function commit(call: CaptionRowsCall) {
+    const signal = call.signal ?? args.signal
+    const onProgress = call.onProgress ?? args.onProgress
     if (published) return result
     if (!staged) {
       await bulkUploadSource({
@@ -164,20 +178,23 @@ export function createCaptionRowsImporter(args: CaptionRowsImportArgs) {
         ...(artifact ? { rawBytes: artifact.bytes, rawSourceFormat: artifact.format,
           artifactFidelity: normalized.fidelity, updateSourceSidecar: true } : {}),
         deferPublication: true, getToken: args.getToken,
-        fetchImpl: args.fetchImpl, signal: args.signal, onProgress: args.onProgress,
+        fetchImpl: args.fetchImpl, signal, onProgress,
       })
       staged = true
     }
+    signal?.throwIfAborted()
     await publishStagedImport({
       projectId: args.projectId, fileId: args.fileId,
       captionPromotion: { contentFileId, genesisEventId },
-      getToken: args.getToken, fetchImpl: args.fetchImpl, signal: args.signal,
+      getToken: args.getToken, fetchImpl: args.fetchImpl, signal,
     })
     published = true
     return result
   }
-  return () => {
-    if (!pending) pending = commit().finally(() => { pending = undefined })
+  // A concurrent call (a double click) joins the press already running; a
+  // later one, after a failure, runs under its own signal.
+  return (call: CaptionRowsCall = {}) => {
+    if (!pending) pending = commit(call).finally(() => { pending = undefined })
     return pending
   }
 }

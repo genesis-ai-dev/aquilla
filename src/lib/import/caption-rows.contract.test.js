@@ -146,6 +146,35 @@ describe('captions attached to an empty linked video become its rows', () => {
     } finally { await h.store.close() }
   }, 30_000)
 
+  it('lets Cancel stop a retry: each press brings its own signal', async () => {
+    const h = await harness()
+    try {
+      const linked = await createYouTubeCaptionCommit(prepareYouTubePictureImport({
+        url: URL_, name: 'Episode one' }), h.ctx)()
+      // Offline for the whole first press, through every retry it makes.
+      let offline = true
+      const fetchImpl = async (url, init) => {
+        if (offline) throw new TypeError('Failed to fetch')
+        return h.fetchImpl(url, init)
+      }
+      const commit = createCaptionRowsImporter({ projectId: 'p', fileId: linked.ref.id,
+        source: srtSource().source, getToken: h.getToken, fetchImpl })
+      // The first press fails; its controller is never aborted.
+      await expect(commit({ signal: new AbortController().signal })).rejects.toThrow()
+      offline = false
+      // The retry is cancelled. It must not go on to promote under the first
+      // press's live signal.
+      const retry = new AbortController()
+      retry.abort()
+      await expect(commit({ signal: retry.signal })).rejects.toThrow()
+      expect(h.promotions).toEqual([])
+      expect(await h.rows(linked.ref.id)).toHaveLength(0)
+      // A later press still finishes the same import.
+      await expect(commit()).resolves.toMatchObject({ cellCount: 2 })
+      expect(h.promotions).toHaveLength(1)
+    } finally { await h.store.close() }
+  }, 30_000)
+
   it('refuses a second set of captions once the file has rows', async () => {
     const h = await harness()
     try {

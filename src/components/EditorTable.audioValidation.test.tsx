@@ -58,8 +58,11 @@ vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   emitCellAudioValidate: emits.validate,
 }))
-const { reportValidation } = vi.hoisted(() => ({ reportValidation: vi.fn() }))
-vi.mock("@/lib/review-telemetry", () => ({ reportValidation }))
+// AQU-1572: the emit reports each validation itself (cell-telemetry.ts, at the
+// emit seam). With the emits mocked, any capture here would be the row
+// reporting a second time on its own.
+const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
+vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation, captureAudioAction: vi.fn() }))
 vi.mock("@/lib/audio/audio-validation-commit", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAudioValidationCommit: () => async () => undefined,
@@ -323,15 +326,14 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
 
   // AQU-1572: "same for audio with medium=audio", counted on the line the take
   // lives on.
-  it("reports the vote once, as audio, against the heard line", async () => {
-    reportValidation.mockClear()
+  it("reports the vote once, through its one emit, against the heard line", async () => {
+    emits.validate.mockClear()
+    captureCellValidation.mockClear()
     renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
     fireEvent.click(within(await rowOf("bonjour cell-1")).getByTestId("audio-validation-button"))
-    await vi.waitFor(() => expect(reportValidation).toHaveBeenCalledTimes(1))
-    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
-      medium: "audio", validated: true, source: "ui", surface: "cell",
-      cells: [{ fileId: "cue-file", cellId: "cue-a" }],
-    }))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1))
+    expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a" })
+    expect(captureCellValidation).not.toHaveBeenCalled()
   })
 
   it("shows a vote cast on the heard line elsewhere", async () => {

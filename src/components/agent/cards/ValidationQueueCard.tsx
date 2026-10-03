@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { applyStagedEvent, reportAppliedValidations, type ApplyContext } from "@/lib/agent/apply"
+import { applyStagedEvent, type ApplyContext } from "@/lib/agent/apply"
 import { shortCellId } from "@/lib/cells/short-cell-id"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 
@@ -52,7 +52,6 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
     setRowError(null)
     try {
       const eventId = await applyStagedEvent(ev, applyContext)
-      reportAppliedValidations([ev], applyContext.projectId)
       setRowState((prev) => new Map(prev).set(idx, "done"))
       if (ev.cellId) await onApplied?.([eventId], [ev.cellId])
     } catch (err) {

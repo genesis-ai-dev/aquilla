@@ -43,8 +43,6 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),
 }))
 vi.mock("@/lib/contextual/transport", () => ({ reviewContextualDraft }))
-const { reportValidation } = vi.hoisted(() => ({ reportValidation: vi.fn() }))
-vi.mock("@/lib/review-telemetry", () => ({ reportValidation }))
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).

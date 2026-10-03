@@ -61,11 +61,6 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: vi.fn(async () => "evt"),
   emitCellAudioRename: vi.fn(async () => "evt"),
 }))
-const reportAudioRecorded = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/review-telemetry", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  reportAudioRecorded,
-}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "sync-tok",
 }))
@@ -133,7 +128,6 @@ beforeEach(() => {
   attachmentsState.byCellId = new Map()
   emitAttach.mockClear()
   emitRetime.mockClear()
-  reportAudioRecorded.mockClear()
 })
 
 describe("Save, untouched", () => {
@@ -151,12 +145,9 @@ describe("Save, untouched", () => {
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ durationMs: 3600, trimStartMs: 200, trimEndMs: 3360 })
     await waitFor(() => expect(emitRetime).toHaveBeenCalledTimes(1))
     expect(emitRetime.mock.calls[0][0]).toMatchObject({ cellId: "c1", targetOffsetMs: -200 })
-    // AQU-1572: one `audio recorded`, measured as the kept window that plays.
-    expect(reportAudioRecorded).toHaveBeenCalledTimes(1)
-    expect(reportAudioRecorded).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: "p1", cells: [{ fileId: "f1", cellId: "c1" }], source: "ui", surface: "recorder",
-      durationMs: 3160,
-    }))
+    // AQU-1572: the save is ONE attach carrying the recorder's origin, which
+    // is what the emit seam counts as one `audio recorded`.
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ audioOrigin: "record" })
   })
 
   it("a compressed take carries no window and no retime", async () => {

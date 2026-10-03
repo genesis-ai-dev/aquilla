@@ -110,7 +110,6 @@ import { transcribeCell } from "./transcribe"
 import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
 import { generateCellVoice } from "./voice-generate-helpers"
-import { reportGeneratedClips, type GeneratedClip } from "@/lib/review-telemetry"
 import { ttsStatusKey, getTtsStatus } from "./tts"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -509,30 +508,22 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   _synthCancelFlag = false
 
-  // AQU-1572: the run is one action, so it is one `audio generated` — sent
-  // even when it was cancelled or a line failed, for the clips that landed.
-  const clips: GeneratedClip[] = []
-  try {
-    await runBatch(
-      targets,
-      (t) =>
-        generateCellVoice({
-          project,
-          cell: t.cell,
-          ...(args.targetLang ? { targetLang: args.targetLang } : {}),
-          session,
-          username,
-          text: t.text,
-          voiceCellId: t.voiceCellId,
-          onGenerated: (clip) => clips.push(clip),
-        }),
-      {
-        kind: "synth",
-        isCancelled: () => _synthCancelFlag,
-        onItemDone: () => { /* per-cell badge handles its own state */ },
-      },
-    )
-  } finally {
-    reportGeneratedClips(clips, { projectId: project.id, lane: args.targetLang, surface: "generate-all" })
-  }
+  await runBatch(
+    targets,
+    (t) =>
+      generateCellVoice({
+        project,
+        cell: t.cell,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        session,
+        username,
+        text: t.text,
+        voiceCellId: t.voiceCellId,
+      }),
+    {
+      kind: "synth",
+      isCancelled: () => _synthCancelFlag,
+      onItemDone: () => { /* per-cell badge handles its own state */ },
+    },
+  )
 }

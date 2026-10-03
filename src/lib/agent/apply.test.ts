@@ -9,8 +9,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { StagedEvent } from "./protocol"
 
 vi.mock("@/lib/sync/events-emit", () => ({ enqueueEvent: vi.fn() }))
-const { reportValidation } = vi.hoisted(() => ({ reportValidation: vi.fn() }))
-vi.mock("@/lib/review-telemetry", () => ({ reportValidation }))
+const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
+vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation }))
 
 import { enqueueEvent } from "@/lib/sync/events-emit"
 import { applyStagedEvent, applyStagedEvents, UnsupportedAgentEventError } from "./apply"
@@ -273,28 +273,48 @@ describe("applyStagedEvent — cell creates (AQU-890)", () => {
 })
 
 describe("applyStagedEvents — telemetry (AQU-1572)", () => {
-  it("reports an applied proposal's validations as ONE agent event per lane", async () => {
-    reportValidation.mockClear()
+  // This path enqueues `cell.validate` itself, past the emit seam that counts
+  // every other validation, so it reports its own lines: one event per line,
+  // in the seam's shape, and nothing for the proposal's other events.
+  it("reports each applied validation once, as the agent's, in its own lane", async () => {
+    captureCellValidation.mockClear()
     const validate = (cellId: string, targetLang?: string): StagedEvent => ({
       kind: "cell.validate", fileId: "f-1", cellId,
       payload: { editEventId: `evt-${cellId}`, ...(targetLang ? { targetLang } : {}) },
       display: {},
     })
     await applyStagedEvents([commitEvent(), validate("c-1"), validate("c-2"), validate("c-3", "es")], CTX)
-    expect(reportValidation).toHaveBeenCalledTimes(2)
-    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
-      medium: "text", validated: true, source: "agent", projectId: "proj-1", lane: "",
-      cells: [{ fileId: "f-1", cellId: "c-1" }, { fileId: "f-1", cellId: "c-2" }],
-    }))
-    expect(reportValidation).toHaveBeenCalledWith(expect.objectContaining({
-      lane: "es", cells: [{ fileId: "f-1", cellId: "c-3" }],
-    }))
+    expect(captureCellValidation).toHaveBeenCalledTimes(3)
+    expect(captureCellValidation.mock.calls.map(([validated, t]) => [validated, t])).toEqual([
+      [true, expect.objectContaining({ medium: "text", source: "agent", projectId: "proj-1", fileId: "f-1", cellId: "c-1", lane: "" })],
+      [true, expect.objectContaining({ cellId: "c-2", lane: "" })],
+      [true, expect.objectContaining({ cellId: "c-3", lane: "es" })],
+    ])
+  })
+
+  it("reports a single applied row once (the validation queue's per-row Confirm)", async () => {
+    captureCellValidation.mockClear()
+    await applyStagedEvent({
+      kind: "cell.validate", fileId: "f-1", cellId: "c-9",
+      payload: { editEventId: "evt-c-9" }, display: {},
+    }, CTX)
+    expect(captureCellValidation).toHaveBeenCalledTimes(1)
   })
 
   it("reports nothing for a proposal with no validations", async () => {
-    reportValidation.mockClear()
+    captureCellValidation.mockClear()
     await applyStagedEvents([commitEvent()], CTX)
-    expect(reportValidation).not.toHaveBeenCalled()
+    expect(captureCellValidation).not.toHaveBeenCalled()
+  })
+
+  it("reports nothing when the enqueue throws", async () => {
+    captureCellValidation.mockClear()
+    vi.mocked(enqueueEvent).mockRejectedValueOnce(new Error("idb"))
+    await expect(applyStagedEvent({
+      kind: "cell.validate", fileId: "f-1", cellId: "c-9",
+      payload: { editEventId: "evt-c-9" }, display: {},
+    }, CTX)).rejects.toThrow("idb")
+    expect(captureCellValidation).not.toHaveBeenCalled()
   })
 })
 

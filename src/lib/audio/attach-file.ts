@@ -21,7 +21,6 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
-import { reportAudioAttached } from "@/lib/review-telemetry"
 
 /** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
  *  enough: some mobile browsers report an empty or wrong MIME type for files
@@ -226,17 +225,6 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
-  // AQU-1572: one event per file attached. The Agent API's LinkMedia reports
-  // the same event from the sync-worker, as method "link".
-  reportAudioAttached({
-    projectId,
-    cells: [{ fileId, cellId }],
-    lane: args.targetLang,
-    source: "ui",
-    surface: args.surface,
-    method: "upload",
-    durationMs,
-  })
 
   return { audioId: fullAudioId, url: result.url, durationMs }
 }

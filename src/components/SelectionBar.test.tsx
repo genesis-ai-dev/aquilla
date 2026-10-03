@@ -597,14 +597,18 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
 })
 
 /**
- * AQU-1572 — a bulk action is ONE `cell validated` / `cell unvalidated` event
- * carrying how many lines it changed, not one per line.
+ * AQU-1572 — a bulk action reports one event PER LINE, and the bar reports
+ * none of its own. Every `cell validated` / `cell unvalidated` comes out of
+ * the emit for that line (cell-telemetry.ts, at the emit seam; one emit is one
+ * event, pinned by events-emit.telemetry.test.ts). The emits are mocked here,
+ * so any capture of those names would be the bar counting a second time.
  */
 describe("SelectionBar — validation telemetry (AQU-1572)", () => {
   const events = (name: string) => vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === name)
 
-  it("reports a bulk text validation once, counting only what it validated", async () => {
+  it("validates each eligible line through one emit and reports nothing itself", async () => {
     vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellValidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
       makeCell({ id: "ok-1", translated: "bonjour" }),
@@ -614,16 +618,16 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
-    // Reported once the writes reach the outbox, not at the click.
-    await vi.waitFor(() => expect(events("cell validated")).toHaveLength(1))
-    expect(events("cell validated")[0][1]).toMatchObject({
-      medium: "text", source: "ui", surface: "selection", cell_count: 2, lane: "fr",
-    })
+    expect(emitCellValidate).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["ok-1", "ok-2"])
+    await Promise.resolve()
+    expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
   })
 
-  it("reports a bulk removal as one cell unvalidated", async () => {
+  it("removes each of my validations through one emit and reports nothing itself", async () => {
     vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellUnvalidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
       makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
@@ -631,20 +635,22 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
 
-    await vi.waitFor(() => expect(events("cell unvalidated")).toHaveLength(1))
-    expect(events("cell unvalidated")[0][1]).toMatchObject({ medium: "text", cell_count: 1, lane: "default" })
+    expect(emitCellUnvalidate).toHaveBeenCalledTimes(1)
+    await Promise.resolve()
+    expect(events("cell unvalidated")).toHaveLength(0)
     vi.restoreAllMocks()
   })
 
-  it("reports a bulk audio vote as one event with the audio medium", async () => {
+  it("votes each take through one emit and reports nothing itself", async () => {
     vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellAudioValidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
     renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
 
     fireEvent.click(screen.getByRole("button", { name: /^validate audio/i }))
 
-    await vi.waitFor(() => expect(events("cell validated")).toHaveLength(1))
-    expect(events("cell validated")[0][1]).toMatchObject({ medium: "audio", surface: "selection" })
+    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
   })
 })
@@ -856,9 +862,12 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
   })
 })
 
-describe("SelectionBar — a write that never queued is not counted (AQU-1572)", () => {
-  it("leaves a failed enqueue out of the event", async () => {
-    vi.mocked(posthog.capture).mockClear()
+// AQU-1572: a write that never queued is not counted — the emit captures only
+// after its enqueue resolves (pinned in events-emit.telemetry.test.ts). What is
+// left for the bar is that the failure is logged instead of escaping as an
+// unhandled rejection, since its loop does not await each write.
+describe("SelectionBar — a write that never queued", () => {
+  it("is logged, not left as an unhandled rejection", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.mocked(emitCellValidate)
       .mockImplementationOnce(() => Promise.resolve("ok"))
@@ -871,11 +880,7 @@ describe("SelectionBar — a write that never queued is not counted (AQU-1572)",
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
-    await vi.waitFor(() => expect(
-      vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === "cell validated"),
-    ).toHaveLength(1))
-    const [, props] = vi.mocked(posthog.capture).mock.calls.find(([n]) => n === "cell validated")!
-    expect(props).toMatchObject({ cell_count: 1 })
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)))
     warn.mockRestore()
     vi.restoreAllMocks()
   })

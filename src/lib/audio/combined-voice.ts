@@ -29,8 +29,6 @@ import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
-import { reportAudioGenerated } from "@/lib/review-telemetry"
-import { describeVoice } from "./generate-voice"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
@@ -231,15 +229,6 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       })
     }
     notifyAudioAttachmentsChanged(fileId)
-    // AQU-1572: one clip shared by every chosen line, so one event naming them all.
-    reportAudioGenerated({
-      projectId: project.id,
-      cells: chosen.map((c) => ({ fileId, cellId: c.id })),
-      source: "ui",
-      surface: "voice-together",
-      provider,
-      ...describeVoice(voice),
-    })
     setAll({ kind: "idle" })
     return {
       audioId: objectName,

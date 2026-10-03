@@ -16,7 +16,6 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
-import { reportGeneratedClips, type GeneratedClip } from "@/lib/review-telemetry"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -228,10 +227,6 @@ export function CellTtsButton({
           }
           let blob: Blob
           if (!playOnly && projectId && fileId && session?.jwt) {
-            // AQU-1572: one press is one `audio generated`, however many heard
-            // lines it voiced.
-            const clips: GeneratedClip[] = []
-            const onGenerated = (clip: GeneratedClip) => { clips.push(clip) }
             const gen = await generateAndAttachCellVoice({
               projectId,
               fileId,
@@ -243,7 +238,6 @@ export function CellTtsButton({
               session,
               username: session.username,
               onProgress,
-              onGenerated,
             })
             blob = gen.blob
             // The other heard lines performing this same subtitle. Sequential,
@@ -266,7 +260,6 @@ export function CellTtsButton({
                   geminiContext,
                   session,
                   username: session.username,
-                  onGenerated,
                 })
                 alsoWritten += 1
               } catch (e) {
@@ -294,7 +287,6 @@ export function CellTtsButton({
             // swallows a failing sibling on purpose, and a toast claiming three
             // when two exist would be its own small lie. `toast.add`
             // de-duplicates by content, so pressing twice does not stack.
-            reportGeneratedClips(clips, { projectId, surface: "cell" })
             if (alsoWritten > 0) {
               toast.add({
                 type: "success",

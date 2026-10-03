@@ -57,7 +57,6 @@ import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
 import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
-import { reportValidation } from "@/lib/review-telemetry"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -6106,11 +6105,6 @@ function EditorRow({
         author: username,
         targetLang: activeLane,
       })
-      reportValidation({
-        medium: "text", validated, projectId: project.id,
-        cells: [{ fileId: cell.fileId, cellId: cell.id }],
-        lane: activeLane, source: "ui", surface: "cell",
-      })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
       // text anywhere, and the propagation runs after the commit has flushed
@@ -6916,11 +6910,6 @@ function EditorRow({
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
-      })
-      reportValidation({
-        medium: "audio", validated, projectId: project.id,
-        cells: [{ fileId: owner.fileId, cellId: owner.cellId }],
-        lane: activeLane, source: "ui", surface: "cell",
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
       // control paints an optimistic vote and the underlying read never moved

@@ -22,6 +22,45 @@ import {
   CELL_VALIDATED,
 } from "@/lib/event-names"
 
+/** One event as it was handed to PostHog, for the dev log below. */
+export interface CapturedTelemetryEvent {
+  event: string
+  properties: Record<string, unknown>
+}
+
+/** How many events the dev log keeps; old ones fall off the front. */
+const DEV_LOG_LIMIT = 200
+
+/**
+ * A dev build has no PostHog key, so `posthog.capture` goes nowhere and these
+ * events could not be checked by hand at all. In a dev build only, keep the
+ * last few on `window.__aqTelemetry`: type it in the console after a click to
+ * see exactly what would have been sent.
+ */
+function recordForDevtools(event: CapturedTelemetryEvent): void {
+  if (!import.meta.env.DEV || typeof window === "undefined") return
+  const win = window as unknown as { __aqTelemetry?: CapturedTelemetryEvent[] }
+  const log = win.__aqTelemetry ?? (win.__aqTelemetry = [])
+  log.push(event)
+  if (log.length > DEV_LOG_LIMIT) log.splice(0, log.length - DEV_LOG_LIMIT)
+}
+
+/**
+ * Every capture in this module goes through here. These run AFTER the write
+ * reached the outbox, inside the emit function, so a capture that threw would
+ * reject an emit whose write had in fact landed, and the caller would show an
+ * error for a validation that happened. Telemetry never gets to break the
+ * action it describes.
+ */
+function send(event: string, properties: Record<string, unknown>): void {
+  try {
+    recordForDevtools({ event, properties })
+    posthog.capture(event, properties)
+  } catch {
+    /* dropped: a missing chart point, never a failed gesture */
+  }
+}
+
 /** Which side of a cell the validation vote was cast on. */
 export type ValidationMedium = "text" | "audio"
 
@@ -55,7 +94,7 @@ export function captureCellValidation(
   validated: boolean,
   t: CellValidationTelemetry,
 ): void {
-  posthog.capture(validated ? CELL_VALIDATED : CELL_UNVALIDATED, {
+  send(validated ? CELL_VALIDATED : CELL_UNVALIDATED, {
     medium: t.medium,
     project_id: t.projectId,
     file_id: t.fileId,
@@ -89,7 +128,7 @@ const AUDIO_EVENT_FOR_ORIGIN: Record<AudioOrigin, string> = {
 
 /** Emit the `audio attached` / `audio generated` / `audio recorded` event. */
 export function captureAudioAction(t: AudioActionTelemetry): void {
-  posthog.capture(AUDIO_EVENT_FOR_ORIGIN[t.origin], {
+  send(AUDIO_EVENT_FOR_ORIGIN[t.origin], {
     project_id: t.projectId,
     file_id: t.fileId,
     cell_id: t.cellId,

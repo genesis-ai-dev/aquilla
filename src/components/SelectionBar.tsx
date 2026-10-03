@@ -49,7 +49,6 @@ import { namedCellRef } from "@/lib/cell-named-ref"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
-import { reportQueued, reportValidation } from "@/lib/review-telemetry"
 
 /** "Voice together" failures whose usual body speaks of ONE line, in the
  *  words that fit the several lines this action voices. */
@@ -442,9 +441,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || audioTakeTargets.length === 0) return
     if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
     setRunning({ kind: "validate-audio" })
-    // AQU-1572: one event for the whole selection, counting the votes that
-    // reached the outbox even when a later one throws.
-    const voted: typeof audioTakeTargets = []
     try {
       // AWAITED, unlike the text loop beside it. These are not fire-and-forget
       // here because the commit below flushes the outbox, and a flush that
@@ -458,7 +454,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
-        voted.push(target)
       }
       toast.add({
         type: "success",
@@ -470,10 +465,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       // can live on a cue sibling.
       await commitAudioValidation(audioTakeTargets.map((target) => target.fileId))
     } finally {
-      reportValidation({
-        medium: "audio", validated: true, projectId: project.id, cells: voted,
-        lane: activeLane, source: "ui", surface: "selection",
-      })
       setRunning({ kind: "idle" })
     }
   }, [audioTakeTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
@@ -483,7 +474,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || audioRemoveTargets.length === 0) return
     if (!canPerform("cell.audio.unvalidate", project.syncRole?.level ?? null)) return
     setRunning({ kind: "validate-audio" })
-    const withdrawn: typeof audioRemoveTargets = []
     try {
       for (const target of audioRemoveTargets) {
         // No `targetUsername`: absent means "my own vote", and removing
@@ -498,7 +488,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           ...(activeLane ? { targetLang: activeLane } : {}),
           author: username,
         })
-        withdrawn.push(target)
       }
       toast.add({
         type: "success",
@@ -506,10 +495,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       })
       await commitAudioValidation(audioRemoveTargets.map((target) => target.fileId))
     } finally {
-      reportValidation({
-        medium: "audio", validated: false, projectId: project.id, cells: withdrawn,
-        lane: activeLane, source: "ui", surface: "selection",
-      })
       setRunning({ kind: "idle" })
     }
   }, [audioRemoveTargets, isBusy, project, username, commitAudioValidation, t, activeLane])
@@ -588,23 +573,20 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         allowAiDrafts: allowBulkValidateAiDrafts,
         allowSelfValidation,
       })
-      const queued = summary.validatable.map((cell) =>
-        emitCellValidate({
+      // AQU-1572: each emit reports its own line's `cell validated` once the
+      // write is in the outbox, so this loop adds no telemetry of its own. A
+      // write that fails is logged rather than left as an unhandled rejection.
+      for (const cell of summary.validatable) {
+        void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId!,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
-        }).then(() => ({ fileId: cell.fileId, cellId: cell.id })),
-      )
+        }).catch((err) => console.warn("[validate] enqueue failed:", err))
+      }
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
-      // AQU-1572: counted once every write has reached the outbox (or failed
-      // to), so a write that never landed is not reported as a validation.
-      void reportQueued(queued, (cells) => reportValidation({
-        medium: "text", validated: true, projectId: project.id, cells,
-        lane: activeLane, source: "ui", surface: "selection",
-      }))
       const message = batchValidateToast(summary, t, formatLocaleList)
       toast.add({
         type: message.type,
@@ -624,31 +606,28 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (unvalidatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
-      const removed: Array<Promise<{ fileId: string; cellId: string }>> = []
+      let removed = 0
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
         if (!cell.activeValidators.includes(username)) continue
         if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue // AQU-633: skip out-of-scope
         if (!cell.targetEventId || !project.id) continue
-        removed.push(emitCellUnvalidate({
+        void emitCellUnvalidate({
           projectId: project.id,
           fileId: cell.fileId,
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId,
           targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
-        }).then(() => ({ fileId: cell.fileId, cellId: cell.id })))
+        }).catch((err) => console.warn("[unvalidate] enqueue failed:", err))
+        removed++
       }
       toast.add({
         type: "success",
-        title: t("editor.selection.unvalidatedToast", { count: removed.length }),
+        title: t("editor.selection.unvalidatedToast", { count: removed }),
       })
-      void reportQueued(removed, (cells) => reportValidation({
-        medium: "text", validated: false, projectId: project.id, cells,
-        lane: activeLane, source: "ui", surface: "selection",
-      }))
       // AQU-616: flush now rather than waiting for the periodic flusher.
-      if (removed.length > 0) onValidationCommitted?.()
+      if (removed > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }

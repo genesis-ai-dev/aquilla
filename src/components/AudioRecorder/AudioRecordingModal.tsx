@@ -82,7 +82,6 @@ import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { emitCellAudioAttach, emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
-import { reportAudioRecorded } from "@/lib/review-telemetry"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioDeselect } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -1441,16 +1440,6 @@ export function AudioRecordingModal({
         validatorCount: autoValidate ? 1 : 0,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
-      // AQU-1572: the length that will play — the kept window, not the file.
-      reportAudioRecorded({
-        projectId: project.id,
-        cells: [{ fileId: activeCell.fileId, cellId: activeCell.id }],
-        lane: laneTag,
-        source: "ui",
-        surface: "recorder",
-        durationMs: (takeTrimWindow.trimEndMs ?? takeDurationMs) - (takeTrimWindow.trimStartMs ?? 0),
-        autoValidated: autoValidate,
-      })
       if (autoValidate) {
         void emitCellAudioValidate({
           projectId: project.id,

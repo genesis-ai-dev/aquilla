@@ -21,7 +21,7 @@ import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { reportValidation } from "@/lib/review-telemetry"
+import { captureCellValidation } from "@/lib/cell-telemetry"
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -176,27 +176,20 @@ export async function applyStagedEvent(
         author: ctx.author,
         payload: { ...ev.payload, editEventId } as OutboxPayloadFor<"cell.validate">,
       })
+      // AQU-1572: this path enqueues the event itself rather than through
+      // `emitCellValidate`, so the emit seam never sees it and it reports its
+      // own line here, after the enqueue, in the seam's shape. The person
+      // approved it, but the agent chose the line, so `source: "agent"`.
+      captureCellValidation(true, {
+        medium: "text",
+        projectId: ctx.projectId,
+        fileId: ev.fileId,
+        cellId: ev.cellId,
+        lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
+        source: "agent",
+      })
       return eventId
     }
-  }
-}
-
-/**
- * AQU-1572: report the validations among events that were just applied. The
- * person approved them, but the agent chose which cells — `source: "agent"`
- * is what tells the review loop's own work apart from the agent's.
- */
-export function reportAppliedValidations(events: readonly StagedEvent[], projectId: string): void {
-  const byLane = new Map<string, Array<{ fileId: string; cellId: string }>>()
-  for (const ev of events) {
-    if (ev.kind !== "cell.validate" || !ev.fileId || !ev.cellId) continue
-    const lane = typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : ""
-    byLane.set(lane, [...(byLane.get(lane) ?? []), { fileId: ev.fileId, cellId: ev.cellId }])
-  }
-  for (const [lane, cells] of byLane) {
-    reportValidation({
-      medium: "text", validated: true, projectId, cells, lane, source: "agent", surface: "proposal",
-    })
   }
 }
 
@@ -239,6 +232,5 @@ export async function applyStagedEvents(
       localHeads.set(cellId, { ...localHeads.get(cellId), [side]: id })
     }
   }
-  reportAppliedValidations(events, ctx.projectId)
   return ids
 }

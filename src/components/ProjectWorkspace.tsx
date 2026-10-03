@@ -456,7 +456,6 @@ import {
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
-import { reportValidation } from "@/lib/review-telemetry"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
@@ -9393,8 +9392,6 @@ export function ProjectWorkspace() {
         return
       }
       void (async () => {
-        // AQU-1572: one event for the run, counting what reached the outbox.
-        const validated: Array<{ fileId: string; cellId: string }> = []
         try {
           for (const cell of summary.validatable) {
             await emitCellValidate({
@@ -9405,7 +9402,6 @@ export function ProjectWorkspace() {
               author: currentUsername,
               targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
             })
-            validated.push({ fileId: cell.fileId, cellId: cell.id })
           }
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
           await refreshOutboxPending()
@@ -9416,11 +9412,6 @@ export function ProjectWorkspace() {
           // A throw part-way leaves SOME cells queued, so the message says the
           // run may be partial rather than inviting a blind retry.
           reportBatchValidate({ ...summary, outcome: "failed" }, "workspace-action")
-        } finally {
-          reportValidation({
-            medium: "text", validated: true, projectId, cells: validated,
-            lane: activeLane, source: "ui", surface: "batch",
-          })
         }
       })()
     },
@@ -9471,24 +9462,14 @@ export function ProjectWorkspace() {
       if (targets.length === 0) return
       const projectId = project.id
       void (async () => {
-        // AQU-1572: one event for the run, counting what reached the outbox.
-        const voted: typeof targets = []
-        try {
-          for (const target of targets) {
-            await emitCellAudioValidate({
-              projectId,
-              fileId: target.fileId,
-              cellId: target.cellId,
-              audioId: target.audioId,
-              ...(activeLane ? { targetLang: activeLane } : {}),
-              author: currentUsername,
-            })
-            voted.push(target)
-          }
-        } finally {
-          reportValidation({
-            medium: "audio", validated: true, projectId, cells: voted,
-            lane: activeLane, source: "ui", surface: "batch",
+        for (const target of targets) {
+          await emitCellAudioValidate({
+            projectId,
+            fileId: target.fileId,
+            cellId: target.cellId,
+            audioId: target.audioId,
+            ...(activeLane ? { targetLang: activeLane } : {}),
+            author: currentUsername,
           })
         }
         await refreshOutboxPending()
@@ -11810,13 +11791,6 @@ export function ProjectWorkspace() {
         editEventId: cell.targetEventId,
         author: currentUsername,
         targetLang: activeLane,
-      })
-      // AQU-1572: the person clicked the control on the agent's pane; the
-      // agent proposed nothing here, so this is a UI validation.
-      reportValidation({
-        medium: "text", validated, projectId: project.id,
-        cells: [{ fileId: cell.fileId, cellId: cell.id }],
-        lane: activeLane, source: "ui", surface: "agent-pane",
       })
       await handleCellCommitted(cell.id)
       return true

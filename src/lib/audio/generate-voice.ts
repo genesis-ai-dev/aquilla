@@ -30,9 +30,8 @@ import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
-import { reportGeneratedClips, type GeneratedClip } from "@/lib/review-telemetry"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
 import type { SynthOptions } from "./tts"
 
@@ -64,31 +63,8 @@ export interface GenerateAndAttachArgs {
   label?: string
   diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
-  /**
-   * AQU-1572: a caller generating as part of a larger action (Generate all, a
-   * line voiced onto every heard line performing it) collects the clips here
-   * and reports them as one `audio generated`. Without it, this clip is
-   * reported on its own.
-   */
-  onGenerated?: (clip: GeneratedClip) => void
-  /** AQU-1572: where a clip reported on its own was asked for ("recorder"…). */
+  /** AQU-1572: where the generation was asked for ("recorder", "cell"…). Telemetry only. */
   surface?: string
-}
-
-/**
- * AQU-1572: the voice, as telemetry may name it. A voice cloned from a
- * reference, an Inworld Instant Clone or a published Voice Design
- * (`workspace__…`) is somebody's voice, so only its kind is sent.
- */
-export function describeVoice(voice: Voice): Pick<GeneratedClip, "voiceKind" | "voiceId"> {
-  const custom = Boolean(voice.referenceAudioId) || Boolean(voice.voiceName?.includes("__"))
-  if (custom) return { voiceKind: "clone" }
-  return { voiceKind: "stock", ...(voice.voiceName ? { voiceId: voice.voiceName } : {}) }
-}
-
-function noteGenerated(args: GenerateAndAttachArgs, clip: GeneratedClip): void {
-  if (args.onGenerated) args.onGenerated(clip)
-  else reportGeneratedClips([clip], { projectId: args.projectId, lane: args.targetLang, surface: args.surface })
 }
 
 export interface GenerateAndAttachResult {
@@ -168,13 +144,6 @@ export async function generateAndAttachCellVoice(
       trimEndMs: null,
     }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
-    noteGenerated(args, {
-      fileId: args.fileId,
-      cellId: args.cellId,
-      provider,
-      ...describeVoice(voice),
-      durationMs: Math.round(result.durationSeconds * 1000),
-    })
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,
@@ -332,13 +301,6 @@ export async function generateAndAttachCellVoice(
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(args.fileId)
-  noteGenerated(args, {
-    fileId: args.fileId,
-    cellId: args.cellId,
-    provider,
-    ...describeVoice(voice),
-    durationMs: generatedDurationMs ?? null,
-  })
 
   return { audioId: objectName, url, blob: playable }
 }

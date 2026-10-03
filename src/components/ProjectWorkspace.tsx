@@ -31,6 +31,18 @@ import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, write
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+// AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
+// link and the first-position fallback that replaces the old `''` one.
+import {
+  firstPositionLaneId,
+  laneIdForTag,
+  laneTagForId,
+  readPersistedActiveLane,
+  readPersistedLaneChoice,
+  resolveDeepLinkLaneId,
+  resolveStoredLaneId,
+  writePersistedActiveLane,
+} from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
@@ -561,28 +573,6 @@ function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, st
     if (b.get(key) !== value) return false
   }
   return true
-}
-
-// AQU-538 (slice 2): per-project persistence of the active target lane.
-// `''` (default lane) is stored as "no key" so a single-lane project keeps a
-// clean localStorage — reading a missing key yields the default lane.
-function activeLaneStorageKey(projectId: string): string {
-  return `aquilla:activeLane:${projectId}`
-}
-function readPersistedActiveLane(projectId: string): string {
-  try {
-    return localStorage.getItem(activeLaneStorageKey(projectId)) ?? ""
-  } catch {
-    return ""
-  }
-}
-function writePersistedActiveLane(projectId: string, lane: string): void {
-  try {
-    if (lane) localStorage.setItem(activeLaneStorageKey(projectId), lane)
-    else localStorage.removeItem(activeLaneStorageKey(projectId))
-  } catch {
-    /* storage unavailable (private mode / quota) — lane stays in-memory only */
-  }
 }
 
 /** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
@@ -2188,18 +2178,53 @@ export function ProjectWorkspace() {
     if (laneRows.length === 0) return project?.archivedLanes
     return laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? "")
   }, [laneRows, project?.archivedLanes])
+  // AQU-1613: the lane in first position — where the editor lands when nothing
+  // else names a lane. It replaces the hardcoded `''` fallback: that one was
+  // the former default lane, which AQU-1600 makes archivable, so falling back
+  // to it is falling back to a lane that may not be open for business.
+  const fallbackLaneId = useMemo(() => firstPositionLaneId(laneRows), [laneRows])
+  const fallbackLane = useMemo(
+    () => laneTagForId(fallbackLaneId, laneRows),
+    [fallbackLaneId, laneRows],
+  )
   // If the active lane is no longer offered (removed from settings), fall back
-  // to the default lane so the editor never points at a nonexistent lane.
+  // to the lane in first position so the editor never points at a nonexistent
+  // lane. Guarded on the fallback itself being available: a project whose lane
+  // rows have not arrived yet offers nothing, and resetting on that would throw
+  // away the reader's lane on every load.
   useEffect(() => {
-    if (activeLane && !availableLanes.includes(activeLane)) setActiveLaneState("")
-  }, [activeLane, availableLanes])
+    if (!activeLane || availableLanes.includes(activeLane)) return
+    if (!availableLanes.includes(fallbackLane)) return
+    setActiveLaneState(fallbackLane)
+  }, [activeLane, availableLanes, fallbackLane])
   const setActiveLane = useCallback(
     (lane: string) => {
       setActiveLaneState(lane)
-      if (projectId) writePersistedActiveLane(projectId, lane)
+      // AQU-1613: persisted by lane id; the tag rides along as the hint the
+      // next first paint needs before the lane rows arrive.
+      if (projectId) writePersistedActiveLane(projectId, laneIdForTag(lane, laneRows), lane)
     },
-    [projectId],
+    [projectId, laneRows],
   )
+  // AQU-1613: the stored choice, resolved id-first once the lane rows arrive.
+  // Runs once per project: it migrates a pre-ticket tag through `legacyTag` to
+  // an id and rewrites the key, and it drops a stored lane that is gone
+  // (previously a silent fall back onto the former default lane).
+  const storedLaneMigratedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!projectId || storedLaneMigratedRef.current === projectId) return
+    if (project?.lanes == null || laneRows.length === 0) return
+    storedLaneMigratedRef.current = projectId
+    const stored = readPersistedLaneChoice(projectId)
+    const laneId = resolveStoredLaneId(stored, laneRows) ?? fallbackLaneId
+    const lane = laneTagForId(laneId, laneRows)
+    setActiveLaneState(lane)
+    // Rewrite the key only for a choice that was actually stored — a reader who
+    // has never switched lanes keeps an empty slot and follows first position,
+    // rather than having today's first lane pinned behind their back.
+    const hadStoredChoice = stored.laneId !== null || stored.legacyTag !== null
+    if (hadStoredChoice && laneId) writePersistedActiveLane(projectId, laneId, lane)
+  }, [projectId, project?.lanes, laneRows, fallbackLaneId])
   // A member the org limited to certain lanes opens in one of them, never on
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
@@ -2210,11 +2235,13 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (scopedLanes && scopedLanes.length > 0 && !scopedLanes.includes(activeLane)) setActiveLane(scopedLanes[0])
   }, [scopedLanes, activeLane, setActiveLane])
-  // AQU-538 deep link: `/project/:id/editor?lane=<tag>` — PM surfaces link into the
-  // editor at the lane they were viewing. Read the param ONCE per project (after
-  // the lane registry loads so an unknown tag can be told apart from a
-  // not-yet-loaded one); a valid tag selects that lane, an unknown tag falls
-  // back to the default. One-shot: it never fights the user's later switches.
+  // AQU-538 deep link: `/project/:id/editor?lane=<lane>` — PM surfaces link into
+  // the editor at the lane they were viewing. Read the param ONCE per project
+  // (after the lane registry loads so an unknown lane can be told apart from a
+  // not-yet-loaded one). AQU-1613 fixes the rule: a lane id or an old tag opens
+  // that lane, an empty `?lane=` or an unknown one opens the lane in FIRST
+  // POSITION rather than the former default lane, and an absent `?lane=` leaves
+  // the reader's lane alone. One-shot: it never fights their later switches.
   const deepLinkLaneAppliedRef = useRef(false)
   useEffect(() => {
     deepLinkLaneAppliedRef.current = false
@@ -2232,9 +2259,22 @@ export function ProjectWorkspace() {
     // An id in `?lane=` cannot be told from an unknown tag until the lane
     // rows arrive. A tag that is already in the registry can resolve now.
     if (project.lanes == null && param && !availableLanes.includes(param)) return
-    const resolved = resolveDeepLinkLaneSelection(param, laneRows, availableLanes)
+    // AQU-1613: resolved by lane id — `?lane=<id>`, an old `?lane=<tag>` mapped
+    // through `legacyTag`, and an empty `?lane=` meaning "first position" rather
+    // than "the former default lane". Projects whose lane rows have not arrived
+    // keep the tag-based resolution.
+    const laneId = laneRows.length > 0 ? resolveDeepLinkLaneId(param, laneRows) : null
+    const resolved =
+      laneId !== null
+        ? laneTagForId(laneId, laneRows)
+        : resolveDeepLinkLaneSelection(param, laneRows, availableLanes)
     deepLinkLaneAppliedRef.current = true
-    if (resolved !== null) setActiveLane(resolved)
+    if (resolved !== null) {
+      setActiveLane(resolved)
+      // An explicit lane in the URL is the reader's current choice, so it also
+      // wins over whatever the stored-choice migration would have opened.
+      storedLaneMigratedRef.current = projectId
+    }
   }, [projectId, project, searchParams, availableLanes, laneRows, setActiveLane])
   // AQU-1006 follow-up: `terminology` on this record is now sourced from the
   // CONCEPTS PROJECTION, never from project settings.

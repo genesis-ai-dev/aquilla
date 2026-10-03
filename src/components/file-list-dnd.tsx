@@ -62,7 +62,6 @@ const sameGroupVerticalStrategy: SortingStrategy = (args) => {
 }
 
 const rowSlide = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
-const dropAnimation = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === "function"
@@ -127,7 +126,6 @@ function ActiveFileReorder({
   children: ReactNode
 }) {
   const sensors = useSensors(useSensor(PointerSensor, pointerSensorOptions))
-  const reduceMotion = prefersReducedMotion()
   useEffect(() => {
     return () => {
       document.body.style.cursor = ""
@@ -154,10 +152,10 @@ function ActiveFileReorder({
       }}
     >
       {children}
-      <DragOverlay
-        dropAnimation={reduceMotion ? null : dropAnimation}
-        style={{ pointerEvents: "none" }}
-      >
+      {/* No drop flight: the list itself moves into the slot on release.
+          Animating the overlay toward the pre-move rect would land it somewhere
+          else and then throw it away. */}
+      <DragOverlay dropAnimation={null} style={{ pointerEvents: "none" }}>
         {overlay}
       </DragOverlay>
     </DndContext>

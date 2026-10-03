@@ -49,7 +49,7 @@ import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./
  * it beats an effect that writes state during render.
  */
 export function PlanInspector({
-  unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
+  unit, now, canPlan, showAudio, projectId, getToken, lane, dataVersion = 0, languageLabel, laneCount,
   assignments, audioFiles, textFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
 }: {
   unit: PlanUnit
@@ -75,6 +75,14 @@ export function PlanInspector({
   /** Mints a project-scoped sync token, for the chapter breakdown. */
   getToken: (() => Promise<string | null>) | null
   lane: string
+  /**
+   * Bumped by the page when something outside this panel changed what its
+   * numbers mean — a project setting such as "Count headings as translatable
+   * content". The panel stays mounted under the settings modal, so without
+   * this its chapter tiles and an open chapter card would keep the old answer
+   * until the reader clicked another row (AQU-1493).
+   */
+  dataVersion?: number
   /** The language the numbers on screen belong to. */
   languageLabel: string | null
   /**
@@ -144,7 +152,7 @@ export function PlanInspector({
   // and let it through without a word. An empty unit still pauses, as it did.
   const validatedShort = unit.totalCount === 0 || unit.validatedCount < unit.totalCount
   const readoutTips = usePlanReadoutTips()
-  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
+  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane, version: dataVersion })
 
   // AQU-1278. `audioFiles` comes from the board, which computes it over every
   // unit: whether audio is EXPECTED is a fact about the FILE, not about this
@@ -192,7 +200,9 @@ export function PlanInspector({
   // AQU-1278: that chapter's verses, fetched on the click that opened it and
   // never before — `cells.canonical_ref` is unindexed, so each of these is a
   // full-file scan and a grid that prefetched its fifty tiles would be fifty.
-  const sectionVerses = useSectionVerses({ projectId, fileId: unit.fileId, getToken, lane })
+  const sectionVerses = useSectionVerses({
+    projectId, fileId: unit.fileId, getToken, lane, version: dataVersion,
+  })
   /**
    * The open chapter's verses, fetched when a chapter is open and not before.
    *

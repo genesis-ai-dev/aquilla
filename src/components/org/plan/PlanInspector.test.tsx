@@ -1016,6 +1016,42 @@ describe("the chapter card", () => {
     )
     expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 1")
   })
+
+  it("reads its tiles and the open card again when the page bumps dataVersion (AQU-1493)", async () => {
+    // The panel stays mounted under the settings modal. Leaving headings out
+    // must empty the open card's 'Heading' chips and the tile's corner number
+    // without the reader clicking another row first.
+    const u = nearlyDone({ sectionKey: "JON" })
+    const getToken = withSections([section("JON 1", { totalCount: 21, filledCount: 17, validatedCount: 17 })])
+    vi.mocked(getFileSectionProgress).mockResolvedValue({
+      verses: [
+        verse("h1", "", { filled: false, validated: false, structural: true }),
+        verse("v5", "JON 1:5", { filled: false, validated: false }),
+      ],
+    } as never)
+    const props = {
+      unit: u, now: NOW, canPlan: true, showAudio: false, projectId: "p1", getToken, lane: "",
+      languageLabel: "German", onPatch: vi.fn(), onClose: vi.fn(), onStep: vi.fn(),
+    }
+    const { rerender } = render(<TooltipProvider delay={0}><PlanInspector {...props} dataVersion={0} /></TooltipProvider>)
+    await waitFor(() => expect(screen.getByTestId("plan-tile-JON 1")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-tile-JON 1"))
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-h1")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("4 cells not yet translated")
+
+    withSections([section("JON 1", { totalCount: 17, filledCount: 16, validatedCount: 16 })])
+    vi.mocked(getFileSectionProgress).mockResolvedValue({
+      verses: [verse("v5", "JON 1:5", { filled: false, validated: false })],
+    } as never)
+    rerender(<TooltipProvider delay={0}><PlanInspector {...props} dataVersion={1} /></TooltipProvider>)
+
+    await waitFor(() => expect(screen.queryByTestId("plan-verse-chip-h1")).toBeNull())
+    expect(screen.getByTestId("plan-verse-chip-v5")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("1 cell not yet translated"))
+    expect(getFileProgress).toHaveBeenCalledTimes(2)
+    expect(getFileSectionProgress).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("the inspector's percentages say what they stand for (round 7)", () => {

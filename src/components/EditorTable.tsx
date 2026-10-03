@@ -186,6 +186,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
@@ -6851,11 +6852,8 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // Human references help people and DOM agents identify a cell. Importers
-  // also store opaque UUIDs as canonical refs; those carry no useful context.
-  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
-    .map((value) => value?.trim())
-    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  // Human references help people and DOM agents identify a cell.
+  const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl

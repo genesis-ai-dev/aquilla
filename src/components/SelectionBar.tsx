@@ -39,17 +39,22 @@ import { categorizeAiError, type ErrorCategory } from "@/lib/audio/ai-error"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useFormat } from "@/lib/i18n/format"
 import {
+  batchValidateSkipClauses,
   batchValidateTelemetry,
   batchValidateToast,
   noPermissionMessage,
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
+import { namedCellRef } from "@/lib/cell-named-ref"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
 import { reportQueued, reportValidation } from "@/lib/review-telemetry"
 
 /** "Voice together" failures whose usual body speaks of ONE line, in the
  *  words that fit the several lines this action voices. */
+/** Lines the partial "Validate text" hover names before "and N more". */
+const PARTIAL_REFS_SHOWN = 8
+
 const VOICE_TOGETHER_ENGINE_BODY: Partial<Record<ErrorCategory, MessageKey>> = {
   "hosted-tts-not-configured": "editor.selection.voiceTogetherInworldNotConfigured",
   "hosted-tts-failed": "editor.selection.voiceTogetherInworldFailed",
@@ -258,6 +263,56 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (needTranslation > 0) return t("editor.selection.validateNeedTranslation")
     return t("editor.selection.validateNothingEligible")
   }, [validatableCount, selectedCells, username, myScopes, activeLane, allowBulkValidateAiDrafts, allowSelfValidation, textScopeCanValidate, noPermissionReason, t])
+  // When the click would sign off only part of the selection, the hover says
+  // which lines and why it leaves the rest. A badge of 3 on ten selected lines
+  // used to explain itself only in the toast after the click (Sam,
+  // 2026-10-03). Built from the same summary the click runs, so the two
+  // cannot disagree.
+  const validatePartialTooltip = useMemo(() => {
+    if (validatableCount === 0) return null
+    const summary = summarizeBatchValidate(selectedCells, {
+      username,
+      myScopes,
+      activeLane,
+      hasTarget: Boolean(project.id),
+      canValidate: textScopeCanValidate,
+      noPermissionReason,
+      allowAiDrafts: allowBulkValidateAiDrafts,
+      allowSelfValidation,
+    })
+    if (summary.outcome !== "partial") return null
+    const count = summary.validatable.length
+    const total = selectedCells.length
+    const signedOff = new Set(summary.validatable)
+    const refs = selectedCells.filter((c) => signedOff.has(c)).map(namedCellRef)
+    // Rows without a reference are numbered by their place in the table,
+    // which this bar does not know; then the lines go unnamed rather than
+    // half-named.
+    const named = refs.every((ref): ref is string => Boolean(ref))
+      ? refs as string[]
+      : null
+    const shown = named && named.length > PARTIAL_REFS_SHOWN
+      ? [
+        ...named.slice(0, PARTIAL_REFS_SHOWN - 1),
+        t("editor.selection.validatePartialMoreRefs", { count: named.length - (PARTIAL_REFS_SHOWN - 1) }),
+      ]
+      : named
+    return (
+      <span className="flex flex-col gap-1">
+        <span>
+          {shown
+            ? t("editor.selection.validatePartialNamed", { count, total, refs: formatLocaleList(shown, { type: "conjunction" }) })
+            : t("editor.selection.validatePartial", { count, total })}
+        </span>
+        <span>
+          {t("editor.selection.validatePartialSkips", {
+            count: summary.skippedTotal + summary.cappedOut,
+            reasons: formatLocaleList(batchValidateSkipClauses(summary, t)),
+          })}
+        </span>
+      </span>
+    )
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowBulkValidateAiDrafts, allowSelfValidation, t, formatLocaleList])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -668,8 +723,8 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       </AppTooltip>
       <AppTooltip content={
         validateDisabledReason
-          ? validateDisabledReason
-          : t("editor.selection.validateTooltip", { count: validatableCount })
+          ?? validatePartialTooltip
+          ?? t("editor.selection.validateTooltip", { count: validatableCount })
       }>
         <Button
           type="button"

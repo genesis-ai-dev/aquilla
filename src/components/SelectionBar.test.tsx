@@ -510,6 +510,51 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.restoreAllMocks()
   })
 
+  // Sam, 2026-10-03: a badge of 3 on ten selected lines explained the other
+  // seven only in the toast after the click.
+  it("says on hover which lines a partial run signs off and why it leaves the rest", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
+      new Set(["ok-1", "ok-2", "draft", "empty"]),
+    )
+    renderFor([
+      makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
+      makeCell({ id: "ok-2", context: "B5", translated: "salut" }),
+      makeCell({ id: "draft", context: "B7", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "empty", context: "B8", translated: "" }),
+    ])
+    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    await expectTooltip(btn, "Validate 2 of 4 selected cells: B4 and B5")
+    await expectTooltip(btn, /2 will be skipped — .*still needs? a translation.*untouched AI draft/i)
+    vi.restoreAllMocks()
+  })
+
+  it("shortens a long list of lines", async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `ok-${i + 1}`)
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...ids, "draft"]))
+    renderFor([
+      ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
+      makeCell({ id: "draft", context: "D1", translated: "auto", aiDrafted: true }),
+    ])
+    await expectTooltip(
+      screen.getByRole("button", { name: /^Validate text/i }),
+      "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more",
+    )
+    vi.restoreAllMocks()
+  })
+
+  it("leaves the lines unnamed when one has no reference", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
+    renderFor([
+      makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
+      makeCell({ id: "ok-2", context: "", group: "", translated: "salut" }),
+      makeCell({ id: "draft", context: "B7", translated: "auto", aiDrafted: true }),
+    ])
+    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    await expectTooltip(btn, "Validate 2 of 3 selected cells")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("B4")
+    vi.restoreAllMocks()
+  })
+
   it("says nothing extra when every selected cell was validated", () => {
     vi.mocked(emitCellValidate).mockClear()
     const added = vi.spyOn(toast, "add")

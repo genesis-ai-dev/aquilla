@@ -3614,7 +3614,11 @@
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
     "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7221,7 +7225,11 @@
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
     "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10813,7 +10821,11 @@
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
     "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14421,7 +14433,11 @@
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
     "audio.recordingModal.saveTooltip": "e0a8c76e48c2f110",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19336,7 +19352,11 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -24251,7 +24271,11 @@
     "workspace.aiConsent.sizeNote": "13ea07ae895c82fb",
     "workspace.aiConsent.learnMore": "1445799c033a2d17",
     "workspace.aiConsent.genericModelName": "4d2e74abb8282496",
-    "nav.feedback.buttonLabel": "aac77df347205252"
+    "nav.feedback.buttonLabel": "aac77df347205252",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -29898,7 +29922,11 @@
     "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
     "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
-    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
+    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35652,7 +35680,11 @@
     "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
     "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
-    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
+    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41315,6 +41347,10 @@
     "editor.selection.voiceTogetherSeedVcNotConfigured": "09102615c8f8fe61",
     "editor.selection.voiceTogetherSeedVcFailed": "f568538792f14be2",
     "editor.selection.validateOwnEditsSome": "91da4210a5dcdbc8",
-    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c"
+    "editor.batchValidate.notNamedValidator": "5e9b5b3e5535f84c",
+    "editor.selection.validatePartial": "f3e4b14fc3768bc3",
+    "editor.selection.validatePartialNamed": "e55c151644d8d1af",
+    "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
+    "editor.selection.validatePartialSkips": "d07f466e76badcc1"
   }
 }

@@ -101,11 +101,11 @@ describe("adding captions as a linked video's rows", () => {
   it("keeps the review open with the reason when the rows cannot be added", async () => {
     const cancel = vi.fn()
     render(<ImportTimelineTextDialog mode="rows" projectId="p" mediaName="Film"
-      onConfirm={async () => { throw new Error("This file already has rows. Reload to see them.") }}
+      onConfirm={async () => { throw new Error("Someone already added rows to this file. They're showing now.") }}
       onCancel={cancel} />)
     await choose()
     fireEvent.click(screen.getByRole("button", { name: "Add captions as rows" }))
-    expect(await screen.findByRole("alert")).toHaveTextContent("This file already has rows. Reload to see them.")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Someone already added rows to this file. They're showing now.")
     expect(cancel).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Segment 1 wording")).toHaveValue("Supplied wording")
   })

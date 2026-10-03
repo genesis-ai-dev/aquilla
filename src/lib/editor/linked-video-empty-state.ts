@@ -14,6 +14,8 @@
 
 import type { OrderedBy } from "@/lib/parsers/types"
 import { youTubeVideoId } from "@/lib/video/youtube"
+import { ROLE } from "@/lib/frontier/roles"
+import { canAttachSourceAudio } from "@/lib/sync/role-policy"
 
 export interface LinkedVideoEmptyStateInput {
   orderedBy: OrderedBy | null | undefined
@@ -79,4 +81,46 @@ export function captionsBecomeRows(
   rows: { loading: boolean; failed: boolean },
 ): boolean {
   return emptyState !== null && !rows.loading && !rows.failed
+}
+
+/** Who is offered what on an empty time-ordered file, and in the caption dialog. */
+export interface MediaEmptyGates {
+  /** Attach captions in place, and "Use (track) as this file's rows". */
+  offerCaptionRows: boolean
+  /** The timeline's Sources > Attach captions is enabled. */
+  canImportCaptions: boolean
+  /** Upload (or link) the file's original recording. */
+  canUploadSourceMedia: boolean
+}
+
+/**
+ * The role gates for those offers, in one place so a test can pin them. Each
+ * mirrors the server's floor for the write it leads to; offering below that
+ * floor leaves a person with a button that fails, or worse, half an import:
+ *
+ *  - captions as rows: maintainer (the promotion's floor), with NO
+ *    track-editing switch (Sam's ruling). The /import staging step only needs
+ *    Project Lead, so a Project Lead offered this would stage a hidden file and
+ *    then be refused at the promotion;
+ *  - captions as a timeline track: maintainer AND track editing on, as before;
+ *  - the original recording: Project Lead and up, because it is stored as the
+ *    file's source audio (`canAttachSourceAudio`, the server's floor). Below
+ *    that nobody can add it, so nobody is offered it.
+ *
+ * `roleLevel` null is "not known yet": the source-audio check fails open like
+ * every `role-policy` check, the maintainer checks fail closed as the
+ * workspace always has.
+ */
+export function mediaEmptyGates(input: {
+  roleLevel: number | null | undefined
+  captionRowsMode: boolean
+  /** Maintainer and the project's track-editing switch on. */
+  canEditTracks: boolean
+}): MediaEmptyGates {
+  const maintainer = (input.roleLevel ?? 0) >= ROLE.MAINTAINER
+  return {
+    offerCaptionRows: input.captionRowsMode && maintainer,
+    canImportCaptions: input.captionRowsMode ? maintainer : input.canEditTracks,
+    canUploadSourceMedia: canAttachSourceAudio(input.roleLevel ?? null),
+  }
 }

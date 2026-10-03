@@ -27,12 +27,12 @@ describe("UseTrackAsRowsDialog", () => {
 
   it("stays open with the reason when it fails, and a second press tries again", async () => {
     const onConfirm = vi.fn()
-      .mockRejectedValueOnce(new Error("This file already has rows. Reload to see them."))
+      .mockRejectedValueOnce(new Error("Someone already added rows to this file. They're showing now."))
       .mockResolvedValueOnce(undefined)
     const onCancel = vi.fn()
     render(<UseTrackAsRowsDialog trackName="Episode captions" onConfirm={onConfirm} onCancel={onCancel} />)
     fireEvent.click(screen.getByRole("button", { name: "Use as rows" }))
-    expect(await screen.findByRole("alert")).toHaveTextContent("This file already has rows. Reload to see them.")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Someone already added rows to this file. They're showing now.")
     expect(onCancel).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Use as rows" }))
     await waitFor(() => expect(onCancel).toHaveBeenCalledOnce())

@@ -3051,7 +3051,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               className="h-full py-10"
               icon={Music}
               title={t("editor.empty.noMediaSegments")}
-              description={t("editor.empty.mediaLayerHint")}
+              // AQU-1565 follow-up: this branch is reached only by someone
+              // with no upload (below Project Lead, or read-only), and a file
+              // with no rows has nothing to record a take on, so "import or
+              // record" would send them nowhere.
+              description={t("editor.empty.mediaLayerWaiting")}
             />
           </div>
         )

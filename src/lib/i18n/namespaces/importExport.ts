@@ -34,7 +34,8 @@ export const importExport = defineNamespace({
       "These captions become this file's rows, ready to translate. Check their " +
       "wording and timing first.",
     "importExport.captionTrack.addAsRows": "Add captions as rows",
-    "importExport.captionTrack.rowsExist": "This file already has rows. Reload to see them.",
+    "importExport.captionTrack.rowsExist": "Someone already added rows to this file. They're showing now.",
+    "importExport.captionTrack.rowsFailed": "Couldn't add these captions as rows. Try again.",
     "importExport.mediaPreview.title": "Import {name}",
     "importExport.mediaPreview.description": "Review wording and timing before importing. Your original files are preserved.",
     "importExport.mediaPreview.textSource": "Text source",
@@ -1331,8 +1332,15 @@ export const importExport = defineNamespace({
       },
       "importExport.captionTrack.rowsExist": {
         description:
-          "Error in that dialog when someone else gave the file rows meanwhile, so " +
-          "these captions cannot become its rows. Reloading shows those rows.",
+          "Error in that dialog (and in the Use-as-rows confirmation) when someone " +
+          "else gave the file rows meanwhile, so these captions cannot become its " +
+          "rows. The editor has already loaded those rows behind the dialog.",
+      },
+      "importExport.captionTrack.rowsFailed": {
+        description:
+          "Error in the same dialog when adding the captions as rows failed for any " +
+          "other reason (the connection, or the file changed). Pressing the button " +
+          "again retries without adding anything twice.",
       },
       "importExport.captionTrack.overwrite": {
         description:

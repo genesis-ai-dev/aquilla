@@ -126,7 +126,10 @@ export function TimelineLinkedVideoEmpty({
             {promotable.length > 0 && (
               <div className="mt-3 flex flex-col items-center gap-2">
                 {promotable.map(track => (
-                  <Button key={track.id} onClick={() => onUseCaptionTrackAsRows?.(track.id)}>
+                  // Wraps: a track name runs to 120 characters, and a one-line
+                  // button would spill out of this column.
+                  <Button key={track.id} className="h-auto max-w-full whitespace-normal py-1.5 text-center"
+                    onClick={() => onUseCaptionTrackAsRows?.(track.id)}>
                     {t("editor.media.useTrackAsRows", { track: track.name })}
                   </Button>
                 ))}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { captionsBecomeRows, deriveLinkedVideoEmptyState } from "./linked-video-empty-state"
+import { captionsBecomeRows, deriveLinkedVideoEmptyState, mediaEmptyGates } from "./linked-video-empty-state"
 
 const base = {
   orderedBy: "time" as const,
@@ -74,5 +74,46 @@ describe("captionsBecomeRows (AQU-1566)", () => {
       { loading: false, failed: false })).toBe(false)
     expect(captionsBecomeRows(deriveLinkedVideoEmptyState({ ...base, coreMediaUrl: null }),
       { loading: false, failed: false })).toBe(false)
+  })
+})
+
+// AQU-1565 / AQU-1566: the gates themselves, not the props a component test
+// chooses to pass. Each must sit at the server's floor for the write it leads
+// to: a Project Lead offered captions as rows would stage a hidden file that
+// the maintainer-only promotion then refuses.
+describe("mediaEmptyGates", () => {
+  const CONTRIBUTOR = 400
+  const PROJECT_LEAD = 500
+  const MAINTAINER = 600
+  const gates = (roleLevel: number | null, captionRowsMode: boolean, canEditTracks = false) =>
+    mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks })
+
+  it("offers captions as rows to maintainers only, with track editing off", () => {
+    expect(gates(MAINTAINER, true)).toEqual({
+      offerCaptionRows: true, canImportCaptions: true, canUploadSourceMedia: true,
+    })
+    expect(gates(PROJECT_LEAD, true)).toEqual({
+      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: true,
+    })
+    expect(gates(CONTRIBUTOR, true)).toEqual({
+      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: false,
+    })
+  })
+
+  it("keeps the timeline's Attach captions behind track editing once the file has rows", () => {
+    expect(gates(MAINTAINER, false, false).canImportCaptions).toBe(false)
+    expect(gates(MAINTAINER, false, true).canImportCaptions).toBe(true)
+    expect(gates(MAINTAINER, false, true).offerCaptionRows).toBe(false)
+  })
+
+  it("offers the recording upload from Project Lead up, on every empty media file", () => {
+    for (const rows of [true, false]) {
+      expect(gates(CONTRIBUTOR, rows).canUploadSourceMedia).toBe(false)
+      expect(gates(PROJECT_LEAD, rows).canUploadSourceMedia).toBe(true)
+    }
+  })
+
+  it("does not offer maintainer actions before the role is known", () => {
+    expect(gates(null, true).offerCaptionRows).toBe(false)
   })
 })

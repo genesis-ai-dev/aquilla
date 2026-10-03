@@ -214,9 +214,11 @@ export const editor = defineNamespace({
     //   timeline, so none of the attach-media copy above applies.
     "editor.media.linkedVideoTitle": "Linked to a YouTube video",
     "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    // AQU-1566: shown to everyone below maintainer. Under option b the first
+    // captions become this file's rows, and only a maintainer attaches them.
     "editor.media.linkedVideoNoCaptions":
-      "No captions on this video yet. Caption tracks are added on the Media " +
-      "view's timeline.",
+      "No captions on this video yet. Once a maintainer attaches them, they " +
+      "become this file's rows.",
     "editor.media.linkedVideoCaptionsOn":
       "Its captions are on the Media view's timeline, in {tracks}.",
     "editor.media.openMediaView": "Open Media view",
@@ -1629,6 +1631,11 @@ export const editor = defineNamespace({
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
       "Import an audio or video file, or record a take, to populate the media layer.",
+    // AQU-1565 follow-up: the same empty file for someone who cannot add its
+    // recording (it is the file's source audio, Project Lead and up), so
+    // telling them to import or record would be a dead end.
+    "editor.empty.mediaLayerWaiting":
+      "This file's recording hasn't been added yet. A project lead can add it.",
 
     // — USFM note chips in the source text ————————————————————————
     "editor.note.footnote": "Footnote",
@@ -2752,11 +2759,11 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoNoCaptions": {
         description:
-          "Line under that heading when no caption track has been attached yet. " +
-          "'Captions' are the timed lines of text the translator works from. The " +
-          "Media view is the editor's video-and-timeline view; its timeline is the " +
-          "only place caption tracks are attached, which is the point of the " +
-          "sentence. Match the Media-view name used in the view switcher.",
+          "Line under that heading when the file has no captions yet, shown to " +
+          "someone who cannot attach them (below maintainer). 'Captions' are the " +
+          "timed lines of text the translator works from; once attached they " +
+          "become this file's rows, which the reader will then translate. " +
+          "'Maintainer' is the project role name; match the members screen.",
       },
       "editor.media.linkedVideoCaptionsOn": {
         description:
@@ -6237,6 +6244,13 @@ export const editor = defineNamespace({
           "Body under editor.empty.noMediaSegments, listing the two ways to get " +
           "clips: import a file, or record. 'Media layer' is the audio/video track " +
           "of the file.",
+      },
+      "editor.empty.mediaLayerWaiting": {
+        description:
+          "Body under editor.empty.noMediaSegments for someone who cannot add the " +
+          "file's recording themselves (below Project Lead, or a viewer): nothing " +
+          "is here until a project lead uploads the audio or video. 'Project lead' " +
+          "is the project role name; match the members screen.",
       },
       "editor.note.footnote": {
         description:

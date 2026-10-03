@@ -15,7 +15,7 @@ import {
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
-import { captionsBecomeRows, deriveLinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import { captionsBecomeRows, deriveLinkedVideoEmptyState, mediaEmptyGates } from "@/lib/editor/linked-video-empty-state"
 import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
@@ -274,7 +274,7 @@ import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canAttachSourceAudio, canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -2939,19 +2939,6 @@ export function ProjectWorkspace() {
    * decides who is OFFERED an import, that decides who may move a timing.
    */
   const canManageSources = (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
-  /**
-   * AQU-1565 follow-up: who may upload or link the original recording into an
-   * empty time-ordered file. The clip is stored as the file's source audio,
-   * which is Project Lead and up on the server (authorize.ts), the same floor
-   * as the import that would otherwise bring that recording in.
-   *
-   * NOT the Add-line gate (`canEditLines`), although the plan named it: that
-   * tier is OFF until a project opts in, so it would have taken the upload away
-   * from every maintainer on every project that never touched the setting. The
-   * upload is an import of the file's own media, like diarization and the
-   * audio-cue re-import the tier deliberately does not govern.
-   */
-  const canUploadSourceMedia = canAttachSourceAudio(project?.syncRole?.level ?? null)
 
   // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
   // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
@@ -10459,7 +10446,6 @@ export function ProjectWorkspace() {
   const captionRowsMode = captionsBecomeRows(linkedVideoEmptyState, {
     loading: cellsLoading, failed: Boolean(cellsError),
   })
-  const offerCaptionRows = captionRowsMode && canManageSources
   const openCaptionDialog = useCallback((fileId: string) => {
     setCaptionDialogRows(captionRowsMode)
     setCaptionDialogFileId(fileId)
@@ -10613,6 +10599,23 @@ export function ProjectWorkspace() {
   // clearance alone. That split is why the editor takes `onRenameTrack` as its
   // own prop instead of folding it into `trackEditing`.
   const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  /**
+   * AQU-1565 / AQU-1566: who is offered captions as rows, the timeline's
+   * Attach captions, and the upload of the original recording. One pure
+   * helper (linked-video-empty-state.ts says why each floor is what it is), so
+   * a test pins the gates rather than the props a test happens to pass.
+   *
+   * The upload is NOT the Add-line gate (`canEditLines`), although the plan
+   * named it: that tier is OFF until a project opts in, so it would have taken
+   * the upload away from every maintainer on every project that never touched
+   * the setting. The upload is an import of the file's own media, like
+   * diarization and the audio-cue re-import the tier deliberately does not
+   * govern. It needs Project Lead on EVERY empty media file, not only a
+   * linked video's, because the clip is stored as the file's source audio.
+   */
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia } = mediaEmptyGates({
+    roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
+  })
   const alignmentClipUrl = useMemo(() => {
     const urls = new Set(audioMergedCells.flatMap(cell => {
       const clip = sourceClipAudioForCell(cell)
@@ -13462,7 +13465,7 @@ export function ProjectWorkspace() {
                       ? () => openCaptionDialog(activeFile.id) : undefined}
                     // AQU-1566: on a linked video with no rows the captions
                     // become its rows, which needs no track-editing switch.
-                    canImportCaptions={captionRowsMode ? canManageSources : canEditTracks}
+                    canImportCaptions={canImportCaptions}
                     onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
                       ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
                     canAlignScript={canEditTracks}
@@ -14750,7 +14753,11 @@ export function ProjectWorkspace() {
                   void refreshAfterCaptionRows()
                   throw new Error(t("importExport.captionTrack.rowsExist"), { cause })
                 }
-                throw cause
+                // Any other refusal reads as an HTTP status and a server
+                // sentence; say it plainly, as Use as rows does, and keep the
+                // raw reason for whoever debugs it.
+                console.warn("[caption-rows] adding captions as rows failed:", cause)
+                throw new Error(t("importExport.captionTrack.rowsFailed"), { cause })
               }
               await refreshAfterCaptionRows()
             }}

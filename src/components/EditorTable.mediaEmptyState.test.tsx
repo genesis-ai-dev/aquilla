@@ -117,7 +117,7 @@ describe("EditorTable — empty time-ordered file", () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
     expect(await screen.findByTestId("linked-video-empty")).toBeInTheDocument()
     expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
-    expect(screen.getByText(/Caption tracks are added on the Media view's timeline/)).toBeInTheDocument()
+    expect(screen.getByText(/Once a maintainer attaches them, they become this file's rows/)).toBeInTheDocument()
     expect(screen.queryByText("No media on this file yet")).toBeNull()
     expect(screen.queryByLabelText("Media URL")).toBeNull()
   })
@@ -159,6 +159,20 @@ describe("EditorTable — empty time-ordered file", () => {
     renderTable({ withAttach: false })
     await screen.findByText("No media segments yet")
     expect(screen.queryByLabelText("Media URL")).toBeNull()
+    // Someone who cannot add the recording is not told to import or record:
+    // with no rows there is nothing to record on, and no import to make.
+    expect(screen.getByText("This file's recording hasn't been added yet. A project lead can add it.")).toBeInTheDocument()
+    expect(screen.queryByText(/Import an audio or video file/)).toBeNull()
+  })
+
+  it("lets a long caption track name wrap instead of spilling out of the column", async () => {
+    const name = "Episode 12: The Wedding at Cana (English captions, final)"
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: true, captionTracks: [{ id: "t1", name, canBecomeRows: true }] },
+      onUseCaptionTrackAsRows: () => {},
+    })
+    const button = await screen.findByRole("button", { name: `Use "${name}" as this file's rows` })
+    expect(button.className).toContain("whitespace-normal")
   })
 
   // Repro step 6: under the timeline, "open the Media view" is a button to
@@ -222,7 +236,7 @@ describe("EditorTable — empty time-ordered file", () => {
       "become this file's rows, ready to translate.",
     )).toBeInTheDocument()
     // The old pointer to the timeline is for people who cannot attach here.
-    expect(screen.queryByText(/Caption tracks are added on the Media view's timeline/)).toBeNull()
+    expect(screen.queryByText(/Once a maintainer attaches them, they become this file's rows/)).toBeNull()
     screen.getByRole("button", { name: "Attach captions" }).click()
     expect(onAttachCaptions).toHaveBeenCalledTimes(1)
     expect(screen.getByRole("button", { name: "Open Media view" })).toBeInTheDocument()
@@ -232,7 +246,7 @@ describe("EditorTable — empty time-ordered file", () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
     await screen.findByTestId("linked-video-empty")
     expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
-    expect(screen.getByText(/Caption tracks are added on the Media view's timeline/)).toBeInTheDocument()
+    expect(screen.getByText(/Once a maintainer attaches them, they become this file's rows/)).toBeInTheDocument()
   })
 
   it("offers one Use-as-rows button per source caption track, and never for a target-text track", async () => {

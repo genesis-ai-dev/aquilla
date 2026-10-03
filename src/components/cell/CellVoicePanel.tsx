@@ -46,8 +46,18 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
-import { CHANGE_VOICE_QUALITIES, CHANGE_VOICE_QUALITY_STEPS, changeCellVoice, changeVoiceBlocker, generateSlotOverVoiceChange } from "@/lib/audio/change-voice"
-import { CHANGE_VOICE_QUALITY_LABEL, setChangeVoiceQuality, useChangeVoiceQuality } from "@/lib/store/change-voice-quality"
+import {
+  CHANGE_VOICE_QUALITIES,
+  CHANGE_VOICE_QUALITY_STEPS,
+  changeCellVoice,
+  changeVoiceBlocker,
+  changeVoiceQualityForSteps,
+  changeVoiceSourceTake,
+  generateSlotOverVoiceChange,
+  voiceChangedSteps,
+  type ChangeVoiceQuality,
+} from "@/lib/audio/change-voice"
+import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
@@ -346,46 +356,57 @@ export function CellVoicePanel({
     })
   }, [playableId, isSourceClip, cell.attachments, cell.fileId, cell.id, cell.selectedAudioId, projectId, username, targetLang])
 
-  const quality = useChangeVoiceQuality()
+  // The menu shows THIS clip's quality (stamped into a converted id), not the
+  // device-wide choice the batch action uses. A pick is remembered only until
+  // this clip is replaced, so raising quality reconverts this take alone.
+  const takeId = changeVoiceSourceTake(cell)?.audioId
+  const [picked, setPicked] = useState<{ audioId: string; quality: ChangeVoiceQuality } | null>(null)
+  const quality = picked != null && picked.audioId === takeId
+    ? picked.quality
+    : changeVoiceQualityForSteps(takeId ? voiceChangedSteps(takeId) : null) ?? "standard"
   const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
   const changeBlocker = changeVoiceBlocker(cell, active, diffusionSteps)
 
-  // Play only once the take that was selected when Generate or Change voice
-  // started is replaced. A status re-render must not start the old clip.
-  const autoplayAfterId = useRef<string | null>(null)
+  // Generate and Change voice → autoplay once a fresh take lands (hasTake
+  // flips, or the playable id swaps). `play` is read through a ref: listing
+  // it as a dependency started the clip on a status re-render, and watching
+  // for "the selected id changed" started a second clip under a waveform click.
+  const autoplayRef = useRef(false)
+  const playRef = useRef(play)
+  playRef.current = play
   useEffect(() => {
-    const marker = autoplayAfterId.current
-    if (marker == null || !playableId || playableId === marker) return
-    autoplayAfterId.current = null
-    void play()
-  }, [playableId, play])
+    if (autoplayRef.current && hasTake) {
+      autoplayRef.current = false
+      void playRef.current()
+    }
+  }, [hasTake, playableId])
 
   // Always in the line's own voice — the picker sets it; picking never
   // generates. A converted take stays selected in its slot, and playback
   // prefers a recording, so a new synthesis lands in that slot.
   const generate = useCallback(async () => {
     if (isVoicing || !canGenerate || !canEdit) return
-    autoplayAfterId.current = playableId ?? ""
+    autoplayRef.current = true
     const ok = await generateCellVoice({
       project, cell, session: sess, username, voiceId: active.id,
       slot: generateSlotOverVoiceChange(cell),
       ...(targetLang ? { targetLang } : {}),
     })
     if (ok) onAfterGenerate()
-    else autoplayAfterId.current = null
-  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, playableId, onAfterGenerate, targetLang])
+    else autoplayRef.current = false
+  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, onAfterGenerate, targetLang])
 
   const changeVoice = useCallback(async () => {
     if (isVoicing || changeBlocker != null || !canEdit) return
-    autoplayAfterId.current = playableId ?? ""
+    autoplayRef.current = true
     const ok = await changeCellVoice({
       projectId, cell, voice: active, session: sess, author: username,
       diffusionSteps,
       ...(targetLang ? { targetLang } : {}),
     })
     if (ok) onAfterGenerate()
-    else autoplayAfterId.current = null
-  }, [isVoicing, changeBlocker, canEdit, projectId, cell, active, sess, username, diffusionSteps, playableId, onAfterGenerate, targetLang])
+    else autoplayRef.current = false
+  }, [isVoicing, changeBlocker, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -480,7 +501,7 @@ export function CellVoicePanel({
                       : t("editor.voice.changeVoiceTooltip", { name: active.name })
                 }
                 onChange={() => void changeVoice()}
-                onQuality={setChangeVoiceQuality}
+                onQuality={(next) => { if (takeId) setPicked({ audioId: takeId, quality: next }) }}
               />
             )}
             {canEdit && canGenerate && (

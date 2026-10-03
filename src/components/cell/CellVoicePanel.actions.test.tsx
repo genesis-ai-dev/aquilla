@@ -27,7 +27,7 @@ vi.mock("@/lib/audio/change-voice", async (importOriginal) => ({
 import { CellVoicePanel } from "./CellVoicePanel"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { changeCellVoice, voiceReferenceFingerprint } from "@/lib/audio/change-voice"
-import { resetChangeVoiceQualityCacheForTests } from "@/lib/store/change-voice-quality"
+import { resetChangeVoiceQualityCacheForTests, setChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 
 const stock: Voice = { id: "v-mary", name: "Mary", color: "#000", provider: "gemini", voiceName: "Kore", prompt: "{text}" }
 const clone: Voice = {
@@ -236,6 +236,57 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     renderPanel(converted, "v-anna")
     const dialog = await openChangeVoice(userEvent.setup())
     expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeDisabled()
+  })
+
+  it("offers Change voice again when the clone's reference clip changes", async () => {
+    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q25-audio-cell-1-2-bbbb`
+    const converted = {
+      ...recorded,
+      selectedAudioId: id,
+      attachments: {
+        ...(recorded.attachments as object),
+        [id]: {
+          url: "blob:y", type: "audio/wav", slot: "recording",
+          voiceId: "v-anna", referenceAudioId: "audio-cell-1-1-aaaa",
+        },
+      },
+    } as unknown as CellData
+    const moved: Voice = { ...clone, referenceAudioId: "ref-anna-new.wav" }
+    const settings = { voices: [stock, moved], defaultVoiceId: "v-anna" } as ProjectTtsSettings
+    const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
+    renderWithTooltips(
+      <CellVoicePanel
+        cell={converted}
+        project={project}
+        projectId="proj-1"
+        settings={settings}
+        session={{ jwt: "x" } as unknown as never}
+        username="tester"
+        onAfterGenerate={() => {}}
+        onMakeCharacter={() => {}}
+      />,
+    )
+    const dialog = await openChangeVoice(userEvent.setup())
+    expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeEnabled()
+  })
+
+  it("shows the quality stamped on this clip, not the device setting", async () => {
+    setChangeVoiceQuality("fast")
+    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q40-audio-cell-1-2-bbbb`
+    const converted = {
+      ...recorded,
+      selectedAudioId: id,
+      attachments: {
+        ...(recorded.attachments as object),
+        [id]: {
+          url: "blob:y", type: "audio/wav", slot: "recording",
+          voiceId: "v-anna", referenceAudioId: "audio-cell-1-1-aaaa",
+        },
+      },
+    } as unknown as CellData
+    renderPanel(converted, "v-anna")
+    const dialog = await openChangeVoice(userEvent.setup())
+    expect(within(dialog).getByRole("combobox", { name: "Quality" })).toHaveTextContent("High")
   })
 
   it("sends the quality the user picks, and a higher quality can run again", async () => {

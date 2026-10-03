@@ -24,8 +24,8 @@ export interface WorkspaceActionContext {
     untranscribed: number
     /** Cells with translated text but no recording yet. */
     unsynthesized: number
-    /** AQU-1109: cells whose selected take can be re-voiced into their
-     *  assigned cloned voice and isn't already. */
+    /** AQU-1109: cells with a take and an assigned clone, including ones
+     *  already converted, so the menu can overwrite them. */
     voiceChangeable?: number
     /** AQU-490: takes this viewer could still validate, policy applied. */
     validatableTakes?: number

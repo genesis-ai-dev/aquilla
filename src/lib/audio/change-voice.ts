@@ -76,6 +76,23 @@ export function voiceChangedSteps(audioId: string): number | null {
   return null
 }
 
+/** The quality a converted clip was made at, or null when the id isn't one.
+ *  An unusual step count maps to the nearest named quality so the menu can
+ *  still show it. */
+export function changeVoiceQualityForSteps(steps: number | null): ChangeVoiceQuality | null {
+  if (steps == null) return null
+  let best: ChangeVoiceQuality = "standard"
+  let dist = Infinity
+  for (const quality of CHANGE_VOICE_QUALITIES) {
+    const d = Math.abs(CHANGE_VOICE_QUALITY_STEPS[quality] - steps)
+    if (d < dist) {
+      dist = d
+      best = quality
+    }
+  }
+  return best
+}
+
 export interface ChangeVoiceTake {
   audioId: string
   slot: string

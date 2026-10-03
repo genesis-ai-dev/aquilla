@@ -1,9 +1,9 @@
 /**
  * How closely Change voice should match the cloned voice (AQU-1109).
  *
- * Device-local, like the other audio prefs: quality is a choice about how long
- * you're willing to wait on this machine, and the batch run reads the same
- * value the cell card last set. Missing or corrupt storage is Standard —
+ * Device-local default for the file-wide batch. A cell card does not read or
+ * write this: it shows the quality stamped on the clip it is looking at.
+ * Missing or corrupt storage is Standard —
  * Seed-VC's own normal setting — rather than the fast one, which sounds rough.
  *
  * Key schema: `aq.change-voice-quality.v1` (`"fast"` | `"standard"` | `"high"`).

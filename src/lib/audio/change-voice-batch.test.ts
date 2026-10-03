@@ -55,12 +55,53 @@ describe("planChangeVoiceAll", () => {
       settings,
     )
     expect(plan.targets.map((t) => [t.cell.id, t.voice.id])).toEqual([["c1", "v-anna"], ["c2", "v-ben"]])
-    expect(plan.skipped).toEqual({ "no-take": 1, "not-cloned": 1, "up-to-date": 1, busy: 0 })
+    expect(plan.skipped).toEqual({ "no-take": 1, "not-cloned": 1, "up-to-date": 1, busy: 0, "voice-reference": 0 })
   })
 
   it("re-targets a converted take when the cell is reassigned to another clone", () => {
     const plan = planChangeVoiceAll([convertedFor("c2", anna)], settings)
     expect(plan.targets.map((t) => t.voice.id)).toEqual(["v-ben"])
+  })
+
+  it("overwrites a conversion when the chosen quality differs", () => {
+    const plan = planChangeVoiceAll([convertedFor("c4", anna)], settings, 25)
+    expect(plan.targets.map((t) => t.cell.id)).toEqual(["c4"])
+    expect(plan.skipped["up-to-date"]).toBe(0)
+  })
+
+  it("re-converts when the voice's reference clip changes, even at the same quality", () => {
+    const moved = {
+      ...settings,
+      voices: settings.voices!.map((v) => v.id === "v-anna" ? { ...v, referenceAudioId: "ref-anna-2.wav" } : v),
+    }
+    // The existing take was named for ref-anna.wav, which counts as Fast (10).
+    const plan = planChangeVoiceAll([convertedFor("c4", anna)], moved, 10)
+    expect(plan.targets.map((t) => t.cell.id)).toEqual(["c4"])
+  })
+
+  it("leaves a take already made from the current clip at the chosen quality", () => {
+    const plan = planChangeVoiceAll([convertedFor("c4", anna)], settings, 10)
+    expect(plan.targets).toEqual([])
+    expect(plan.skipped["up-to-date"]).toBe(1)
+  })
+
+  it("leaves a take that a voice is using as its reference clip", () => {
+    const using = {
+      ...settings,
+      voices: settings.voices!.map((v) => v.id === "v-ben" ? { ...v, referenceTakeKey: "c1:recorded" } : v),
+    }
+    const plan = planChangeVoiceAll([recorded("c1")], using, 25)
+    expect(plan.targets).toEqual([])
+    expect(plan.skipped["voice-reference"]).toBe(1)
+  })
+
+  it("still converts a take whose voice was removed, when no voice uses that take", () => {
+    const gone = convertedFor("c4", anna)
+    const takeId = gone.selectedAudioId!
+    gone.attachments![takeId] = { ...gone.attachments![takeId], voiceId: "v-gone" }
+    const plan = planChangeVoiceAll([gone], settings, 25)
+    expect(plan.targets.map((t) => t.cell.id)).toEqual(["c4"])
+    expect(plan.skipped["voice-reference"]).toBe(0)
   })
 
   it("skips a cell that is already voicing", () => {
@@ -94,6 +135,40 @@ describe("runChangeVoiceAll", () => {
     expect(result).toMatchObject({ converted: 1, failed: 1 })
     expect(result.skipped["not-cloned"]).toBe(1)
     expect(getBatchProgress()).toBeNull()
+  })
+
+  it("overwrites a finished take when the run asks for a different quality", async () => {
+    vi.mocked(changeCellVoice).mockResolvedValue(true)
+    const result = await runChangeVoiceAll({
+      projectId: "p1",
+      cells: [convertedFor("c4", anna)],
+      settings,
+      session: null,
+      author: "tester",
+      diffusionSteps: 40,
+    })
+    expect(changeCellVoice).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(changeCellVoice).mock.calls[0][0]).toMatchObject({ diffusionSteps: 40 })
+    expect(result.converted).toBe(1)
+  })
+
+  it("overwrites a finished take when the voice's reference clip changed", async () => {
+    vi.mocked(changeCellVoice).mockResolvedValue(true)
+    const moved = {
+      ...settings,
+      voices: settings.voices!.map((v) => v.id === "v-anna" ? { ...v, referenceAudioId: "ref-anna-2.wav" } : v),
+    }
+    const result = await runChangeVoiceAll({
+      projectId: "p1",
+      cells: [convertedFor("c4", anna)],
+      settings: moved,
+      session: null,
+      author: "tester",
+      diffusionSteps: 10,
+    })
+    expect(changeCellVoice).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(changeCellVoice).mock.calls[0][0].voice.referenceAudioId).toBe("ref-anna-2.wav")
+    expect(result.converted).toBe(1)
   })
 
   it("does nothing, and shows no banner, when no cell qualifies", async () => {

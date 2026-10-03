@@ -423,6 +423,10 @@ export const audio = defineNamespace({
       one: "{count} cell was skipped because its voice has no reference clip.",
       other: "{count} cells were skipped because their voice has no reference clip.",
     }),
+    "audio.changeVoice.batchSkippedVoiceReference": plural({
+      one: "{count} cell is left out because its selected take is the reference clip for a voice.",
+      other: "{count} cells are left out because their selected take is the reference clip for a voice.",
+    }),
 
     // GEMINI_TTS_VOICES (tts-providers.ts) — tone/character description for
     // each named Gemini voice. Several voices share the same description
@@ -2332,6 +2336,13 @@ export const audio = defineNamespace({
           "Toast detail after the bulk run: cells assigned a stock voice were left " +
           "alone, because changing voice needs a cloned voice's reference recording.",
         placeholders: { count: "How many cells were skipped." },
+      },
+      "audio.changeVoice.batchSkippedVoiceReference": {
+        description:
+          "Its own paragraph in the Change voice confirmation, and a sentence in " +
+          "the toast afterwards. These cells are not converted because a voice in " +
+          "the project is using the selected take as its reference clip.",
+        placeholders: { count: "How many cells were left out for this reason." },
       },
       "audio.voice.bright": {
         description:

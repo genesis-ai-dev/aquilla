@@ -199,11 +199,13 @@ export const nav = defineNamespace({
     "nav.workspaceActions.changeVoiceAll.description": plural(
       {
         one:
-          "Converts the selected take in {n} cell to its assigned voice at {quality} " +
-          "quality. Words and timing stay the same. Nothing is generated from text.",
+          "Converts {n} cell to its assigned voice at {quality} quality. A changed " +
+          "reference clip is included. A take already at that quality from the current " +
+          "clip stays. Nothing is generated from text.",
         other:
-          "Converts the selected take in {n} cells to each cell's assigned voice at " +
-          "{quality} quality. Words and timing stay the same. Nothing is generated from text.",
+          "Converts {n} cells to each assigned voice at {quality} quality. A changed " +
+          "reference clip is included. A take already at that quality from the current " +
+          "clip stays. Nothing is generated from text.",
       },
       "n",
     ),
@@ -930,13 +932,13 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.changeVoiceAll.description": {
         description:
-          "Body of the confirmation dialog above. The point to keep: the words and " +
-          "their timing are preserved, only the speaker's sound changes.",
+          "Body of the confirmation dialog above. The point to keep: only the speaker's " +
+          "sound changes, and a new reference clip or a different quality is redone.",
         placeholders: {
-          n: "How many cells have a take that will be converted.",
+          n: "How many cells will be converted at the quality chosen in this dialog. Takes already made from the current reference clip at that quality are not included.",
           quality:
-            "The quality the user last chose for Change voice — Fast, Standard or " +
-            "High — already translated. Insert it as given.",
+            "The quality chosen in this dialog — Fast, Standard, or High — already " +
+            "translated. Insert it as given.",
         },
         maxLength: 200,
       },

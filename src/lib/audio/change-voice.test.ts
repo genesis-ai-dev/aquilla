@@ -26,6 +26,7 @@ const {
   changeVoiceBlocker,
   changeVoiceForCell,
   changeVoiceLabel,
+  changeVoiceQualityForSteps,
   changeVoiceSourceTake,
   generateSlotOverVoiceChange,
   originalTakeId,
@@ -147,6 +148,15 @@ describe("originalTakeId", () => {
       "vc-aaaaaaaa-audio-c-1-x.wav": att({ referenceAudioId: "rec.webm" }),
     }
     expect(originalTakeId(attachments, "vc-aaaaaaaa-audio-c-1-x.wav")).toBe("vc-aaaaaaaa-audio-c-1-x.wav")
+  })
+})
+
+describe("changeVoiceQualityForSteps", () => {
+  it("names the stamped steps, and treats an unstamped conversion as Fast", () => {
+    expect(changeVoiceQualityForSteps(10)).toBe("fast")
+    expect(changeVoiceQualityForSteps(25)).toBe("standard")
+    expect(changeVoiceQualityForSteps(40)).toBe("high")
+    expect(changeVoiceQualityForSteps(null)).toBeNull()
   })
 })
 

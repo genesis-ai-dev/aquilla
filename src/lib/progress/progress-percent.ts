@@ -8,8 +8,10 @@
 // for part === whole, and everything short of it stops at 99.
 //
 // For PROGRESS only — translated, validated, recorded, a person's share of an
-// assignment. Not for an import or download in flight, a confidence score or a
-// bill, where a rounded 100 means what it says.
+// assignment, and the editor's decay health, which counts every cell (a blank
+// one at full decay) and so climbs with the work done. Not for an import or
+// download in flight, the server's confidence score or a bill, where a rounded
+// 100 means what it says.
 
 /** `part` of `whole` as 0–100; 100 only when nothing is outstanding. */
 export function progressPercent(part: number, whole: number): number {

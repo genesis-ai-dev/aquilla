@@ -934,10 +934,13 @@ export function resolveFileTimingMode(
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
   opts?: {
     /**
-     * AQU-1565 follow-up: the file is timed to a linked YouTube video. Its
-     * rows run to the video's clock, so, as for a subtitle import, there is
-     * nothing for Free timing to fit and the Media view must always show the
-     * video. A flag rather than a URL test so this module stays import-free.
+     * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
+     * DEFAULT is Original timing and the Media view shows the video. The
+     * legacy project-level Free timing no longer reaches it (it hid the video
+     * on a "Link video only" file that nobody had set). A choice made on the
+     * file itself still stands: Free timing there was picked through a
+     * warning that the video stays hidden. A flag rather than a URL test so
+     * this module stays import-free.
      */
     timedToLinkedVideo?: boolean
   },
@@ -955,10 +958,9 @@ export function resolveFileTimingMode(
   // those clients for no gain. A stray "audioFirst" on a subtitle file is
   // simply inert from here on — nothing migrates it away.
   if (isSubtitleImportFile(file)) return "dubbing"
-  // Withdrawn at resolution for the same three reasons as above: a stored
-  // mode, the legacy project setting and an older client all stay inert.
-  if (opts?.timedToLinkedVideo) return "dubbing"
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
+  if (opts?.timedToLinkedVideo) return "dubbing"
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization

@@ -2383,8 +2383,10 @@ export function ProjectWorkspace() {
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
   // AQU-1565 follow-up: a file linked to a YouTube video is timed to that
-  // video, so Free timing is withdrawn for it exactly as for a subtitle file,
-  // and the Media view always shows the video.
+  // video, so it defaults to Original timing and the Media view shows the
+  // video. The legacy project-level Free timing no longer reaches it; a Free
+  // timing chosen on the file itself (through the video-stays-hidden warning)
+  // still stands, so the timing control stays on these files.
   const timedToLinkedVideo = youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
@@ -3255,8 +3257,9 @@ export function ProjectWorkspace() {
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      // Resolved against the NEW link: a YouTube link withdraws Free timing,
-      // so there is no switch-back to warn about.
+      // Resolved against the NEW link: a YouTube link drops the legacy
+      // project-level Free timing, so only a file that chose Free timing
+      // itself still gets the switch-back warning.
       if (url && resolveFileTimingMode(activeFile, project ?? undefined, {
         timedToLinkedVideo: youTubeVideoId(url) != null,
       }) === "audioFirst") {
@@ -10910,7 +10913,7 @@ export function ProjectWorkspace() {
       // picker that could have asked for it is not rendered for one. Silent
       // because it is unreachable from the UI — this exists so no future
       // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && (isSubtitleFile || timedToLinkedVideo)) return
+      if (mode === "audioFirst" && isSubtitleFile) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -10931,7 +10934,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, timedToLinkedVideo, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
   )
   /**
    * Persist a dragged (or Alt+Arrow'd) track order: overlay first so the row
@@ -13521,7 +13524,7 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    hideTimingMode={isSubtitleFile || timedToLinkedVideo}
+                    hideTimingMode={isSubtitleFile}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns
                     // the header it portals into the table column's slot.

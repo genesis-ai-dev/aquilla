@@ -373,9 +373,13 @@ export async function authorize<K extends EventKind>(
 
   // AQU-1462: an archived lane refuses writes that name it. Every role,
   // including Maintainer and platform, and whether or not the write wall is
-  // on. The default lane is not archivable. Kinds that are not stored per
-  // lane (audio, waivers, back-translations, lane retimes) are frozen only
-  // when the event carries that lane's tag.
+  // on. AQU-1600: that now includes the former default lane (tag ''), which
+  // archives like any other lane — an ALWAYS_LANE_KIND with no targetLang
+  // names it, so it is checked rather than waved through. Kinds that are not
+  // stored per lane (audio, waivers, back-translations, lane retimes) are
+  // frozen only when the event carries that lane's tag; an absent tag there is
+  // still a shared write (an import, a source transcription) and is not
+  // attributed to the former default lane.
   //
   // Someone who is not allowed to know the lane exists does not hear its
   // name or that it is archived. The read wall decides that: wall off,
@@ -385,7 +389,10 @@ export async function authorize<K extends EventKind>(
   // and are not handed to the write wall below.
   const archiveTag = laneTagForArchiveCheck(raw.kind, raw.payload)
   const wallOn = laneReadWallEnabled(laneReadWall)
-  if (db != null && settings && archiveTag) {
+  // AQU-1600: `''` is a REAL lane tag (the former default lane), and it is
+  // falsy — so this gate tests for null, which is what
+  // laneTagForArchiveCheck returns when the event is not a lane write at all.
+  if (db != null && settings && archiveTag !== null) {
     let laneGrants = tokenClaims.laneGrants
     if (
       wallOn &&
@@ -507,7 +514,10 @@ export async function authorize<K extends EventKind>(
       // The assign dialog recognises "cannot take work in" and shows its own
       // translated message; anything else showing this sees plain words.
       if (!eligible) {
-        const language = lane === '' ? 'the main language' : lane
+        // AQU-1600: no lane is "the main language" any more — the former
+        // default lane is ordinary. Name it as the default lane when the
+        // event carries the legacy empty tag instead of the lane's name.
+        const language = lane === '' ? 'the default lane' : lane
         return {
           ok: false,
           status: 403,

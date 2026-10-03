@@ -61,11 +61,60 @@ describe("archivedLaneReason", () => {
     expect(archivedLaneReason({ tag: "sw", lanes, archivedTags: ["SW"] })).toBe("lane 'sw' is archived")
   })
 
-  it("allows the default lane, an active sibling, and a restored lane", () => {
+  it("allows an active default lane, an active sibling, and a restored lane", () => {
     expect(archivedLaneReason({ tag: "", lanes, archivedTags: ["", "es"] })).toBeNull()
     expect(archivedLaneReason({ tag: "fr", lanes, archivedTags: ["es"] })).toBeNull()
     const restored = [{ ...spanish, archivedAt: null }]
     expect(archivedLaneReason({ tag: "es", lanes: restored, archivedTags: [] })).toBeNull()
+  })
+
+  // AQU-1600: the former default lane is an ordinary lane. Once archived it
+  // freezes writes exactly like any other, and an ALWAYS_LANE_KIND with no
+  // targetLang is the write that names it.
+  it("refuses a write to the former default lane once its row is archived", () => {
+    const archivedDefault = [
+      { ...defaultLane, archivedAt: "2026-10-03T00:00:00.000Z" },
+      french,
+    ]
+    expect(archivedLaneReason({ tag: "", lanes: archivedDefault, archivedTags: [] })).toBe(
+      "lane 'English' is archived",
+    )
+    // The same refusal reaches the caller via laneTagForArchiveCheck's '' tag.
+    const tag = laneTagForArchiveCheck("target.cell.commit", { value: "hola" })
+    expect(tag).toBe("")
+    expect(archivedLaneReason({ tag: tag!, lanes: archivedDefault, archivedTags: [] })).toBe(
+      "lane 'English' is archived",
+    )
+  })
+
+  it("hides the archived former default lane from a caller who cannot know it", () => {
+    const archivedDefault = [{ ...defaultLane, archivedAt: "2026-10-03T00:00:00.000Z" }]
+    const hidden = archivedLaneReason({
+      tag: "",
+      lanes: archivedDefault,
+      archivedTags: [],
+      visibleLaneIds: new Set(["frlane01"]),
+    })
+    expect(hidden).toBe(LANE_DOES_NOT_EXIST_REASON)
+    expect(hidden).not.toContain("English")
+  })
+
+  // The legacy settings mirror holds TAGS and cannot name the '' lane, so it
+  // must never archive the former default lane by colliding with its NAME.
+  it("does not archive the former default lane from settings.archivedLanes", () => {
+    const sameName: ArchiveLaneRow = {
+      id: "enlane02",
+      name: "English",
+      legacyTag: "en",
+      archivedAt: null,
+    }
+    expect(
+      archivedLaneReason({ tag: "", lanes: [defaultLane, sameName], archivedTags: ["English", "en"] }),
+    ).toBeNull()
+  })
+
+  it("does not refuse a project that has no former-default lane row at all", () => {
+    expect(archivedLaneReason({ tag: "", lanes: [french], archivedTags: [] })).toBeNull()
   })
 
   it("still refuses when the row was restored but settings still lists the lane", () => {

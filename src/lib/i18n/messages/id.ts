@@ -5003,6 +5003,7 @@ export const id: Catalog = {
   "rules.checkDrawer.commentOnCell": "Beri komentar pada sel ini",
   "rules.checkDrawer.commentOnCellAriaLabel": "Beri komentar pada {label}",
   "rules.checkDrawer.matchedDetail": "cocok dengan \"{text}\"",
+  "rules.checkDrawer.rowLabel": "Baris {number}",
   "rules.checkDrawer.scopeRules": {"forms":{"other":"{count} aturan"},"countVar":"count"},
   "rules.checkDrawer.scopeTerms": {"forms":{"other":"{count} istilah"},"countVar":"count"},
   "rules.checkDrawer.termHeadline.noneApproved": {"forms":{"other":"tidak satu pun dari {total} kemunculan memakai padanan yang disetujui"},"countVar":"total"},

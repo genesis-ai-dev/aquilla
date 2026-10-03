@@ -40749,7 +40749,8 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79",
+    "rules.checkDrawer.rowLabel": "f8c78edd52580dd6"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47331,7 +47332,8 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79",
+    "rules.checkDrawer.rowLabel": "f8c78edd52580dd6"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -53824,6 +53826,7 @@
     "rules.infraction.builtin.referenceQuoteDiffers": "825b2b737b6d2ee0",
     "rules.infraction.builtin.referenceQuoteMissing": "c258cb9c24a220c3",
     "rules.builtin.referenceQuote.name": "d7e0777e2945f898",
-    "rules.builtin.referenceQuote.description": "d8b269d80805de79"
+    "rules.builtin.referenceQuote.description": "d8b269d80805de79",
+    "rules.checkDrawer.rowLabel": "f8c78edd52580dd6"
   }
 }

@@ -5043,6 +5043,7 @@ export const ru: Catalog = {
   "rules.checkDrawer.commentOnCell": "Оставить комментарий к этой ячейке",
   "rules.checkDrawer.commentOnCellAriaLabel": "Комментарий к {label}",
   "rules.checkDrawer.matchedDetail": "совпало с «{text}»",
+  "rules.checkDrawer.rowLabel": "Строка {number}",
   "rules.checkDrawer.scopeRules": {"forms":{"one":"{count} правило","few":"{count} правила","many":"{count} правил","other":"{count} правила"},"countVar":"count"},
   "rules.checkDrawer.scopeTerms": {"forms":{"one":"{count} термин","few":"{count} термина","many":"{count} терминов","other":"{count} термина"},"countVar":"count"},
   "rules.checkDrawer.termHeadline.noneApproved": {"forms":{"one":"ни одно из {total} вхождения не использует утверждённый вариант","few":"ни одно из {total} вхождений не использует утверждённый вариант","many":"ни одно из {total} вхождений не использует утверждённый вариант","other":"ни одно из {total} вхождений не использует утверждённый вариант"},"countVar":"total"},

@@ -132,6 +132,7 @@ export const rules = defineNamespace({
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
+    "rules.checkDrawer.rowLabel": "Row {number}",
     "rules.checkDrawer.scopeRules": plural({ one: "{count} rule", other: "{count} rules" }),
     "rules.checkDrawer.scopeTerms": plural({ one: "{count} term", other: "{count} terms" }),
     "rules.checkDrawer.termHeadline.noneApproved": plural(
@@ -579,6 +580,11 @@ export const rules = defineNamespace({
         description:
           "Small caption under a rule-violation cell reference, quoting the exact text that matched. The quoted text itself is raw cell content, never translated.",
         placeholders: { text: "The matched span's raw text — never translated." },
+      },
+      "rules.checkDrawer.rowLabel": {
+        description:
+          "Title of a finding card in the Check file drawer for a row that has no verse reference or cue time (a paragraph of a Markdown or Word document, such as a sermon). {number} is the row number shown in the editor's left margin.",
+        placeholders: { number: "The row's number in the editor, as digits." },
       },
       "rules.checkDrawer.scopeRules": {
         description: "Second segment of the 'what was checked' scope summary.",

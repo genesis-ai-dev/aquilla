@@ -4974,6 +4974,7 @@ export const fr: Catalog = {
   "rules.checkDrawer.commentOnCell": "Commenter cette cellule",
   "rules.checkDrawer.commentOnCellAriaLabel": "Commenter {label}",
   "rules.checkDrawer.matchedDetail": "correspond à « {text} »",
+  "rules.checkDrawer.rowLabel": "Ligne {number}",
   "rules.checkDrawer.scopeRules": {"forms":{"one":"{count} règle","many":"{count} règles","other":"{count} règles"},"countVar":"count"},
   "rules.checkDrawer.scopeTerms": {"forms":{"one":"{count} terme","many":"{count} termes","other":"{count} termes"},"countVar":"count"},
   "rules.checkDrawer.termHeadline.noneApproved": {"forms":{"one":"aucune des {total} occurrence n'utilise un rendu approuvé","many":"aucune des {total} occurrences n'utilise un rendu approuvé","other":"aucune des {total} occurrences n'utilise un rendu approuvé"},"countVar":"total"},

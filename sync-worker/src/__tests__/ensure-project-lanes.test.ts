@@ -8,6 +8,7 @@ import {
   ensureProjectLanes,
   ensureProjectLaneStmts,
   insertTargetLane,
+  isDefaultLaneUnderAnotherName,
   listProjectLanes,
   renameTargetLane,
   setTargetLaneArchived,
@@ -242,5 +243,150 @@ describe("rename and archive a target lane", () => {
     })
     const created = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "aabbccdd")
     expect(created).toMatchObject({ name: "Yoruba Team", legacyTag: "aabbccdd", langCode: "yo" })
+  })
+})
+
+// AQU-1585: changing the project target language on Project Info used to leave
+// the old language behind as an empty duplicate lane, and re-coded the default
+// lane without renaming it ("Spanish" with lang_code 'pt').
+describe("AQU-1585 editing the project target language", () => {
+  /** Create the project, then the create dialog's one atomic settings write. */
+  async function createEnglishSpanishPlusFrench() {
+    await createProjectShared(t.db, {
+      projectId: PROJECT,
+      name: "P",
+      orgId: null,
+      createdBy: 1,
+    })
+    const result = await updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: {
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+        // completeTargetLanes() includes the primary in the registry.
+        targetLanes: ["Spanish", "French"],
+      },
+      ifMatchVersion: 0,
+      updatedBy: 1,
+    })
+    expect(result.status).toBe("ok")
+  }
+
+  it("creates the extra lanes the create dialog asked for", async () => {
+    await createEnglishSpanishPlusFrench()
+    expect(await lanes(t)).toEqual([
+      { role: "source", name: "English", lang_code: "en", legacy_tag: null },
+      { role: "target", name: "Spanish", lang_code: "es", legacy_tag: "" },
+      { role: "target", name: "French", lang_code: "fr", legacy_tag: "French" },
+    ])
+  })
+
+  it("does not spawn a lane for the language the default lane already is", async () => {
+    await createEnglishSpanishPlusFrench()
+    const before = (await lanes(t)).map((r) => r.legacy_tag)
+
+    // Project Info: target language Spanish -> Portuguese. The registry still
+    // lists "Spanish" (the UI does not rewrite it), so that entry is now stale.
+    const changed = await updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: {
+        sourceLanguage: "English",
+        targetLanguage: "Portuguese",
+        targetLanes: ["Spanish", "French"],
+      },
+      ifMatchVersion: 1,
+      updatedBy: 1,
+    })
+    expect(changed.status).toBe("ok")
+
+    // The project still has exactly the lanes it had: no empty second "Spanish".
+    // (What the default lane is *called* and *coded* is AQU-1592's derive-on-read
+    // work, not this fix — it only guarantees the lane set is untouched.)
+    expect((await lanes(t)).map((r) => r.legacy_tag)).toEqual(before)
+    expect((await lanes(t)).filter((r) => r.role === "target")).toHaveLength(2)
+  })
+
+  it("still registers a brand-new lane declared only in the settings registry", async () => {
+    // The external Agent API has no insertTargetLane path — PatchSettings on
+    // targetLanes is how it declares a lane ("register it in settings.targetLanes").
+    await createEnglishSpanishPlusFrench()
+    const added = await updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: {
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+        targetLanes: ["Spanish", "French", "fr-CA", "Yoruba"],
+      },
+      ifMatchVersion: 1,
+      updatedBy: 1,
+    })
+    expect(added.status).toBe("ok")
+    const tags = (await lanes(t))
+      .filter((r) => r.role === "target")
+      .map((r) => r.legacy_tag)
+      .sort()
+    // The stale "Spanish" entry is still refused; the new ones land, including a
+    // regional lane beside its base primary (AQU-1532).
+    expect(tags).toEqual(["", "French", "Yoruba", "fr-CA"].sort())
+  })
+
+  it("still keeps a lane added through the lanes route, which inserts the row before syncing the registry", async () => {
+    await createEnglishSpanishPlusFrench()
+    // What POST /:projectId/lanes does: insert the row, then merge the tag into
+    // settings.targetLanes — so the settings write only has to promote it.
+    await insertTargetLane(t.db, PROJECT, {
+      id: "11223344",
+      name: "Yoruba Team",
+      langCode: "yo",
+      legacyTag: "Yoruba",
+    })
+    const synced = await updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: {
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+        targetLanes: ["Spanish", "French", "Yoruba"],
+      },
+      ifMatchVersion: 1,
+      updatedBy: 1,
+    })
+    expect(synced.status).toBe("ok")
+    const rows = await lanes(t)
+    expect(rows.filter((r) => r.role === "target")).toHaveLength(3)
+    expect(rows.find((r) => r.legacy_tag === "Yoruba")).toEqual({
+      role: "target",
+      name: "Yoruba Team",
+      lang_code: "yo",
+      legacy_tag: "Yoruba",
+    })
+  })
+})
+
+describe("isDefaultLaneUnderAnotherName", () => {
+  const source = { role: "source", name: "English", legacyTag: null }
+  const spanish = { role: "target", name: "Spanish", legacyTag: "" }
+  const unnamed = { role: "target", name: BLANK_LANE_PLACEHOLDER, legacyTag: "" }
+
+  it("recognises the default lane's own language, whatever targetLanguage now says", () => {
+    expect(isDefaultLaneUnderAnotherName("Spanish", [source, spanish])).toBe(true)
+    expect(isDefaultLaneUnderAnotherName("spanish", [source, spanish])).toBe(true)
+  })
+
+  it("leaves a genuinely different lane alone", () => {
+    expect(isDefaultLaneUnderAnotherName("French", [source, spanish])).toBe(false)
+    // AQU-1532: a regional lane beside its base primary is its own lane.
+    expect(
+      isDefaultLaneUnderAnotherName("fr-CA", [
+        source,
+        { role: "target", name: "French", legacyTag: "" },
+      ]),
+    ).toBe(false)
+  })
+
+  it("says nothing when there is no named default lane, or for the lanes it never drops", () => {
+    expect(isDefaultLaneUnderAnotherName("Spanish", [])).toBe(false)
+    expect(isDefaultLaneUnderAnotherName("Spanish", [source, unnamed])).toBe(false)
+    expect(isDefaultLaneUnderAnotherName("", [source, spanish])).toBe(false)
+    expect(isDefaultLaneUnderAnotherName(null, [source, spanish])).toBe(false)
   })
 })

@@ -12779,6 +12779,8 @@ export function ProjectWorkspace() {
                   onValidationCommitted={handleBulkValidationCommitted}
                   allowBulkValidateAiDrafts={allowBulkValidateAiDrafts}
                   audioMode={lens === "audio"}
+                  orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
+                  mediaLayer={!!audioLens}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
                     const result = await generateCombinedVoice({

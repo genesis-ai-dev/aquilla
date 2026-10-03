@@ -672,6 +672,7 @@ export const fr: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"one":"Valider {count} cellule","many":"Valider {count} cellules","other":"Valider {count} cellules"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"one":"Valider {count} des {total} cellules sélectionnées","many":"Valider {count} des {total} cellules sélectionnées","other":"Valider {count} des {total} cellules sélectionnées"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"one":"Valider {count} des {total} cellules sélectionnées : {refs}","many":"Valider {count} des {total} cellules sélectionnées : {refs}","other":"Valider {count} des {total} cellules sélectionnées : {refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"one":"Valider {count} des {total} cellules sélectionnées : ligne {refs}","many":"Valider {count} des {total} cellules sélectionnées : lignes {refs}","other":"Valider {count} des {total} cellules sélectionnées : lignes {refs}"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"one":"{count} de plus","many":"{count} de plus","other":"{count} de plus"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"one":"{count} sera ignorée — {reasons}","many":"{count} seront ignorées — {reasons}","other":"{count} seront ignorées — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "Certaines cellules sélectionnées sont en dehors de vos fichiers ou pistes assignés",

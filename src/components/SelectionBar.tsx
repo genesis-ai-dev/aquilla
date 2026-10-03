@@ -15,8 +15,8 @@ import { Languages, Sparkles, Wand2, X } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { type CellStore, readAtVersion, useCellIds, useCellStoreVersion } from "@/hooks/useActiveCellStore"
+import type { OrderedBy, ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -46,6 +46,7 @@ import {
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
 import { namedCellRef } from "@/lib/cell-named-ref"
+import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
 import { reportQueued, reportValidation } from "@/lib/review-telemetry"
@@ -98,6 +99,12 @@ interface Props {
   completeBatch?: (cells: CellData[]) => Promise<void> | void
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean
+  /**
+   * The open file's order, as the editor table reads it, so the toolbar can
+   * name a line by the number in the table's # column.
+   */
+  orderedBy?: OrderedBy
+  mediaLayer?: boolean
   /** Synthesize the selected cells as one continuous clip + slice per cell. */
   onVoiceTogether?: (cells: CellData[]) => Promise<void> | void
   /**
@@ -137,7 +144,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, allowBulkValidateAiDrafts = false }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, allowBulkValidateAiDrafts = false }: Props) {
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -163,6 +170,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selected.size])
+
+  // The editor's own numbering (the # column), so a line without a reference
+  // can still be named the way the reader sees it.
+  const fileCellIds = useCellIds(cellStore, orderedBy, mediaLayer)
+  const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
@@ -284,24 +296,34 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     const count = summary.validatable.length
     const total = selectedCells.length
     const signedOff = new Set(summary.validatable)
-    const refs = selectedCells.filter((c) => signedOff.has(c)).map(namedCellRef)
-    // Rows without a reference are numbered by their place in the table,
-    // which this bar does not know; then the lines go unnamed rather than
-    // half-named.
-    const named = refs.every((ref): ref is string => Boolean(ref))
-      ? refs as string[]
-      : null
-    const shown = named && named.length > PARTIAL_REFS_SHOWN
+    const lines = selectedCells.filter((c) => signedOff.has(c))
+    // Lines go by their references ("GEN 1:1") when every one has one, else by
+    // the table's # column ("rows 4, 5 and 10", Sam's ask), else unnamed rather
+    // than half-named: a heading has no number.
+    const refs = lines.map(namedCellRef)
+    const rowNumbers = readAtVersion(cellStoreVersion, () =>
+      structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
+    // The table's rule: a line's imported number, else its place in the file
+    // (a plain document numbers 1, 2, 3…). A file that has imported numbers
+    // leaves its headings unnumbered, so those name nothing.
+    const position = rowNumbers.size > 0 ? null : new Map(fileCellIds.map((id, i) => [id, i + 1]))
+    const numbers = lines.map((c) => rowNumbers.get(c.id) ?? position?.get(c.id))
+    const names = refs.every((ref): ref is string => Boolean(ref))
+      ? { key: "editor.selection.validatePartialNamed" as const, items: refs as string[] }
+      : numbers.every((n): n is number => n !== undefined)
+        ? { key: "editor.selection.validatePartialRows" as const, items: (numbers as number[]).map(String) }
+        : null
+    const shown = names && names.items.length > PARTIAL_REFS_SHOWN
       ? [
-        ...named.slice(0, PARTIAL_REFS_SHOWN - 1),
-        t("editor.selection.validatePartialMoreRefs", { count: named.length - (PARTIAL_REFS_SHOWN - 1) }),
+        ...names.items.slice(0, PARTIAL_REFS_SHOWN - 1),
+        t("editor.selection.validatePartialMoreRefs", { count: names.items.length - (PARTIAL_REFS_SHOWN - 1) }),
       ]
-      : named
+      : names?.items
     return (
       <span className="flex flex-col gap-1">
         <span>
-          {shown
-            ? t("editor.selection.validatePartialNamed", { count, total, refs: formatLocaleList(shown, { type: "conjunction" }) })
+          {names && shown
+            ? t(names.key, { count, total, refs: formatLocaleList(shown, { type: "conjunction" }) })
             : t("editor.selection.validatePartial", { count, total })}
         </span>
         <span>
@@ -312,7 +334,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         </span>
       </span>
     )
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowBulkValidateAiDrafts, allowSelfValidation, t, formatLocaleList])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowBulkValidateAiDrafts, allowSelfValidation, t, formatLocaleList, cellStore, cellStoreVersion, fileCellIds, structureCache])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,

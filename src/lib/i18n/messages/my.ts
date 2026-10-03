@@ -649,6 +649,7 @@ export const my: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"other":"ဆဲလ် {count} ခု စိစစ်ရန်"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"other":"ရွေးထားသော ဆဲလ် {total} ခုအနက် {count} ခု စိစစ်ရန်"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"other":"ရွေးထားသော ဆဲလ် {total} ခုအနက် {count} ခု စိစစ်ရန်: {refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"other":"ရွေးထားသော ဆဲလ် {total} ခုအနက် {count} ခု စိစစ်ရန်: အတန်း {refs}"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"other":"နောက်ထပ် {count} ခု"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"other":"{count} ခုကို ကျော်သွားမည် — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "ရွေးထားသော ဆဲလ်အချို့သည် သင့်တာဝန်ပေးထားသော ဖိုင် သို့မဟုတ် ဘာသာစကားလိုင်းများ ပြင်ပတွင် ရှိနေသည်",

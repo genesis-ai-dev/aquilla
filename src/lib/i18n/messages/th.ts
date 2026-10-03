@@ -649,6 +649,7 @@ export const th: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"other":"ตรวจสอบ {count} เซลล์"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"other":"ตรวจสอบ {count} จาก {total} เซลล์ที่เลือก"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"other":"ตรวจสอบ {count} จาก {total} เซลล์ที่เลือก: {refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"other":"ตรวจสอบ {count} จาก {total} เซลล์ที่เลือก: แถว {refs}"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"other":"อีก {count} รายการ"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"other":"จะข้าม {count} เซลล์ — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "บางเซลล์ที่เลือกอยู่นอกไฟล์หรือช่องภาษาที่มอบหมายให้คุณ",

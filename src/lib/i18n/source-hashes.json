@@ -3620,7 +3620,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -7233,7 +7234,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10831,7 +10833,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14445,7 +14448,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19366,7 +19370,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -24287,7 +24292,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -29940,7 +29946,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35700,7 +35707,8 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41369,6 +41377,7 @@
     "editor.selection.validatePartialMoreRefs": "57a4e40f7dd57862",
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
-    "projectSettings.validation.audioGroup": "8e111d8446334a31"
+    "projectSettings.validation.audioGroup": "8e111d8446334a31",
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
   }
 }

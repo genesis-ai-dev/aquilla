@@ -665,6 +665,7 @@ export const ms: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"other":"Sahkan {count} sel"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"other":"Sahkan {count} daripada {total} sel yang dipilih"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"other":"Sahkan {count} daripada {total} sel yang dipilih: {refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"other":"Sahkan {count} daripada {total} sel yang dipilih: baris {refs}"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"other":"{count} lagi"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"other":"{count} akan dilangkau — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "Sebahagian sel yang dipilih berada di luar fail atau laluan yang ditugaskan kepada anda",

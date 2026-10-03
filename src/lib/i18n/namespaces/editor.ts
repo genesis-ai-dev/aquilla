@@ -624,6 +624,10 @@ export const editor = defineNamespace({
       one: "Validate {count} of {total} selected cells: {refs}",
       other: "Validate {count} of {total} selected cells: {refs}",
     }),
+    "editor.selection.validatePartialRows": plural({
+      one: "Validate {count} of {total} selected cells: row {refs}",
+      other: "Validate {count} of {total} selected cells: rows {refs}",
+    }),
     "editor.selection.validatePartialMoreRefs": plural({
       one: "{count} more",
       other: "{count} more",
@@ -4476,6 +4480,17 @@ export const editor = defineNamespace({
           count: "Cells the click would sign off; selects the plural form.",
           total: "Cells selected in all (always more than count).",
           refs: "A list of cell references such as \"GEN 1:1, GEN 1:2 and 3 more\".",
+        },
+      },
+      "editor.selection.validatePartialRows": {
+        description:
+          "Same tooltip as validatePartial, naming the cells the click would sign " +
+          "off by their row numbers in the editor's # column, for files whose " +
+          "lines have no verse or line labels.",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form (row/rows).",
+          total: "Cells selected in all (always more than count).",
+          refs: "A list of row numbers such as \"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
         },
       },
       "editor.selection.validatePartialMoreRefs": {

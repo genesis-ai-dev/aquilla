@@ -649,6 +649,7 @@ export const zh_Hans: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"other":"验证 {count} 个单元格"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"other":"验证所选 {total} 个单元格中的 {count} 个"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"other":"验证所选 {total} 个单元格中的 {count} 个：{refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"other":"验证所选 {total} 个单元格中的 {count} 个：第 {refs} 行"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"other":"另外 {count} 个"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"other":"将跳过 {count} 个 — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "部分选取的单元格不在您被指派的文件或语言轨范围内",

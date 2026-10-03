@@ -695,6 +695,7 @@ export const id: Catalog = {
   "editor.selection.validateTooltip": {"forms":{"other":"Validasi {count} sel"},"countVar":"count"},
   "editor.selection.validatePartial": {"forms":{"other":"Validasi {count} dari {total} sel terpilih"},"countVar":"count"},
   "editor.selection.validatePartialNamed": {"forms":{"other":"Validasi {count} dari {total} sel terpilih: {refs}"},"countVar":"count"},
+  "editor.selection.validatePartialRows": {"forms":{"other":"Validasi {count} dari {total} sel terpilih: baris {refs}"},"countVar":"count"},
   "editor.selection.validatePartialMoreRefs": {"forms":{"other":"{count} lainnya"},"countVar":"count"},
   "editor.selection.validatePartialSkips": {"forms":{"other":"{count} akan dilewati — {reasons}"},"countVar":"count"},
   "editor.selection.validateOutOfScope": "Sebagian sel yang dipilih berada di luar file atau jalur yang ditugaskan kepada Anda",

@@ -542,7 +542,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.restoreAllMocks()
   })
 
-  it("leaves the lines unnamed when one has no reference", async () => {
+  it("names the lines by row number when one has no reference", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
     renderFor([
       makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
@@ -550,7 +550,8 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "draft", context: "B7", translated: "auto", aiDrafted: true }),
     ])
     const btn = screen.getByRole("button", { name: /^Validate text/i })
-    await expectTooltip(btn, "Validate 2 of 3 selected cells")
+    // …so they go by the table's # column instead: their place in the file.
+    await expectTooltip(btn, "Validate 2 of 3 selected cells: rows 1 and 2")
     expect(screen.getByRole("tooltip").textContent).not.toContain("B4")
     vi.restoreAllMocks()
   })

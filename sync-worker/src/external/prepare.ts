@@ -75,6 +75,7 @@ import {
   type ArchiveLaneRow,
 } from '../../../src/lib/lanes/archived-lane'
 import { echoableLaneLabels, visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { matchLanguageTag } from '../../../db/shared/language-normalize'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
@@ -633,6 +634,16 @@ export async function prepareChangesetCore(
         ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
         : [],
     )
+    // AQU-1597: a lane named in another spelling of the same language
+    // ("spanish" for a registered "Spanish") IS that lane. Resolve to the
+    // registered tag before the registry check, the archived check, the
+    // de-dupe and the precondition keys — carrying the caller's spelling
+    // through would silently open a second lane of the same language.
+    setCommands = setCommands.map((c) => {
+      if (!c.laneId) return c
+      const registered = matchLanguageTag(c.laneId, registeredLanes)
+      return registered === undefined || registered === c.laneId ? c : { ...c, laneId: registered }
+    })
     const archivedRows = archiveRows(projectSettings.lanes ?? [])
     const archivedTags = archivedTagsFromSettings(projectSettings.settings)
     const { visible: visibleLaneIds } = await visibleTagsForMember(

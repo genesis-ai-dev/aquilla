@@ -17,15 +17,20 @@
 // This module is the single, pure, unit-tested source of the active/archived
 // split so those surfaces stay consistent.
 
-/** Case-insensitive membership test against the archived-lane set. The default
- *  lane (`''`) is never archivable, so it always reports false. */
+import { sameLanguageTag } from "@/lib/language-normalize"
+
+/** Membership test against the archived-lane set, through the one language
+ *  normalizer (AQU-1597) so an entry of "Spanish" archives the lane tagged
+ *  "spanish" — and so the client agrees with the server, which resolves the
+ *  same set the same way. A regional lane ("fr-CA") stays distinct from its
+ *  base language. The default lane (`''`) is never archivable, so it always
+ *  reports false. */
 export function isLaneArchived(
   lane: string,
   archivedLanes: readonly string[] | undefined,
 ): boolean {
   if (!lane || !archivedLanes || archivedLanes.length === 0) return false
-  const lower = lane.toLowerCase()
-  return archivedLanes.some((l) => l.toLowerCase() === lower)
+  return archivedLanes.some((l) => sameLanguageTag(l, lane))
 }
 
 /** The lanes a surface should show by default: registered lanes minus the

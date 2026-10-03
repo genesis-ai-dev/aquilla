@@ -18,6 +18,7 @@
 // than at two definitions that drift.
 
 import { termToRegexSource, type LintHit, type LintRule } from "../agent/lint"
+import { matchLanguageTag } from "../../../../db/shared/language-normalize"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -356,7 +357,11 @@ function stringList(raw: unknown): string[] {
 }
 
 /** Empty string is always the project-default lane. Named lanes must be
- *  registered in settings.targetLanes and not archived. */
+ *  registered in settings.targetLanes and not archived.
+ *
+ *  AQU-1597: registration is matched with the one language normalizer, so a
+ *  caller asking for "spanish" finds the lane registered as "Spanish". A
+ *  regional lane ("fr-CA") stays distinct from its base language. */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,
@@ -372,7 +377,9 @@ export async function isRegisteredTargetLane(
     const settings = parseSettings(row.settings)
     const lanes = stringList(settings.targetLanes)
     const archived = stringList(settings.archivedLanes)
-    return lanes.includes(lane) && !archived.includes(lane)
+    const registered = matchLanguageTag(lane, lanes)
+    if (registered === undefined) return false
+    return matchLanguageTag(registered, archived) === undefined
   } catch {
     return false
   }

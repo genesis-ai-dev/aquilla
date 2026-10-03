@@ -4,6 +4,7 @@ import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import { languageTagKey } from "../../../db/shared/language-normalize"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 import {
@@ -1433,15 +1434,21 @@ async function fetchPortfolioLanes(
   // AQU-1458: a lane is archived when its row says so, or when an older
   // project only recorded the tag in settings.archivedLanes. The default
   // lane ('') cannot be archived.
+  // AQU-1597: archived tags are matched with the one language normalizer, so a
+  // settings entry of "Spanish" archives the lane tagged "spanish" or "es".
   const archivedTagsByProject = new Map<string, Set<string>>()
   for (const row of settingsRows.results ?? []) {
-    const tags = new Set(readTargetLanes(row.archived_lanes).map((tag) => tag.toLowerCase()))
+    const tags = new Set(
+      readTargetLanes(row.archived_lanes)
+        .map((tag) => languageTagKey(tag))
+        .filter(Boolean),
+    )
     if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
   }
   const archivedRowTags = new Map<string, Set<string>>()
   for (const row of nameRows.results ?? []) {
     if (row.archived_at == null || row.archived_at === "") continue
-    const tag = (row.legacy_tag ?? "").trim().toLowerCase()
+    const tag = languageTagKey(row.legacy_tag)
     if (!tag) continue
     let tags = archivedRowTags.get(row.project_id)
     if (!tags) {
@@ -1456,7 +1463,8 @@ async function fetchPortfolioLanes(
     if (!fromSettings && !fromRows) continue
     for (const entry of lanes.values()) {
       if (!entry.lane) continue
-      const key = entry.lane.toLowerCase()
+      const key = languageTagKey(entry.lane)
+      if (!key) continue
       if (fromRows?.has(key) || fromSettings?.has(key)) entry.archived = true
     }
   }

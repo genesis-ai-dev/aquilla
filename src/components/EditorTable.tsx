@@ -1350,7 +1350,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // AQU-1591: and in THIS lane. A take belongs to the language it performs, so
+  // the rows show the active lane's dubs plus the shared programme audio — not
+  // whatever every other language has recorded on the same lines.
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } =
+    useFileAudioAttachments(project.id, audioFileId, activeLane)
   // Until the file's recordings have been read — and in a dubbing file, its
   // heard lines' too — an empty answer means "not read yet", and each row's
   // audio check shows a placeholder instead of claiming there is no audio.

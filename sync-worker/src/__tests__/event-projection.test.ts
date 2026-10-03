@@ -532,7 +532,15 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain('INSERT INTO cell_audio_validators')
     expect(recorded[0].sql).toContain('ON CONFLICT')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000])
+    // AQU-1591: the four trailing binds belong to the lane_id subquery, which
+    // reads the lane off the TAKE — a vote is a fact about one take, so it
+    // cannot take the lane of whoever happened to cast it. See
+    // audio-lane-projection.test.ts for the row that proves it.
+    expect(recorded[0].sql).toContain('SELECT lane_id FROM cell_audio')
+    expect(recorded[0].args).toEqual([
+      'proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000,
+      'proj-1', 'file-a', 'cell-1', 'a1',
+    ])
     expect(recorded[1].sql).toContain('SET validator_count')
   })
 

@@ -7,6 +7,14 @@
 // the cells read (the editor / Voice Studio pull all attachments at once)
 // rather than the per-cell cell_validators read.
 //
+// Query:
+//   lane=<tag>  — AQU-1591: optional. When present, only the takes that lane
+//                 can see come back: its own dubs, plus the shared programme
+//                 audio (`role = 'source'`), which is the source side of the
+//                 line and belongs to every lane the way source TEXT does.
+//                 Absent = every lane's takes, byte-identical to pre-1591 —
+//                 which is what the export paths and any older client send.
+//
 // Auth: sync-token JWT scoped to projectId; viewer (100) and up — same as the
 // cells read.
 
@@ -18,6 +26,7 @@ export interface CellAudioReadEnv {
 }
 
 import { collapseCellAudioRows, type AudioRowRaw } from "./cell-audio-collapse"
+import { audioLaneDualReadBinds, audioLaneDualReadSql } from "./lane-id-sql"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/audio-attachments$/
 
@@ -41,6 +50,14 @@ export async function handleCellAudioReadRequest(
 
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
+
+  // AQU-1591. `lane` is read with `has`, not truthiness: `?lane=` names the
+  // DEFAULT lane (legacy_tag ''), which is a real lane and a different request
+  // from "every lane". The cells read spells the absent case the same way.
+  const laneRequested = url.searchParams.has("lane")
+  const lane = url.searchParams.get("lane") ?? ""
+  const laneFilterSql = laneRequested ? `AND ${audioLaneDualReadSql("a")}` : ""
+  const laneFilterBinds = laneRequested ? audioLaneDualReadBinds(projectId, lane) : []
 
   const authHeader = request.headers.get("Authorization") ?? ""
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null
@@ -69,9 +86,10 @@ export async function handleCellAudioReadRequest(
             AND cav.cell_id = a.cell_id AND cav.audio_id = a.audio_id
        ) v ON TRUE
       WHERE a.project_id = ? AND a.file_id = ? AND a.deleted = 0
+        ${laneFilterSql}
       ORDER BY a.created_ts ASC`,
   )
-    .bind(projectId, fileId)
+    .bind(projectId, fileId, ...laneFilterBinds)
     .all<AudioRowRaw>()
 
   const cells = collapseCellAudioRows(res.results ?? [])

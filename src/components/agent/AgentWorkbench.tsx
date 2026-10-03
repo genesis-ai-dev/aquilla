@@ -11,6 +11,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import {
   EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS,
@@ -19,7 +20,9 @@ import {
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
+import { AGENT_PERSONAS } from "@/lib/agent/personas"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { formatTranscriptMarkdown } from "@/lib/agent/transcript-copy"
 import { buildUndoEvents } from "@/lib/agent/undo"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
 import type { TranslatedEditorCommit } from "../TranslatedEditor"
@@ -126,6 +129,22 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
   // was applied (that would re-offer applied drafts and drop Undo).
   const decided = state.decided
   const [applying, setApplying] = useState(false)
+  // AQU-1652: the reader can select and copy any part of the transcript by
+  // hand; this copies the whole thread at once, with speaker labels, so an
+  // answer can leave the app without a careful drag through the scroller.
+  const copyChat = useCallback(async () => {
+    const text = formatTranscriptMarkdown(state.runs, {
+      user: t("agent.chatOptions.copySpeakerYou"),
+      assistant: t(AGENT_PERSONAS.coordinator.nameKey),
+    })
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.add({ type: "success", title: t("agent.chatOptions.copyDone") })
+    } catch {
+      toast.add({ type: "error", title: t("agent.chatOptions.copyFailed") })
+    }
+  }, [state.runs, t])
   const [searchParams, setSearchParams] = useSearchParams()
   const conversationId = searchParams.get(CONVERSATION_PARAM) ?? TEAM_CHAT_CONVERSATION
   const view = readAgentWorkspaceView(searchParams)
@@ -405,6 +424,8 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
           <AgentChatOptions
             key={JSON.stringify([agent.projectId, agent.author])}
             onReset={reset}
+            onCopyChat={() => void copyChat()}
+            copyDisabled={state.runs.length === 0}
             disabled={applying}
           />
           <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>

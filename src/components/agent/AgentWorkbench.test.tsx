@@ -661,6 +661,51 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     expect(onRename).toHaveBeenCalledOnce()
   })
 
+  // AQU-1652: "Copy chat" is the whole-thread counterpart to being able to
+  // select a single answer by hand. It runs on the real session store's runs,
+  // so a change to how a turn is recorded shows up here.
+  it("copies the whole conversation, with speaker labels, from chat options", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    scriptedFrames = [
+      { type: "run_start", runId: "run-chat" },
+      { type: "assistant_delta", text: "Drafted two lines." },
+      { type: "done", runId: "run-chat", status: "ok" },
+    ]
+    agentSessionStore(PROJECT, "alice").send({
+      wire: "draft this file",
+      display: "draft this file",
+      jwt: "jwt",
+      request: { projectId: PROJECT },
+    })
+    await waitFor(() =>
+      expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false),
+    )
+
+    render(<AgentWorkbench {...workbenchProps()} />)
+    await user.click(screen.getByRole("button", { name: "Chat options" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Copy chat" }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    expect(writeText.mock.calls[0][0]).toBe(
+      "**You:** draft this file\n\n**Coordinator:** Drafted two lines.",
+    )
+  })
+
+  it("offers no live Copy chat before the conversation has a single turn", async () => {
+    const user = userEvent.setup()
+    render(<AgentWorkbench {...workbenchProps()} />)
+    await user.click(screen.getByRole("button", { name: "Chat options" }))
+    expect(await screen.findByRole("menuitem", { name: "Copy chat" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+  })
+
   it("shows header Collapse only when the workbench was expanded from the sidebar", () => {
     const onCollapse = vi.fn()
     render(<AgentWorkbench {...workbenchProps()} onCollapse={onCollapse} />)

@@ -253,6 +253,10 @@ export const agent = defineNamespace({
     "agent.chatOptions.resetDescription":
       "Clears the messages, chat proposals, and Undo controls shared by {teamChat} and {chat} in this browser. Stops any current chat response and clears queued messages. Project task activity, files, and applied translations are unchanged.",
     "agent.chatOptions.resetConfirm": "Reset chat",
+    "agent.chatOptions.copyItem": "Copy chat",
+    "agent.chatOptions.copySpeakerYou": "You",
+    "agent.chatOptions.copyDone": "Chat copied to the clipboard",
+    "agent.chatOptions.copyFailed": "Couldn't copy the chat.",
 
     // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
     // The agent's autonomy is a dial, not an on/off: two independent loops
@@ -1269,6 +1273,19 @@ export const agent = defineNamespace({
       },
       "agent.chatOptions.resetConfirm": {
         description: "Destructive confirmation button; the existing reset runs only after this is activated.",
+      },
+      "agent.chatOptions.copyItem": {
+        description: "Menu action that copies the whole conversation to the clipboard as readable text; it changes nothing in the project.",
+      },
+      "agent.chatOptions.copySpeakerYou": {
+        description: "Speaker label for the reader's own turns in the copied transcript, e.g. \"You: …\". The agent's turns are labelled with the Coordinator's name instead.",
+        maxLength: 16,
+      },
+      "agent.chatOptions.copyDone": {
+        description: "Success toast shown once the conversation is on the clipboard.",
+      },
+      "agent.chatOptions.copyFailed": {
+        description: "Error toast shown when the browser refused clipboard access, so nothing was copied.",
       },
       "agent.team.openQuestionAriaLabel": {
         description:

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { RotateCcw } from "lucide-react"
+import { Copy, RotateCcw } from "lucide-react"
 import { OverflowMenu } from "@/components/OverflowMenu"
 import {
   AlertDialog,
@@ -15,9 +15,17 @@ import { useT } from "@/lib/i18n/I18nProvider"
 
 export function AgentChatOptions({
   onReset,
+  onCopyChat,
+  copyDisabled = false,
   disabled = false,
 }: {
   onReset: () => void
+  /** Copies the whole conversation to the clipboard (AQU-1652). Omitted on a
+   *  surface with no transcript to copy. */
+  onCopyChat?: () => void
+  /** No conversation yet — the item stays visible but inert, so the action is
+   *  discoverable before the first message rather than appearing later. */
+  copyDisabled?: boolean
   /** Do not reset review state while an apply or undo is in flight. */
   disabled?: boolean
 }) {
@@ -32,14 +40,26 @@ export function AgentChatOptions({
         ariaLabel={t("agent.chatOptions.label")}
         triggerSize="icon-sm"
         triggerRef={triggerRef}
-        items={[{
-          id: "reset-chat",
-          label: t("agent.chatOptions.resetItem"),
-          icon: RotateCcw,
-          destructive: true,
-          disabled,
-          onClick: () => setConfirmOpen(true),
-        }]}
+        items={[
+          ...(onCopyChat
+            ? [{
+                id: "copy-chat",
+                label: t("agent.chatOptions.copyItem"),
+                icon: Copy,
+                disabled: copyDisabled,
+                testId: "copy-chat",
+                onClick: onCopyChat,
+              }]
+            : []),
+          {
+            id: "reset-chat",
+            label: t("agent.chatOptions.resetItem"),
+            icon: RotateCcw,
+            destructive: true,
+            disabled,
+            onClick: () => setConfirmOpen(true),
+          },
+        ]}
       />
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent initialFocus={cancelRef} finalFocus={triggerRef}>

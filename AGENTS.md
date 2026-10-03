@@ -260,9 +260,19 @@ out, so a branch named for AQU-A ends up holding AQU-B commits **and** a junk dr
 uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
 makes the work impossible to review or revert cleanly.
 
-- **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
-  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets. Use
-  `git worktree add` (see `using-git-worktrees`); the main checkout is frequently dirty.
+- **Each ticket gets its own git worktree off live `origin/dev`** (PRs target `dev`), on the Linear-suggested
+  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets; it is
+  frequently dirty. Create it with `pnpm worktree:new <branch> [dir]`
+  (`--base <ref>` overrides the start point, for example `--base origin/main` for a hotfix).
+  The default directory is a sibling named for the ticket (`../aquilla-aqu-1234`).
+- **Bare `git worktree add` plus a symlinked `node_modules` is not enough.**
+  `core.hooksPath` is the relative `.husky/_`, which husky writes and git ignores, so a
+  worktree that never ran `pnpm install` has no pre-commit, no prepare-commit-msg, and
+  no pre-push — a push finishes with nothing tested. A `node_modules` symlink at the
+  root, `sync-worker/`, or `auth-worker/` borrowed from another checkout tests that
+  checkout's versions, and Vite will not serve files from outside the worktree, so e2e
+  cannot load wa-sqlite. The Playwright chromium build for this lockfile may be missing
+  too. `pnpm worktree:new` does the frozen installs and `pnpm exec playwright install chromium`.
 - **Start clean.** Before picking up a ticket, the working tree should be clean (or your
   changes stashed). Don't start AQU-B on top of AQU-A's uncommitted spillover.
 - **Don't cross-commit.** A commit's `AQU-###` must match the branch's ticket. The

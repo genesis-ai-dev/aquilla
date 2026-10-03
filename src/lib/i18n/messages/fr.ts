@@ -1053,6 +1053,7 @@ export const fr: Catalog = {
   "editor.validation.ariaValidatedByYou": "Validé par vous, {ref}. Cliquer pour voir la liste, où vous pouvez retirer votre validation.",
   "editor.validation.ariaValidatedByYouNoAction": "Validé par vous, {ref}.",
   "editor.validation.ariaValidatedByOthers": "Validé par d'autres — {ref}. Cliquer pour ajouter votre validation.",
+  "editor.readOnly.reviewerNoTextValidation": "Affichage en tant que relecteur. Vous pouvez commenter, mais ce projet ne vous permet pas de valider le texte.",
   "editor.validation.ariaNotValidated": "Non validé — {ref}. Cliquer pour valider.",
   "editor.validation.ariaNotValidatedNoAction": "Non validé — {ref}.",
   "editor.validation.ariaValidatedByOthersNoAction": "Validé par d'autres — {ref}.",

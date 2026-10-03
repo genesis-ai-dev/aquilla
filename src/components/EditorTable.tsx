@@ -1077,9 +1077,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     project.id,
     project.syncRole?.level ?? null,
   )
-  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel } = useEditorCapabilities(project, {
+  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
   })
+  // AQU-1571: the reviewer banner promised "you can validate" even where the
+  // project's minimum role or named-validator list shuts this reader out of
+  // text validation, while every check below it said "unavailable" (walk
+  // 10-02). The banner now asks the same rule the checks do.
+  const readOnlyLabel =
+    roleReadOnlyLabel && !canEdit && canValidate
+    && !textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate
+      ? t("editor.readOnly.reviewerNoTextValidation")
+      : roleReadOnlyLabel
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)

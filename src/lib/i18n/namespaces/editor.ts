@@ -1471,6 +1471,8 @@ export const editor = defineNamespace({
     "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
     "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
     "editor.validation.validatedBy": "Text validated by",
+    "editor.readOnly.reviewerNoTextValidation":
+      "Viewing as reviewer. You can comment, but this project does not let you validate text.",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -5491,6 +5493,13 @@ export const editor = defineNamespace({
         placeholders: {
           ref: "The cell's reference or fallback row number. Do not translate.",
         },
+      },
+      "editor.readOnly.reviewerNoTextValidation": {
+        description:
+          "Banner above the editor for a reviewer (who cannot edit) when the " +
+          "project's minimum role to validate or its list of named validators " +
+          "leaves them out, so they cannot validate text here either. Replaces " +
+          "the usual 'Viewing as reviewer, you can validate and comment' banner.",
       },
       "editor.validation.ariaValidatedByOthers": {
         description:

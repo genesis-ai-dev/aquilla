@@ -265,3 +265,32 @@ describe("EditorTable — text validation blocked where the server would refuse 
     await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
   })
 })
+
+// Walk 10-02: bob, a reviewer left off the named-validator list, read "you can
+// validate and comment" above a column of checks that each said he could not.
+describe("EditorTable — the reviewer banner agrees with the checks", () => {
+  const CAN = "Viewing as reviewer — you can validate and comment"
+  const CANNOT = "Viewing as reviewer. You can comment, but this project does not let you validate text."
+
+  it("keeps the usual reviewer banner where the reviewer may validate", async () => {
+    renderTable(projectWith({}, ROLE.REVIEWER), makeStore([target("bonjour", "alice")]))
+    expect(await screen.findByText(CAN)).toBeInTheDocument()
+  })
+
+  it("says the reviewer cannot validate text when the named list leaves them out", async () => {
+    renderTable(projectWith({ validationNamedUsers: ["alice"] }, ROLE.REVIEWER), makeStore([target("bonjour", "alice")]))
+    expect(await screen.findByText(CANNOT)).toBeInTheDocument()
+    expect(screen.queryByText(CAN)).not.toBeInTheDocument()
+  })
+
+  it("says the same under a minimum role above reviewer", async () => {
+    renderTable(projectWith({ validationRoleFloor: "project_lead" }, ROLE.REVIEWER), makeStore([target("bonjour", "alice")]))
+    expect(await screen.findByText(CANNOT)).toBeInTheDocument()
+  })
+
+  it("shows no banner for a contributor, whatever the validation rules", async () => {
+    renderTable(projectWith({ validationNamedUsers: ["alice"] }, ROLE.CONTRIBUTOR), makeStore([target("bonjour", "alice")]))
+    await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
+    expect(screen.queryByText(CANNOT)).not.toBeInTheDocument()
+  })
+})

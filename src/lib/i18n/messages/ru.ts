@@ -1074,6 +1074,7 @@ export const ru: Catalog = {
   "editor.validation.ariaValidatedByYou": "Подтверждено вами, {ref}. Нажмите, чтобы открыть список, где можно снять своё подтверждение.",
   "editor.validation.ariaValidatedByYouNoAction": "Подтверждено вами, {ref}.",
   "editor.validation.ariaValidatedByOthers": "Подтверждено другими — {ref}. Нажмите, чтобы добавить своё подтверждение.",
+  "editor.readOnly.reviewerNoTextValidation": "Просмотр в роли рецензента. Вы можете комментировать, но этот проект не позволяет вам подтверждать текст.",
   "editor.validation.ariaNotValidated": "Не подтверждено — {ref}. Нажмите, чтобы подтвердить.",
   "editor.validation.ariaNotValidatedNoAction": "Не подтверждено — {ref}.",
   "editor.validation.ariaValidatedByOthersNoAction": "Подтверждено другими — {ref}.",

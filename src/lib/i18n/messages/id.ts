@@ -1067,6 +1067,7 @@ export const id: Catalog = {
   "editor.validation.ariaValidatedByYou": "Tervalidasi oleh Anda, {ref}. Klik untuk melihat daftar, tempat Anda dapat menghapus validasi Anda.",
   "editor.validation.ariaValidatedByYouNoAction": "Tervalidasi oleh Anda, {ref}.",
   "editor.validation.ariaValidatedByOthers": "Tervalidasi oleh orang lain — {ref}. Klik untuk menambahkan validasi Anda.",
+  "editor.readOnly.reviewerNoTextValidation": "Melihat sebagai peninjau. Anda dapat berkomentar, tetapi proyek ini tidak mengizinkan Anda memvalidasi teks.",
   "editor.validation.ariaNotValidated": "Belum tervalidasi — {ref}. Klik untuk memvalidasi.",
   "editor.validation.validatedBy": "Divalidasi oleh",
   "editor.validation.noActiveValidators": "Tidak ada validator aktif",

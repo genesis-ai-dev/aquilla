@@ -8,7 +8,7 @@ describe("UseTrackAsRowsDialog", () => {
     const onConfirm = vi.fn(async () => {})
     const onCancel = vi.fn()
     render(<UseTrackAsRowsDialog trackName="Episode captions" onConfirm={onConfirm} onCancel={onCancel} />)
-    expect(screen.getByText("Use Episode captions as this file's rows?")).toBeInTheDocument()
+    expect(screen.getByText('Use "Episode captions" as this file\'s rows?')).toBeInTheDocument()
     expect(screen.getByText(/The track leaves the timeline and its captions show in the Source text row instead/))
       .toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Use as rows" }))

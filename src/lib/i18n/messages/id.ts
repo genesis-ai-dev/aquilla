@@ -948,7 +948,7 @@ export const id: Catalog = {
   "editor.timeline.trackDeleteFolder": "Hapus folder",
   "editor.timeline.trackDeleteCount": {"forms":{"other":"Hapus {count} trek"},"countVar":"count"},
   "editor.timeline.trackUseAsRows": "Gunakan sebagai baris file ini",
-  "editor.timeline.useAsRowsTitle": "Gunakan {track} sebagai baris file ini?",
+  "editor.timeline.useAsRowsTitle": "Gunakan \"{track}\" sebagai baris file ini?",
   "editor.timeline.useAsRowsBody": "Takarirnya menjadi baris yang bisa Anda terjemahkan di tampilan Teks. Trek ini keluar dari lini masa dan takarirnya tampil di baris Source text sebagai gantinya.",
   "editor.timeline.useAsRowsConfirm": "Gunakan sebagai baris",
   "editor.timeline.useAsRowsFailed": "Tidak dapat menggunakan trek ini sebagai baris file.",

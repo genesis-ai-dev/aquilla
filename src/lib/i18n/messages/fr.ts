@@ -940,7 +940,7 @@ export const fr: Catalog = {
   "editor.timeline.trackDeleteFolder": "Supprimer le dossier",
   "editor.timeline.trackDeleteCount": {"forms":{"one":"Supprimer {count} piste","many":"Supprimer {count} pistes","other":"Supprimer {count} pistes"},"countVar":"count"},
   "editor.timeline.trackUseAsRows": "Utiliser comme lignes du fichier",
-  "editor.timeline.useAsRowsTitle": "Utiliser {track} comme lignes de ce fichier ?",
+  "editor.timeline.useAsRowsTitle": "Utiliser « {track} » comme lignes de ce fichier ?",
   "editor.timeline.useAsRowsBody": "Ses sous-titres deviennent des lignes à traduire dans la vue Texte. La piste quitte la chronologie et ses sous-titres s'affichent à la place dans la ligne Source text.",
   "editor.timeline.useAsRowsConfirm": "Utiliser comme lignes",
   "editor.timeline.useAsRowsFailed": "Impossible d'utiliser cette piste comme lignes du fichier.",

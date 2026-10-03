@@ -1019,7 +1019,7 @@ export const editor = defineNamespace({
     // AQU-1566: a caption track on a linked video with no rows can become the
     // file's rows. It asks first, because the track leaves the timeline.
     "editor.timeline.trackUseAsRows": "Use as this file's rows",
-    "editor.timeline.useAsRowsTitle": "Use {track} as this file's rows?",
+    "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
     "editor.timeline.useAsRowsBody":
       "Its captions become rows you can translate in the Text view. The track " +
       "leaves the timeline and its captions show in the Source text row instead.",

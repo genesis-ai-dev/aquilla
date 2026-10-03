@@ -961,7 +961,7 @@ export const ru: Catalog = {
   "editor.timeline.trackDeleteFolder": "Удалить папку",
   "editor.timeline.trackDeleteCount": {"forms":{"one":"Удалить {count} дорожку","few":"Удалить {count} дорожки","many":"Удалить {count} дорожек","other":"Удалить {count} дорожки"},"countVar":"count"},
   "editor.timeline.trackUseAsRows": "Сделать строками этого файла",
-  "editor.timeline.useAsRowsTitle": "Сделать {track} строками этого файла?",
+  "editor.timeline.useAsRowsTitle": "Сделать «{track}» строками этого файла?",
   "editor.timeline.useAsRowsBody": "Её субтитры станут строками, которые можно переводить в режиме «Текст». Дорожка уйдёт с таймлайна, а её субтитры будут показаны в строке Source text.",
   "editor.timeline.useAsRowsConfirm": "Сделать строками",
   "editor.timeline.useAsRowsFailed": "Не удалось сделать эту дорожку строками файла.",

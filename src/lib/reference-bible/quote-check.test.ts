@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { checkReferenceQuotes, sourceVisiblyQuotes, type ReferenceQuoteLookup } from "./quote-check"
+import { checkReferenceQuotes, quotedReferenceGroups, sourceVisiblyQuotes, type ReferenceQuoteLookup } from "./quote-check"
 import { findScriptureReferences, parseCanonicalRef } from "./reference-finder"
 import { extractUsfmVerses } from "./usfm-verses"
 
@@ -130,12 +130,134 @@ describe("checkReferenceQuotes (AQU-1573)", () => {
   })
 })
 
-describe("sourceVisiblyQuotes (AQU-1573)", () => {
+// Van Dyck verses outside the fixture chapters, copied from db/reference-bibles/arb-vandyck.tsv.gz.
+const EXTRA_ARB: Record<string, string> = {
+  "MAT 11:28": "تَعَالَوْا إِلَيَّ يا جَمِيعَ ٱلْمُتْعَبِينَ وَٱلثَّقِيلِي ٱلْأَحْمَالِ، وَأَنَا أُرِيحُكُمْ.",
+  "ROM 5:8": "وَلَكِنَّ ٱللهَ بَيَّنَ مَحَبَّتَهُ لَنَا، لِأَنَّهُ وَنَحْنُ بَعْدُ خُطَاةٌ مَاتَ ٱلْمَسِيحُ لِأَجْلِنَا.",
+  "JHN 15:13": "لَيْسَ لِأَحَدٍ حُبٌّ أَعْظَمُ مِنْ هَذَا: أَنْ يَضَعَ أَحَدٌ نَفْسَهُ لِأَجْلِ أَحِبَّائِهِ.",
+  "PHP 4:13": "أَسْتَطِيعُ كُلَّ شَيْءٍ فِي ٱلْمَسِيحِ ٱلَّذِي يُقَوِّينِي.",
+}
+const arbPlus: ReferenceQuoteLookup = (c) => (EXTRA_ARB[c] ? [EXTRA_ARB[c]] : arb.lookup(c))
+
+describe("checkReferenceQuotes: the ends of a quote (AQU-1573 review)", () => {
+  const source316 = "\"For God so loved the world that he gave his one and only Son, that whoever believes in him shall not perish but have eternal life\" (John 3:16)."
+  const kinds = (source: string, draft: string, lookup = arb.lookup) => checkReferenceQuotes(source, draft, lookup).map((f) => f.kind)
+
+  it("flags a changed last word, inside or outside quotation marks", () => {
+    const kjvChanged = kjv.verse("JHN", 3, 16).replace("everlasting life.", "everlasting joy.")
+    expect(kinds(source316, kjvChanged, kjv.lookup)).toEqual(["differs"])
+    expect(kinds(source316, `"${kjvChanged}" (John 3:16).`, kjv.lookup)).toEqual(["differs"])
+    const arbChanged = unvowelled(JHN316).replace(/الأبدية\.?$/, "الدائمة.")
+    expect(arbChanged).not.toBe(unvowelled(JHN316))
+    expect(kinds(source316, `«${arbChanged}»`)).toEqual(["differs"])
+    expect(kinds(source316, arbChanged)).toEqual(["differs"])
+  })
+
+  it("flags the last two words or the first word changed", () => {
+    const lastTwo = unvowelled(JHN316).replace(/الحياة الأبدية\.?$/, "حياة دائمة.")
+    expect(lastTwo).not.toBe(unvowelled(JHN316))
+    expect(kinds(source316, `«${lastTwo}»`)).toEqual(["differs"])
+    expect(kinds(source316, lastTwo)).toEqual(["differs"])
+    const firstWord = unvowelled(JHN316).replace(/^لأنه/, "إذ")
+    expect(firstWord).not.toBe(unvowelled(JHN316))
+    expect(kinds(source316, `«${firstWord}»`)).toEqual(["differs"])
+    expect(kinds(source316, firstWord)).toEqual(["differs"])
+  })
+
+  it("marks the changed end word in the span", () => {
+    const changed = unvowelled(JHN316).replace(/الأبدية\.?$/, "الدائمة.")
+    const draft = `قال يسوع: «${changed}»`
+    const [f] = checkReferenceQuotes(source316, draft, arb.lookup) as { targetStart: number; targetEnd: number }[]
+    expect(draft.slice(f.targetStart, f.targetEnd)).toContain("الدائمة")
+    expect(draft.slice(f.targetStart, f.targetEnd)).not.toContain("يسوع")
+  })
+
+  it("flags a quote that copies the opening and paraphrases the rest", () => {
+    const source = "Jesus said, \"Come to me, all you who are weary and burdened, and I will give you rest\" (Matthew 11:28)."
+    const draft = "«تعالوا إليّ يا جميع المتعبين والمثقلين، وأنا أمنحكم الراحة»"
+    expect(kinds(source, draft, arbPlus)).toEqual(["differs"])
+  })
+
+  it("flags a fresh translation that happens to share three words of the verse", () => {
+    const source = "Paul writes, \"while we were still sinners, Christ died for us\" (Romans 5:8)."
+    expect(kinds(source, "«بينما كنا لا نزال خطاة، مات المسيح من أجلنا»", arbPlus)).toEqual(["differs"])
+    expect(kinds(source, "بينما كنا لا نزال خطاة، مات المسيح من أجلنا", arbPlus)).toEqual(["differs"])
+  })
+
+  it("still passes a partial quote, a lead-in, a cited reference and a verse's own quotation marks", () => {
+    const words = unvowelled(JHN316).split(" ")
+    // Words left out at either end of the quote.
+    expect(kinds(source316, `«${words.slice(0, 6).join(" ")}»`)).toEqual([])
+    expect(kinds(source316, `«${words.slice(3).join(" ")}»`)).toEqual([])
+    // A leading و added or dropped at the first word.
+    expect(kinds(source316, `«و${words.join(" ")}»`)).toEqual([])
+    // Lead-in and reference outside the marks; a reference in brackets inside them.
+    expect(kinds(source316, `قال يسوع لنيقوديموس: «${JHN316}» (يوحنا 3: 16).`)).toEqual([])
+    expect(kinds(source316, `«${JHN316} (يوحنا 3: 16)»`)).toEqual([])
+    // Unquoted, the verse running into the draft's own sentence after punctuation.
+    expect(kinds(source316, `${JHN316} وهذا هو قلب الإنجيل.`)).toEqual([])
+    // A verse that carries its own «…», quoted inside the draft's «…».
+    const source = "Isaiah 40:25 says, \"To whom then will ye liken me, or shall I be equal?\""
+    const isa = arb.verse("ISA", 40, 25)
+    expect(kinds(source, `يقول إشعياء: «${isa}»`)).toEqual([])
+  })
+
+  it("does not apply the unquoted end check to a verse the source only mentions", () => {
+    // Shares a run with Romans 8:28 but the source does not quote it.
+    const source = "Later we'll look at Romans 8:28 together."
+    const draft = `سننظر لاحقا معا في ${unvowelled(ROM828).split(" ").slice(0, 6).join(" ")} اليوم`
+    expect(kinds(source, draft)).toEqual([])
+  })
+})
+
+describe("checkReferenceQuotes: what counts as the source quoting a verse (AQU-1573 review)", () => {
+  it("stays quiet when the source quotes someone else and only mentions a verse", () => {
+    const source = "As Spurgeon said, \"Faith is the hand that receives.\" Later we'll look at Philippians 4:13."
+    expect(checkReferenceQuotes(source, "ترجمة جديدة لا تستعمل كلمات الآية", arbPlus)).toEqual([])
+    expect(checkReferenceQuotes(source, "كما قال سبرجن: «الإيمان هو اليد التي تأخذ». سننظر لاحقا في فيلبي 4: 13.", arbPlus)).toEqual([])
+    const tagged = "As Spurgeon said, \"Faith is the hand that receives.\" Philippians 4:13 reminds us we can do all things."
+    expect(checkReferenceQuotes(tagged, "ترجمة جديدة تماما لا علاقة لها بالآية", arbPlus)).toEqual([])
+  })
+
+  it("names only the reference that cites the quotation, not a see-also", () => {
+    const source = "Paul writes, \"while we were still sinners, Christ died for us\" (Romans 5:8; see also John 15:13)."
+    expect(checkReferenceQuotes(source, "ترجمة جديدة لا تستعمل كلمات الآية", arbPlus)).toEqual([
+      expect.objectContaining({ kind: "missing", canonicals: ["ROM 5:8"], labels: ["Romans 5:8"] }),
+    ])
+  })
+
+  it("flags each quotation the draft leaves out, even when another one is copied", () => {
+    const source = "\"For God so loved the world\" (John 3:16). And Paul: \"while we were still sinners, Christ died for us\" (Romans 5:8)."
+    const findings = checkReferenceQuotes(source, `«${JHN316}» ثم ترجمة جديدة لكلام بولس هنا`, arbPlus)
+    expect(findings).toEqual([expect.objectContaining({ kind: "missing", canonicals: ["ROM 5:8"] })])
+  })
+})
+
+describe("quotedReferenceGroups / sourceVisiblyQuotes (AQU-1573)", () => {
   const refs = (s: string) => findScriptureReferences(s)
+  const groups = (s: string) => quotedReferenceGroups(s, refs(s)).map((g) => g.map((r) => r.canonical))
   it("needs three quoted words or a bracketed reference after three words", () => {
-    const yes = ["Isaiah 40:25 says, “To whom will you compare me?”", "«To whom then will» Isaiah 40:25", "God so loved the world (John 3:16)"]
+    const yes = [
+      "Isaiah 40:25 says, “To whom will you compare me?”",
+      "«To whom then will» Isaiah 40:25",
+      "God so loved the world (John 3:16)",
+      "\"While we were still sinners,\" says Paul in Romans 5:8.",
+    ]
     for (const s of yes) expect(sourceVisiblyQuotes(s, refs(s))).toBe(true)
-    const no = ["Isaiah 40:25 says \"Holy\" twice", "See (John 3:16)", "Read John 3:16 tonight, don't wait, it's good"]
+    const no = [
+      "Isaiah 40:25 says \"Holy\" twice",
+      "See (John 3:16)",
+      "Read John 3:16 tonight, don't wait, it's good",
+      "As Spurgeon said, \"Faith is the hand that receives.\" Later we'll look at Philippians 4:13.",
+      "\"Faith is the hand that receives,\" and Philippians 4:13 agrees with that.",
+      "Romans 8:28 is a promise. Then the pastor said, \"we will look at it next week\".",
+    ]
     for (const s of no) expect(sourceVisiblyQuotes(s, refs(s))).toBe(false)
+  })
+
+  it("groups a cited list with its quotation", () => {
+    expect(groups("Romans 8:28; John 3:16 show us: \"For God so loved the world\"")).toEqual([["ROM 8:28", "JHN 3:16"]])
+    expect(groups("\"For God so loved the world\" (John 3:16, 18)")).toEqual([["JHN 3:16", "JHN 3:18"]])
+    expect(groups("\"For God so loved the world\" (John 3:16; see also Romans 5:8)")).toEqual([["JHN 3:16"]])
   })
 })

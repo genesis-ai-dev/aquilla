@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
-import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, stopQueue, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
@@ -261,19 +261,6 @@ export function MediaVideoPane({
   const offerSoundSource = youTube && recordingCell != null
   const recordingName = recordingCell?.original.trim() || null
   const [soundMenuOpen, setSoundMenuOpen] = useState(false)
-  /**
-   * Switching sound mid-play hands the transport from one player to the other
-   * (queue <-> picture). Neither stops the other on its own: picking the
-   * video's sound unmutes a picture that is still running while the queue
-   * plays on underneath it, and the playback bar then drives only the picture.
-   * So everything stops first, and the person presses play on the new source.
-   * Nothing resumes by itself, the house rule for every pause here.
-   */
-  const chooseSoundSource = (next: PlaybackSource) => {
-    if (next === playbackSource) return
-    pauseAllTransports()
-    setPlaybackSource(fileId, next)
-  }
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
@@ -615,6 +602,36 @@ export function MediaVideoPane({
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
   }, [slaved])
+
+  /**
+   * Switching sound mid-play hands the transport from one player to the other
+   * (queue <-> picture). Neither stops the other on its own: picking the
+   * video's sound unmutes a picture that is still running while the queue
+   * plays on underneath it, and the playback bar then drives only the picture.
+   * So everything stops first, and the person presses play on the new source.
+   * Nothing resumes by itself, the house rule for every pause here.
+   *
+   * pauseAllTransports alone is not enough for that (walk 2026-10-02):
+   * - A SLAVED picture has no registered controller; it is normally stopped by
+   *   the sync effect following the queue. But the flip below makes the pane
+   *   standalone on the next render, so that effect never runs, and the
+   *   picture played on, now unmuted. So the element is paused here directly,
+   *   and the play intent dropped so the stall watchdog does not restart it.
+   * - A PAUSED queue is still "active" for this file, and an active queue owns
+   *   the playback bar (`selectTransportForFile`). Play then resumed the
+   *   recording under the video's own sound. Stopping it hands the bar to the
+   *   source the person just picked.
+   */
+  const chooseSoundSource = (next: PlaybackSource) => {
+    if (next === playbackSource) return
+    pauseAllTransports()
+    wantPlayRef.current = false
+    stallRef.current = IDLE_STALL_STATE
+    cancelPendingPlay()
+    videoRef.current?.pause()
+    if (queue.active) stopQueue()
+    setPlaybackSource(fileId, next)
+  }
 
   // Handing the transport to the queue abandons any start we were waiting for.
   //

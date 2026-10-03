@@ -38,7 +38,10 @@ vi.mock("@/lib/audio/play-queue", () => ({
   // so a test can still put the flag wherever it likes before rendering.
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
+  stopQueue: () => stopQueue(),
 }))
+// Hoisted with the mock above, so the factory can reach it.
+const { stopQueue } = vi.hoisted(() => ({ stopQueue: vi.fn() }))
 
 // AQU-1565 follow-up: the sound menu stops both players before it hands the
 // transport over. Spied, so a test can see the pause without real audio.
@@ -1062,6 +1065,7 @@ describe("a YouTube link over an uploaded recording", () => {
   afterEach(() => {
     localStorage.removeItem(playbackSourceKey("f1"))
     __resetPlaybackSourceForTests()
+    mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
   })
 
   it("keeps playing the video with its own sound by default", () => {
@@ -1096,6 +1100,35 @@ describe("a YouTube link over an uploaded recording", () => {
     fireEvent.click(screen.getByTestId("video-sound-source-picker"))
     fireEvent.click(await screen.findByTestId("video-sound-source-video"))
     expect(pauseAllTransports).not.toHaveBeenCalled()
+  })
+
+  // Walk 2026-10-02: switching back to the video's sound DURING playback left
+  // the picture running (a slaved picture has no controller for
+  // pauseAllTransports to reach, and the flip made the pane standalone before
+  // its sync effect could stop it), now unmuted. The queue was only paused,
+  // so it still owned the playback bar and Play resumed the recording under
+  // the video's sound.
+  it("stops the running picture and ends the recording's playback when switching back mid-play", async () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    sounding("c1")
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    const media = screen.getByTestId("video-pane-media") as HTMLVideoElement
+    const pause = vi.spyOn(media, "pause")
+    stopQueue.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pause).toHaveBeenCalled()
+    expect(stopQueue).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+  })
+
+  it("leaves a queue that is not on this file alone when switching", async () => {
+    renderPane({ src: YT })
+    stopQueue.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+    expect(stopQueue).not.toHaveBeenCalled()
   })
 
   it("shows the corner controls to keyboard focus, not only to hover", () => {

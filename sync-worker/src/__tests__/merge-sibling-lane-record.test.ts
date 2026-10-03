@@ -83,7 +83,7 @@ async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string,
 
 interface LaneRow {
   id: string
-  role: string
+  role: "source" | "target"
   /** AQU-1592: the stored freeform language. */
   language: string | null
   /** AQU-1592: null when the lane carries only a language. */

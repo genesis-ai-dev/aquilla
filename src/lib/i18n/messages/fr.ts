@@ -3014,6 +3014,8 @@ export const fr: Catalog = {
   "org.projectOverview.plan.chapters": "Chapitres",
   "org.projectOverview.plan.chapterCount": {"forms":{"one":"{count} chapitre","many":"{count} chapitres","other":"{count} chapitres"},"countVar":"count"},
   "org.projectOverview.plan.chaptersShort": {"forms":{"one":"{count} chapitre incomplet","many":"{count} chapitres incomplets","other":"{count} chapitres incomplets"},"countVar":"count"},
+  "org.projectOverview.plan.frontMatterShort": "Préliminaires incomplets",
+  "org.projectOverview.plan.frontMatterAndChaptersShort": {"forms":{"one":"Préliminaires et {count} chapitre incomplets","many":"Préliminaires et {count} chapitres incomplets","other":"Préliminaires et {count} chapitres incomplets"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Ligne sans numéro",
   "org.projectOverview.plan.headingLine": "Titre",
   "org.projectOverview.plan.titleLine": "Titre ou introduction",

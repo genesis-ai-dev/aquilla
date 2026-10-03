@@ -3076,6 +3076,8 @@ export const ru: Catalog = {
   "org.projectOverview.plan.chapterCount": {"forms":{"one":"{count} глава","few":"{count} главы","many":"{count} глав","other":"{count} главы"},"countVar":"count"},
   "org.projectOverview.plan.sectionCount": {"forms":{"one":"{count} раздел","few":"{count} раздела","many":"{count} разделов","other":"{count} раздела"},"countVar":"count"},
   "org.projectOverview.plan.chaptersShort": {"forms":{"one":"не хватает {count} главы","few":"не хватает {count} глав","many":"не хватает {count} глав","other":"не хватает {count} главы"},"countVar":"count"},
+  "org.projectOverview.plan.frontMatterShort": "вводная часть не готова",
+  "org.projectOverview.plan.frontMatterAndChaptersShort": {"forms":{"one":"вводная часть и {count} глава не готовы","few":"вводная часть и {count} главы не готовы","many":"вводная часть и {count} глав не готовы","other":"вводная часть и {count} главы не готовы"},"countVar":"count"},
   "org.projectOverview.plan.unnumberedLine": "Строка без номера",
   "org.projectOverview.plan.headingLine": "Заголовок",
   "org.projectOverview.plan.titleLine": "Название или введение",

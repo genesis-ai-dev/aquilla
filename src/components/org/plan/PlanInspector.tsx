@@ -211,12 +211,14 @@ export function PlanInspector({
   useEffect(() => {
     if (openSectionKey) loadVerses(openSectionKey)
   }, [openSectionKey, loadVerses])
+  // Which book codes own a numbered chapter in this unit: the context that
+  // tells a bare book code's front matter from a one-chapter book's chapter 1.
+  const numbered = numberedBookCodes(sections.map((s) => s.key))
   const openSectionIsFrontMatter = openSection
-    ? classifyPlanSection(openSection.key, numberedBookCodes(sections.map((s) => s.key))).kind === "frontMatter"
+    ? classifyPlanSection(openSection.key, numbered).kind === "frontMatter"
     : false
   const openSectionTitle = (() => {
     if (!openSection) return ""
-    const numbered = numberedBookCodes(sections.map((s) => s.key))
     const kind = classifyPlanSection(openSection.key, numbered)
     // A numbered chapter — and a one-chapter book, which IS chapter 1 — names
     // itself that way. Front matter gets the words the grid's own tile uses
@@ -235,7 +237,21 @@ export function PlanInspector({
         ? tileWords.charAt(0).toLocaleUpperCase(locale) + tileWords.slice(1)
         : openSection.key
   })()
-  const shortChapters = sections.filter(
+  // AQU-1493: front matter is not a chapter. It holds a book's title and
+  // introduction, and now any line added above its first verse, and counting
+  // it here read "5 chapters" and "3 chapters short" for four-chapter Ruth
+  // while the board row beside it said "front matter and chapters 1 and 2".
+  // Same judge as the grid's own tile (`classifyPlanSection`), so the count
+  // and the tiles never disagree about one section.
+  const chapterSections = sections.filter(
+    (s) => classifyPlanSection(s.key, numbered).kind !== "frontMatter",
+  )
+  const frontMatterShort = sections.some(
+    (s) =>
+      classifyPlanSection(s.key, numbered).kind === "frontMatter" &&
+      planSectionShortfall(s, hasAudio, hasText).worst > 0,
+  )
+  const shortChapters = chapterSections.filter(
     // `hasAudio`, not `showAudio`. showAudio is a PROJECT-wide question — does
     // this project track audio at all, and therefore should an audio bar be
     // drawn — and answering the per-chapter one with it counts every chapter of
@@ -279,7 +295,9 @@ export function PlanInspector({
   // numbers these are, on one line, so no reader mistakes one lane for another.
   const meta = [
     t("org.projectOverview.plan.cellCount", { count: unit.totalCount }),
-    sections.length > 0 ? t(sectionsCountKey as never, { count: sections.length }) : null,
+    chapterSections.length > 0
+      ? t(sectionsCountKey as never, { count: chapterSections.length })
+      : null,
     languageLabel,
   ].filter(Boolean).join(" · ")
 
@@ -518,15 +536,20 @@ export function PlanInspector({
                 The link used to share this line. It moved up under the bars,
                 where every unit can have one — see `plan-unit-shortfall`. */}
             <div className="text-[11.5px]" data-testid="plan-grid-summary">
-              {shortChapters > 0 ? (
+              {shortChapters > 0 || frontMatterShort ? (
                 <span className="font-medium text-foreground">
-                  {t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
+                  {/* AQU-1493: short front matter is named, not counted as a chapter. */}
+                  {shortChapters > 0 && frontMatterShort
+                    ? t("org.projectOverview.plan.frontMatterAndChaptersShort", { count: shortChapters })
+                    : frontMatterShort
+                      ? t("org.projectOverview.plan.frontMatterShort")
+                      : t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
                 </span>
               ) : (
                 <span className="text-muted-foreground">
                   {t("org.projectOverview.plan.chaptersComplete", {
-                    done: sections.length,
-                    total: sections.length,
+                    done: chapterSections.length,
+                    total: chapterSections.length,
                   })}
                 </span>
               )}

@@ -1482,6 +1482,13 @@ export const org = defineNamespace({
     // question the grid poses at a glance — how much of this is left — for a
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    // AQU-1493: front matter is not a chapter, so when it is short it is named
+    // in its own words rather than counted as one more chapter.
+    "org.projectOverview.plan.frontMatterShort": "Front matter short",
+    "org.projectOverview.plan.frontMatterAndChaptersShort": plural({
+      one: "Front matter and {count} chapter short",
+      other: "Front matter and {count} chapters short",
+    }),
     "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
     "org.projectOverview.plan.headingLine": "Heading",
     "org.projectOverview.plan.titleLine": "Title or intro",
@@ -3327,6 +3334,15 @@ export const org = defineNamespace({
         description:
           "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
         placeholders: { count: "Chapters with outstanding cells — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.frontMatterShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the only outstanding cells sit in the book's front matter (its title, introduction, or a line added above the first verse), which is not a chapter. Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+      },
+      "org.projectOverview.plan.frontMatterAndChaptersShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the book's front matter AND some chapters still have outstanding cells: \"Front matter and 2 chapters short\". Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Chapters with outstanding cells, not counting the front matter — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chaptersComplete": {
         description:

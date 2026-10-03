@@ -435,6 +435,52 @@ describe("the chapter grid (AQU-1278)", () => {
       expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("3 chapters"))
   })
 
+  it("does not count a book's front matter as a chapter (AQU-1493)", async () => {
+    // Ruth has four chapters. A line added above its first verse puts a short
+    // front-matter section beside them, and the panel used to read "5
+    // chapters" and "3 chapters short" while the board row said "front matter
+    // and chapters 1 and 2".
+    const getToken = withSections([
+      section("RUT", { totalCount: 1, filledCount: 0, validatedCount: 0 }),
+      section("RUT 1"), section("RUT 2"), doneSection("RUT 3"), doneSection("RUT 4"),
+    ])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("4 chapters"))
+    expect(screen.getByTestId("plan-inspector-meta")).not.toHaveTextContent("5 chapters")
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("Front matter and 2 chapters short")
+  })
+
+  it("names short front matter alone rather than calling it a chapter (AQU-1493)", async () => {
+    // Only the line above the first verse is open: no chapter is short.
+    const getToken = withSections([
+      section("RUT", { totalCount: 1, filledCount: 0, validatedCount: 0 }),
+      doneSection("RUT 1"), doneSection("RUT 2"),
+    ])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
+    const summary = screen.getByTestId("plan-grid-summary")
+    expect(summary).toHaveTextContent(/^Front matter short$/)
+    expect(summary).not.toHaveTextContent("chapter")
+    expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("2 chapters")
+  })
+
+  it("counts only the chapters once front matter is finished too (AQU-1493)", async () => {
+    const getToken = withSections([doneSection("RUT"), doneSection("RUT 1"), doneSection("RUT 2")])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("2 of 2 complete")
+  })
+
+  it("still counts a one-chapter book's bare code as its chapter (AQU-1493)", async () => {
+    // TIT alone is chapter 1, not front matter, so it stays in the count.
+    const getToken = withSections([section("TIT")])
+    renderInspector(unit({ sectionKey: "TIT", fileName: "Titus" }), true, false, getToken)
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("1 chapter"))
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("1 chapter short")
+  })
+
   it("opens one chapter's own bars when its tile is chosen", async () => {
     const getToken = withSections([section("GEN 1", { audioCount: 20, audioValidatedCount: 5 })])
     // The unit carries recordings too. AQU-1278 put the card on the same

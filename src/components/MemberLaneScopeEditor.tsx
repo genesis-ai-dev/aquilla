@@ -26,6 +26,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelForTag } from "@/lib/lanes/lane-language"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export interface MemberLaneScopeEditorProps {
@@ -78,7 +79,13 @@ export function MemberLaneScopeEditor({
                   value: "",
                   label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
                 },
-                ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
+                // AQU-1586: the scope value stays the lane TAG — that is what
+                // a member scope stores — but the label comes from the lane
+                // row, because a tag can be the opaque lane id.
+                ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({
+                  value: lane,
+                  label: laneLabelForTag(lane, settings.lanes?.filter((row) => row.role === "target")),
+                })),
               ]
             : null,
         )

@@ -826,6 +826,12 @@ export function ImportDialog({
         setIntent("translation")
         setTranslationRun(null)
         setTranslationNotice(null)
+        // Nothing chosen yet. The picker would otherwise start on the open
+        // file with Continue live, and a quick Continue sent the upload into
+        // whatever file happened to be open: the one thing this screen exists
+        // to stop. The person names the file, or the upload's own book does.
+        setTranslationFileId(null)
+        setTranslationTouched(false)
         setHeldTranslationFile(flaggedFile)
         setScreen("landing")
         return

@@ -240,6 +240,9 @@ describe("AQU-1365: Is this a translation?", () => {
     expect(await screen.findByTestId("translation-chooser")).toBeInTheDocument()
     expect(screen.getByTestId("translation-held-file")).toHaveTextContent("GEN1-tatar.usfm")
     expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
+    // The open file is NOT chosen for them: a quick Continue must not send the
+    // upload into whatever file happened to be open.
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeEnabled()
     expect(importFile).not.toHaveBeenCalled()
   })
 

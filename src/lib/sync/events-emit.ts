@@ -558,6 +558,19 @@ export interface CellAudioAttachInput {
 }
 
 /** Emit a `cell.audio.attach` — records a clip and selects it in its slot. */
+/**
+ * AQU-1572: the length that will PLAY, for telemetry. A recorder take is
+ * attached with its trim window (the pre-roll and tail it keeps but does not
+ * play), and the file's own length would overstate every take by that much.
+ * Nothing known, nothing sent.
+ */
+function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
+  const start = input.trimStartMs ?? 0
+  const end = input.trimEndMs ?? input.durationMs
+  if (end === undefined || !Number.isFinite(end) || end - start <= 0) return {}
+  return { durationMs: end - start }
+}
+
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.attach",
@@ -598,7 +611,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       surface: input.surface,
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
-      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...playedDuration(input),
     })
   }
   return eventId

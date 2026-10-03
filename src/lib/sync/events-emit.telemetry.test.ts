@@ -271,6 +271,13 @@ describe("audio action telemetry", () => {
     expect(captured(AUDIO_GENERATED)).toHaveLength(0)
   })
 
+  it("reports a trimmed take as the length that plays, not the file's", async () => {
+    await emitCellAudioAttach({
+      ...ATTACH, audioOrigin: "record", durationMs: 3600, trimStartMs: 200, trimEndMs: 3360,
+    })
+    expect(captured(AUDIO_RECORDED)[0]).toMatchObject({ duration_ms: 3160 })
+  })
+
   it("emits nothing for a derived re-attach (denoise, timings, diarization, heal)", async () => {
     // These re-attach a clip that the originating gesture already counted.
     // They pass no origin, so counting them again is impossible by construction.

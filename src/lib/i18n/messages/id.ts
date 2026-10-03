@@ -2972,6 +2972,7 @@ export const id: Catalog = {
   "org.projectOverview.plan.notMarkedDone": "Belum ditandai selesai.",
   "org.projectOverview.plan.aMaintainer": "seorang pengelola",
   "org.projectOverview.plan.markedDoneBy": "Ditandai selesai {date} oleh {user}",
+  "org.projectOverview.plan.markedDoneWithWork": "Ditandai selesai · {work}",
   "org.projectOverview.plan.doneBelowFullNudge": "Tervalidasi baru {validated}%. Menandai selesai mencatat penilaian Anda, bukan angkanya — batangnya tetap terlihat di samping tanda itu.",
   "org.projectOverview.plan.progress": "Progres",
   "org.projectOverview.plan.lastActivity": "Aktivitas terakhir {when}.",

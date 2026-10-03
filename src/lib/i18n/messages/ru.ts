@@ -3017,6 +3017,7 @@ export const ru: Catalog = {
   "org.projectOverview.plan.notMarkedDone": "Готовность не отмечена.",
   "org.projectOverview.plan.aMaintainer": "куратор",
   "org.projectOverview.plan.markedDoneBy": "Отмечено готовым {date}, {user}",
+  "org.projectOverview.plan.markedDoneWithWork": "Отмечено готовым · {work}",
   "org.projectOverview.plan.doneBelowFullNudge": "Подтверждено {validated}%. Отметка готовности фиксирует вашу оценку, а не цифры — полосы прогресса остаются видны рядом с отметкой.",
   "org.projectOverview.plan.progress": "Прогресс",
   "org.projectOverview.plan.lastActivity": "Последняя активность {when}.",

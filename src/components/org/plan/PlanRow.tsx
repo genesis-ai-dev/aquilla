@@ -250,6 +250,14 @@ export const PlanRow = memo(function PlanRow({
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
   const leftToDo = nearly ? (shortfallText ?? t("org.projectOverview.plan.nothingLeft")) : null
+  // AQU-1494 (Sam, 2026-10-03): a unit somebody marked done can have work in
+  // it again — a setting that counts headings, a line added, an edit that
+  // un-validated a cell. It stays in Done, because the mark is a person's
+  // decision and the board never takes it back on its own; but it no longer
+  // hides what came back. Same counts and words as every other row.
+  const doneWithWork = unit.doneAt != null && shortfallText !== null
+    ? t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })
+    : null
 
   const label = planUnitLabel(unit)
   const nameCellRef = useRef<HTMLSpanElement>(null)
@@ -424,6 +432,18 @@ export const PlanRow = memo(function PlanRow({
    * " · " here would be untranslated copy in a .tsx.
    */
   const line2Node: ReactNode = (() => {
+    // Amber, the board's "needs attention" colour, in place of "marked <date>":
+    // the date is in the side panel, and this is the line that changed.
+    if (doneWithWork !== null) {
+      return (
+        <span
+          className={`font-medium ${PLAN_TONE.soon.text}`}
+          data-testid={`plan-done-with-work-${unit.fileId}-${unit.sectionKey}`}
+        >
+          {doneWithWork}
+        </span>
+      )
+    }
     if (line2Shortfall === null) return line2Text ?? "—"
     const node = shortfallNode(line2Shortfall)
     if (line2Text === null) return node

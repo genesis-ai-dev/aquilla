@@ -1364,6 +1364,10 @@ export const org = defineNamespace({
     "org.projectOverview.plan.notMarkedDone": "Not marked done.",
     "org.projectOverview.plan.aMaintainer": "a maintainer",
     "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    // AQU-1494: a unit someone marked done that has work in it again — a
+    // setting that counts more cells, a line added, an edit that un-validated
+    // one. It stays done (that is a person's call); this says what came back.
+    "org.projectOverview.plan.markedDoneWithWork": "Marked done \u00b7 {work}",
     "org.projectOverview.plan.doneBelowFullNudge":
       "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
     "org.projectOverview.plan.progress": "Progress",
@@ -3007,6 +3011,13 @@ export const org = defineNamespace({
       "org.projectOverview.plan.markedDoneBy": {
         description: "Provenance line: when a unit was marked done and by whom.",
         placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.markedDoneWithWork": {
+        description:
+          "Amber note on a plan row, and in the side panel beside 'Unmark', for a unit someone marked done that has outstanding cells again (a setting change, an added line, or an edit since). The unit stays in the Done group; this says that it was marked done AND what is left. Joined the way the board joins two fragments (see shortfallPair).",
+        placeholders: {
+          work: "What is left, already translated: one or two shortfall terms, e.g. '6 cells to translate' or '2 to translate \u00b7 3 to validate'.",
+        },
       },
       "org.projectOverview.plan.doneBelowFullNudge": {
         description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",

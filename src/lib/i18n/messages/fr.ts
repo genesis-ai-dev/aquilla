@@ -2959,6 +2959,7 @@ export const fr: Catalog = {
   "org.projectOverview.plan.notMarkedDone": "Non marqué terminé.",
   "org.projectOverview.plan.aMaintainer": "un mainteneur",
   "org.projectOverview.plan.markedDoneBy": "Marqué terminé le {date} par {user}",
+  "org.projectOverview.plan.markedDoneWithWork": "Marqué terminé · {work}",
   "org.projectOverview.plan.doneBelowFullNudge": "La validation est à {validated} %. Marquer comme terminé enregistre votre jugement, pas les chiffres — les barres restent visibles à côté de la marque.",
   "org.projectOverview.plan.progress": "Progression",
   "org.projectOverview.plan.lastActivity": "Dernière activité {when}.",

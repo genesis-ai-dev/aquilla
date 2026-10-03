@@ -163,9 +163,31 @@ describe("the date column", () => {
   })
 
   it("says when a done unit was marked, rather than how stale it is", () => {
-    renderBoard([unit({ doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
+    // Finished: a unit marked done with work in it says that instead (AQU-1494).
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
     // Scoped to the row: the Done group header also contains the word "marked".
     const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).getByText(/^marked /)).toBeInTheDocument()
+  })
+
+  it("says when a unit marked done has work in it again, and keeps it in Done (AQU-1494)", () => {
+    // Sam, 2026-10-03: Ruth was marked done, then a setting started counting
+    // its headings and it was six cells short — and the row still read only
+    // "marked <date>". It stays in Done (the mark is a person's decision), but
+    // the row says what came back, in the words every other row uses.
+    renderBoard([unit({ totalCount: 93, filledCount: 87, validatedCount: 87, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(screen.getByTestId("plan-group-done")).getByTestId("plan-row-f1-")).toBe(row)
+    const note = within(row).getByTestId("plan-done-with-work-f1-")
+    expect(note).toHaveTextContent(/^Marked done \u00b7 6 cells to translate$/)
+    expect(note.className).toContain("text-amber-700")
+    expect(within(row).queryByText(/^marked /)).toBeNull()
+  })
+
+  it("keeps a finished unit marked done as just 'marked <date>' (AQU-1494)", () => {
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).queryByTestId("plan-done-with-work-f1-")).toBeNull()
     expect(within(row).getByText(/^marked /)).toBeInTheDocument()
   })
 

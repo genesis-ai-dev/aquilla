@@ -636,6 +636,15 @@ export function PlanInspector({
                     user: unit.doneBy ?? t("org.projectOverview.plan.aMaintainer"),
                   })}
                 </p>
+                {/* AQU-1494 (Sam, 2026-10-03): the mark stands, but the work that
+                    came back since is said here, beside the button that would
+                    take the mark away — the same words as the board row. */}
+                {shortfallText !== null && (
+                  <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px]"
+                     data-testid="plan-done-with-work">
+                    {t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })}
+                  </p>
+                )}
                 {canPlan && (
                   <div>
                     <Button variant="outline" size="sm" disabled={busy}

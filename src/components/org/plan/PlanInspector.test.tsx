@@ -190,6 +190,19 @@ describe("marking done", () => {
     await expectTooltip(screen.getByTestId("plan-mark-done"), "You can unmark this later.")
   })
 
+  it("says beside Unmark what a unit marked done has to do again (AQU-1494)", () => {
+    // The mark stands; the work that came back since is said where the button
+    // that would take the mark away is, in the board row's own words.
+    renderInspector(unit({ filledCount: 94, validatedCount: 94, doneAt: NOW, doneBy: "randall" }))
+    expect(screen.getByTestId("plan-done-with-work")).toHaveTextContent(/^Marked done \u00b7 6 cells to translate$/)
+    expect(screen.getByTestId("plan-unmark-done")).toBeInTheDocument()
+  })
+
+  it("says nothing more beside Unmark when a unit marked done is finished (AQU-1494)", () => {
+    renderInspector(unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "randall" }))
+    expect(screen.queryByTestId("plan-done-with-work")).toBeNull()
+  })
+
   it("shows a Done unit's bars beside the mark, mismatch and all", () => {
     // The point of an explicit mark: Done at 31% validated is visible, not
     // hidden, so a reader can judge it.

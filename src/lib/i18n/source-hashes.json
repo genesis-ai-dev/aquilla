@@ -29897,7 +29897,8 @@
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
     "nav.feedback.buttonLabel": "aac77df347205252",
-    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833"
+    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833",
+    "org.projectOverview.plan.markedDoneWithWork": "0c78a5f5c8a99897"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -35648,7 +35649,8 @@
     "segmentation.saveFailed": "f183f316e86fe84b",
     "segmentation.readOnly": "34b046473fe9b27d",
     "nav.feedback.buttonLabel": "aac77df347205252",
-    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833"
+    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833",
+    "org.projectOverview.plan.markedDoneWithWork": "0c78a5f5c8a99897"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -41308,6 +41310,7 @@
     "segmentation.readOnly": "34b046473fe9b27d",
     "knowledgeBase.status.stalled": "d8e9d488c1579f94",
     "nav.feedback.buttonLabel": "aac77df347205252",
-    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833"
+    "org.projectOverview.plan.headingChipAt": "27a9f4c571a0f833",
+    "org.projectOverview.plan.markedDoneWithWork": "0c78a5f5c8a99897"
   }
 }

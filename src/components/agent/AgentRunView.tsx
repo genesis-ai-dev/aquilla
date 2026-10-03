@@ -183,7 +183,9 @@ export function AgentRunView({
       <Message align="end">
         <MessageContent>
           <Bubble>
-            <BubbleContent>{run.prompt}</BubbleContent>
+            {/* App chrome disables selection globally (index.css); the
+                conversation itself opts back in so it can be copied. */}
+            <BubbleContent className="select-text">{run.prompt}</BubbleContent>
           </Bubble>
         </MessageContent>
       </Message>
@@ -213,7 +215,7 @@ export function AgentRunView({
                     </div>
                   )}
                   <Bubble variant="ghost">
-                    <BubbleContent>
+                    <BubbleContent className="select-text">
                       <ChatMarkdown content={displayText} />
                     </BubbleContent>
                   </Bubble>

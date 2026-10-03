@@ -34,6 +34,8 @@ export const agent = defineNamespace({
     "agent.dock.attachFileAriaLabel": "Attach file",
     "agent.dock.attachFileTitle": "Attach a file for the agent",
     "agent.dock.removeAttachmentAriaLabel": "Remove {fileName}",
+    "agent.dock.copyChat": "Copy chat",
+    "agent.dock.copiedChat": "Copied",
 
     // ── Rename-suggestions banner (SuggestionBanner) — unrelated feature
     //    (Bible-book / episode file naming), keyed here because this agent
@@ -690,6 +692,17 @@ export const agent = defineNamespace({
           "file attachment chip from the composer before sending, naming the file " +
           "being removed.",
         placeholders: { fileName: "Display name of the attached file being removed." },
+      },
+      "agent.dock.copyChat": {
+        description:
+          "Tooltip and accessible name for the small icon button at the top-right of the " +
+          "agent conversation that copies the whole conversation (the user's messages and " +
+          "the agent's replies) to the clipboard as plain text.",
+      },
+      "agent.dock.copiedChat": {
+        description:
+          "Brief confirmation shown in the same tooltip/accessible name for about a second " +
+          "after agent.dock.copyChat succeeds: the conversation is now on the clipboard.",
       },
       "agent.rename.bannerSuffix": {
         description:

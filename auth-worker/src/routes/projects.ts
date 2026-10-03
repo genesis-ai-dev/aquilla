@@ -53,6 +53,7 @@ import {
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
   getUnitAssignments,
+  resolveTargetLaneId,
 } from "../services/assignments"
 import {
   bumpOrgActivity,
@@ -1212,7 +1213,11 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   const fileId = c.req.query("fileId") ?? ""
   if (!fileId) return c.json({ error: "fileId required" }, 400)
   const sectionKey = c.req.query("section") ?? ""
-  const lane = c.req.query("lane") ?? ""
+  // AQU-1609: the lane is identified by `laneId`. `lane` remains accepted as
+  // the legacy target-language tag, resolved below, so a client deployed before
+  // this change keeps working — the SPA and the Worker ship separately.
+  const laneIdParam = c.req.query("laneId")
+  const laneTag = c.req.query("lane") ?? ""
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
@@ -1252,7 +1257,12 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
     return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
   }
 
-  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, lane)
+  // A `laneId` the caller sent is used as given. Otherwise resolve the legacy
+  // tag to the lane it names. An unresolvable tag yields '', which matches no
+  // lane_id, so the per-lane progress columns read zero rather than silently
+  // counting another lane's work.
+  const laneId = laneIdParam ?? (await resolveTargetLaneId(c.env, projectId, laneTag))
+  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, laneId)
   return c.json({ assignments })
 })
 

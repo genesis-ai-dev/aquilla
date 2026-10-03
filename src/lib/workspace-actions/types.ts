@@ -24,6 +24,9 @@ export interface WorkspaceActionContext {
     untranscribed: number
     /** Cells with translated text but no recording yet. */
     unsynthesized: number
+    /** AQU-1109: cells whose selected take can be re-voiced into their
+     *  assigned cloned voice and isn't already. */
+    voiceChangeable?: number
     /** AQU-490: takes this viewer could still validate, policy applied. */
     validatableTakes?: number
   }
@@ -53,6 +56,7 @@ export interface WorkspaceActionRunArgs {
   runImportIntoFile: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
+  runChangeVoiceAll: () => void
   navigate: NavigateFunction
 }
 

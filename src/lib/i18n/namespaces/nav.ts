@@ -194,6 +194,20 @@ export const nav = defineNamespace({
       "n",
     ),
     "nav.workspaceActions.synthAll.confirmLabel": "Generate audio",
+    "nav.workspaceActions.changeVoiceAll.label": "Change voice of existing audio",
+    "nav.workspaceActions.changeVoiceAll.title": "Change voice",
+    "nav.workspaceActions.changeVoiceAll.description": plural(
+      {
+        one:
+          "Converts the selected take in {n} cell to its assigned voice at {quality} " +
+          "quality. Words and timing stay the same. Nothing is generated from text.",
+        other:
+          "Converts the selected take in {n} cells to each cell's assigned voice at " +
+          "{quality} quality. Words and timing stay the same. Nothing is generated from text.",
+      },
+      "n",
+    ),
+    "nav.workspaceActions.changeVoiceAll.confirmLabel": "Change voice",
     // AQU-365: the checkbox on the workspace-action confirmation dialog above
     // (distinct from ConfirmActionDialog's generic default, since this one
     // names WHY the checkbox matters — attribution). e2e asserts this exact
@@ -899,6 +913,34 @@ export const nav = defineNamespace({
         maxLength: 200,
       },
       "nav.workspaceActions.synthAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.changeVoiceAll.label": {
+        description:
+          "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
+          "recording and makes it sound like the cloned voice assigned to that cell. " +
+          "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
+          "from text.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.changeVoiceAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.changeVoiceAll.description": {
+        description:
+          "Body of the confirmation dialog above. The point to keep: the words and " +
+          "their timing are preserved, only the speaker's sound changes.",
+        placeholders: {
+          n: "How many cells have a take that will be converted.",
+          quality:
+            "The quality the user last chose for Change voice — Fast, Standard or " +
+            "High — already translated. Insert it as given.",
+        },
+        maxLength: 200,
+      },
+      "nav.workspaceActions.changeVoiceAll.confirmLabel": {
         description: "Confirm button of the dialog above.",
         maxLength: 24,
       },

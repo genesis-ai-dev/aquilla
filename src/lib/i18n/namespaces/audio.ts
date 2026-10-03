@@ -410,6 +410,19 @@ export const audio = defineNamespace({
 
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
+    "audio.bulkProgress.changingVoices": "Changing voices",
+    "audio.changeVoice.batchDone": plural({
+      one: "Changed the voice of {count} take",
+      other: "Changed the voice of {count} takes",
+    }),
+    "audio.changeVoice.batchFailed": plural({
+      one: "{count} take could not be converted; its cell shows why.",
+      other: "{count} takes could not be converted; their cells show why.",
+    }),
+    "audio.changeVoice.batchSkippedNotCloned": plural({
+      one: "{count} cell was skipped because its voice has no reference clip.",
+      other: "{count} cells were skipped because their voice has no reference clip.",
+    }),
 
     // GEMINI_TTS_VOICES (tts-providers.ts) — tone/character description for
     // each named Gemini voice. Several voices share the same description
@@ -2294,6 +2307,31 @@ export const audio = defineNamespace({
         description:
           "Tooltip and accessible name for the small 'x' button on the bulk-progress " +
           "banner that cancels the running batch job.",
+      },
+      "audio.bulkProgress.changingVoices": {
+        description:
+          "Label on the bulk-progress banner while 'Change voice of existing audio' " +
+          "runs: existing recordings are being re-voiced into their assigned cloned " +
+          "voices. Sits beside a progress bar, so keep it short.",
+        maxLength: 24,
+      },
+      "audio.changeVoice.batchDone": {
+        description:
+          "Toast title after the bulk 'Change voice of existing audio' run finishes. " +
+          "A take is one recorded or generated version of a line's audio.",
+        placeholders: { count: "How many takes were converted." },
+      },
+      "audio.changeVoice.batchFailed": {
+        description:
+          "Toast detail after the bulk run when some conversions failed. Each failed " +
+          "cell shows its own error badge with the reason.",
+        placeholders: { count: "How many conversions failed." },
+      },
+      "audio.changeVoice.batchSkippedNotCloned": {
+        description:
+          "Toast detail after the bulk run: cells assigned a stock voice were left " +
+          "alone, because changing voice needs a cloned voice's reference recording.",
+        placeholders: { count: "How many cells were skipped." },
       },
       "audio.voice.bright": {
         description:

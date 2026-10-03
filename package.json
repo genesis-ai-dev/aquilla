@@ -118,6 +118,7 @@
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",
     "seed:dev": "tsx scripts/seed-load.ts --local",
+    "seed-vc:local": "bash scripts/seed-vc-local.sh",
     "test:neon:comments": "tsx --test --test-concurrency=1 scripts/comments-key-migration.integration.ts",
     "neon:check": "tsx scripts/check-schema-migrations.ts",
     "db:check:comments": "tsx scripts/check-comment-projection.ts",

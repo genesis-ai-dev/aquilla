@@ -11,6 +11,7 @@ import {
   cancelBatchSynth,
   cancelBatchMeasure,
 } from "@/lib/audio/batch-audio"
+import { cancelBatchChangeVoice } from "@/lib/audio/change-voice-batch"
 
 export function AudioBulkProgressBanner() {
   const t = useT()
@@ -24,10 +25,13 @@ export function AudioBulkProgressBanner() {
       ? t("common.transcribing")
       : kind === "synth"
         ? t("common.synthesizing")
-        : t("common.measuringLengths")
+        : kind === "changeVoice"
+          ? t("audio.bulkProgress.changingVoices")
+          : t("common.measuringLengths")
   const handleCancel = () => {
     if (kind === "transcribe") cancelBatchTranscribe()
     else if (kind === "synth") cancelBatchSynth()
+    else if (kind === "changeVoice") cancelBatchChangeVoice()
     else cancelBatchMeasure()
   }
 

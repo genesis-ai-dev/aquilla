@@ -9,6 +9,7 @@ import {
   handleVoiceConvertRequest,
   handleVoiceReferenceRequest,
   voiceRefObjectKey,
+  voiceReferenceFingerprint,
 } from "../voice-convert"
 import type { SyncTokenClaims } from "../auth"
 
@@ -269,6 +270,50 @@ describe("POST /api/v1/voice/convert", () => {
     form.append("sourceAudioId", "rec.webm")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(200)
+  })
+
+  // AQU-1109: Change voice. The client reads the reference fingerprint and the
+  // cell seed back out of this id (src/lib/audio/change-voice.ts) — the
+  // fingerprint values here are asserted verbatim on that side too.
+  it("names a cellId conversion vc-<reference fingerprint>-audio-<cell>-…", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
+    stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    form.append("sourceAudioId", "rec.webm")
+    form.append("cellId", "GEN 1:1")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { objectName: string; url: string }
+    expect(body.objectName).toMatch(/^vc-a8dcd319-q10-audio-GEN_1_1-\d+-[0-9a-f]{8}\.wav$/)
+    expect(body.url).toBe(`frontier-audio://${body.objectName}`)
+    expect(env.SNAPSHOTS._allKeys()).toContain(audioObjectKey(env, "p1", "f1", body.objectName))
+  })
+
+  it("keeps the legacy audio-clone- name when no cellId is sent", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
+    stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    form.append("sourceAudioId", "rec.webm")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    const body = (await res.json()) as { objectName: string }
+    expect(body.objectName).toMatch(/^audio-clone-\d+-[0-9a-f]{8}\.wav$/)
+  })
+
+  it("fingerprints reference ids with FNV-1a, matching the client", () => {
+    expect(voiceReferenceFingerprint("ref1.wav")).toBe("a8dcd319")
+    expect(voiceReferenceFingerprint("ref-1700000000000-abc123def.webm")).toBe("4583a16c")
   })
 
   // [Pen test] API security & data exposure (2026-08-27): sourceAudioId is a

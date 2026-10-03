@@ -113,6 +113,42 @@ export async function handleVoiceReferenceRequest(
   })
 }
 
+/**
+ * FNV-1a (32-bit) of a reference clip id, as 8 hex chars. Mirrored by
+ * `voiceReferenceFingerprint` in src/lib/audio/change-voice.ts — the client
+ * reads it back out of the audioId to tell whether a converted take was made
+ * from the voice's CURRENT reference clip. Change both or neither.
+ */
+export function voiceReferenceFingerprint(referenceAudioId: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < referenceAudioId.length; i++) {
+    h ^= referenceAudioId.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, "0")
+}
+
+/**
+ * Object id for a converted clip. With a `cellId` (Change voice on an existing
+ * take) it is `vc-<fingerprint>-q<steps>-audio-<cellId>-…`: seeded with the
+ * cell id like every other take (the client's `audioIdSeededWith` tells a
+ * cell's own take from the shared imported clip that way), and carrying which
+ * reference clip and which diffusion-step count produced it. Without a cellId
+ * it keeps the legacy TTS→clone name.
+ */
+export function convertedAudioId(
+  referenceAudioId: string,
+  cellId: string | null,
+  diffusionSteps = 10,
+): string {
+  const ts = Date.now()
+  const rnd = crypto.randomUUID().slice(0, 8)
+  if (!cellId) return `audio-clone-${ts}-${rnd}`
+  const seed = cellId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
+  const steps = Math.min(50, Math.max(1, Math.round(diffusionSteps)))
+  return `vc-${voiceReferenceFingerprint(referenceAudioId)}-q${steps}-audio-${seed}-${ts}-${rnd}`
+}
+
 function clampSteps(raw: unknown): number {
   const n = typeof raw === "string" ? parseInt(raw, 10) : NaN
   if (!Number.isFinite(n)) return 10
@@ -237,7 +273,9 @@ export async function handleVoiceConvertRequest(
 
   // Write the result as a new cell-audio object (same layout as client uploads),
   // so the client only needs to attach the returned audioId.
-  const audioId = `audio-clone-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const cellIdField = form.get("cellId")
+  const cellId = typeof cellIdField === "string" && cellIdField ? cellIdField : null
+  const audioId = convertedAudioId(referenceAudioId, cellId, clampSteps(form.get("diffusionSteps")))
   const ext = "wav"
   const objectName = `${audioId}.${ext}`
   await env.SNAPSHOTS.put(audioObjectKey(env, projectId, fileId, objectName), convertedBytes, {

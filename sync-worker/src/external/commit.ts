@@ -1477,7 +1477,7 @@ async function commitLinkMedia(
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
 
-  // AQU-1572: one `audio attached` for the cells whose attach landed. After the
+  // AQU-1572: one `audio attached` per line whose attach landed. After the
   // terminal write, and before the partial-failure reply: a partly rejected
   // changeset is still committed, and its accepted attaches are real. A
   // session commit reports only with the person's analytics switch on.

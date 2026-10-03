@@ -1,13 +1,16 @@
 // review-telemetry — PostHog events for validations and audio the Agent API
 // commits (AQU-1572).
 //
-// The browser reports what a person does in the app (src/lib/review-telemetry.ts).
+// The browser reports what a person does in the app, one event per line, from
+// its emit seam (src/lib/cell-telemetry.ts, called in src/lib/sync/events-emit.ts).
 // A changeset committed through the Agent API — REST, MCP, or the in-app
 // agent's plan applied from a review card through the session route — lands
 // here, server-side, and no browser ever sees the write. So this worker is the
-// only place it can be counted. The properties come from the SAME builders the
-// browser uses (src/lib/review-events.ts), so a validation reads the same in
-// PostHog whoever made it.
+// only place it can be counted. The events come from the SAME builders the
+// browser uses (src/lib/review-events.ts): same names, same properties, one
+// event per line, so a validation reads the same in PostHog whoever made it.
+// What only this side knows: `surface: 'api'`, and `auto: false` (the Agent
+// API never votes by itself; every event in a plan was asked for).
 //
 // When it fires: only after a changeset's terminal `committed` write, and only
 // for the events the /events perimeter accepted. A staged plan, an approval
@@ -16,8 +19,8 @@
 // Writes through the browser's own POST /events never reach this module: the
 // browser reports those itself, and reporting both would double-count.
 //
-// Data policy: the builders' — ids and counts only. No cell text, file name,
-// artifact id, audio id or URL.
+// Data policy: the builders' — ids only, and a cell id only when it is an
+// opaque UUID. No cell text, file name, artifact id, audio id or URL.
 //
 // Consent: the browser's analytics switch lives in that browser's localStorage
 // (src/lib/analytics-consent.ts), which no worker can read. REST and MCP
@@ -34,8 +37,8 @@
 
 import { resolvePosthogHost } from '../posthog-logs'
 import {
-  audioAttachedEvent,
-  validationEvent,
+  audioActionEvent,
+  cellValidationEvent,
   type TelemetryEvent,
   type TelemetrySource,
   type ValidationMedium,
@@ -48,9 +51,8 @@ export type ReviewTelemetryEnv = Pick<ExternalEnv, 'POSTHOG_KEY' | 'POSTHOG_HOST
 const LIB = 'aquilla-sync-worker'
 const FLUSH_TIMEOUT_MS = 3000
 
-/** Reported as the lane when one action validated cells in more than one lane
- *  (EmitEvents allows it). One event per action, so it cannot name them all. */
-export const MIXED_LANE = 'mixed'
+/** Every Agent API event says it came through the API, whoever held the token. */
+const API_SURFACE = 'api' as const
 
 /**
  * Who acted, from the channel the commit arrived on. REST is any integration
@@ -95,12 +97,13 @@ export interface AppliedPlanEvent {
   kind: string
   fileId?: string
   cellId?: string
+  /** The lane's tag, canonical: '' (or absent) is the default lane. */
   laneId?: string
 }
 
 /**
- * The validation events for one committed EmitEvents batch: one per kind, so a
- * batch of 40 validations is ONE `cell validated` with `cell_count: 40`.
+ * The validation events for one committed EmitEvents batch: one per line, as
+ * the browser reports them. A line named twice for the same kind is one line.
  * `applied` must hold only the events the perimeter accepted.
  */
 export function emitEventsTelemetry(
@@ -108,40 +111,47 @@ export function emitEventsTelemetry(
   applied: readonly AppliedPlanEvent[],
   source: TelemetrySource,
 ): TelemetryEvent[] {
-  const byKind = new Map<string, Map<string, AppliedPlanEvent>>()
-  for (const e of applied) {
-    if (!VALIDATION_KINDS[e.kind] || !e.fileId || !e.cellId) continue
-    const cells = byKind.get(e.kind) ?? new Map<string, AppliedPlanEvent>()
-    // Keyed per (file, cell, lane): a cell named twice is still one cell.
-    cells.set(laneCellKey(e.fileId, e.cellId, e.laneId), e)
-    byKind.set(e.kind, cells)
-  }
+  const seen = new Set<string>()
   const out: TelemetryEvent[] = []
-  for (const [kind, cells] of byKind) {
-    const list = [...cells.values()]
-    const lanes = new Set(list.map((e) => e.laneId ?? ''))
-    const event = validationEvent({
+  for (const e of applied) {
+    const kind = VALIDATION_KINDS[e.kind]
+    if (!kind || !e.fileId || !e.cellId) continue
+    const key = `${e.kind}\u0000${laneCellKey(e.fileId, e.cellId, e.laneId)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(cellValidationEvent(kind.validated, {
+      medium: kind.medium,
       projectId,
-      cells: list.map((e) => ({ fileId: e.fileId!, cellId: e.cellId! })),
-      lane: lanes.size === 1 ? list[0].laneId : MIXED_LANE,
+      fileId: e.fileId,
+      cellId: e.cellId,
+      lane: e.laneId ?? '',
       source,
-      ...VALIDATION_KINDS[kind],
-    })
-    if (event) out.push(event)
+      auto: false,
+      surface: API_SURFACE,
+    }))
   }
   return out
 }
 
-/** `audio attached` for one committed LinkMedia changeset — one event for all
- *  the cells it attached to. The artifact carries no duration (upload does no
- *  decoding, see artifacts-route.ts), so none is sent. */
+/** One `audio attached` per line a committed LinkMedia changeset attached to.
+ *  LinkMedia always lands in the shared `recording` slot, with no lane, and
+ *  the artifact carries no duration (upload does no decoding, see
+ *  artifacts-route.ts), so none is sent. */
 export function linkMediaTelemetry(
   projectId: string,
   attached: ReadonlyArray<{ fileId: string; cellId: string }>,
   source: TelemetrySource,
 ): TelemetryEvent[] {
-  const event = audioAttachedEvent({ projectId, cells: attached, source, method: 'link' })
-  return event ? [event] : []
+  return attached.map((a) => audioActionEvent({
+    origin: 'attach',
+    projectId,
+    fileId: a.fileId,
+    cellId: a.cellId,
+    slot: 'recording',
+    lane: '',
+    source,
+    surface: API_SURFACE,
+  }))
 }
 
 /**

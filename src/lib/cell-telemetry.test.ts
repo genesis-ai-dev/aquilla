@@ -28,10 +28,10 @@ describe("the dev log (window.__aqTelemetry)", () => {
 
   it("keeps only the most recent 200", () => {
     for (let i = 0; i < 205; i++) {
-      captureCellValidation(true, { medium: "text", projectId: "p1", fileId: "f1", cellId: `c${i}` })
+      captureCellValidation(true, { medium: "text", projectId: "p1", fileId: `f${i}`, cellId: "c" })
     }
     expect(devLog()).toHaveLength(200)
-    expect(devLog()?.[0].properties.cell_id).toBe("c5")
+    expect(devLog()?.[0].properties.file_id).toBe("f5")
   })
 })
 

@@ -845,7 +845,9 @@ export async function commitEmitEvents(
   // AQU-1572: report the validations that landed — after the terminal write,
   // and only the accepted events, so a refused, stale or still-staged plan
   // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id. A
-  // session commit reports only with the person's analytics switch on.
+  // session commit reports only with the person's analytics switch on. The
+  // lane is the canonical one the compiled event carried (a lane naming the
+  // primary language is the default lane, ''), as the browser reports it.
   if (reviewTelemetryAllowed(request, channel)) {
     sendReviewTelemetry(
       env,
@@ -853,7 +855,9 @@ export async function commitEmitEvents(
       cred.username,
       emitEventsTelemetry(
         projectId,
-        cmd.events.filter((_, i) => acceptedIds.has(allEventIds[i])),
+        cmd.events
+          .filter((_, i) => acceptedIds.has(allEventIds[i]))
+          .map((e) => (e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) })),
         telemetrySourceFor(channel),
       ),
     )

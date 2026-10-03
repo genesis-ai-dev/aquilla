@@ -1,8 +1,9 @@
 // AQU-1572: the Agent API's validation and audio telemetry.
 //
 // Pins the contract of external/review-telemetry.ts and its two call sites:
-//   - one event per kind per committed changeset, with the right cell_count,
-//     medium, source and lane;
+//   - one event per line, in the browser's shape (src/lib/review-events.ts):
+//     medium, source, lane, auto: false and surface: 'api', and no property
+//     the browser's events do not also use;
 //   - the channel → source mapping (rest → api; mcp and the session route's
 //     'app' → agent);
 //   - nothing at staging, at a refused ask-mode commit, on a stale plan, or on
@@ -25,7 +26,6 @@ import { handleExternalArtifactsRequest } from '../external/artifacts-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleSessionChangesetsRequest } from '../external/session-routes'
 import {
-  MIXED_LANE,
   emitEventsTelemetry,
   linkMediaTelemetry,
   reviewTelemetryAllowed,
@@ -39,6 +39,12 @@ import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import {
+  AUDIO_EVENT_PROPERTIES,
+  VALIDATION_EVENT_PROPERTIES,
+  audioActionEvent,
+  cellValidationEvent,
+} from '../../../src/lib/review-events'
 
 const SECRET = 'test-secret'
 const PROJECT = 'proj-t'
@@ -49,10 +55,11 @@ const TARGET_TEXT = 'the target words nobody may see'
 const SOURCE_TEXT = 'the source words nobody may see'
 const PH_HOST = 'https://ph.test'
 
-/** Every property a server event may carry. Anything else is a leak. */
-const ALLOWED_PROPS = new Set([
-  'project_id', 'lane', 'source', 'cell_count', 'file_id', 'file_count', 'cell_id',
-  'medium', 'method', 'duration_ms', 'app_env', '$lib',
+/** Every property a server event may carry: exactly the browser's (the shared
+ *  lists in src/lib/review-events.ts), plus the two this sender stamps on every
+ *  event. Anything else is a leak, or a name the browser does not use. */
+const ALLOWED_PROPS = new Set<string>([
+  ...VALIDATION_EVENT_PROPERTIES, ...AUDIO_EVENT_PROPERTIES, 'app_env', '$lib',
 ])
 
 interface PosthogBatch {
@@ -212,11 +219,11 @@ describe('review telemetry — builders', () => {
     expect(telemetrySourceFor('app')).toBe('agent')
   })
 
-  it('one event per validation kind, cells counted once, other kinds ignored', () => {
+  it('one event per line, in the browser\'s shape; a line named twice is one; other kinds ignored', () => {
     const events = emitEventsTelemetry(
       'p',
       [
-        { kind: 'cell.validate', fileId: 'f1', cellId: 'c1', laneId: 'es' },
+        { kind: 'cell.validate', fileId: 'f1', cellId: UUID_CELL, laneId: 'es' },
         { kind: 'cell.validate', fileId: 'f1', cellId: 'c2', laneId: 'es' },
         { kind: 'cell.validate', fileId: 'f1', cellId: 'c2', laneId: 'es' },
         { kind: 'cell.unvalidate', fileId: 'f2', cellId: 'c3' },
@@ -225,33 +232,39 @@ describe('review telemetry — builders', () => {
       ],
       'agent',
     )
+    const common = { source: 'agent', auto: false, surface: 'api', project_id: 'p' }
     expect(events).toEqual([
-      {
-        event: 'cell validated',
-        properties: { project_id: 'p', lane: 'es', source: 'agent', cell_count: 2, file_id: 'f1', medium: 'text' },
-      },
-      {
-        event: 'cell unvalidated',
-        properties: { project_id: 'p', lane: 'default', source: 'agent', cell_count: 1, file_id: 'f2', medium: 'text' },
-      },
-      {
-        event: 'cell validated',
-        properties: { project_id: 'p', lane: 'default', source: 'agent', cell_count: 1, file_id: 'f1', medium: 'audio' },
-      },
+      // A UUID cell is named; any other cell id (a verse reference) never is.
+      { event: 'cell validated', properties: { ...common, medium: 'text', file_id: 'f1', cell_id: UUID_CELL, lane: 'es' } },
+      { event: 'cell validated', properties: { ...common, medium: 'text', file_id: 'f1', lane: 'es' } },
+      { event: 'cell unvalidated', properties: { ...common, medium: 'text', file_id: 'f2', lane: '' } },
+      { event: 'cell validated', properties: { ...common, medium: 'audio', file_id: 'f1', lane: '' } },
     ])
   })
 
-  it('names the lane "mixed" when one action spans lanes', () => {
-    const [event] = emitEventsTelemetry(
+  // The browser and this worker must never drift apart: a dashboard filters
+  // both with one query. Same builder, so the same facts give the same event.
+  it('builds exactly the event the browser would build for the same line', () => {
+    const [server] = emitEventsTelemetry('p', [{ kind: 'cell.validate', fileId: 'f1', cellId: UUID_CELL, laneId: 'es' }], 'api')
+    expect(server).toEqual(cellValidationEvent(true, {
+      medium: 'text', projectId: 'p', fileId: 'f1', cellId: UUID_CELL, lane: 'es', source: 'api', auto: false, surface: 'api',
+    }))
+    const [attach] = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: UUID_CELL }], 'agent')
+    expect(attach).toEqual(audioActionEvent({
+      origin: 'attach', projectId: 'p', fileId: 'f1', cellId: UUID_CELL, slot: 'recording', lane: '', source: 'agent', surface: 'api',
+    }))
+  })
+
+  it('each line keeps its own lane when one action spans lanes', () => {
+    const events = emitEventsTelemetry(
       'p',
       [
         { kind: 'cell.validate', fileId: 'f1', cellId: 'c1', laneId: 'es' },
-        { kind: 'cell.validate', fileId: 'f1', cellId: 'c2' },
+        { kind: 'cell.validate', fileId: 'f1', cellId: 'c1' },
       ],
       'api',
     )
-    expect(event.properties.lane).toBe(MIXED_LANE)
-    expect(event.properties.cell_count).toBe(2)
+    expect(events.map((e) => e.properties.lane)).toEqual(['es', ''])
   })
 
   it('nothing to report is no event', () => {
@@ -287,7 +300,7 @@ describe('review telemetry — builders', () => {
 // ── EmitEvents through the real commit path ─────────────────────────────────
 
 describe('review telemetry — EmitEvents commits', () => {
-  it('a REST commit of N validations sends ONE `cell validated` with cell_count N', async () => {
+  it('a REST commit of N validations sends N `cell validated`, one per line, in one request', async () => {
     await seedTarget(tdb, 'cell-1', 'tgt-1')
     await seedTarget(tdb, 'cell-2', 'tgt-2')
     const env = makeEnv(tdb.db)
@@ -315,24 +328,26 @@ describe('review telemetry — EmitEvents commits', () => {
     expect(batches).toHaveLength(1)
     const [batch] = batches
     expect(batch.api_key).toBe('phc_test')
-    expect(batch.batch).toHaveLength(1)
-    const [event] = batch.batch
-    expect(event.event).toBe('cell validated')
-    expect(event.distinct_id).toBe(sha256(reviewer.username))
-    expect(event.properties).toEqual({
-      project_id: PROJECT,
-      lane: 'default',
-      source: 'api',
-      cell_count: 2,
-      file_id: FILE,
-      medium: 'text',
-      app_env: 'test',
-      $lib: 'aquilla-sync-worker',
-    })
+    expect(batch.batch).toHaveLength(2)
+    for (const event of batch.batch) {
+      expect(event.event).toBe('cell validated')
+      expect(event.distinct_id).toBe(sha256(reviewer.username))
+      expect(event.properties).toEqual({
+        medium: 'text',
+        project_id: PROJECT,
+        file_id: FILE,
+        lane: '',
+        source: 'api',
+        auto: false,
+        surface: 'api',
+        app_env: 'test',
+        $lib: 'aquilla-sync-worker',
+      })
+    }
     expectIdsAndCountsOnly(batch)
   })
 
-  it('validate + unvalidate in one changeset: one event per kind, in one request', async () => {
+  it('validate + unvalidate in one changeset: one event per line, in one request', async () => {
     await seedTarget(tdb, 'cell-1', 'tgt-1')
     await seedTarget(tdb, UUID_CELL, 'tgt-3')
     const env = makeEnv(tdb.db)
@@ -354,7 +369,6 @@ describe('review telemetry — EmitEvents commits', () => {
     expect(batches).toHaveLength(2)
     const second = batches[1].batch
     expect(second.map((e) => e.event)).toEqual(['cell unvalidated', 'cell validated'])
-    expect(second.every((e) => e.properties.cell_count === 1)).toBe(true)
     // A single UUID cell is named; a verse-reference-shaped id never is.
     expect(second[0].properties.cell_id).toBeUndefined()
     expect(second[1].properties.cell_id).toBe(UUID_CELL)
@@ -480,8 +494,7 @@ describe('review telemetry — ask mode through the session route', () => {
     const [event] = batches[0].batch
     expect(event.event).toBe('cell validated')
     expect(event.distinct_id).toBe(sha256('alice'))
-    expect(event.properties.source).toBe('agent')
-    expect(event.properties.cell_count).toBe(1)
+    expect(event.properties).toMatchObject({ source: 'agent', auto: false, surface: 'api' })
   })
 })
 
@@ -561,7 +574,7 @@ describe('review telemetry — LinkMedia commits', () => {
     }
   }
 
-  it('one `audio attached` with method "link" for the cells it attached to', async () => {
+  it('one `audio attached` per line it attached to, in the browser\'s shape', async () => {
     const env = makeEnv(tdb.db, { SNAPSHOTS: makeBucket() as unknown as R2Bucket, R2_KEY_PREFIX: '' })
     const contributor = await patMember(tdb, 400)
 
@@ -596,12 +609,12 @@ describe('review telemetry — LinkMedia commits', () => {
     expect(event.distinct_id).toBe(sha256(contributor.username))
     expect(event.properties).toEqual({
       project_id: PROJECT,
-      lane: 'default',
-      source: 'api',
-      cell_count: 1,
       file_id: FILE,
       cell_id: UUID_CELL,
-      method: 'link',
+      slot: 'recording',
+      lane: '',
+      source: 'api',
+      surface: 'api',
       app_env: 'test',
       $lib: 'aquilla-sync-worker',
     })
@@ -626,7 +639,7 @@ describe('sendReviewTelemetry on a local stack', () => {
     const events = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: 'c1' }], 'api')
     sendReviewTelemetry({ POSTHOG_KEY: '', ENVIRONMENT: 'local' }, undefined, 'alice', events)
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(info).toHaveBeenCalledWith('[review-telemetry]', 'audio attached', expect.stringContaining('"method":"link"'))
+    expect(info).toHaveBeenCalledWith('[review-telemetry]', 'audio attached', expect.stringContaining('"surface":"api"'))
     info.mockClear()
     // Anywhere else a blank key stays silent.
     sendReviewTelemetry({ POSTHOG_KEY: '', ENVIRONMENT: 'production' }, undefined, 'alice', events)

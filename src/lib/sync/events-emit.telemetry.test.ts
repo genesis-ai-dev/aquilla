@@ -58,7 +58,9 @@ function captured(name: string): Record<string, unknown>[] {
     .map((args) => args[1] as Record<string, unknown>)
 }
 
-const CELL = { projectId: "p1", fileId: "f1", cellId: "c1", author: "tester" }
+// An opaque UUID: only such a cell id is ever sent (see review-events.ts).
+const CELL_ID = "01a0f305-61ea-7cfd-8a03-dab4dfb4010a"
+const CELL = { projectId: "p1", fileId: "f1", cellId: CELL_ID, author: "tester" }
 
 beforeEach(() => {
   mockCapture.mockClear()
@@ -74,7 +76,7 @@ describe("text validation telemetry", () => {
       medium: "text",
       project_id: "p1",
       file_id: "f1",
-      cell_id: "c1",
+      cell_id: CELL_ID,
       lane: "spa",
       source: "ui",
     })
@@ -88,6 +90,13 @@ describe("text validation telemetry", () => {
     await emitCellValidate({ ...CELL, cellId: "c2", editEventId: "ev2" })
 
     expect(captured(CELL_VALIDATED)).toHaveLength(1)
+  })
+
+  it("leaves out a verse-reference cell id, keeping the file", async () => {
+    await emitCellValidate({ ...CELL, cellId: "JHN 3:16", editEventId: "ev1" })
+    const [props] = captured(CELL_VALIDATED)
+    expect(props).not.toHaveProperty("cell_id")
+    expect(props.file_id).toBe("f1")
   })
 
   it("reports the default lane as an empty lane rather than omitting it", async () => {
@@ -227,7 +236,7 @@ describe("audio action telemetry", () => {
     expect(captured(AUDIO_ATTACHED)).toHaveLength(1)
     expect(captured(AUDIO_ATTACHED)[0]).toMatchObject({
       project_id: "p1",
-      cell_id: "c1",
+      cell_id: CELL_ID,
       slot: "recording",
       duration_ms: 1235,
       source: "ui",

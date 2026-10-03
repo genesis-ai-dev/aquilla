@@ -513,7 +513,12 @@ async function handleExternalPromptPreview(
     const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
     if (limited) return limited
   }
-  return handlePromptPreview(request, { AQUILLA_PG: env.AQUILLA_PG }, projectId, cellId)
+  return handlePromptPreview(
+    request,
+    { AQUILLA_PG: env.AQUILLA_PG, ...(env.SNAPSHOTS ? { SNAPSHOTS: env.SNAPSHOTS } : {}) },
+    projectId,
+    cellId,
+  )
 }
 
 // ---------------------------------------------------------------------------

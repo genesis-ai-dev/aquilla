@@ -33,6 +33,9 @@ export interface ExternalReadsEnv {
   SYNC_SECRET_KEY?: string
   /** AQU-730. Unset locally and in e2e. Deployed dev and prod set "1". */
   LANE_READ_WALL?: string
+  /** `aquilla-snapshots`. Optional here because most reads never touch R2; the
+   *  prompt preview does, for the AQU-1573 reference-Bible texts. */
+  SNAPSHOTS?: R2Bucket
 }
 
 /** Credential-only gate (no project in play yet) — used by /me, /projects and

@@ -204,6 +204,60 @@ export function buildStyleRulesBlock(instructions: string[] | undefined | null):
 }
 
 /**
+ * One verse the project's reference Bible supplies for a Scripture citation the
+ * source cell makes (AQU-1573).
+ *
+ * This is NOT a retrieved example and NOT context: it is text the draft must
+ * REPRODUCE. A sermon that quotes Isaiah 40:25 has to carry the wording the
+ * project's readers already know, and a model asked to translate the English
+ * quotation freshly will invent a rendering of a familiar verse instead.
+ */
+export interface ReferenceScriptureEntry {
+  /** Canonical ref of the verse, e.g. "ISA 40:25". */
+  canonicalRef: string
+  /** The citation as the source wrote it, e.g. "Isaiah 40:25". */
+  citedAs: string
+  /** Reference Bible version id (db/shared/reference-bibles.ts). */
+  versionId: string
+  /** Display label for the version, e.g. "Smith-Van Dyck (1865)". */
+  versionLabel: string
+  /** The verse text in the reference version. */
+  text: string
+}
+
+/**
+ * Render the reference verses as a labeled block for the USER message.
+ *
+ * It belongs in the user message, not the system prompt: it is per-cell data,
+ * and it must sit beside the source it applies to. It carries its own
+ * instruction line because a bare list of verses reads as more few-shot
+ * examples — the one thing it is not.
+ *
+ * Blank text is dropped; empty input -> "" (caller skips injection).
+ */
+export function buildReferenceScriptureBlock(
+  entries: readonly ReferenceScriptureEntry[] | undefined | null,
+): string {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  for (const entry of entries ?? []) {
+    const text = entry.text.trim()
+    if (!text) continue
+    const key = `${entry.versionId}|${entry.canonicalRef}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    lines.push(`- ${entry.citedAs} (${entry.versionLabel}): ${text}`)
+  }
+  if (!lines.length) return ""
+  return (
+    "Reference Scripture for the quotations in the source below. Where the source quotes one of "
+    + "these verses, reproduce the wording given here VERBATIM instead of translating the quotation "
+    + "yourself; translate only the surrounding prose:\n"
+    + lines.join("\n")
+  )
+}
+
+/**
  * Render the brief's L1 summary as a labeled block for the system prompt.
  * Empty/blank input → "" (caller skips injection). The brief states the
  * project's purpose, audience, register, and constraints; it sits ABOVE the
@@ -260,6 +314,11 @@ export interface BuildPromptOptions {
    *  never inside `sourceText`, where they contradict the base prompt's
    *  "translate the final source line only" rule. */
   systemAddendum?: string
+  /** Verses the project's reference Bible supplies for the Scripture this cell
+   *  quotes (AQU-1573). Rendered in the user message after precedingContext and
+   *  before `preSourceBlock`, so the verse to be reproduced sits next to the
+   *  source that quotes it. Independent of `bibleResourcesEnabled`. */
+  referenceScripture?: ReferenceScriptureEntry[]
   /** Labelled context block rendered in the user message after
    *  precedingContext and immediately BEFORE the final `Source:` line — never
    *  inside it. Used for the source-footnote listing. */
@@ -319,6 +378,11 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
       user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
+  // Reference Scripture (AQU-1573): last block before the source-footnote
+  // listing and the live source, because it is the text the draft must
+  // reproduce rather than evidence to learn from.
+  const referenceBlock = buildReferenceScriptureBlock(options.referenceScripture)
+  if (referenceBlock) user += `${referenceBlock}\n\n`
   if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
   user += `Source: ${stripTrailingBareMarkers(options.sourceText)}\nTranslation:`
 

@@ -409,6 +409,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
     "projectSettings.bible.disabledHint": "Turned off for this project. This is always respected, even for scripture projects.",
 
+    // ── Reference Bible (AQU-1573) — same card, independent of the switch above ──
+    "projectSettings.referenceBible.label": "Reference Bible",
+    "projectSettings.referenceBible.description":
+      "When a source cell quotes Scripture, AI drafts reproduce the wording of these versions instead " +
+      "of translating the quotation again.",
+    "projectSettings.referenceBible.independentHint":
+      "Works whether or not Bible resources above are on — pick this for sermons, devotionals, " +
+      "curriculum, and books that quote Scripture.",
+    "projectSettings.referenceBible.capHint":
+      "Maximum reached. Clear a version to choose a different one.",
+
     // ── Import card ──
     "projectSettings.import.excludeFrontMatterLabel": "Exclude USFM front matter",
     "projectSettings.import.excludeFrontMatterDescription":

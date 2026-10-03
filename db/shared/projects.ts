@@ -416,11 +416,15 @@ export async function updateProjectSettingsShared(
   const thresholdChanged = oldThreshold !== newThreshold
   // Lane ids are minted inside the attempt. The settings write is in the same
   // transaction, so a uq_lanes_id collision rolls the version change back too.
+  // The existing lane rows stop a stale targetLanes entry minting a lane (AQU-1585).
   const batchWithLanes = (head: AquillaStatement[]) =>
     retryingLaneIdCollision(() =>
       db.batch([
         ...head,
-        ...ensureProjectLaneStmts(db, input.projectId, { settings: normalizedSettings }),
+        ...ensureProjectLaneStmts(db, input.projectId, {
+          settings: normalizedSettings,
+          existingLanes: current.lanes ?? [],
+        }),
       ]),
     )
 

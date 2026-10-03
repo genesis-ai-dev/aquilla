@@ -24,6 +24,7 @@ import {
 } from "../../src/lib/lanes/backfill-plan"
 import { planNewTargetLane, type ExistingLaneIdentity } from "../../src/lib/lanes/lane-create"
 import { laneNameProblem, type LaneNameProblem } from "../../src/lib/lanes/lane-name"
+import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
@@ -164,6 +165,53 @@ export async function retryingLaneIdCollision<T>(run: () => Promise<T>): Promise
   throw new Error("lane id collision retries exhausted")
 }
 
+/** The shape {@link isDefaultLaneUnderAnotherName} needs of an existing lane row. */
+export type ExistingLaneShape = {
+  role: string
+  name: string
+  legacyTag: string | null
+}
+
+/**
+ * AQU-1585: is this planned target lane just the default lane under the name it
+ * already carries?
+ *
+ * `planLanesForProject` drops the registry entry for the primary language,
+ * because the primary *is* the default lane (`legacy_tag ''`) rather than a lane
+ * beside it. But it recognises the primary only by today's
+ * `settings.targetLanguage`, so the moment someone changes the project target
+ * language the registry's entry for the outgoing language stops looking like the
+ * primary — and a project set up English -> Spanish and then moved to Portuguese
+ * grew a second, empty "Spanish" lane next to the default lane that already was
+ * Spanish.
+ *
+ * A caller that knows the project's lane rows can see that directly: a registry
+ * entry naming the language the default lane is already called is that lane, not
+ * a new one. Matching is by name, under the same rule
+ * {@link isPrimaryRegistryLane} applies to `targetLanguage` — so a regional lane
+ * beside its base primary ("fr-CA" next to "French", AQU-1532) still counts as
+ * its own lane. Name is the right key and not the language code: two lanes may
+ * deliberately share a language (AQU-1598), but lane names are unique
+ * (`laneNameProblem`), so only the default lane can be called what it is called.
+ *
+ * Lanes a caller genuinely registers through the settings registry — the
+ * external Agent API's only way to declare one, and the create dialog's extra
+ * languages — name a different language, so they are untouched by this.
+ */
+export function isDefaultLaneUnderAnotherName(
+  legacyTag: string | null,
+  existingLanes: ReadonlyArray<ExistingLaneShape>,
+): boolean {
+  // The source lane (null) and the default lane itself ('') are never dropped.
+  if (!legacyTag) return false
+  const defaultLane = existingLanes.find(
+    (lane) => lane.role === "target" && lane.legacyTag === "",
+  )
+  // No default lane yet, or one still unnamed, says nothing about this entry.
+  if (!defaultLane || defaultLane.name === BLANK_LANE_PLACEHOLDER) return false
+  return isPrimaryRegistryLane(legacyTag, defaultLane.name)
+}
+
 /**
  * Statements that create (or promote-from-placeholder) the project's lanes.
  * Callers that already have a batch should splice these in; otherwise use
@@ -177,15 +225,32 @@ export function ensureProjectLaneStmts(
   opts?: {
     settings?: LaneSettingsBlob | Record<string, unknown> | null
     dataTargetTags?: string[]
+    /**
+     * AQU-1585: the project's current lane rows, passed by a *settings write*
+     * (which has them already from `loadProjectSettings`). With them, a stale
+     * registry entry for the language the default lane already is cannot mint a
+     * duplicate lane — see {@link isDefaultLaneUnderAnotherName}. Omit them, as
+     * import and migration callers do, to plan lanes from the settings alone.
+     */
+    existingLanes?: ReadonlyArray<ExistingLaneShape>
   },
 ): AquillaStatement[] {
   const plan = planLanesForProject(
     settingsToLaneInputs(opts?.settings, opts?.dataTargetTags ?? []),
   )
-  return plan.map((row, i) =>
+  const existing = opts?.existingLanes
+  // Keep the plan's own indexes as positions, so dropping a stale registry
+  // entry does not renumber the lanes that survive it.
+  const planned = plan.map((row, i) => ({ row, position: i }))
+  const kept = existing
+    ? planned.filter(({ row }) => !isDefaultLaneUnderAnotherName(row.legacyTag, existing))
+    : planned
+  return kept.map(({ row, position }) =>
     row.role === "source"
-      ? db.prepare(INSERT_SOURCE).bind(newLaneId(), projectId, row.name, row.langCode, i)
-      : db.prepare(INSERT_TARGET).bind(newLaneId(), projectId, row.name, row.langCode, row.legacyTag, i),
+      ? db.prepare(INSERT_SOURCE).bind(newLaneId(), projectId, row.name, row.langCode, position)
+      : db
+          .prepare(INSERT_TARGET)
+          .bind(newLaneId(), projectId, row.name, row.langCode, row.legacyTag, position),
   )
 }
 

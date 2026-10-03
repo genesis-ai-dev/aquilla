@@ -4054,6 +4054,7 @@ export const id: Catalog = {
   "projectSettings.field.apiKeyNoAuth": "Kosongkan bila tanpa autentikasi",
   "projectSettings.advancedLlm.modelPlaceholder": "Ketik sebuah id model",
   "projectSettings.shared.lastEdited": "Terakhir diubah oleh {name} · {date}",
+  "projectSettings.shared.lastEditedOn": "Terakhir diubah · {date}",
   "projectSettings.shared.nameHint": "Ditampilkan di seluruh ruang kerja dan daftar proyek.",
   "projectSettings.timeline.lockLabel": "Kunci pewaktuan agar tidak bisa diseret",
   "projectSettings.timeline.lockHint": "Aktif secara bawaan, dan berlaku bagi semua orang — ketua proyek sekalipun. Pewaktuannya berasal dari file milik klien sendiri, dan satu cip yang terseret memindahkan sebuah baris bagi seluruh tim tanpa ada pembanding sesudahnya. Selama ini aktif, gagangnya hilang dari setiap baris dan isyarat hasil impor; baris yang ditambahkan di sini tetap bisa digeser, dan rekaman tetap dapat ditempatkan pada barisnya seperti biasa. Hanya pengelola yang dapat menonaktifkannya, dan lini masanya akan menyatakan hal itu selama masih nonaktif.",

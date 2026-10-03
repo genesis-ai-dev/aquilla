@@ -13,6 +13,8 @@ import {
   type ProjectWideSettings,
   type ProjectSettingsResponse,
   type ProjectLaneView,
+  type ProjectSettingsEditor,
+  settingsEditorName,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -255,7 +257,7 @@ export interface UseProjectSettings {
   /** Server version of the settings row. null = never fetched yet. */
   version: number | null
   /** "When was this last edited and by whom" — null if no server row yet. */
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   updatedAt: string | null
   /** True after the first GET resolves (success OR network failure). */
   hasFetched: boolean
@@ -896,7 +898,7 @@ export function useProjectSettings(
       setConflict(true)
       posthog.capture("project settings sync conflict", {
         project_id: projectId,
-        conflicting_user: result.latest.updatedBy?.username ?? null,
+        conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
       return { kind: "conflict", latest: result.latest }
     }

@@ -288,6 +288,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
     "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
@@ -1059,6 +1060,14 @@ export const projectSettings = defineNamespace({
           "period. Separated by a middle dot.",
         placeholders: {
           name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
+      "projectSettings.shared.lastEditedOn": {
+        description:
+          "The same provenance line as lastEdited, when the app does not know " +
+          "who saved the shared settings, only when. Not a sentence, no period.",
+        placeholders: {
           date: "Date of that save, already formatted for the viewer's locale.",
         },
       },

@@ -63,6 +63,8 @@ const patch = vi.fn()
 let currentProject: ProjectRecord = makeProject()
 let currentSettings: ProjectWideSettings = {}
 let currentHasFetched = true
+let currentUpdatedAt: string | null = null
+let currentUpdatedBy: unknown = null
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -78,8 +80,8 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     reasonCannotEdit: null,
     patch,
     version: 1,
-    updatedAt: null,
-    updatedBy: null,
+    updatedAt: currentUpdatedAt,
+    updatedBy: currentUpdatedBy,
     conflict: false,
     dismissConflict: vi.fn(),
     settings: currentSettings,
@@ -181,6 +183,8 @@ beforeEach(() => {
   currentProject = makeProject()
   currentSettings = {}
   currentHasFetched = true
+  currentUpdatedAt = null
+  currentUpdatedBy = null
 })
 
 describe("ProjectSettings — stored shared settings on a direct load (PR1 leftover #2)", () => {
@@ -268,5 +272,24 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
 
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
     expect(patch.mock.calls[0]?.[0]).toEqual({ allowSelfValidation: true })
+  })
+})
+
+// Walk 10-02: the identity worker names the saver by user id only, and the
+// General page read "Last edited by undefined · Oct 2, 2026" off it.
+describe("ProjectSettings — the Last edited line under the project name", () => {
+  it("gives the date alone when the response names the saver by id only", () => {
+    currentUpdatedAt = "2026-10-02T12:00:00Z"
+    currentUpdatedBy = 1
+    render(tree("general"))
+    expect(screen.getByText(/^Last edited Oct 2, 2026$/)).toBeInTheDocument()
+    expect(screen.queryByText(/undefined/)).toBeNull()
+  })
+
+  it("names the saver when the response carries a username", () => {
+    currentUpdatedAt = "2026-10-02T12:00:00Z"
+    currentUpdatedBy = { id: 1, username: "dev" }
+    render(tree("general"))
+    expect(screen.getByText("Last edited by dev · Oct 2, 2026")).toBeInTheDocument()
   })
 })

@@ -673,7 +673,7 @@ describe("useProjectSettings — write path", () => {
       res = await result.current.patch({ sourceLanguage: "fr" })
     })
     expect(res.kind).toBe("conflict")
-    if (res.kind === "conflict") expect(res.latest.updatedBy?.username).toBe("alex")
+    if (res.kind === "conflict") expect(restClient.settingsEditorName(res.latest.updatedBy)).toBe("alex")
     expect(result.current.settings.sourceLanguage).toBe("de")
     expect(result.current.version).toBe(2)
     // Two IDB writes expected: the optimistic local apply with "fr", then the

@@ -376,10 +376,27 @@ export function resolveCellEditingFloor(
   }
 }
 
+/**
+ * Who last saved the shared settings, as the identity worker sends it: the
+ * saver's user id (`project_settings.updated_by`, a number, or a string id for
+ * an agent-sourced save). The object form is what this type used to promise
+ * and the server never sent; it stays accepted so a server that does send a
+ * name is shown it. Read it through `settingsEditorName`.
+ */
+export type ProjectSettingsEditor = number | string | { id: number; username: string } | null
+
+/** The saver's username when the response carries one, else null. A bare id
+ *  is not a name: the General page printed "Last edited by undefined" by
+ *  reading `.username` off a number (walk 10-02). */
+export function settingsEditorName(editor: ProjectSettingsEditor | undefined): string | null {
+  if (editor == null || typeof editor !== "object") return null
+  return typeof editor.username === "string" && editor.username !== "" ? editor.username : null
+}
+
 export interface ProjectSettingsResponse {
   version: number
   updatedAt: string
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   settings: ProjectWideSettings
   /**
    * AQU-1083: the org default this project inherits when `settings` carries no

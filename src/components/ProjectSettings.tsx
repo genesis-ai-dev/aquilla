@@ -93,6 +93,7 @@ import {
   renameProjectLane,
   setProjectLaneArchived,
   fetchLaneLastChange,
+  settingsEditorName,
   type LaneLastChangeResult,
 } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -128,7 +129,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -359,6 +360,15 @@ type SharedBaselineKey = (typeof SHARED_BASELINE_KEYS)[number]
 
 /** Value equality for a baseline field: arrays and objects by content (the
  *  same JSON comparison isDirty and handleSave use), everything else by `===`. */
+/** The provenance line under the project name. The settings response names
+ *  the saver only by id, so without a username it gives the date alone rather
+ *  than "Last edited by undefined" (walk 10-02). */
+function lastEditedLine(name: string | null, date: string, t: TFunction): string {
+  return name
+    ? t("projectSettings.shared.lastEdited", { name, date })
+    : t("projectSettings.shared.lastEditedOn", { date })
+}
+
 function sameSettingValue(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (a == null || b == null || typeof a !== "object" || typeof b !== "object") return false
@@ -1152,7 +1162,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           toast.add({
             type: "warning",
             title: t("projectSettings.save.conflictToast", {
-              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
+              username: settingsEditorName(out.latest.updatedBy) ?? t("projectSettings.save.conflictFallbackUsername"),
             }),
           })
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
@@ -1848,11 +1858,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
-                  sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
-                    ? t("projectSettings.shared.lastEdited", {
-                        name: sharedUpdatedBy.username,
-                        date: new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-                      })
+                  sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
+                    ? lastEditedLine(
+                        settingsEditorName(sharedUpdatedBy),
+                        new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+                        t,
+                      )
                     : t("projectSettings.shared.nameHint")
                 }
                 control={

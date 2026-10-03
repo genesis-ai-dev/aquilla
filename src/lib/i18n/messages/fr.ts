@@ -4050,6 +4050,7 @@ export const fr: Catalog = {
   "projectSettings.field.apiKeyNoAuth": "Laisser vide pour aucune authentification",
   "projectSettings.advancedLlm.modelPlaceholder": "Saisissez un identifiant de modèle",
   "projectSettings.shared.lastEdited": "Dernière modification par {name} · {date}",
+  "projectSettings.shared.lastEditedOn": "Dernière modification · {date}",
   "projectSettings.shared.nameHint": "Affiché dans tout l'espace de travail et la liste des projets.",
   "projectSettings.timeline.lockLabel": "Verrouiller les minutages contre le glissement",
   "projectSettings.timeline.lockHint": "Activé par défaut, et pour tout le monde — responsables de projet inclus. Les minutages proviennent du fichier même du client, et une puce déplacée déplace une ligne pour toute l'équipe sans rien pour la comparer ensuite. Tant que c'est activé, les poignées disparaissent de chaque ligne et repère importés ; une ligne ajoutée ici peut toujours être déplacée, et les enregistrements peuvent toujours être placés par rapport à leurs lignes comme d'habitude. Seul un mainteneur peut le désactiver, et la timeline l'indique tant que c'est désactivé.",

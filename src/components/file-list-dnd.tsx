@@ -1,8 +1,9 @@
 // AQU-1647: pointer dragging for the editor file sidebar.
 //
 // Which slot a drop landed on lives in `file-list-dnd-model`; the numbers
-// written for that slot still come from `planFileMove`. Changing groups is
-// "Move to corpus…", which asks first. Keyboard reordering stays on Move up /
+// written for that slot still come from `planFileMove` / `planFileInsert`.
+// A custom corpus accepts a file dragged from another custom corpus. Old and
+// New Testament folders do not. Keyboard reordering stays on Move up /
 // Move down; there is no keyboard sensor, and the library's space-bar
 // instructions are cleared so a screen reader is not told about a gesture
 // this list does not offer.
@@ -54,12 +55,18 @@ const accessibility = {
   },
 }
 
-// Hovering a different group reports overIndex -1. Shifting rows then would
-// preview a move we are about to refuse.
+// A file that is not one of this group's items reports activeIndex -1. That is
+// a refusal, or the moment before the preview puts the file in the other
+// corpus. Shifting rows then would preview a move this list is not making.
 const sameGroupVerticalStrategy: SortingStrategy = (args) => {
-  if (args.overIndex < 0) return null
+  if (args.overIndex < 0 || args.activeIndex < 0) return null
   return verticalListSortingStrategy(args)
 }
+
+// The preview has already placed the file in its slot. The shift strategy
+// would move it a second time, so the layout itself is the position and the
+// sortable's own layout animation is what slides the neighbours.
+const layoutHoldStrategy: SortingStrategy = () => null
 
 const rowSlide = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
 
@@ -165,17 +172,23 @@ function ActiveFileReorder({
 export function CorpusGroupFrame({
   droppable,
   label,
+  acceptsFileTransfer = false,
   groupRef,
   children,
 }: {
   droppable: boolean
   label: string
+  acceptsFileTransfer?: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
   if (!droppable) return <div ref={groupRef}>{children}</div>
   return (
-    <DroppableCorpusGroup label={label} groupRef={groupRef}>
+    <DroppableCorpusGroup
+      label={label}
+      acceptsFileTransfer={acceptsFileTransfer}
+      groupRef={groupRef}
+    >
       {children}
     </DroppableCorpusGroup>
   )
@@ -185,16 +198,19 @@ export function GroupFileRows({
   sortable,
   label,
   fileIds,
+  holdLayout = false,
   children,
 }: {
   sortable: boolean
   label: string
   fileIds: string[]
+  /** The preview already put each row in its slot; don't shift them again. */
+  holdLayout?: boolean
   children: ReactNode
 }) {
   if (!sortable) return <div className="space-y-0.5">{children}</div>
   return (
-    <SidebarSortableGroup label={label} fileIds={fileIds}>
+    <SidebarSortableGroup label={label} fileIds={fileIds} holdLayout={holdLayout}>
       <div className="space-y-0.5">{children}</div>
     </SidebarSortableGroup>
   )
@@ -202,14 +218,19 @@ export function GroupFileRows({
 
 export function DroppableCorpusGroup({
   label,
+  acceptsFileTransfer,
   groupRef,
   children,
 }: {
   label: string
+  acceptsFileTransfer: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
-  const data = useMemo(() => ({ group: label }), [label])
+  const data = useMemo(
+    () => ({ group: label, acceptsFileTransfer }),
+    [label, acceptsFileTransfer],
+  )
   const { setNodeRef } = useDroppable({ id: `sidebar-drop:${label}`, data })
   return (
     <div
@@ -227,14 +248,20 @@ export function DroppableCorpusGroup({
 export function SidebarSortableGroup({
   label,
   fileIds,
+  holdLayout = false,
   children,
 }: {
   label: string
   fileIds: string[]
+  holdLayout?: boolean
   children: ReactNode
 }) {
   return (
-    <SortableContext id={`sidebar-sort:${label}`} items={fileIds} strategy={sameGroupVerticalStrategy}>
+    <SortableContext
+      id={`sidebar-sort:${label}`}
+      items={fileIds}
+      strategy={holdLayout ? layoutHoldStrategy : sameGroupVerticalStrategy}
+    >
       {children}
     </SortableContext>
   )
@@ -245,6 +272,7 @@ export function FileListRow({
   id,
   group,
   draggable,
+  acceptsFileTransfer = false,
   handleLabel,
   children,
 }: {
@@ -252,6 +280,7 @@ export function FileListRow({
   id: string
   group: string
   draggable: boolean
+  acceptsFileTransfer?: boolean
   /** Accessible name for the grip. Null when this row cannot start a drag. */
   handleLabel: string | null
   children: ReactNode
@@ -260,7 +289,13 @@ export function FileListRow({
     return <div className="group/file-slot relative">{children}</div>
   }
   return (
-    <SortableFileSlot id={id} group={group} draggable={draggable} handleLabel={handleLabel}>
+    <SortableFileSlot
+      id={id}
+      group={group}
+      draggable={draggable}
+      acceptsFileTransfer={acceptsFileTransfer}
+      handleLabel={handleLabel}
+    >
       {children}
     </SortableFileSlot>
   )
@@ -270,19 +305,29 @@ function SortableFileSlot({
   id,
   group,
   draggable,
+  acceptsFileTransfer,
   handleLabel,
   children,
 }: {
   id: string
   group: string
   draggable: boolean
+  acceptsFileTransfer: boolean
   handleLabel: string | null
   children: ReactNode
 }) {
-  const data = useMemo(() => ({ group }), [group])
+  const data = useMemo(
+    () => ({ group, acceptsFileTransfer }),
+    [group, acceptsFileTransfer],
+  )
   const { setNodeRef, setActivatorNodeRef, listeners, transform, transition, isDragging } = useSortable({
     id,
     data,
+    // The default layout animation gives up when the row's index changes
+    // because a file left for another corpus. Both lists should slide: the
+    // one that opened a gap, and the one that closed it.
+    animateLayoutChanges: ({ isSorting, wasDragging }) =>
+      (isSorting || wasDragging) && !prefersReducedMotion(),
     transition: prefersReducedMotion() ? { duration: 0, easing: "linear" } : rowSlide,
     // Renaming: the row holds a text input. It can still be a drop slot,
     // but it must not start a drag or the pointer leaves the selection.

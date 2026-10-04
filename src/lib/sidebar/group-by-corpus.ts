@@ -68,6 +68,17 @@ function normalize(marker: string): string {
 }
 
 /**
+ * A named corpus a person created (a season, a series), as opposed to the
+ * Old and New Testament folders and the synthetic Ungrouped bucket.
+ * Derived testament groups count as those folders too: their label is OT or
+ * NT only because a book code said so, and dragging must not retitle them.
+ */
+export function isCustomCorpusLabel(label: string, derived = false): boolean {
+  if (derived) return false
+  return label !== "OT" && label !== "NT" && label !== "Ungrouped"
+}
+
+/**
  * A `sortIndex` is only usable if it is a real finite number: the value
  * arrives as raw JSON off the wire (`files.meta`), where a newer client, a
  * hand-edited blob or a failed parse could leave a string, a NaN or an

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
+import { hasSortableData } from "@dnd-kit/sortable"
 import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import { groupByCorpus, isCustomCorpusLabel } from "@/lib/sidebar/group-by-corpus"
 import {
   hasPlacedFiles,
+  planFileInsert,
   planFileMove,
   planFileNudge,
   planFileOrderReset,
@@ -25,7 +27,15 @@ import {
   FileReorderDnd,
   GroupFileRows,
 } from "./file-list-dnd"
-import { readSidebarGroup, resolveSidebarFileDrop } from "./file-list-dnd-model"
+import {
+  corpusPreviewAction,
+  previewSidebarGroups,
+  readSidebarGroup,
+  resolveSidebarFileDrop,
+  sidebarInsertionIndex,
+  type CorpusTransferPreview,
+  type SidebarFileDrop,
+} from "./file-list-dnd-model"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
 import {
@@ -131,6 +141,12 @@ interface Props {
    * positions computed here — the arithmetic lives in one tested module.
    */
   onReorderFiles?: (writes: SortIndexWrite[]) => void
+  /**
+   * Move one file into another custom corpus and place it at the slot the
+   * pointer let go of. `writes` is the output of `planFileInsert` for the
+   * target group. Old and New Testament folders never take this path.
+   */
+  onTransferFile?: (fileId: string, corpus: string, writes: SortIndexWrite[]) => void
 }
 
 export function ExpandableFileList({
@@ -143,6 +159,7 @@ export function ExpandableFileList({
   filterFocus,
   canReorderFiles = false,
   onReorderFiles,
+  onTransferFile,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -156,6 +173,7 @@ export function ExpandableFileList({
   // AQU-1531: the dock mounts only the active panel, so a "Choose file" click
   // that opens this panel can only be answered from here, once the box exists.
   const filterInputRef = useRef<HTMLInputElement>(null)
+  const groupEls = useRef(new Map<string, HTMLDivElement>())
   useEffect(() => {
     if (!filterFocus) return
     filterFocus.register(() => filterInputRef.current?.focus())
@@ -204,13 +222,24 @@ export function ExpandableFileList({
   // of the group to the end. Reordering a list you can only partly see is also
   // not a thing anyone means to do.
   const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
+  const canTransferBetweenCustom = reorderEnabled
+    && groups.filter((group) => isCustomCorpusLabel(group.label, group.derived === true)).length >= 2
   const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
-  const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
+  const [refusingGroup, setRefusingGroup] = useState<string | null>(null)
+  // Where the gap is drawn while a file is dragged into another custom corpus.
+  // The commit still reads `groups`, which is the list before this picture.
+  const [transferPreview, setTransferPreview] = useState<CorpusTransferPreview | null>(null)
   const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
+
+  const displayGroups = useMemo(() => {
+    if (!transferPreview) return groups
+    return previewSidebarGroups(files, transferPreview, drag?.group ?? null)
+  }, [drag?.group, files, groups, transferPreview])
 
   function endDrag() {
     setDrag(null)
-    setRefusedGroup(null)
+    setRefusingGroup(null)
+    setTransferPreview(null)
   }
 
   function submit(writes: SortIndexWrite[]) {
@@ -223,24 +252,121 @@ export function ExpandableFileList({
     setDrag({ fileId: String(event.active.id), group })
   }
 
-  function handleDragOver(event: DragOverEvent) {
+  function groupSpan(label: string) {
+    return verticalSpan(groupEls.current.get(label)?.getBoundingClientRect())
+  }
+
+  // The preview puts the file into the target list, which shifts every
+  // sortable index in that list. The slot is counted in the original group,
+  // the one `planFileInsert` will write.
+  function dropAt(event: DragOverEvent | DragEndEvent): SidebarFileDrop {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
-    const next = resolution.kind === "refuse" ? resolution.group : null
-    setRefusedGroup((current) => current === next ? current : next)
+    if (resolution.kind !== "transfer" || !event.over || !hasSortableData(event.over)) return resolution
+    const target = groups.find((group) => group.label === resolution.toGroup)
+    if (!target) return resolution
+    const index = target.files.findIndex((file) => file.id === String(event.over?.id))
+    if (index < 0) return { kind: "cancel" }
+    return { ...resolution, toPosition: sidebarInsertionIndex(event.active, event.over, index) }
+  }
+
+  function showTransfer(preview: CorpusTransferPreview) {
+    setTransferPreview((current) =>
+      current?.fileId === preview.fileId
+        && current.toGroup === preview.toGroup
+        && current.toPosition === preview.toPosition
+        ? current
+        : preview,
+    )
+    if (collapsed.has(preview.toGroup)) toggleCollapsed(preview.toGroup)
+  }
+
+  function commitTransfer(preview: CorpusTransferPreview) {
+    const target = groups.find((group) => group.label === preview.toGroup)
+    if (!target) return
+    if (collapsed.has(preview.toGroup)) toggleCollapsed(preview.toGroup)
+    onTransferFile?.(
+      preview.fileId,
+      preview.toGroup,
+      planFileInsert(target.files, preview.fileId, preview.toPosition),
+    )
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const resolution = dropAt(event)
+    const pointerY = dragPointerY(event)
+    if (resolution.kind === "refuse") {
+      setRefusingGroup(resolution.group)
+      setTransferPreview(null)
+      return
+    }
+    setRefusingGroup(null)
+    if (resolution.kind === "transfer") {
+      const action = corpusPreviewAction(
+        "transfer",
+        pointerY,
+        groupSpan(resolution.toGroup),
+        verticalSpan(event.over?.rect),
+      )
+      if (action === "set") {
+        showTransfer({
+          fileId: resolution.fileId,
+          toGroup: resolution.toGroup,
+          toPosition: resolution.toPosition,
+        })
+      }
+      return
+    }
+    const source = drag?.group
+    const sourceRect = source ? groupSpan(source) : null
+    const action = resolution.kind === "cancel"
+      ? corpusPreviewAction("cancel", pointerY, sourceRect, null)
+      : corpusPreviewAction("move", pointerY, sourceRect, verticalSpan(event.over?.rect))
+    if (action === "clear") setTransferPreview(null)
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    const resolution = resolveSidebarFileDrop(event.active, event.over)
+    const resolution = dropAt(event)
+    const preview = transferPreview
+    const pointerY = dragPointerY(event)
+    const sourceRect = drag ? groupSpan(drag.group) : null
     endDrag()
-    if (resolution.kind !== "move") return
-    const target = groups.find((group) => group.label === resolution.group)
-    if (!target) return
-    submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+    if (resolution.kind === "move") {
+      const action = corpusPreviewAction("move", pointerY, sourceRect, verticalSpan(event.over?.rect))
+      if (action === "keep" && preview && preview.fileId === resolution.fileId) {
+        commitTransfer(preview)
+        return
+      }
+      const target = groups.find((group) => group.label === resolution.group)
+      if (!target) return
+      submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+      return
+    }
+    if (resolution.kind === "transfer") {
+      const action = corpusPreviewAction(
+        "transfer",
+        pointerY,
+        groupSpan(resolution.toGroup),
+        verticalSpan(event.over?.rect),
+      )
+      if (action === "set") {
+        commitTransfer({
+          fileId: resolution.fileId,
+          toGroup: resolution.toGroup,
+          toPosition: resolution.toPosition,
+        })
+        return
+      }
+      if (preview) commitTransfer(preview)
+      return
+    }
+    if (resolution.kind === "cancel" && preview) {
+      const action = corpusPreviewAction("cancel", pointerY, sourceRect, null)
+      if (action === "keep") commitTransfer(preview)
+    }
   }
 
   const draggedName = drag ? files.find((file) => file.id === drag.fileId)?.name ?? "" : ""
 
-  const groupEls = useRef(new Map<string, HTMLDivElement>())
   const visibleGroupLabels = useMemo(() => new Set(groups.map((g) => g.label)), [groups])
   function jumpToGroup(label: string) {
     if (collapsed.has(label)) toggleCollapsed(label)
@@ -318,14 +444,18 @@ export function ExpandableFileList({
           onDragCancel={endDrag}
         >
         <div className="p-2 space-y-2">
-          {groups.length === 0 && (
+          {displayGroups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
               {filter
                 ? t("nav.fileList.noFilesMatch", { filter })
                 : t("nav.fileList.noFilesImported")}
             </p>
           )}
-          {groups.map((group) => {
+          {displayGroups.map((group) => {
+            // Flags stay on the real group. The preview can temporarily empty
+            // a corpus or add a file to one; the grip and the drop target
+            // must not flicker while that picture is on screen.
+            const base = groups.find((item) => item.label === group.label) ?? group
             // group.label is the stable identity string (compared/keyed on
             // below); group.labelKey, set only on the synthetic "Ungrouped"
             // bucket, is what's actually shown to the user.
@@ -339,9 +469,15 @@ export function ExpandableFileList({
             const isEditingCorpus = editingCorpus === group.label
             // AQU-1569: a group of one has nothing to reorder, and "Reset
             // order" only means something once a file in it has been placed.
-            const canReorderGroup = reorderEnabled && group.files.length > 1
-            const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
-            const isRefusing = refusedGroup === group.label
+            // A lone file in a custom corpus can still be dragged into another
+            // custom corpus — that is the drag that replaces "Move to corpus…"
+            // for those groups. Testament folders never accept that drop.
+            const canReorderGroup = reorderEnabled && base.files.length > 1
+            const acceptsTransfer = canTransferBetweenCustom
+              && isCustomCorpusLabel(group.label, base.derived === true)
+            const rowSortable = canReorderGroup || acceptsTransfer
+            const canResetGroup = reorderEnabled && hasPlacedFiles(base.files)
+            const isRefusing = refusingGroup === group.label
             // A project whose files are all ungrouped shows no header
             // (showHeader is false), but its one group can still be given an
             // order — so the control cannot live only inside the header, or
@@ -359,7 +495,7 @@ export function ExpandableFileList({
                     setResetGroup({
                       label: group.label,
                       displayLabel,
-                      writes: planFileOrderReset(group.files),
+                      writes: planFileOrderReset(base.files),
                     })
                   }}
                   aria-label={t("nav.fileList.resetOrder", { group: displayLabel })}
@@ -369,13 +505,14 @@ export function ExpandableFileList({
               </AppTooltip>
             )
             return (
-              // The group is the drop boundary. Hovering its header, or any
-              // other group, is a refusal — a file does not change corpus by
-              // being dragged. That stays "Move to corpus…", which asks first.
+              // The group is the drop boundary. A custom corpus accepts a file
+              // from another custom corpus. A testament folder and Ungrouped
+              // stay refusals — those still go through "Move to corpus…".
               <CorpusGroupFrame
                 key={group.label}
                 droppable={reorderEnabled}
                 label={group.label}
+                acceptsFileTransfer={acceptsTransfer}
                 groupRef={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
@@ -452,26 +589,34 @@ export function ExpandableFileList({
                 )}
                 {!isCollapsed && (
                   <GroupFileRows
-                    sortable={canReorderGroup}
+                    sortable={rowSortable}
                     label={group.label}
                     fileIds={group.files.map((file) => file.id)}
+                    holdLayout={transferPreview !== null}
                   >
-                    {group.files.map((file, position) => {
+                    {group.files.map((file) => {
+                      const place = base.files.findIndex((item) => item.id === file.id)
                       const canExpand = fileHasSections(file)
                         || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       // Not while renaming: the row holds a text input, and a
                       // drag ancestor takes the pointer away from selecting inside it.
-                      const isDraggable = canReorderGroup && !isEditing
+                      const isDraggable = rowSortable && !isEditing
                       return (
                         <FileListRow
                           key={file.id}
-                          sortable={canReorderGroup}
+                          sortable={rowSortable}
                           id={file.id}
-                          group={group.label}
+                          group={drag?.fileId === file.id ? drag.group : group.label}
                           draggable={isDraggable}
-                          handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
+                          acceptsFileTransfer={acceptsTransfer}
+                          handleLabel={isDraggable
+                            ? t(
+                              canReorderGroup ? "nav.fileList.reorderHandle" : "nav.fileList.moveHandle",
+                              { name: file.name },
+                            )
+                            : null}
                         >
                           <div
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
@@ -512,11 +657,11 @@ export function ExpandableFileList({
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
-                            reorder={canReorderGroup ? {
-                              onUp: () => submit(planFileNudge(group.files, file.id, -1)),
-                              onDown: () => submit(planFileNudge(group.files, file.id, 1)),
-                              canUp: position > 0,
-                              canDown: position < group.files.length - 1,
+                            reorder={canReorderGroup && place >= 0 ? {
+                              onUp: () => submit(planFileNudge(base.files, file.id, -1)),
+                              onDown: () => submit(planFileNudge(base.files, file.id, 1)),
+                              canUp: place > 0,
+                              canDown: place < base.files.length - 1,
                             } : undefined}
                           />
                           {isExpanded && (
@@ -585,4 +730,18 @@ export function ExpandableFileList({
     </>
   )
 
+}
+
+function dragPointerY(event: { activatorEvent: Event; delta: { y: number } }): number | null {
+  const start = event.activatorEvent
+  if (!("clientY" in start)) return null
+  const clientY = start.clientY
+  return typeof clientY === "number" ? clientY + event.delta.y : null
+}
+
+function verticalSpan(
+  rect: { top: number; bottom: number } | null | undefined,
+): { top: number; bottom: number } | null {
+  if (!rect) return null
+  return { top: rect.top, bottom: rect.bottom }
 }

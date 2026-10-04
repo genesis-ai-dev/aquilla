@@ -14,6 +14,9 @@ const HARMONIZER_REASONS = [
   "harmonizer.quotes.closeHere",
   "harmonizer.reference.unclearSubject",
   "harmonizer.reference.impliedSubject",
+  "harmonizer.sentence.brokenCase",
+  "harmonizer.sentence.brokenOff",
+  "harmonizer.sentence.runOn",
 ] as const
 type HarmonizerReason = (typeof HARMONIZER_REASONS)[number]
 function isHarmonizerReason(key: string): key is HarmonizerReason {

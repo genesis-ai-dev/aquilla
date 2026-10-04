@@ -269,6 +269,8 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
 
@@ -324,6 +326,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    smartQuotes: project.smartQuotes ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
@@ -615,6 +618,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  const [smartQuotes, setSmartQuotes] = useState(false)
   // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
   const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
@@ -678,6 +682,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setSmartQuotes(b.smartQuotes)
     setTermMatching(b.termMatching)
   }, [])
 
@@ -749,6 +754,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // baseline moves with it.
     setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
     setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
+  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+
+  // Smart quotes live only in the shared settings blob too, so they never
+  // reach `project` on this page. Same once-only re-sync as the languages.
+  const smartQuotesResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!baseline || !sharedSettingsFetched) return
+    if (smartQuotesResyncedRef.current) return
+    smartQuotesResyncedRef.current = true
+    const next = sharedSettingsBlob?.smartQuotes ?? false
+    if (next === baseline.smartQuotes) return
+    setBaseline((prev) => (prev ? { ...prev, smartQuotes: next } : prev))
+    setSmartQuotes((prev) => (prev === baseline.smartQuotes ? next : prev))
   }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -849,6 +867,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
       importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      smartQuotes !== baseline.smartQuotes ||
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
@@ -862,7 +881,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter, termMatching,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -1081,6 +1100,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -1165,6 +1185,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        smartQuotes,
         termMatching,
       }
       setBaseline(newBaseline)
@@ -1217,7 +1238,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1280,7 +1301,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
@@ -1850,6 +1871,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
+                description={t("projectSettings.info.smartQuotesDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="smart-quotes"
+                      checked={smartQuotes}
+                      onCheckedChange={(checked) => setSmartQuotes(checked)}
+                      disabled={!canEditShared}
+                      aria-label={t("projectSettings.info.smartQuotesLabel")}
                     />
                   </DisabledFieldTooltip>
                 }

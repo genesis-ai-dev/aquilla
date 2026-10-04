@@ -191,6 +191,7 @@ import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
+import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -1627,6 +1628,14 @@ export function ProjectWorkspace() {
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  const mentionCellText = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const cell of cellSummaries) {
+      const text = cell.original.trim() || cell.translated.trim()
+      if (text) map.set(cell.id, text)
+    }
+    return map
+  }, [cellSummaries])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -12713,6 +12722,15 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
+            {project && (
+              <NotificationsInbox
+                projectId={project.id}
+                readerUsername={currentUsername}
+                comments={allProjectComments}
+                files={project.files.map((file) => ({ id: file.id, name: file.name }))}
+                cellTextById={mentionCellText}
+              />
+            )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}

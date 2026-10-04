@@ -4,6 +4,7 @@ import {
   draftReviewHref,
   editorCellHref,
   editorCommentHref,
+  focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
   resolveDeepLinkLane,
   resolveDeepLinkLaneFromSearchParams,
@@ -160,5 +161,14 @@ describe('comment deep links', () => {
     const href = editorCommentHref('p1', 'f1', 'cell 2')
     const params = new URL(href, 'https://app.test').searchParams
     expect(openCommentsCellFromSearchParams(params)).toBe('cell 2')
+    expect(focusedCommentFromSearchParams(params)).toBeNull()
+  })
+
+  it('names the reply so the open thread can scroll to it', () => {
+    const href = editorCommentHref('p1', 'f1', 'c1', 'reply 9')
+    const params = new URL(href, 'https://app.test').searchParams
+    expect(params.get('comments')).toBe('1')
+    expect(openCommentsCellFromSearchParams(params)).toBe('c1')
+    expect(focusedCommentFromSearchParams(params)).toBe('reply 9')
   })
 })

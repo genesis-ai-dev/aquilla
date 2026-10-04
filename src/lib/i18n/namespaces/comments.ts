@@ -78,8 +78,19 @@ export const comments = defineNamespace({
     "comments.drawer.noComments": "No comments yet.",
     "comments.drawer.loadError": "Couldn't load comments. Existing threads may be missing.",
     "comments.drawer.newThreadHeading": "New thread",
-    "comments.drawer.newThreadPlaceholder": "Start a new comment thread...",
+    "comments.drawer.newThreadPlaceholder": "Leave a comment...",
     "comments.drawer.post": "Post",
+
+    // In-app mention inbox (workspace header bell)
+    "comments.inbox.title": "Notifications",
+    "comments.inbox.unreadCount": "{count} unread",
+    "comments.inbox.emptyTitle": "No mentions yet",
+    "comments.inbox.empty": "When a teammate @mentions you in a comment, it shows up here.",
+    "comments.inbox.markAllRead": "Mark all as read",
+    "comments.inbox.unreadBadge": "Unread",
+    "comments.inbox.footer": "Mentions in this project.",
+    "comments.inbox.openAria": "Notifications",
+    "comments.inbox.openUnreadAria": "Notifications, {count} unread",
   },
   context: {
     _context: {
@@ -377,20 +388,63 @@ export const comments = defineNamespace({
       },
       "comments.drawer.newThreadHeading": {
         description:
-          "Small label above the new-thread composer at the bottom of the per-cell " +
-          "drawer.",
+          "Accessible name of the new-thread field at the bottom of the per-cell " +
+          "drawer. Not shown on screen.",
         screenshot: "cell-editor",
       },
       "comments.drawer.newThreadPlaceholder": {
-        description: "Placeholder text of the new-thread textarea in the per-cell drawer.",
+        description:
+          "Placeholder of the new-thread field at the bottom of the per-cell drawer. " +
+          "Short prompt. Typing @ still mentions a project member.",
         screenshot: "cell-editor",
       },
       "comments.drawer.post": {
         description:
-          "Button that submits the new-thread textarea, creating the first comment of " +
-          "a new thread on this cell. Imperative verb naming the act of publishing, " +
-          "not a generic 'Add' or 'Save'.",
+          "Accessible name of the arrow button at the bottom right of the new-thread " +
+          "field. It stays an outline icon button until the field has text, then " +
+          "fills in. Enter posts the comment. Imperative verb.",
         screenshot: "cell-editor",
+      },
+      "comments.inbox.title": {
+        description: "Heading of the notifications popover opened from the bell in the project header.",
+      },
+      "comments.inbox.unreadCount": {
+        description:
+          "Count shown at the right of the notifications heading while mentions are unread. " +
+          "{count} is the number.",
+        placeholders: { count: "How many mention notifications are still unread." },
+      },
+      "comments.inbox.emptyTitle": {
+        description: "Short heading of the empty notifications popover.",
+      },
+      "comments.inbox.empty": {
+        description:
+          "Body under the empty-state heading when nobody has @mentioned the signed-in " +
+          "user in a comment on this project.",
+      },
+      "comments.inbox.markAllRead": {
+        description:
+          "Button in the notifications popover that marks every visible mention as read. " +
+          "Shown only while at least one mention is unread.",
+      },
+      "comments.inbox.unreadBadge": {
+        description: "Small badge on a notification row that has not been opened yet.",
+      },
+      "comments.inbox.footer": {
+        description:
+          "One-line note at the bottom of the notifications popover. Says these rows are " +
+          "mentions in the project that is open.",
+      },
+      "comments.inbox.openAria": {
+        description:
+          "Accessible name of the notifications bell in the project header when nothing " +
+          "is unread. Not visible; the control is a bell icon.",
+      },
+      "comments.inbox.openUnreadAria": {
+        description:
+          "Accessible name of the notifications bell when one or more mentions are unread. " +
+          "{count} is the number of unread mentions.",
+        placeholders: { count: "How many mention notifications are still unread." },
       },
     },
   },

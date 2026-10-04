@@ -39,9 +39,23 @@ export function stripAgentCommentMarker(label: string): string {
     : label
 }
 
+/**
+ * A confirmed mention. Typed `@name` is ordinary text and does not notify
+ * anyone. Enter (or a click on the suggestion) stores this token instead.
+ * KEEP IN SYNC with sync-worker/src/notification-email.ts extractMentions.
+ */
+const MENTION_TOKEN = /@\[([a-zA-Z][a-zA-Z0-9_]*)\]/g
+
+/**
+ * A confirmed mention, matching Linear's rendered user tag: an inline
+ * medium-weight `@Name` with no pill. The composer marks the same node
+ * `contenteditable=false` so it deletes as one object.
+ */
+export const MENTION_CHIP_CLASS = "mention font-medium text-foreground"
+
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
-  const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g
+  const re = new RegExp(MENTION_TOKEN.source, "g")
   let match: RegExpExecArray | null
   while ((match = re.exec(text)) !== null) {
     mentions.add(match[1])

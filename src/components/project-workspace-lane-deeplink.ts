@@ -120,6 +120,9 @@ export function defaultLaneDraftReviewHref(
  */
 export const OPEN_COMMENTS_PARAM = "comments"
 
+/** The comment (often a reply) a deep link asks the open thread to scroll to. */
+export const FOCUS_COMMENT_PARAM = "commentId"
+
 /**
  * The cell whose comment thread a deep link asks to have open, or `null`.
  *
@@ -149,8 +152,25 @@ export function editorCommentHref(
   projectId: string,
   fileId: string,
   cellId?: string | null,
+  commentId?: string | null,
 ): string {
   const base = `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}`
   if (!cellId) return base
-  return `${base}?cellId=${encodeURIComponent(cellId)}&${OPEN_COMMENTS_PARAM}=1`
+  const query = [
+    `cellId=${encodeURIComponent(cellId)}`,
+    `${OPEN_COMMENTS_PARAM}=1`,
+    commentId ? `${FOCUS_COMMENT_PARAM}=${encodeURIComponent(commentId)}` : "",
+  ].filter(Boolean).join("&")
+  return `${base}?${query}`
+}
+
+/**
+ * The comment a deep link asks the open thread to scroll to and highlight,
+ * or `null` when the link only names the cell.
+ */
+export function focusedCommentFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): string | null {
+  const commentId = searchParams.get(FOCUS_COMMENT_PARAM)
+  return commentId ? commentId : null
 }

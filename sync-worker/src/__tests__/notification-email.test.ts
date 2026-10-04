@@ -31,15 +31,16 @@ type SendArg = Parameters<EmailService['send']>[0]
 
 describe('extractMentions (inline copy)', () => {
   it('finds @username mentions', () => {
-    expect(extractMentions('Hey @alice check this')).toEqual(['alice'])
+    expect(extractMentions('Hey @[alice] check this')).toEqual(['alice'])
+    expect(extractMentions('Hey @alice check this')).toEqual([])
   })
 
   it('finds multiple mentions', () => {
-    expect(extractMentions('@alice and @bob_smith both')).toEqual(['alice', 'bob_smith'])
+    expect(extractMentions('@[alice] and @[bob_smith] both')).toEqual(['alice', 'bob_smith'])
   })
 
   it('deduplicates mentions', () => {
-    expect(extractMentions('@alice talked to @alice')).toEqual(['alice'])
+    expect(extractMentions('@[alice] talked to @[alice]')).toEqual(['alice'])
   })
 
   it('ignores email-like patterns', () => {

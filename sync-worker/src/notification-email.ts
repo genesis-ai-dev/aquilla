@@ -30,12 +30,19 @@ import { ROLE } from './events/role-policy'
  */
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
-  const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g
+  // Confirmed mentions only. Typed "@name" is plain text. KEEP IN SYNC with
+  // src/lib/comments/comment-helpers.ts extractMentions.
+  const re = /@\[([a-zA-Z][a-zA-Z0-9_]*)\]/g
   let match: RegExpExecArray | null
   while ((match = re.exec(text)) !== null) {
     mentions.add(match[1])
   }
   return Array.from(mentions)
+}
+
+/** Show a confirmed mention as @name in plain-text mail. */
+export function mentionDisplayText(text: string): string {
+  return text.replace(/@\[([a-zA-Z][a-zA-Z0-9_]*)\]/g, '@$1')
 }
 
 export interface NotificationEmailPayload {
@@ -513,7 +520,7 @@ export async function sendCommentNotifications(
     ])
 
     const commentsUrl = `${baseUrl}/project/${projectId}/comments`
-    const excerpt = body.slice(0, 200)
+    const excerpt = mentionDisplayText(body).slice(0, 200)
     const authorDisplay = author
     const threadTopic = threadTopicFromBody(rootBody ?? body)
 

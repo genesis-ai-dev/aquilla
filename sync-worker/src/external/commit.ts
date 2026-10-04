@@ -955,17 +955,16 @@ export async function applyPlanImport(
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
-           id, project_id, artifact_id, file_id, binding_role, target_lang,
+           id, project_id, artifact_id, file_id, binding_role,
            member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         ) VALUES (?, ?, ?::uuid, ?, 'source', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
+         ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
            fidelity = excluded.fidelity,
            manifest = excluded.manifest,
            recipe = excluded.recipe,
-           lane_id = COALESCE(excluded.lane_id, artifact_bindings.lane_id),
            updated_at = now()`,
       )
       .bind(

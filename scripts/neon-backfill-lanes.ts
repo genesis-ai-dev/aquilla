@@ -104,13 +104,9 @@ function targetOnlyUpdate(table: string): string {
              AND l.role = 'target' AND l.legacy_tag = t.target_lang`
 }
 
-// artifact_bindings: source bindings -> the source lane; the rest by legacy_tag.
-const ARTIFACT_BINDINGS_UPDATE = `UPDATE artifact_bindings t SET lane_id = l.id
-    FROM lanes l
-   WHERE t.project_id = ? AND t.lane_id IS NULL
-     AND l.project_id = t.project_id
-     AND ( (t.binding_role = 'source' AND l.role = 'source')
-        OR (t.binding_role <> 'source' AND l.role = 'target' AND l.legacy_tag = t.target_lang) )`
+// artifact_bindings is NOT in this backfill: migration 0108 made its lane_id
+// NOT NULL (gated on zero NULLs) and AQU-1611 then dropped its target_lang, so
+// there is no tag left to resolve a lane from and no row left to fill.
 
 // cells: side='source' -> the source lane; side='target' -> lane by legacy_tag.
 const CELLS_UPDATE = `UPDATE cells c SET lane_id = l.id
@@ -163,14 +159,13 @@ const MAINTAINER = 600
 const VIEWER = 100
 
 // Distinct target_lang values that actually appear in the data (target side).
-// One statement, 8 project_id binds; the non-cells tables are tiny and cells is
+// One statement, 7 project_id binds; the non-cells tables are tiny and cells is
 // index-covered by (project_id, file_id, side, target_lang).
 const DISTINCT_TAGS = `SELECT DISTINCT target_lang FROM (
     SELECT target_lang FROM cells WHERE project_id = ? AND side = 'target'
     UNION SELECT target_lang FROM cell_validators WHERE project_id = ?
     UNION SELECT target_lang FROM file_section_progress WHERE project_id = ?
     UNION SELECT target_lang FROM assignments WHERE project_id = ?
-    UNION SELECT target_lang FROM artifact_bindings WHERE project_id = ? AND binding_role <> 'source'
     UNION SELECT target_lang FROM scene_briefs WHERE project_id = ?
     UNION SELECT target_lang FROM contextual_runs WHERE project_id = ?
     UNION SELECT target_lang FROM contextual_drafts WHERE project_id = ?
@@ -388,7 +383,7 @@ async function main(): Promise<void> {
     for (const p of projects) {
       const { results: tagRows } = await db
         .prepare(DISTINCT_TAGS)
-        .bind(p.id, p.id, p.id, p.id, p.id, p.id, p.id, p.id)
+        .bind(p.id, p.id, p.id, p.id, p.id, p.id, p.id)
         .all<{ target_lang: string }>()
       const dataTargetTags = tagRows.map((r) => r.target_lang)
 
@@ -423,8 +418,6 @@ async function main(): Promise<void> {
           const r = await db.prepare(targetOnlyUpdate(table)).bind(p.id).run()
           rowsUpdated[table] = (rowsUpdated[table] ?? 0) + (r.meta?.changes ?? 0)
         }
-        const ab = await db.prepare(ARTIFACT_BINDINGS_UPDATE).bind(p.id).run()
-        rowsUpdated['artifact_bindings'] = (rowsUpdated['artifact_bindings'] ?? 0) + (ab.meta?.changes ?? 0)
         const cells = await db.prepare(CELLS_UPDATE).bind(p.id).run()
         rowsUpdated['cells'] = (rowsUpdated['cells'] ?? 0) + (cells.meta?.changes ?? 0)
       }

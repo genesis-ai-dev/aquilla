@@ -250,6 +250,14 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
       files: [{ id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" }],
     })
+    // AQU-1611: the binding stores the lane, not the tag, so the lanes the
+    // header names have to exist for the writer's resolver to find them.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0),
+              ('lane-dflt', 'p1', 'target', 'Default', NULL, '', 1),
+              ('lane-frca', 'p1', 'target', 'French (CA)', 'fr-CA', 'fr-CA', 2)`,
+    ).run()
     await db.prepare(
       `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
        VALUES ('f1', 'p1', 'usfm', NULL, 'source-key', 12, 1)`,
@@ -273,9 +281,9 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
 
     expect(response?.status).toBe(200)
     const binding = await db.prepare(
-      `SELECT binding_role, target_lang FROM artifact_bindings WHERE artifact_id::text = ?`,
-    ).bind(artifactId).first<{ binding_role: string; target_lang: string }>()
-    expect(binding).toEqual({ binding_role: "target", target_lang: "fr-CA" })
+      `SELECT binding_role, lane_id FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ binding_role: string; lane_id: string }>()
+    expect(binding).toEqual({ binding_role: "target", lane_id: "lane-frca" })
     const sourceSidecar = await db.prepare(
       `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
     ).first<{ format: string; r2_key: string }>()

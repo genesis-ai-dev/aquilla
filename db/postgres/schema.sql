@@ -1443,7 +1443,9 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     file_id         TEXT NOT NULL,
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
-    target_lang     TEXT NOT NULL DEFAULT '',
+    -- AQU-1611: the lane IS the identity here; the legacy target_lang tag is
+    -- gone. A 'source' binding carries the project's source lane, every other
+    -- role the target lane it was uploaded against.
     lane_id         TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     member_path     TEXT NOT NULL DEFAULT '',
     profile_id      TEXT NOT NULL,
@@ -1454,7 +1456,8 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
+    CONSTRAINT artifact_bindings_lane_member_key
+      UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path),
     CONSTRAINT artifact_bindings_artifact_project_fkey
       FOREIGN KEY (artifact_id, project_id)
       REFERENCES artifacts(id, project_id)

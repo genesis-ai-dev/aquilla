@@ -175,18 +175,18 @@ async function handleSourceBindingRequest(
   try {
     await env.AQUILLA_PG.prepare(
       `INSERT INTO artifact_bindings (
-         id, project_id, artifact_id, file_id, binding_role, target_lang,
+         id, project_id, artifact_id, file_id, binding_role,
          member_path, profile_id, profile_version, fidelity, manifest, lane_id
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})
-       ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})
+       ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,
          fidelity = EXCLUDED.fidelity,
-         lane_id = COALESCE(EXCLUDED.lane_id, artifact_bindings.lane_id),
          updated_at = now()`,
-      // AQU-1240 slice 8: 'support'/'target' role -> target lane by tag.
-    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, targetLang, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
+      // AQU-1611: X-Artifact-Target-Lang names the lane, which is all the row
+      // stores. AQU-1240 slice 8: 'support'/'target' role -> target lane by tag.
+    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
   } catch (error) {
     console.error("[source-upload] artifact binding failed:", error)
     return withCors(Response.json({ error: "Artifact binding failed" }, { status: 500 }), request)

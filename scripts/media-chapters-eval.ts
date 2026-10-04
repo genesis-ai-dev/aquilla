@@ -255,11 +255,15 @@ function table(rows: readonly Row[]): void {
   }
 }
 
+/** Total media duration, or 0 for a dataset with no cues — a labelled file is
+ *  user-supplied, so an empty one must report nothing rather than throw. */
+function durationOf(dataset: Dataset): number {
+  const last = dataset.cues.at(-1)
+  return last ? last.endMs - dataset.cues[0].startMs : 0
+}
+
 function reportCost(datasets: readonly Dataset[], candidates: number): void {
-  const totalMs = datasets.reduce(
-    (total, dataset) => total + (dataset.cues.at(-1)!.endMs - dataset.cues[0].startMs),
-    0,
-  )
+  const totalMs = datasets.reduce((total, dataset) => total + durationOf(dataset), 0)
   const hours = totalMs / 3_600_000
   const perHour = hours > 0 ? candidates / hours : 0
   const callsPerHour = Math.ceil(perHour / MAX_CANDIDATES_PER_REQUEST)
@@ -291,7 +295,7 @@ const dump: Record<string, (number | null)[]> | undefined = levelsPath
 
 console.log(
   `AQU-1388 media chaptering eval — boundary F1 at +-3s and +-10s,`
-  + ` truth at >= ${PASSAGE_MIN_TRANSLATIONS}/20 translations,`
+  + ` truth ${cuesPath ? `from ${cuesPath}` : `at >= ${PASSAGE_MIN_TRANSLATIONS}/20 translations`},`
   + ` model ${live ? JEV_MODEL : "not called"}`,
 )
 if (!cuesPath) {
@@ -343,10 +347,7 @@ for (const dataset of datasets) {
 table(rows)
 reportCost(datasets, totalCandidates)
 
-const longest = datasets.reduce(
-  (total, dataset) => Math.max(total, dataset.cues.at(-1)!.endMs - dataset.cues[0].startMs),
-  0,
-)
+const longest = datasets.reduce((total, dataset) => Math.max(total, durationOf(dataset)), 0)
 console.log(
   `\n${datasets.length} dataset(s), ${totalCandidates} candidates,`
   + ` longest track ${formatClock(longest)}.`

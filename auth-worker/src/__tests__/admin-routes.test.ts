@@ -210,6 +210,55 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     })
   })
 
+  // AQU-1626: the admin rollup is the same SUM over `files` the org dashboard
+  // runs, and it had the same hole — a 500-cue caption track or a deleted file
+  // counted as work, so platform admin and the project's own plan board
+  // disagreed about how much there was to do.
+  it("GET /projects leaves tombstoned files and hidden companions out of the rollup", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, word_count, last_edit_at, role, deleted_at)
+       VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 500, 1000, NULL, NULL),
+              ('f-gone', 'pa', 'Old GEN', 'e1', 100, 100, 500, 1000, NULL, 123),
+              ('f-cues', 'pa', 'GEN · audio cues', 'e1', 500, 0, 0, 1000, 'audio-cues', NULL),
+              ('f-track', 'pa', 'GEN · captions', 'e1', 500, 0, 0, 1000, 'timeline-content', NULL)`,
+    ).run()
+
+    const res = await app.request("/api/v2/admin/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; totalCells: number; validatedCells: number; wordCount: number }>
+    }
+    expect(body.projects[0]).toMatchObject({ id: "pa", totalCells: 100, validatedCells: 40, wordCount: 500 })
+  })
+
+  // The LEFT join must stay a LEFT join: a project whose only file is hidden
+  // still belongs in the admin list, at zero rather than missing entirely.
+  it("GET /projects still lists a project whose only file is a hidden companion", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, role)
+       VALUES ('f-cues', 'pa', 'GEN · audio cues', 'e1', 500, 'audio-cues')`,
+    ).run()
+
+    const res = await app.request("/api/v2/admin/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string; totalCells: number }> }
+    expect(body.projects).toHaveLength(1)
+    expect(body.projects[0]).toMatchObject({ id: "pa", totalCells: 0 })
+  })
+
   it("GET /projects flags a project as shared when a non-org member can access it", async () => {
     await seedUser(7, "root")
     await seedUser(1, "wendi")

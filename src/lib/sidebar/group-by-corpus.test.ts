@@ -1,9 +1,19 @@
 import { describe, it, expect } from "vitest"
-import { groupByCorpus } from "./group-by-corpus"
+import { groupByCorpus, isCustomCorpusLabel } from "./group-by-corpus"
 
 function f(name: string, corpusMarker?: string) {
   return { id: name, name, type: "txt" as const, createdAt: "", cellCount: 0, corpusMarker }
 }
+
+describe("isCustomCorpusLabel", () => {
+  it("accepts a person-named corpus and refuses the testament folders", () => {
+    expect(isCustomCorpusLabel("Season 1")).toBe(true)
+    expect(isCustomCorpusLabel("OT")).toBe(false)
+    expect(isCustomCorpusLabel("NT")).toBe(false)
+    expect(isCustomCorpusLabel("Ungrouped")).toBe(false)
+    expect(isCustomCorpusLabel("OT", true)).toBe(false)
+  })
+})
 
 describe("groupByCorpus", () => {
   it("returns empty array for empty input", () => {

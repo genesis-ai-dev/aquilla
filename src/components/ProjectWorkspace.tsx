@@ -373,7 +373,7 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
-import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
+import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes, overlayPendingCorpusMarkers, settlePendingCorpusMarkers } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
@@ -713,6 +713,10 @@ export function ProjectWorkspace() {
   // list, and the IDB patch does not reach that list, so without this the row
   // jumps back to its old slot the moment the pointer lets go.
   const [optimisticSortIndexes, setOptimisticSortIndexes] = useState<Map<string, number | null>>(new Map())
+  // A drop onto another custom corpus. The sidebar renders the server file
+  // list, so the corpus change has to be painted here before file.corpus.set
+  // comes back, or the row returns to the group the pointer picked it up from.
+  const [optimisticCorpusMarkers, setOptimisticCorpusMarkers] = useState<Map<string, string>>(new Map())
   // FRO-272: soft-deleted file ids hidden from the sidebar until the server
   // read reflects the file.delete event. Same class as optimistic renames —
   // patchProject(IDB) writes are invisible (useProject reads server), so
@@ -736,6 +740,7 @@ export function ProjectWorkspace() {
     setOptimisticFiles([])
     setOptimisticRenames(new Map())
     setOptimisticSortIndexes(new Map())
+    setOptimisticCorpusMarkers(new Map())
     setOptimisticDeletes(new Set())
     setOptimisticTrash([])
     setDeletedFiles([])
@@ -777,6 +782,10 @@ export function ProjectWorkspace() {
           const renamed = optimisticRenames.get(file.id)
           return renamed !== undefined && renamed !== file.name ? { ...file, name: renamed } : file
         })
+    // A drop onto another custom corpus, until the server read carries it.
+    if (optimisticCorpusMarkers.size > 0) {
+      base = overlayPendingCorpusMarkers(base, optimisticCorpusMarkers)
+    }
     // A drop's new order, until the server read carries the same positions.
     if (optimisticSortIndexes.size > 0) {
       base = overlayPendingSortIndexes(base, optimisticSortIndexes)
@@ -793,7 +802,7 @@ export function ProjectWorkspace() {
       (file) => !seen.has(file.id) && !optimisticDeletes.has(file.id),
     )
     return pending.length > 0 ? [...base, ...pending] : base
-  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticSortIndexes, optimisticDeletes])
+  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticSortIndexes, optimisticCorpusMarkers, optimisticDeletes])
 
   // AQU-1393: the Examples panel names where each match came from. Resolved
   // here because the file inventory lives at this level and the editor table
@@ -871,6 +880,13 @@ export function ProjectWorkspace() {
     const settled = settlePendingSortIndexes(hydratedProject.files, optimisticSortIndexes)
     if (settled !== optimisticSortIndexes) setOptimisticSortIndexes(settled)
   }, [hydratedProject, optimisticSortIndexes])
+
+  // Drop a pending corpus once the server read carries the same marker.
+  useEffect(() => {
+    if (!hydratedProject || optimisticCorpusMarkers.size === 0) return
+    const settled = settlePendingCorpusMarkers(hydratedProject.files, optimisticCorpusMarkers)
+    if (settled !== optimisticCorpusMarkers) setOptimisticCorpusMarkers(settled)
+  }, [hydratedProject, optimisticCorpusMarkers])
 
   // Drop an optimistic rename once the server read carries the new name.
   useEffect(() => {
@@ -8933,6 +8949,75 @@ export function ProjectWorkspace() {
     refresh()
   }, [project, currentUsername, refresh])
 
+  // A custom-corpus drop. The slot's numbers still come from planFileInsert.
+  // The corpus change is painted before the first await, same as a reorder,
+  // so the row is already in the group the pointer let go of.
+  const handleTransferFile = useCallback(async (
+    fileId: string,
+    corpus: string,
+    writes: ReadonlyArray<{ fileId: string; sortIndex: number | null }>,
+  ) => {
+    if (!project || !corpus.trim()) return
+    const marker = corpus.trim()
+    setOptimisticCorpusMarkers((current) => {
+      const next = new Map(current)
+      next.set(fileId, marker)
+      return next
+    })
+    if (writes.length > 0) {
+      setOptimisticSortIndexes((current) => {
+        const next = new Map(current)
+        for (const write of writes) next.set(write.fileId, write.sortIndex)
+        return next
+      })
+    }
+    try {
+      await emitFileCorpusSet({
+        projectId: project.id,
+        fileId,
+        corpusMarker: marker,
+        author: currentUsername,
+      })
+      await Promise.all(
+        writes.map((write) =>
+          emitFileReorder({
+            projectId: project.id,
+            fileId: write.fileId,
+            sortIndex: write.sortIndex,
+            author: currentUsername,
+          }),
+        ),
+      )
+    } catch (error) {
+      console.error("[corpus] file.corpus.set failed", error)
+      setOptimisticCorpusMarkers((current) => {
+        if (current.get(fileId) !== marker) return current
+        const next = new Map(current)
+        next.delete(fileId)
+        return next
+      })
+      setOptimisticSortIndexes((current) => {
+        const next = new Map(current)
+        for (const write of writes) {
+          if (next.get(write.fileId) === write.sortIndex) next.delete(write.fileId)
+        }
+        return next
+      })
+      return
+    }
+    // The local project cache is what a later refetch merges onto the server
+    // read. A miss here must not undo the events that already landed.
+    try {
+      await patchProject(project.id, (record) => {
+        const moved = moveFileToCorpus(record, fileId, marker)
+        return writes.length > 0 ? applyFileSortIndexes(moved, writes) : moved
+      })
+    } catch (error) {
+      console.error("[corpus] local project patch failed", error)
+    }
+    refresh()
+  }, [project, currentUsername, refresh])
+
   const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
     if (!project) return
@@ -12579,6 +12664,7 @@ export function ProjectWorkspace() {
                   // than present-and-403ing.
                   canReorderFiles={canPerform("file.reorder", project?.syncRole?.level ?? null)}
                   onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
+                  onTransferFile={(fileId, corpus, writes) => { void handleTransferFile(fileId, corpus, writes) }}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}

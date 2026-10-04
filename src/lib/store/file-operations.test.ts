@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest"
 import {
   renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes,
   overlayPendingSortIndexes, settlePendingSortIndexes,
+  overlayPendingCorpusMarkers, settlePendingCorpusMarkers,
 } from "./file-operations"
-import { planFileMove, planFileOrderReset, SORT_INDEX_STEP } from "@/lib/sidebar/file-sort-index"
+import { planFileInsert, planFileMove, planFileOrderReset, SORT_INDEX_STEP } from "@/lib/sidebar/file-sort-index"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import type { ProjectRecord, FileReference } from "@/lib/parsers/types"
 
@@ -219,6 +220,35 @@ describe("overlayPendingSortIndexes", () => {
     const shown = overlayPendingSortIndexes(files, pendingOf(writes))
     expect(shown.every((file) => file.sortIndex === undefined)).toBe(true)
     expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["a", "b"])
+  })
+
+  it("moves a file into the other custom corpus at the slot it was dropped on", () => {
+    const files = [
+      ...season(["a", "b"]).map((file) => file),
+      ...["c", "d"].map((id, index) => mkFile({
+        id,
+        name: id,
+        corpusMarker: "Season 2",
+        sortIndex: index * SORT_INDEX_STEP,
+      })),
+    ]
+    const target = groupByCorpus(files).find((group) => group.label === "Season 2")!.files
+    const writes = planFileInsert(target, "a", 1)
+    const shown = overlayPendingSortIndexes(
+      overlayPendingCorpusMarkers(files, new Map([["a", "Season 2"]])),
+      pendingOf(writes),
+    )
+    const groups = groupByCorpus(shown)
+    expect(groups.find((group) => group.label === "Season 1")!.files.map((file) => file.id)).toEqual(["b"])
+    expect(groups.find((group) => group.label === "Season 2")!.files.map((file) => file.id)).toEqual(["c", "a", "d"])
+  })
+
+  it("keeps a pending corpus until the server file carries it", () => {
+    const files = season(["a"])
+    const pending = new Map([["a", "Season 2"]])
+    expect(settlePendingCorpusMarkers(files, pending)).toBe(pending)
+    const landed = files.map((file) => file.id === "a" ? { ...file, corpusMarker: "Season 2" } : file)
+    expect(settlePendingCorpusMarkers(landed, pending).size).toBe(0)
   })
 
   it("keeps the pending position until the server file carries it, then lets go", () => {

@@ -18,6 +18,7 @@ export const FILE_DRAG_ACTIVATION_DISTANCE = 8
 
 export type SidebarFileDrop =
   | { kind: "move"; fileId: string; group: string; toPosition: number }
+  | { kind: "transfer"; fileId: string; fromGroup: string; toGroup: string; toPosition: number }
   | { kind: "refuse"; group: string }
   | { kind: "cancel" }
 
@@ -27,10 +28,31 @@ export function readSidebarGroup(data: unknown): string | null {
   return typeof group === "string" ? group : null
 }
 
+/** Set on custom-corpus rows and headers. Testament folders and Ungrouped leave it off. */
+export function readAcceptsFileTransfer(data: unknown): boolean {
+  return typeof data === "object" && data !== null
+    && "acceptsFileTransfer" in data
+    && data.acceptsFileTransfer === true
+}
+
 /**
- * What a drop means. `toPosition` is the hovered row's index in the group's
- * current visual order — the same index `planFileMove` already expects from
- * the native drag path this replaced.
+ * Where an incoming file lands relative to the hovered row. The top half of
+ * the row is that row's slot; the bottom half is the slot after it, which is
+ * how a drop on the last row can land at the end of the group.
+ */
+function insertionIndex(active: Active, over: Over, overIndex: number): number {
+  const translated = active.rect.current.translated
+  if (!translated) return overIndex
+  const mid = over.rect.top + over.rect.height / 2
+  return translated.top > mid ? overIndex + 1 : overIndex
+}
+
+/**
+ * What a drop means. `toPosition` is the slot the file should occupy
+ * afterwards. Inside its own group that slot is what `planFileMove` expects.
+ * A custom corpus accepts a file from another custom corpus, and that slot
+ * is what `planFileInsert` expects. Old Testament, New Testament, and
+ * Ungrouped stay refusals.
  */
 export function resolveSidebarFileDrop(active: Active | null, over: Over | null): SidebarFileDrop {
   if (!active) return { kind: "cancel" }
@@ -39,10 +61,31 @@ export function resolveSidebarFileDrop(active: Active | null, over: Over | null)
   if (!over) return { kind: "cancel" }
   const overGroup = readSidebarGroup(over.data.current)
   if (overGroup === null) return { kind: "cancel" }
-  // A file only moves inside the group it already belongs to. The other
-  // group's header and its rows are both refusals, including a collapsed
-  // group that has no row under the pointer.
-  if (overGroup !== activeGroup) return { kind: "refuse", group: overGroup }
+  if (overGroup !== activeGroup) {
+    const canTransfer = readAcceptsFileTransfer(active.data.current)
+      && readAcceptsFileTransfer(over.data.current)
+    if (!canTransfer) return { kind: "refuse", group: overGroup }
+    // A collapsed group, or the header above its rows, has no row under the
+    // pointer. The file joins at the top, where the header sits.
+    if (!hasSortableData(over)) {
+      return {
+        kind: "transfer",
+        fileId: String(active.id),
+        fromGroup: activeGroup,
+        toGroup: overGroup,
+        toPosition: 0,
+      }
+    }
+    const overIndex = over.data.current.sortable.index
+    if (overIndex < 0) return { kind: "cancel" }
+    return {
+      kind: "transfer",
+      fileId: String(active.id),
+      fromGroup: activeGroup,
+      toGroup: overGroup,
+      toPosition: insertionIndex(active, over, overIndex),
+    }
+  }
   if (!hasSortableData(over) || over.id === active.id) return { kind: "cancel" }
   const toPosition = over.data.current.sortable.index
   if (toPosition < 0) return { kind: "cancel" }
@@ -73,11 +116,12 @@ function sameGroupFiles(args: Parameters<CollisionDetection>[0], group: string):
  * A file row sits inside its group droppable.
  *
  * The pointer wins when it is actually on a row. A different group's header
- * (or a collapsed group) is a refusal. Gaps between rows, and a pointer that
- * has drifted off the narrow column, keep sorting against the nearest row in
- * the active group — otherwise the list freezes the moment the cursor leaves
- * a 28px row. The active group's own header is the exception: it is above
- * every row, and hovering it should not preview a move.
+ * is a refusal unless that group is a custom corpus, in which case the
+ * nearest row in it is the slot the file would move into. Gaps between rows,
+ * and a pointer that has drifted off the narrow column, keep sorting against
+ * the nearest row in the active group — otherwise the list freezes the
+ * moment the cursor leaves a 28px row. The active group's own header is the
+ * exception: it is above every row, and hovering it should not preview a move.
  */
 export const sidebarFileCollision: CollisionDetection = (args) => {
   const hits = pointerWithin(args)
@@ -98,10 +142,21 @@ export const sidebarFileCollision: CollisionDetection = (args) => {
   const hoveredGroupName = hoveredGroup ? readSidebarGroup(hoveredGroup.data.current) : null
 
   if (hoveredGroupName !== null && hoveredGroupName !== activeGroup) {
-    return groupHits.filter((hit) => {
+    const foreignHits = groupHits.filter((hit) => {
       const container = containerOf(hit)
       return container !== undefined && readSidebarGroup(container.data.current) === hoveredGroupName
     })
+    const accepts = hoveredGroup !== undefined && readAcceptsFileTransfer(hoveredGroup.data.current)
+    const rows = accepts ? sameGroupFiles(args, hoveredGroupName) : []
+    if (rows.length === 0 || !args.pointerCoordinates) return foreignHits
+    const firstTop = rows.reduce((top, container) => {
+      const rect = args.droppableRects.get(container.id)
+      return rect ? Math.min(top, rect.top) : top
+    }, Number.POSITIVE_INFINITY)
+    // The header sits above the rows. A pointer there joins the group at the
+    // top. A pointer in a gap between rows still targets the nearest row.
+    if (args.pointerCoordinates.y < firstTop) return foreignHits
+    return closestCenter({ ...args, droppableContainers: rows }).slice(0, 1)
   }
 
   const rows = activeGroup === null ? [] : sameGroupFiles(args, activeGroup)

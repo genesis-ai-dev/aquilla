@@ -5,9 +5,10 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import { groupByCorpus, isCustomCorpusLabel } from "@/lib/sidebar/group-by-corpus"
 import {
   hasPlacedFiles,
+  planFileInsert,
   planFileMove,
   planFileNudge,
   planFileOrderReset,
@@ -131,6 +132,12 @@ interface Props {
    * positions computed here — the arithmetic lives in one tested module.
    */
   onReorderFiles?: (writes: SortIndexWrite[]) => void
+  /**
+   * Move one file into another custom corpus and place it at the slot the
+   * pointer let go of. `writes` is the output of `planFileInsert` for the
+   * target group. Old and New Testament folders never take this path.
+   */
+  onTransferFile?: (fileId: string, corpus: string, writes: SortIndexWrite[]) => void
 }
 
 export function ExpandableFileList({
@@ -143,6 +150,7 @@ export function ExpandableFileList({
   filterFocus,
   canReorderFiles = false,
   onReorderFiles,
+  onTransferFile,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -204,13 +212,15 @@ export function ExpandableFileList({
   // of the group to the end. Reordering a list you can only partly see is also
   // not a thing anyone means to do.
   const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
+  const canTransferBetweenCustom = reorderEnabled
+    && groups.filter((group) => isCustomCorpusLabel(group.label, group.derived === true)).length >= 2
   const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
-  const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
+  const [dropHover, setDropHover] = useState<{ kind: "refuse" | "transfer"; group: string } | null>(null)
   const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
 
   function endDrag() {
     setDrag(null)
-    setRefusedGroup(null)
+    setDropHover(null)
   }
 
   function submit(writes: SortIndexWrite[]) {
@@ -225,17 +235,34 @@ export function ExpandableFileList({
 
   function handleDragOver(event: DragOverEvent) {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
-    const next = resolution.kind === "refuse" ? resolution.group : null
-    setRefusedGroup((current) => current === next ? current : next)
+    const next = resolution.kind === "refuse"
+      ? { kind: "refuse" as const, group: resolution.group }
+      : resolution.kind === "transfer"
+        ? { kind: "transfer" as const, group: resolution.toGroup }
+        : null
+    setDropHover((current) =>
+      current?.kind === next?.kind && current?.group === next?.group ? current : next,
+    )
   }
 
   function handleDragEnd(event: DragEndEvent) {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
     endDrag()
-    if (resolution.kind !== "move") return
-    const target = groups.find((group) => group.label === resolution.group)
+    if (resolution.kind === "move") {
+      const target = groups.find((group) => group.label === resolution.group)
+      if (!target) return
+      submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+      return
+    }
+    if (resolution.kind !== "transfer") return
+    const target = groups.find((group) => group.label === resolution.toGroup)
     if (!target) return
-    submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+    if (collapsed.has(resolution.toGroup)) toggleCollapsed(resolution.toGroup)
+    onTransferFile?.(
+      resolution.fileId,
+      resolution.toGroup,
+      planFileInsert(target.files, resolution.fileId, resolution.toPosition),
+    )
   }
 
   const draggedName = drag ? files.find((file) => file.id === drag.fileId)?.name ?? "" : ""
@@ -339,9 +366,16 @@ export function ExpandableFileList({
             const isEditingCorpus = editingCorpus === group.label
             // AQU-1569: a group of one has nothing to reorder, and "Reset
             // order" only means something once a file in it has been placed.
+            // A lone file in a custom corpus can still be dragged into another
+            // custom corpus — that is the drag that replaces "Move to corpus…"
+            // for those groups. Testament folders never accept that drop.
             const canReorderGroup = reorderEnabled && group.files.length > 1
+            const acceptsTransfer = canTransferBetweenCustom
+              && isCustomCorpusLabel(group.label, group.derived === true)
+            const rowSortable = canReorderGroup || acceptsTransfer
             const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
-            const isRefusing = refusedGroup === group.label
+            const isRefusing = dropHover?.kind === "refuse" && dropHover.group === group.label
+            const isReceiving = dropHover?.kind === "transfer" && dropHover.group === group.label
             // A project whose files are all ungrouped shows no header
             // (showHeader is false), but its one group can still be given an
             // order — so the control cannot live only inside the header, or
@@ -369,13 +403,15 @@ export function ExpandableFileList({
               </AppTooltip>
             )
             return (
-              // The group is the drop boundary. Hovering its header, or any
-              // other group, is a refusal — a file does not change corpus by
-              // being dragged. That stays "Move to corpus…", which asks first.
+              // The group is the drop boundary. A custom corpus accepts a file
+              // from another custom corpus. A testament folder and Ungrouped
+              // stay refusals — those still go through "Move to corpus…".
               <CorpusGroupFrame
                 key={group.label}
                 droppable={reorderEnabled}
                 label={group.label}
+                acceptsFileTransfer={acceptsTransfer}
+                receiving={isReceiving}
                 groupRef={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
@@ -450,9 +486,17 @@ export function ExpandableFileList({
                     {t("nav.fileList.reorderWrongGroup")}
                   </p>
                 )}
+                {isReceiving && (
+                  <p
+                    role="status"
+                    className="mx-1 mb-1 rounded-md bg-muted px-2 py-1 text-[10px] leading-snug text-muted-foreground"
+                  >
+                    {t("nav.fileList.dropIntoCorpus", { group: displayLabel })}
+                  </p>
+                )}
                 {!isCollapsed && (
                   <GroupFileRows
-                    sortable={canReorderGroup}
+                    sortable={rowSortable}
                     label={group.label}
                     fileIds={group.files.map((file) => file.id)}
                   >
@@ -463,15 +507,21 @@ export function ExpandableFileList({
                       const isEditing = editingFileId === file.id
                       // Not while renaming: the row holds a text input, and a
                       // drag ancestor takes the pointer away from selecting inside it.
-                      const isDraggable = canReorderGroup && !isEditing
+                      const isDraggable = rowSortable && !isEditing
                       return (
                         <FileListRow
                           key={file.id}
-                          sortable={canReorderGroup}
+                          sortable={rowSortable}
                           id={file.id}
                           group={group.label}
                           draggable={isDraggable}
-                          handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
+                          acceptsFileTransfer={acceptsTransfer}
+                          handleLabel={isDraggable
+                            ? t(
+                              canReorderGroup ? "nav.fileList.reorderHandle" : "nav.fileList.moveHandle",
+                              { name: file.name },
+                            )
+                            : null}
                         >
                           <div
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}

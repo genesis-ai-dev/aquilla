@@ -15,7 +15,7 @@ import { FILE_DRAG_ACTIVATION_DISTANCE } from "./file-list-dnd-model"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import type { FileReference } from "@/lib/parsers/types"
-import { SORT_INDEX_STEP, type SortIndexWrite } from "@/lib/sidebar/file-sort-index"
+import { planFileInsert, SORT_INDEX_STEP, type SortIndexWrite } from "@/lib/sidebar/file-sort-index"
 
 const PROJECT_ID = "p1"
 
@@ -47,6 +47,7 @@ const UNPLACED_SEASON = [
 ]
 
 let onReorderFiles: ReturnType<typeof vi.fn<(writes: SortIndexWrite[]) => void>>
+let onTransferFile: ReturnType<typeof vi.fn<(fileId: string, corpus: string, writes: SortIndexWrite[]) => void>>
 
 function renderList(
   files: FileReference[],
@@ -68,6 +69,7 @@ function renderList(
           onMove={vi.fn()}
           canReorderFiles
           onReorderFiles={onReorderFiles}
+          onTransferFile={onTransferFile}
           {...props}
         />
       </EditorScrollProvider>
@@ -193,6 +195,7 @@ let restoreAddEventListener: (() => void) | null = null
 beforeEach(() => {
   localStorage.clear()
   onReorderFiles = vi.fn<(writes: SortIndexWrite[]) => void>()
+  onTransferFile = vi.fn<(fileId: string, corpus: string, writes: SortIndexWrite[]) => void>()
   HTMLElement.prototype.scrollIntoView = vi.fn()
   // dnd-kit swallows the click that ends a drag, and only removes that
   // document listener after 50ms. Later tests click menus in this same
@@ -276,41 +279,95 @@ describe("dragging a file within its group", () => {
   })
 })
 
-describe("a drop into another group is refused", () => {
-  const TWO_GROUPS = [
+describe("a drop into another custom corpus", () => {
+  const TWO_SEASONS = [
     ...PLACED_SEASON,
     file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
     file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
   ]
 
-  it("says so visibly and changes nothing — no move, no corpus change", () => {
-    renderList(TWO_GROUPS)
+  it("asks to move the file into that corpus at the hovered slot", () => {
+    renderList(TWO_SEASONS)
     beginDrag("Episode 2")
     hoverDrag("Pilot")
+    expect(screen.getByText("Drop to move into Season 2")).toHaveAttribute("role", "status")
+    releaseDrag("Pilot")
+    expect(onReorderFiles).not.toHaveBeenCalled()
+    expect(onTransferFile).toHaveBeenCalledWith(
+      "episode-2",
+      "Season 2",
+      planFileInsert(
+        [
+          { id: "pilot", sortIndex: 0 },
+          { id: "finale", sortIndex: SORT_INDEX_STEP },
+        ],
+        "episode-2",
+        0,
+      ),
+    )
+  })
+
+  it("lets the only file in a custom corpus be dragged into another one", () => {
+    renderList([
+      file("Only", { corpusMarker: "Season 1", sortIndex: 0 }),
+      file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
+      file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
+    ])
+    dragOnto("Only", "Finale")
+    expect(onTransferFile).toHaveBeenCalledWith(
+      "only",
+      "Season 2",
+      expect.any(Array),
+    )
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
+})
+
+describe("a drop onto a testament folder is refused", () => {
+  const OT_AND_SEASON = [
+    file("Genesis", { corpusMarker: "OT", sortIndex: 0 }),
+    file("Exodus", { corpusMarker: "OT", sortIndex: SORT_INDEX_STEP }),
+    file("Pilot", { corpusMarker: "Season 1", sortIndex: 0 }),
+    file("Finale", { corpusMarker: "Season 1", sortIndex: SORT_INDEX_STEP }),
+  ]
+
+  it("says so visibly and changes nothing — no move, no corpus change", () => {
+    renderList(OT_AND_SEASON)
+    beginDrag("Pilot")
+    hoverDrag("Genesis")
 
     // Visible, not just a cursor shape: a silent no-op is indistinguishable
     // from a drop that failed. role="status" is what a screen reader hears.
     expect(screen.getByText(refusalText)).toHaveAttribute("role", "status")
 
-    releaseDrag("Pilot")
+    releaseDrag("Genesis")
+    expect(onReorderFiles).not.toHaveBeenCalled()
+    expect(onTransferFile).not.toHaveBeenCalled()
+  })
+
+  it("also refuses dragging a testament file into a custom corpus", () => {
+    renderList(OT_AND_SEASON)
+    dragOnto("Genesis", "Pilot")
+    expect(onTransferFile).not.toHaveBeenCalled()
     expect(onReorderFiles).not.toHaveBeenCalled()
   })
 
   it("clears the refusal once the drag ends", () => {
-    renderList(TWO_GROUPS)
-    beginDrag("Episode 2")
-    hoverDrag("Pilot")
+    renderList(OT_AND_SEASON)
+    beginDrag("Pilot")
+    hoverDrag("Genesis")
     expect(refusal()).not.toBeNull()
-    releaseDrag("Episode 2")
+    releaseDrag("Pilot")
     expect(refusal()).toBeNull()
   })
 
   it("ignores the native HTML drag events this list used to listen for", () => {
-    renderList(TWO_GROUPS)
-    fireEvent.dragStart(slot("Episode 2"))
-    fireEvent.dragOver(slot("Pilot"))
-    fireEvent.drop(slot("Pilot"))
+    renderList(OT_AND_SEASON)
+    fireEvent.dragStart(slot("Pilot"))
+    fireEvent.dragOver(slot("Genesis"))
+    fireEvent.drop(slot("Genesis"))
     expect(onReorderFiles).not.toHaveBeenCalled()
+    expect(onTransferFile).not.toHaveBeenCalled()
     expect(refusal()).toBeNull()
   })
 })

@@ -101,6 +101,38 @@ export function planFileMove(
 }
 
 /**
+ * The writes that put `fileId` into a group it is not in yet, at `toPosition`.
+ *
+ * `ordered` is the target group's current visual order, without the incoming
+ * file. `toPosition` is the 0-based slot the file should occupy afterwards,
+ * and it may be `ordered.length` (after the last file). A file that is
+ * already in `ordered` is handed to `planFileMove`, so a same-group drop and
+ * a cross-corpus drop share one rule once the file is in the list.
+ */
+export function planFileInsert(
+  ordered: readonly PlaceableFile[],
+  fileId: string,
+  toPosition: number,
+): SortIndexWrite[] {
+  if (ordered.some((file) => file.id === fileId)) return planFileMove(ordered, fileId, toPosition)
+  const to = Math.max(0, Math.min(ordered.length, toPosition))
+  const incoming: PlaceableFile = { id: fileId }
+  const next = ordered.slice()
+  next.splice(to, 0, incoming)
+
+  const allPlaced = ordered.every((file) => usableSortIndex(file.sortIndex) !== undefined)
+  if (!allPlaced) return renumber(next)
+
+  const placed = midpoint(
+    to > 0 ? usableSortIndex(next[to - 1].sortIndex) : undefined,
+    to < next.length - 1 ? usableSortIndex(next[to + 1].sortIndex) : undefined,
+  )
+  return placed === null
+    ? renumber(next)
+    : [{ fileId, sortIndex: placed }]
+}
+
+/**
  * The writes that move `fileId` one slot up (`-1`) or down (`+1`). Returns
  * nothing at the respective end of the group, which is also what disables the
  * menu item — the two agree because they ask this same function.

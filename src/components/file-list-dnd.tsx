@@ -1,8 +1,9 @@
 // AQU-1647: pointer dragging for the editor file sidebar.
 //
 // Which slot a drop landed on lives in `file-list-dnd-model`; the numbers
-// written for that slot still come from `planFileMove`. Changing groups is
-// "Move to corpus…", which asks first. Keyboard reordering stays on Move up /
+// written for that slot still come from `planFileMove` / `planFileInsert`.
+// A custom corpus accepts a file dragged from another custom corpus. Old and
+// New Testament folders do not. Keyboard reordering stays on Move up /
 // Move down; there is no keyboard sensor, and the library's space-bar
 // instructions are cleared so a screen reader is not told about a gesture
 // this list does not offer.
@@ -54,10 +55,11 @@ const accessibility = {
   },
 }
 
-// Hovering a different group reports overIndex -1. Shifting rows then would
-// preview a move we are about to refuse.
+// A file that is not one of this group's items reports activeIndex -1.
+// Shifting rows then would preview a move this list is not making; the file
+// joins the other group when the pointer lets go.
 const sameGroupVerticalStrategy: SortingStrategy = (args) => {
-  if (args.overIndex < 0) return null
+  if (args.overIndex < 0 || args.activeIndex < 0) return null
   return verticalListSortingStrategy(args)
 }
 
@@ -165,17 +167,27 @@ function ActiveFileReorder({
 export function CorpusGroupFrame({
   droppable,
   label,
+  acceptsFileTransfer = false,
+  receiving = false,
   groupRef,
   children,
 }: {
   droppable: boolean
   label: string
+  acceptsFileTransfer?: boolean
+  receiving?: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
-  if (!droppable) return <div ref={groupRef}>{children}</div>
+  const frameClass = receiving ? "rounded-lg ring-1 ring-primary/50" : undefined
+  if (!droppable) return <div ref={groupRef} className={frameClass}>{children}</div>
   return (
-    <DroppableCorpusGroup label={label} groupRef={groupRef}>
+    <DroppableCorpusGroup
+      label={label}
+      acceptsFileTransfer={acceptsFileTransfer}
+      receiving={receiving}
+      groupRef={groupRef}
+    >
       {children}
     </DroppableCorpusGroup>
   )
@@ -202,14 +214,21 @@ export function GroupFileRows({
 
 export function DroppableCorpusGroup({
   label,
+  acceptsFileTransfer,
+  receiving,
   groupRef,
   children,
 }: {
   label: string
+  acceptsFileTransfer: boolean
+  receiving: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
-  const data = useMemo(() => ({ group: label }), [label])
+  const data = useMemo(
+    () => ({ group: label, acceptsFileTransfer }),
+    [label, acceptsFileTransfer],
+  )
   const { setNodeRef } = useDroppable({ id: `sidebar-drop:${label}`, data })
   return (
     <div
@@ -218,6 +237,8 @@ export function DroppableCorpusGroup({
         groupRef(element)
       }}
       data-reorder-group={label}
+      data-transfer-target={receiving ? "" : undefined}
+      className={receiving ? "rounded-lg ring-1 ring-primary/50" : undefined}
     >
       {children}
     </div>
@@ -245,6 +266,7 @@ export function FileListRow({
   id,
   group,
   draggable,
+  acceptsFileTransfer = false,
   handleLabel,
   children,
 }: {
@@ -252,6 +274,7 @@ export function FileListRow({
   id: string
   group: string
   draggable: boolean
+  acceptsFileTransfer?: boolean
   /** Accessible name for the grip. Null when this row cannot start a drag. */
   handleLabel: string | null
   children: ReactNode
@@ -260,7 +283,13 @@ export function FileListRow({
     return <div className="group/file-slot relative">{children}</div>
   }
   return (
-    <SortableFileSlot id={id} group={group} draggable={draggable} handleLabel={handleLabel}>
+    <SortableFileSlot
+      id={id}
+      group={group}
+      draggable={draggable}
+      acceptsFileTransfer={acceptsFileTransfer}
+      handleLabel={handleLabel}
+    >
       {children}
     </SortableFileSlot>
   )
@@ -270,16 +299,21 @@ function SortableFileSlot({
   id,
   group,
   draggable,
+  acceptsFileTransfer,
   handleLabel,
   children,
 }: {
   id: string
   group: string
   draggable: boolean
+  acceptsFileTransfer: boolean
   handleLabel: string | null
   children: ReactNode
 }) {
-  const data = useMemo(() => ({ group }), [group])
+  const data = useMemo(
+    () => ({ group, acceptsFileTransfer }),
+    [group, acceptsFileTransfer],
+  )
   const { setNodeRef, setActivatorNodeRef, listeners, transform, transition, isDragging } = useSortable({
     id,
     data,

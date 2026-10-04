@@ -104,6 +104,7 @@ import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
@@ -317,6 +318,11 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Team chat history — the caller's own past agent conversations, listed and
+// reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
+// read-only, and scoped to (project, user) so it never surfaces another
+// member's chats.
+app.route("/api/v2/projects", agentSessionRoutes)
 // Knowledge base — project + org document upload/extract/index/read/search
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.

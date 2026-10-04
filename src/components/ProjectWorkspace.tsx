@@ -300,6 +300,7 @@ import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
+import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
 import { FileChapterToolbar } from "./FileChapterToolbar"
@@ -1280,8 +1281,18 @@ export function ProjectWorkspace() {
   // A dock quick-action prompt (Summarize book/chapter) headed for the agent
   // surface's chat — the dock no longer hosts a composer of its own (v2.2).
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
+  // AQU-1651: "Ask AI" opens the floating mini-chat over the workspace rather
+  // than the full agent surface — a quick question must not cost the reader
+  // the passage they were translating. The window outlives cell and chapter
+  // navigation because it is mounted here, not inside the editor; its expand
+  // button hands the SAME thread to the full surface for longer work.
+  const [miniChatOpen, setMiniChatOpen] = useState(false)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
+    setMiniChatOpen(true)
+  }, [])
+  const expandMiniChat = useCallback(() => {
+    setMiniChatOpen(false)
     openAgentTab("editor")
   }, [openAgentTab])
   // FRO-309: expanded search results overlay in the main area
@@ -14695,6 +14706,32 @@ export function ProjectWorkspace() {
               author: currentUsername,
             }).then(() => refresh())
             setMoveTargetId(null)
+          }}
+        />
+      )}
+      {/* Not while the full agent surface IS the workspace: the two mount the
+          same shared session and would both consume a pending "Ask AI" chip,
+          inserting it into the composer twice. */}
+      {project && miniChatOpen && !agentOpen && (
+        <AgentMiniChat
+          open={miniChatOpen}
+          onClose={() => setMiniChatOpen(false)}
+          onExpand={expandMiniChat}
+          agent={{
+            projectId: project.id,
+            jwt,
+            author: currentUsername,
+            roleLevel: currentRoleLevel,
+            context: {
+              fileId: activeFileId ?? undefined,
+              cellId: focusedCellId ?? undefined,
+            },
+            rules,
+            resolveCell: resolveCellById,
+            allowSelfValidation: project.allowSelfValidation,
+            onApplied: handleAgentApplied,
+            pendingChip,
+            onPendingChipConsumed: () => setPendingChip(null),
           }}
         />
       )}

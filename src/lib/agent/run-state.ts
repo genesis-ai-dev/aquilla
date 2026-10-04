@@ -168,6 +168,14 @@ export interface AgentRunUi {
   budget?: AgentBudget
   status: AgentRunStatus
   errorMessage?: string
+  /**
+   * AQU-1653: this run was rebuilt from a stored conversation when the user
+   * reopened a past chat, not streamed. Only the prose survives — the live
+   * chrome (tool chips, proposals, budget) belonged to the original run — so
+   * the view labels it as reopened instead of implying the agent answered with
+   * nothing. Absent on every live run.
+   */
+  restored?: boolean
 }
 
 let runCounter = 0

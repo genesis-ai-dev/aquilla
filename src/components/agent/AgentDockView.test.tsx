@@ -11,11 +11,12 @@ import { t } from "@/lib/i18n/standalone"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 
 const send = vi.fn<(options: AgentSendOptions) => void>()
+const startNewChat = vi.fn()
 const state: AgentSessionState = {
   sessionId: "session", runs: [], isStreaming: false, queued: [], decided: new Map(), activity: [],
 }
 vi.mock("@/lib/agent/session-store", () => ({
-  useAgentSession: () => ({ state, send, stop: vi.fn(), noteActivity: vi.fn() }),
+  useAgentSession: () => ({ state, send, stop: vi.fn(), startNewChat, switchTo: vi.fn(), noteActivity: vi.fn() }),
 }))
 vi.mock("@/lib/agent/artifact-upload", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/agent/artifact-upload")>()
@@ -118,6 +119,47 @@ describe("AgentDockView shared Team chat", () => {
     const { container } = render(<AgentDockView {...props} conversationPrelude={<div>Contextual dispatch</div>} />)
     const content = container.querySelector('[data-slot="message-scroller-content"]')
     expect(content?.textContent).toMatch(/Contextual dispatch.*Session prompt/)
+  })
+
+  // AQU-1653: "Ask AI" on a source selection is a fresh question about the
+  // passage just selected, so it starts a NEW chat instead of tacking the chip
+  // onto whatever the last conversation was about. Safe only because the chat
+  // being left is saved server-side and reopenable from the chat menu — which
+  // is why this landed with the history reads and not before them.
+  const askAiChip = {
+    chipId: "selection", fileId: "source-file", cellId: "source-cell", side: "source" as const,
+    selection: "source & words", preview: "source & words", canonicalRef: "GEN 1:1", fileName: "Genesis.usfm",
+  }
+
+  it("Ask AI starts a new chat when there is a conversation to start away from", () => {
+    state.runs = [{ localId: "run", runId: null, prompt: "Earlier question", items: [], status: "ok" }]
+    render(<AgentDockView {...props} pendingChip={askAiChip} onPendingChipConsumed={vi.fn()} />)
+    expect(startNewChat).toHaveBeenCalledTimes(1)
+    // The chip still lands in the composer — a new chat the question never
+    // reached would be worse than appending to the old one.
+    expect(screen.getByRole("textbox")).toHaveTextContent("source & words")
+  })
+
+  it("Ask AI keeps an empty chat rather than minting a second one", () => {
+    state.runs = []
+    render(<AgentDockView {...props} pendingChip={askAiChip} onPendingChipConsumed={vi.fn()} />)
+    expect(startNewChat).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox")).toHaveTextContent("source & words")
+  })
+
+  it("Ask AI does not abort a run in flight to start a new chat", () => {
+    // startNewChat() stops the stream. Doing that because the reader selected
+    // a passage would throw away a reply they are waiting on and never asked
+    // to cancel, so a streaming chat keeps the chip instead.
+    state.runs = [{ localId: "run", runId: null, prompt: "Earlier question", items: [], status: "running" }]
+    state.isStreaming = true
+    try {
+      render(<AgentDockView {...props} pendingChip={askAiChip} onPendingChipConsumed={vi.fn()} />)
+      expect(startNewChat).not.toHaveBeenCalled()
+      expect(screen.getByRole("textbox")).toHaveTextContent("source & words")
+    } finally {
+      state.isStreaming = false
+    }
   })
 
   it("reloads typed prose, exact context chips and attachments, then hands their real composed payload to the session", async () => {

@@ -106,14 +106,8 @@ export interface OrgPortfolio {
 }
 
 /**
- * AQU-1071: an org's rollup plus the number the enterprise billing band is read
- * off — distinct ACTIVE target languages across the org (archived lanes and
- * archived projects excluded), counted server-side by the same helper billing
- * uses, so the dashboard tile and the invoice cannot disagree.
- *
- * A project with three target lanes contributes three languages; two projects
- * translating into the same language contribute one, which is why this is not
- * derived client-side from the per-project lane chips.
+ * AQU-1071: an org's rollup plus the enterprise billing band — active target
+ * lanes, counted server-side by the same helper billing uses.
  */
 export interface OrgPortfolioSummary {
   projects: PortfolioProject[]

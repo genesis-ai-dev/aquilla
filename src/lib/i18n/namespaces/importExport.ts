@@ -1083,6 +1083,9 @@ export const importExport = defineNamespace({
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.laneLabel": "Fill which language",
+    "importExport.fileTarget.laneHint": "The translations go into this language. Choosing another one opens it in the editor.",
+    "importExport.fileTarget.laneLoading": "Opening this language… you can choose a file in a moment.",
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
@@ -2879,6 +2882,30 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.laneLabel": {
+        description:
+          "Label above the language picker on the panel that fills in the open " +
+          "file's translations. The picker chooses which of the project's target " +
+          "languages the uploaded translations are written into, and it only " +
+          "appears when the project has more than one. Short noun phrase, no " +
+          "closing full stop.",
+        maxLength: 32,
+      },
+      "importExport.fileTarget.laneHint": {
+        description:
+          "Small grey note under that language picker, in two short sentences: the " +
+          "first states that the uploaded translations go into the chosen " +
+          "language, the second warns that choosing a different one also switches " +
+          "the language shown in the editor behind the dialog. Keep both " +
+          "sentences — the second is the only warning the user gets.",
+      },
+      "importExport.fileTarget.laneLoading": {
+        description:
+          "Replaces the note under the language picker while the newly chosen " +
+          "language is still loading, during which the file picker is disabled. " +
+          "Reassurance that the wait is short, not an error. Keep the trailing " +
+          "ellipsis on the first clause.",
       },
       "importExport.fileTarget.noCuesInSubtitle": {
         description:

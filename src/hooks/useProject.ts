@@ -108,6 +108,8 @@ function overlaySettings(
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
+  // Smart quotes must reach the workspace, where the cell editor reads it.
+  assign("smartQuotes", settings.smartQuotes)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     const merged = { ...record.ttsSettings, ...settings.ttsSettings }

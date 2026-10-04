@@ -268,6 +268,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -1531,7 +1532,17 @@ export function ProjectWorkspace() {
   // AQU-633: the current user's own lane/file scopes, so bulk validate skips
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
   const myScopeGrant = useMyScopeGrant(project?.id ?? null)
-  const myScopes = myScopeGrant.scopes
+  // AQU-1607: a lane scope is a lane id. Everything below compares it to the
+  // active lane's TAG, so read the ids back as tags here, once — the server
+  // resolves by id and stays the authority on every write.
+  const myScopes = useMemo(
+    () =>
+      laneScopesAsTags(
+        myScopeGrant.scopes,
+        (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+      ),
+    [myScopeGrant.scopes, project?.lanes],
+  )
 
   // AQU-538: the active target lane. Declared here (above useActiveCellStore)
   // because the store's cell list is lane-filtered on this value. Persisted
@@ -2245,8 +2256,8 @@ export function ProjectWorkspace() {
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
   const scopedLanes = useMemo(
-    () => scopedLanesFor(project?.syncRole?.level, myScopes, availableLanes),
-    [project?.syncRole?.level, myScopes, availableLanes],
+    () => scopedLanesFor(project?.syncRole?.level, myScopes, availableLanes, laneRows),
+    [project?.syncRole?.level, myScopes, availableLanes, laneRows],
   )
   useEffect(() => {
     if (scopedLanes && scopedLanes.length > 0 && !scopedLanes.includes(activeLane)) setActiveLane(scopedLanes[0])

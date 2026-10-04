@@ -14,7 +14,8 @@ import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
-import { visibleLaneTags } from '../../../src/lib/lanes/read-wall'
+import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
+import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import { laneTagForArchiveCheck, writesLaneRow } from '../../../src/lib/lanes/archived-lane'
 import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
@@ -104,13 +105,20 @@ function assignmentLaneTag(kind: string, payload: unknown): string | null {
 function enforceScopes(
   scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }>,
   raw: RawEvent<EventKind>,
+  /**
+   * AQU-1607: the project's target lanes, so a scope naming a lane id admits
+   * that lane alone — two lanes of one language are no longer the same scope.
+   * Empty (no database to hand) falls back to comparing the stored value to
+   * the event's tag, which is what a scope meant before lane ids.
+   */
+  lanes: readonly LaneIdentity[],
 ): { ok: false; status: 403; reason: string } | null {
   if (!SCOPE_GATED_KINDS.has(raw.kind)) return null
 
   const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
   if (laneScopes.length > 0) {
     const lane = scopeLaneOf(raw.kind, raw.payload)
-    if (!laneScopes.includes(lane)) {
+    if (!laneScopeAdmitsTag(laneScopes, lanes, lane)) {
       return { ok: false, status: 403, reason: `lane '${lane}' not in scope for ${raw.kind}` }
     }
   }
@@ -149,6 +157,8 @@ function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boo
 function isInScopeLaneAssignCreate(
   scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
   raw: RawEvent<EventKind>,
+  /** AQU-1607: the project's target lanes — see `enforceScopes`. */
+  lanes: readonly LaneIdentity[],
 ): boolean {
   if (raw.kind !== 'assignment.create') return false
   if (!Array.isArray(scopes) || scopes.length === 0) return false
@@ -158,7 +168,7 @@ function isInScopeLaneAssignCreate(
 
   const payload = raw.payload as { targetLang?: unknown; scope?: unknown } | undefined
   const lane = typeof payload?.targetLang === 'string' ? payload.targetLang : ''
-  if (!laneScopes.includes(lane)) return false
+  if (!laneScopeAdmitsTag(laneScopes, lanes, lane)) return false
 
   const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
   if (fileScopes.length > 0) {
@@ -208,6 +218,32 @@ export function isAuthorizedEvent<K extends EventKind = EventKind>(
   x: unknown,
 ): x is AuthorizedEvent<K> {
   return x instanceof AuthorizedEvent && (x as { [AUTHORIZED]?: true })[AUTHORIZED] === true
+}
+
+const targetLanesByCache = new WeakMap<RequestCache, Map<string, Promise<LaneIdentity[]>>>()
+
+/**
+ * The project's target lanes, memoized on the request cache. A flush batch
+ * asks for them once per project instead of once per event — the write wall,
+ * the scope check and the lane-delegate carve-out all want the same rows.
+ */
+function targetLanesFor(
+  db: AquillaDb,
+  projectId: string,
+  cache: RequestCache | undefined,
+): Promise<LaneIdentity[]> {
+  if (!cache) return loadTargetLanes(db, projectId)
+  let byProject = targetLanesByCache.get(cache)
+  if (!byProject) {
+    byProject = new Map()
+    targetLanesByCache.set(cache, byProject)
+  }
+  let pending = byProject.get(projectId)
+  if (!pending) {
+    pending = loadTargetLanes(db, projectId)
+    byProject.set(projectId, pending)
+  }
+  return pending
 }
 
 const externalGrantsByCache = new WeakMap<RequestCache, Map<string, Promise<Array<{ lane: string; level: number }>>>>()
@@ -473,7 +509,7 @@ export async function authorize<K extends EventKind>(
     if (db == null) {
       return { ok: false, status: 403, reason: 'lane write wall requires a database' }
     }
-    const lanes = await loadTargetLanes(db, raw.projectId)
+    const lanes = await targetLanesFor(db, raw.projectId, settings)
     const decision = decideLaneWrite({
       enabled: true,
       role: tokenClaims.role,
@@ -526,7 +562,14 @@ export async function authorize<K extends EventKind>(
       Array.isArray(tokenClaims.scopes) &&
       tokenClaims.scopes.some((s) => s.kind === 'lane')
     let laneDelegateOk = false
-    if (delegateCandidate && isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>)) {
+    // AQU-1607: a lane scope is a lane id, so the caller's own scopes — and
+    // the assignee's, checked below — are read against the project's lanes.
+    const delegateLanes =
+      delegateCandidate && db != null ? await targetLanesFor(db, raw.projectId, settings) : []
+    if (
+      delegateCandidate &&
+      isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>, delegateLanes)
+    ) {
       const payload = raw.payload as RawEvent<'assignment.create'>['payload']
       const lane = typeof payload.targetLang === 'string' ? payload.targetLang : ''
       const eligible = await isEligibleLaneAssignee(
@@ -535,6 +578,7 @@ export async function authorize<K extends EventKind>(
         payload.assigneeUserId,
         lane,
         payload.scope.map((entry) => entry.fileId),
+        delegateLanes,
       )
       // The assign dialog recognises "cannot take work in" and shows its own
       // translated message; anything else showing this sees plain words.
@@ -554,7 +598,14 @@ export async function authorize<K extends EventKind>(
       const payload = raw.payload as RawEvent<'assignment.unassign'>['payload']
       laneDelegateOk =
         typeof payload?.assignmentId === 'string' &&
-        (await isOwnLaneAssignment(db, raw.projectId, payload.assignmentId, tokenClaims.userId, tokenClaims.scopes ?? []))
+        (await isOwnLaneAssignment(
+          db,
+          raw.projectId,
+          payload.assignmentId,
+          tokenClaims.userId,
+          tokenClaims.scopes ?? [],
+          delegateLanes,
+        ))
     }
 
     if (!selfAssignOk && !laneDelegateOk) {
@@ -706,7 +757,7 @@ export async function authorize<K extends EventKind>(
       if (db == null) {
         return { ok: false, status: 403, reason: 'lane write wall requires a database' }
       }
-      const lanes = await loadTargetLanes(db, raw.projectId)
+      const lanes = await targetLanesFor(db, raw.projectId, settings)
       const decision = decideLaneWrite({
         enabled: true,
         role: tokenClaims.role,
@@ -721,9 +772,18 @@ export async function authorize<K extends EventKind>(
       }
     }
   } else if (Array.isArray(tokenClaims.scopes) && tokenClaims.scopes.length > 0) {
+    // AQU-1607: lane scopes are lane ids, so the project's lanes say which
+    // lane each one is. Only loaded when a lane scope is actually in play —
+    // a file-only scoped caller still pays nothing.
+    const hasLaneScope = tokenClaims.scopes.some((s) => s.kind === 'lane')
+    const lanes =
+      db != null && hasLaneScope && SCOPE_GATED_KINDS.has(raw.kind)
+        ? await targetLanesFor(db, raw.projectId, settings)
+        : []
     const scopeRejection = enforceScopes(
       tokenClaims.scopes,
       raw as RawEvent<EventKind>,
+      lanes,
     )
     if (scopeRejection) return scopeRejection
   }

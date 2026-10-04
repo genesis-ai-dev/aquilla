@@ -12,6 +12,9 @@
  * hole — but drift defeats the point, so update both together.
  */
 
+import { laneScopeTags } from "@/lib/lanes/scope-ids"
+import type { LaneIdentity } from "@/lib/lanes/read-wall"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -468,11 +471,19 @@ export function scopedLanesFor(
   roleLevel: number | null | undefined,
   scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
   lanes: readonly string[],
+  /**
+   * AQU-1607: the project's lane rows, which turn the lane ids a scope now
+   * holds into the tags `lanes` is written in. Omitted (a caller with no lane
+   * rows loaded yet) compares the stored value to the tag, which is what a
+   * scope meant before lane ids.
+   */
+  laneRows?: readonly LaneIdentity[] | null,
 ): string[] | null {
   if (canSwitchLanes(roleLevel)) return null
   const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
   if (laneScopes.length === 0) return null
-  return lanes.filter((lane) => laneScopes.includes(lane))
+  const allowed = laneScopeTags(laneScopes, laneRows ?? [])
+  return lanes.filter((lane) => allowed.has(lane))
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -2129,7 +2129,7 @@ CREATE TABLE IF NOT EXISTS workspace_plan_entitlements (
   CHECK ((scope = 'team') = (offer IN ('team', 'team_20x')))
 );
 
--- AQU-837: sandbox rehearsal only. One unresolved checkout per workspace.
+-- AQU-1491: sandbox or live identity, with one unresolved checkout per workspace.
 -- Never delete/reuse an attempt to recover an ambiguous Stripe response.
 CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   id TEXT PRIMARY KEY,
@@ -2148,7 +2148,7 @@ CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   CONSTRAINT workspace_checkout_resolution_check
     CHECK ((resolved_at IS NULL AND resolution IS NULL)
       OR (resolved_at IS NOT NULL AND resolution IS NOT NULL AND resolution = 'expired')),
-  sandbox BOOLEAN NOT NULL DEFAULT TRUE CHECK (sandbox = TRUE)
+  sandbox BOOLEAN NOT NULL DEFAULT TRUE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS workspace_checkout_pending_org
   ON workspace_checkout_attempts (org_id) WHERE resolved_at IS NULL;
@@ -2309,3 +2309,7 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gm.added_by::BIGINT, gm.added_at
     FROM group_members gm
    WHERE gm.role_level IS NOT NULL;
+
+-- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
+ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
+  CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);

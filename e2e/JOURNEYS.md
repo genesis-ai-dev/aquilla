@@ -55,7 +55,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 

@@ -10,6 +10,11 @@
 //   - assignment.create  : INSERT the assignments row, resolve the
 //                           book/chapter/cell scope into assignment_cells from
 //                           the live `cells` projection, then set cells_total.
+//                           A book/chapter scope ALSO records the range itself
+//                           in assignment_scopes, so the read side can
+//                           re-resolve it and pick up lines added later
+//                           (AQU-1629) — a resolved snapshot can only ever
+//                           shrink, never grow.
 //   - assignment.reassign : UPDATE assignee_user_id.
 //   - assignment.unassign : set unassigned_at (soft close; row kept for audit).
 //
@@ -142,6 +147,31 @@ export function handleAssignmentEvent(
                ON CONFLICT DO NOTHING`,
             )
             .bind(p.assignmentId, event.projectId, entry.fileId),
+        )
+      }
+
+      // AQU-1629: record the RANGE, not only what it resolved to. The rows
+      // above are a snapshot of the cells that existed at this instant, and
+      // nothing re-resolved them, so a line added to the chapter or file
+      // afterwards never joined the assignment — the assignee's progress could
+      // read done over a chapter that still had open work. `assignment_scopes`
+      // lets the read side re-resolve the scope against live `cells` on every
+      // read (view `assignment_member_cells`, migration 0129).
+      //
+      // Deliberately NOT written for a 'cells' entry: an explicit selection is
+      // exactly the lines the manager picked, and must not silently acquire
+      // new ones. The branch is the same `entry.cellIds` test as above, so a
+      // scope kind and its entries can never disagree about which it is.
+      if (!entry.cellIds) {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO assignment_scopes (assignment_id, file_id, chapter)
+               VALUES (?, ?, ?)
+               ON CONFLICT DO NOTHING`,
+            )
+            // '' = the whole file (a 'books' scope); see the column comment.
+            .bind(p.assignmentId, entry.fileId, entry.chapter ?? ''),
         )
       }
     }

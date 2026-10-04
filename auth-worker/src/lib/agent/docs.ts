@@ -228,7 +228,9 @@ FROM assignment_cells ac JOIN cells c
   ON c.project_id = :project AND c.file_id = ac.file_id
  AND c.cell_id = ac.cell_id AND c.side = 'target'
 WHERE ac.assignment_id = '#e1'
-(assignment_id values come back from the first query; aliases work.)
+(assignment_id values come back from the first query; aliases work. assignment_cells
+is the snapshot taken when the assignment was created, so for a book or chapter
+assignment this total is a floor — it misses lines added to the file since.)
 
 Members you can assign to:
 SELECT pm.user_id, pm.role_level

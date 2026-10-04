@@ -16,7 +16,7 @@ export interface LaneRow {
   language: string
 }
 
-/** Rows for the default lane and every active extra lane. */
+/** Rows for the default lane and every extra lane, archived lanes left out. */
 export function referenceBibleLaneRows(
   targetLanguage: string,
   targetLanes: readonly string[],
@@ -27,13 +27,17 @@ export function referenceBibleLaneRows(
   const recordFor = (tag: string) =>
     targets.find((lane) => (lane.legacyTag ?? "").toLowerCase() === tag.toLowerCase())
   const defaultRecord = recordFor("")
-  const rows: LaneRow[] = [
-    {
+  const rows: LaneRow[] = []
+  // AQU-1600 lets the default lane be archived like any other. Its archived
+  // state lives only on its lane row (the archivedLanes mirror holds tags and
+  // cannot name ""), so the row is what hides it here.
+  if (!defaultRecord?.archivedAt) {
+    rows.push({
       tag: "",
       label: defaultRecord?.name || targetLanguage,
       language: defaultRecord?.langCode || targetLanguage,
-    },
-  ]
+    })
+  }
   for (const tag of activeLanes(extraRegistryLanes(targetLanes, targetLanguage), archivedLanes)) {
     const record = recordFor(tag)
     if (record?.archivedAt) continue

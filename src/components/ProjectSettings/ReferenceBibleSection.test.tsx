@@ -187,6 +187,13 @@ describe("referenceBibleLaneRows", () => {
       { tag: "en", label: "en", language: "en" },
     ])
   })
+
+  it("leaves out an archived default lane (AQU-1600 lets it be archived)", () => {
+    const lanes = LANES.map((lane) => (lane.legacyTag === "" ? { ...lane, archivedAt: "2026-10-03" } : lane))
+    expect(referenceBibleLaneRows("Arabic", ["Arabic", "en", "fr"], ["fr"], lanes)).toEqual([
+      { tag: "en", label: "Plain English", language: "en" },
+    ])
+  })
 })
 
 describe("sortBiblesForLane", () => {

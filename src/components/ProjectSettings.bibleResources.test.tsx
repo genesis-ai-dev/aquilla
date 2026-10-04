@@ -61,6 +61,11 @@ let currentProject: ProjectRecord = makeProject()
 // GET hasn't resolved yet. Defaults to true (hydrated) so the other tests in
 // this file — which don't care about the race — keep their prior behavior.
 let currentHasFetched = true
+// The settings blob this page's own settings hook returns. In the real app
+// `useProject(..., { includeSettings: false })` never fills
+// `project.bibleResourcesEnabled`, so the blob is the only place the saved
+// value lives.
+let currentSettings: Record<string, unknown> = {}
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -80,7 +85,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     updatedBy: null,
     conflict: false,
     dismissConflict: vi.fn(),
-    settings: {},
+    settings: currentSettings,
     hasFetched: currentHasFetched,
     isOnline: true,
     refresh: vi.fn(),
@@ -158,6 +163,7 @@ function renderSettings() {
 beforeEach(() => {
   vi.clearAllMocks()
   currentHasFetched = true
+  currentSettings = {}
 })
 
 describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
@@ -251,5 +257,25 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+  })
+
+  // AQU-1573 walk: a non-scripture project saved with Bible resources ON came
+  // back OFF on every later visit, because the project record this page reads
+  // never carries the setting. The saved value in the settings blob must win.
+  it("non-scripture project saved ON -> switch shows ON on a later visit (value only in the settings blob)", () => {
+    currentProject = makeProject({
+      files: [{ id: "f1", name: "sermon.md", type: "md", createdAt: "", cellCount: 1 }],
+      bibleResourcesEnabled: undefined,
+    })
+    currentSettings = { bibleResourcesEnabled: true }
+    renderSettings()
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    // Settling to the saved value is not a user edit.
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+    // And it can be turned off again, which marks the form dirty.
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
   })
 })

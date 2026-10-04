@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
+import { laneComboboxOptions } from "@/components/lane-options"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -131,7 +132,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { CellPresenceBadges } from "./CellPresenceBadges"
-import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
@@ -2872,13 +2872,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={switchableLanes.map((lane) => ({
-                  value: lane,
-                  label: laneLabels?.[lane]
-                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
-                  archived: isLaneArchived(lane, archivedLanes),
-                  testId: lane,
-                }))}
+                options={laneComboboxOptions({
+                  lanes: switchableLanes,
+                  laneLabels,
+                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+                  archivedLanes,
+                })}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}

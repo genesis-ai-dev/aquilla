@@ -9,9 +9,14 @@
 //
 // One passage lookup covers every staged commit. Best-effort like the rest of
 // staging lint: a lane with no Bible, a Bible that is not installed, or a
-// failed query adds no lines and never fails the emit.
+// failed query adds no quote lines and never fails the emit.
+//
+// A draft that leaves out a reference the source cites (its chapter and verse
+// numbers, reference-kept.ts) gets a NEEDS REVIEW line too. That needs no
+// verse text, so it is checked on every lane, Bible or not.
 
 import { checkReferenceQuotes } from "../../../../src/lib/reference-bible/quote-check"
+import { findDroppedReferences } from "../../../../src/lib/reference-bible/reference-kept"
 import { loadLaneReferencePassages } from "./reference-bible"
 
 /** One staged target.cell.commit, as the lint needs it. */
@@ -29,27 +34,47 @@ function clip(text: string): string {
   return text.length > MAX_QUOTED_CHARS ? `${text.slice(0, MAX_QUOTED_CHARS)}…` : text
 }
 
-/** NEEDS REVIEW lines for staged drafts whose cited verses are not quoted from the lane's Bible. */
+/** NEEDS REVIEW lines for a staged draft that leaves out a reference its source cites. */
+function droppedReferenceLines(d: StagedQuoteDraft): string[] {
+  return findDroppedReferences(d.source, d.draft).map(
+    (f) =>
+      `NEEDS REVIEW ${d.ref}: the source cites ${f.label} but the draft leaves out the reference — keep its chapter and verse numbers in the translation`,
+  )
+}
+
+/** NEEDS REVIEW lines for staged drafts whose cited verses are not quoted from the lane's Bible, or whose references are left out. */
 export async function referenceQuoteLintLines(
   db: AquillaDb,
   input: { projectId: string; lane: string; drafts: readonly StagedQuoteDraft[] },
 ): Promise<string[]> {
   const drafts = input.drafts.filter((d) => d.source && /\d/.test(d.source) && d.draft.trim())
   if (drafts.length === 0) return []
+  const quoteLines = await quoteMismatchLines(db, { ...input, drafts })
+  const lines: string[] = []
+  for (const d of drafts) lines.push(...(quoteLines.get(d) ?? []), ...droppedReferenceLines(d))
+  return lines
+}
+
+/** The quote lines per draft, from the lane's Bible; empty when the lane has none or the lookup fails. */
+async function quoteMismatchLines(
+  db: AquillaDb,
+  input: { projectId: string; lane: string; drafts: readonly StagedQuoteDraft[] },
+): Promise<Map<StagedQuoteDraft, string[]>> {
+  const out = new Map<StagedQuoteDraft, string[]>()
   try {
     const found = await loadLaneReferencePassages(db, {
       projectId: input.projectId,
       lane: input.lane,
-      sources: drafts.map((d) => d.source),
+      sources: input.drafts.map((d) => d.source),
     })
-    if (!found?.version || found.passages.length === 0) return []
+    if (!found?.version || found.passages.length === 0) return out
     const versionName = found.version.name
     const byCanonical = new Map(found.passages.map((p) => [p.canonical, p]))
     const lookup = (canonical: string) => byCanonical.get(canonical)?.verses.map((v) => v.text)
     const verseText = (canonical: string) => clip(lookup(canonical)?.join(" ") ?? "")
 
-    const lines: string[] = []
-    for (const d of drafts) {
+    for (const d of input.drafts) {
+      const lines: string[] = []
       for (const f of checkReferenceQuotes(d.source, d.draft, lookup)) {
         if (f.kind === "differs") {
           lines.push(
@@ -61,10 +86,11 @@ export async function referenceQuoteLintLines(
           )
         }
       }
+      if (lines.length > 0) out.set(d, lines)
     }
-    return lines
+    return out
   } catch (err) {
     console.warn("[emit-stage] reference quote lint failed:", err)
-    return []
+    return new Map()
   }
 }

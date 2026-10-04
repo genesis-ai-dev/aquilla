@@ -2,7 +2,8 @@
 // in-app agent must hear, in its verdict block, that a staged sermon draft
 // changed a quoted verse or translated a visibly quoted verse fresh, so it can
 // redraft from the lane's Bible before a human reads the proposal. A correct
-// quote, a mere mention, and a lane with no Bible stay silent.
+// quote, a mere mention, and a lane with no Bible stay silent about quotes. A
+// draft that leaves out a cited reference's numbers is flagged on any lane.
 
 import { env } from "cloudflare:test"
 import { beforeEach, describe, expect, it } from "vitest"
@@ -61,7 +62,7 @@ beforeEach(async () => {
 describe("emit staging — reference Bible quote lint (AQU-1573)", () => {
   it("says nothing for an exact quote and a mere mention", async () => {
     const rom = await verse("arb-vandyck", "ROM 8:28")
-    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `«${rom}»`), commit(3, "سننظر لاحقًا في فيلبي 4: 13.")], ctx())
+    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `رومية 8: 28: «${rom}»`), commit(3, "سننظر لاحقًا في فيلبي 4: 13.")], ctx())
     expect(out.proposal?.events).toHaveLength(2)
     expect(out.modelVerdictBlock).not.toContain("NEEDS REVIEW")
   })
@@ -70,7 +71,7 @@ describe("emit staging — reference Bible quote lint (AQU-1573)", () => {
     const rom = await verse("arb-vandyck", "ROM 8:28")
     const changed = rom.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")
     expect(changed).not.toBe(rom)
-    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `«${changed}»`)], ctx())
+    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `رومية 8: 28: «${changed}»`)], ctx())
     // Still staged: the check is a warning, never a block.
     expect(out.proposal?.events).toHaveLength(1)
     expect(out.modelVerdictBlock).toContain(
@@ -87,10 +88,24 @@ describe("emit staging — reference Bible quote lint (AQU-1573)", () => {
     expect(out.modelVerdictBlock).toContain(await verse("arb-vandyck", "PSA 23:1"))
   })
 
-  it("stays silent on a lane with no reference Bible", async () => {
+  it("stays silent about quotes on a lane with no reference Bible", async () => {
     const rom = await verse("arb-vandyck", "ROM 8:28")
-    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `«${rom.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}»`)], ctx("en"))
+    const out = await stageEvents(env.AQUILLA_PG, [commit(1, `رومية 8: 28: «${rom.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}»`)], ctx("en"))
     expect(out.proposal?.events).toHaveLength(1)
     expect(out.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+  })
+
+  it("flags a draft that leaves out the cited reference, with or without a Bible", async () => {
+    const rom = await verse("arb-vandyck", "ROM 8:28")
+    const line = "NEEDS REVIEW #1: the source cites Romans 8:28 but the draft leaves out the reference — keep its chapter and verse numbers in the translation"
+    const withBible = await stageEvents(env.AQUILLA_PG, [commit(1, `«${rom}»`)], ctx())
+    expect(withBible.proposal?.events).toHaveLength(1)
+    expect(withBible.modelVerdictBlock).toContain(line)
+    expect(withBible.modelVerdictBlock).not.toContain("word for word")
+    const noBible = await stageEvents(env.AQUILLA_PG, [commit(1, `«${rom}»`)], ctx("en"))
+    expect(noBible.modelVerdictBlock).toContain(line)
+    // Arabic-Indic digits keep the reference.
+    const kept = await stageEvents(env.AQUILLA_PG, [commit(1, `رومية ٨: ٢٨: «${rom}»`)], ctx())
+    expect(kept.modelVerdictBlock).not.toContain("NEEDS REVIEW")
   })
 })

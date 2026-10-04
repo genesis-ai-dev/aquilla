@@ -13,6 +13,27 @@ function infraction(reasonParams: Record<string, string>): RuleInfraction {
 }
 
 describe("formatInfractionReason — reference Bible quotes", () => {
+  it("says the translation leaves out a reference, and counts them", () => {
+    expect(formatInfractionReason(infraction({ kind: "dropped", refs: "Isaiah 40:25", count: "1" }), t)).toBe(
+      "The source cites Isaiah 40:25, but the translation leaves out the reference",
+    )
+    expect(
+      formatInfractionReason(infraction({ kind: "dropped", refs: "Romans 5:8, John 15:13", count: "2", version: "Van Dyck" }), t),
+    ).toBe("The source cites Romans 5:8, John 15:13, but the translation leaves out the references")
+  })
+
+  it("adds the left-out reference after a quote sentence", () => {
+    expect(
+      formatInfractionReason(
+        infraction({ kind: "differs", refs: "Romans 8:28", version: "Van Dyck", droppedRefs: "Romans 8:28", droppedCount: "1" }),
+        t,
+      ),
+    ).toBe(
+      "The quote of Romans 8:28 does not match Van Dyck word for word. " +
+        "The source cites Romans 8:28, but the translation leaves out the reference",
+    )
+  })
+
   it("says a changed quote does not match word for word", () => {
     expect(formatInfractionReason(infraction({ kind: "differs", refs: "Romans 8:28", version: "Van Dyck" }), t)).toBe(
       "The quote of Romans 8:28 does not match Van Dyck word for word",

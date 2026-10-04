@@ -28,20 +28,20 @@ const ROM828 = verse("ROM", 8, 28)
 const JHN316 = verse("JHN", 3, 16)
 
 describe("reference-quote built-in check (AQU-1573)", () => {
-  it("finds nothing without a reference Bible in the context", () => {
+  it("finds no quote problem without a reference Bible in the context", () => {
     const source = "Romans 8:28: \"And we know that in all things God works for the good\""
-    const changed = ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")
+    const changed = `رومية 8: 28: ${ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}`
     expect(runCheck(source, changed)).toBeNull()
     expect(runCheck(source, changed, {})).toBeNull()
   })
 
   it("passes an exact quote", () => {
-    expect(runCheck("\"For God so loved the world\" (John 3:16)", `«${JHN316}»`, ctx)).toBeNull()
+    expect(runCheck("\"For God so loved the world\" (John 3:16)", `«${JHN316}» (يوحنا 3: 16)`, ctx)).toBeNull()
   })
 
   it("flags a changed word as a target span and names the verse and the Bible", () => {
     const source = "Romans 8:28: \"And we know that in all things God works for the good\""
-    const draft = `«${ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}»`
+    const draft = `رومية 8: 28: «${ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}»`
     const result = runCheck(source, draft, ctx)
     expect(result).not.toBeNull()
     expect(Array.isArray(result)).toBe(false)
@@ -81,7 +81,7 @@ describe("reference-quote built-in check (AQU-1573)", () => {
   it("skips a verse that has not loaded yet", () => {
     const pending: BuiltinCheckContext = { referenceBible: { versionName: "Van Dyck", lookup: () => undefined } }
     const source = "Romans 8:28: \"And we know that in all things God works for the good\""
-    expect(runCheck(source, "ترجمة جديدة تمامًا لا علاقة لها بالآية", pending)).toBeNull()
+    expect(runCheck(source, "رومية 8: 28: ترجمة جديدة تمامًا لا علاقة لها بالآية", pending)).toBeNull()
   })
 
   it("uses the caller's memoised references and skips sources with none", () => {
@@ -92,5 +92,50 @@ describe("reference-quote built-in check (AQU-1573)", () => {
     // No digit at all: not even the memo is consulted.
     expect(runCheck("Who is God?", "من هو الله؟", memo)).toBeNull()
     expect(references).toHaveBeenCalledTimes(1)
+  })
+
+  // A translation must keep the chapter and verse numbers of what the source
+  // cites, Bible or not; the book name may be translated.
+  describe("a reference left out of the translation", () => {
+    const ISA = 'Isaiah 40:25 says, "To whom will you compare me? Or who is my equal?" says the Holy One.'
+    const VD = verse("ISA", 40, 25)
+    type Result = { spans: { side: string; start: number; end: number; matchedText: string }[]; params: Record<string, string> }
+
+    it("flags a copied quote whose reference is gone, as a source span over the reference", () => {
+      const result = runCheck(ISA, `يقول إشعياء: ${VD}`, ctx) as Result
+      expect(result.params).toEqual({ kind: "dropped", refs: "Isaiah 40:25", count: "1", version: "Van Dyck" })
+      expect(result.spans).toEqual([{ side: "source", start: 0, end: 12, matchedText: "Isaiah 40:25" }])
+    })
+
+    it("passes the reference in Western or Arabic-Indic digits", () => {
+      expect(runCheck(ISA, `يقول إشعياء 40: 25: ${VD}`, ctx)).toBeNull()
+      expect(runCheck(ISA, `يقول إشعياء ٤٠:٢٥: ${VD}`, ctx)).toBeNull()
+    })
+
+    it("fires on a lane with no reference Bible, naming no Bible", () => {
+      const result = runCheck(ISA, "يقول إشعياء: بمن تشبهونني؟", undefined) as Result
+      expect(result.params).toEqual({ kind: "dropped", refs: "Isaiah 40:25", count: "1" })
+      expect(runCheck(ISA, "يقول إشعياء 40: 25: بمن تشبهونني؟", undefined)).toBeNull()
+    })
+
+    it("rides along with a quote finding as its own list", () => {
+      const source = "Romans 8:28: \"And we know that in all things God works for the good\""
+      const result = runCheck(source, `«${ROM828.replace("لِلْخَيْرِ", "لِلصَّلَاحِ")}»`, ctx) as Result
+      expect(result.params).toEqual({ kind: "differs", refs: "Romans 8:28", version: "Van Dyck", droppedRefs: "Romans 8:28", droppedCount: "1" })
+      expect(result.spans.map((s) => s.side)).toEqual(["target", "source"])
+    })
+
+    it("marks a reference once when its quote is also missing", () => {
+      const source = "The psalmist writes, \"The Lord is my shepherd, I lack nothing\" (Ps 23:1)."
+      const result = runCheck(source, "يكتب المرنم: «الرب هو راعيّ، لن أحتاج إلى شيء».", ctx) as Result
+      expect(result.params).toEqual({ kind: "missing", refs: "Psalm 23:1", version: "Van Dyck", droppedRefs: "Psalm 23:1", droppedCount: "1" })
+      expect(result.spans).toHaveLength(1)
+    })
+
+    it("stays quiet for an empty translation, a chapter-only mention and a source with no reference", () => {
+      expect(runCheck(ISA, "", ctx)).toBeNull()
+      expect(runCheck("Read Romans 8 this week.", "اقرأ رسالة رومية هذا الأسبوع.", ctx)).toBeNull()
+      expect(runCheck("Who is God?", "من هو الله؟")).toBeNull()
+    })
   })
 })

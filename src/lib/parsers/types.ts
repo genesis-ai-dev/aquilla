@@ -202,10 +202,13 @@ export interface RuleInfraction {
    * `source-requires-target`: `sourceCount` and `targetCount` (instance
    * counts as decimal strings).
    * `builtin:reference-quote` (AQU-1573): `kind` ("differs" | "missing" |
-   * "both"), `refs` (the cited references' reader labels, joined; for "both"
-   * the changed quotes, with `missingRefs` the ones not taken from the
-   * Bible) and `version` (the reference Bible's name) — none of them
-   * translatable text.
+   * "both" | "dropped"), `refs` (the cited references' reader labels,
+   * joined; for "both" the changed quotes, with `missingRefs` the ones not
+   * taken from the Bible; for "dropped" the references the translation
+   * leaves out, with `count`), `version` (the reference Bible's name; absent
+   * on a lane with no Bible, where only "dropped" can fire), and, next to a
+   * quote finding, `droppedRefs` + `droppedCount` for references left out —
+   * none of them translatable text.
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable

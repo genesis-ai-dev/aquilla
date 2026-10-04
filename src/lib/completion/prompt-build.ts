@@ -310,7 +310,8 @@ export function buildReferenceVersesBlock(input: {
     // Only a Bible printed with vowel pointing (Van Dyck) gets the vowel-mark
     // allowance; it is noise for the King James Version (AQU-1573 walk).
     (pointed ? "You may leave out vowel marks to match the rest of your translation. " : "") +
-    "If the source only names a reference without quoting it, translate the source as usual.\n" +
+    "If the source only names a reference without quoting it, translate the source as usual. " +
+    "Keep each reference (chapter and verse numbers) in the translation.\n" +
     lines.join("\n")
   )
 }

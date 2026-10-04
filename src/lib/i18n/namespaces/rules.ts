@@ -50,6 +50,10 @@ export const rules = defineNamespace({
       "The quote of {refs} does not match {version} word for word",
     "rules.infraction.builtin.referenceQuoteMissing":
       "The source quotes {refs}, but the translation does not use the {version} wording",
+    "rules.infraction.builtin.referenceDropped": plural({
+      one: "The source cites {refs}, but the translation leaves out the reference",
+      other: "The source cites {refs}, but the translation leaves out the references",
+    }),
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -87,7 +91,7 @@ export const rules = defineNamespace({
       "ALL-CAPS abbreviations from source missing in translation.",
     "rules.builtin.referenceQuote.name": "Reference Bible quotes",
     "rules.builtin.referenceQuote.description":
-      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine.",
+      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine. The translation must also keep each reference's chapter and verse numbers.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -498,9 +502,16 @@ export const rules = defineNamespace({
           version: "The reference Bible's short name, e.g. 'Van Dyck' — never translated.",
         },
       },
+      "rules.infraction.builtin.referenceDropped": {
+        description:
+          "Reference Bible quotes check finding (AQU-1573), shown under the check's name in the editor and the Check file drawer: the source cites a Bible verse by chapter and verse (e.g. 'Isaiah 40:25'), but the translation does not contain those numbers, so the reference was lost. The book name may be translated; only the numbers have to stay. Fires with or without a reference Bible. A warning, not an error.",
+        placeholders: {
+          refs: "The cited verse reference(s) as written for readers, e.g. 'Isaiah 40:25' or 'Isaiah 40:25, John 3:16' — never translated. The plural form follows how many references are listed.",
+        },
+      },
       "rules.builtin.referenceQuote.description": {
         description:
-          "Description of the built-in 'Reference Bible quotes' check (AQU-1573), shown under its name in the built-in checks list. 'Reference Bible' is the Bible chosen per language in Project settings; vowel marks means Arabic/Hebrew diacritics.",
+          "Description of the built-in 'Reference Bible quotes' check (AQU-1573), shown under its name in the built-in checks list. 'Reference Bible' is the Bible chosen per language in Project settings; vowel marks means Arabic/Hebrew diacritics. The last sentence means the chapter and verse numbers of a cited reference (e.g. '40:25') must still appear in the translation.",
       },
       "rules.infraction.builtin.placeholderIntegrity": {
         description:

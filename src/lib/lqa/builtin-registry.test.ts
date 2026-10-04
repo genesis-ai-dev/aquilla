@@ -51,7 +51,7 @@ describe("builtin-registry", () => {
     expect(def.defaultSeverity).toBe("minor")
     expect(def.runsOnEmptyTarget).toBe(false)
     const source = "\"For God so loved the world\" (John 3:16)"
-    const draft = "For God so loved the whole world, that he gave his only begotten Son"
+    const draft = "For God so loved the whole world, that he gave his only begotten Son (John 3:16)"
     expect(def.run(source, draft)).toBeNull()
     const ctx = {
       referenceBible: {

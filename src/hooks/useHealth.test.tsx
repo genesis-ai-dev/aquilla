@@ -494,7 +494,7 @@ describe("useHealth — check context (reference Bible quotes)", () => {
   }
   const verse = "For God so loved the world, that he gave his only begotten Son"
   const quoting = {
-    ...cell("a", "For God so loved the whole world, that he gave his only begotten Son"),
+    ...cell("a", "For God so loved the whole world, that he gave his only begotten Son (John 3:16)"),
     original: "\"For God so loved the world\" (John 3:16)",
   }
 

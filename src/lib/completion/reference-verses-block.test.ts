@@ -50,6 +50,7 @@ describe("buildReferenceVersesBlock", () => {
     expect(lines[0]).toBe(`${REFERENCE_VERSES_HEADING}Van Dyck (Arabic) (MUST follow):`)
     expect(lines[1]).toContain("copy the matching words from this Bible exactly")
     expect(lines[1]).toContain("If the source only names a reference without quoting it, translate the source as usual.")
+    expect(lines[1].endsWith(" Keep each reference (chapter and verse numbers) in the translation.")).toBe(true)
     expect(lines[2]).toBe(`- Isaiah 40:25 [ISA 40:25]: ${ISA_40_25}`)
     expect(lines).toHaveLength(3)
   })

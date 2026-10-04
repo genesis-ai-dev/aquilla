@@ -452,7 +452,7 @@ describe("rule engine — check context (reference Bible quotes)", () => {
     const c = makeCell({
       id: "c1",
       original: source,
-      translated: "And we know that all things work together for the best to them that love God",
+      translated: "Romans 8:28: And we know that all things work together for the best to them that love God",
       status: "unvalidated",
     })
     const [inf] = checkRulesForCell(c, "f1", [quoteRule], ctx)
@@ -462,9 +462,9 @@ describe("rule engine — check context (reference Bible quotes)", () => {
   })
 
   it("passes the exact wording, and finds nothing without a context", () => {
-    const exact = makeCell({ id: "c2", original: source, translated: verse, status: "unvalidated" })
+    const exact = makeCell({ id: "c2", original: source, translated: `Romans 8:28: ${verse}`, status: "unvalidated" })
     expect(checkRulesForCell(exact, "f1", [quoteRule], ctx)).toEqual([])
-    const changed = makeCell({ id: "c3", original: source, translated: "And we know that all things work together for the best to them that love God", status: "unvalidated" })
+    const changed = makeCell({ id: "c3", original: source, translated: "Romans 8:28: And we know that all things work together for the best to them that love God", status: "unvalidated" })
     expect(checkRulesForCell(changed, "f1", [quoteRule])).toEqual([])
   })
 })

@@ -148,13 +148,15 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
-  // AQU-1573: on by default but silent until a lane names a reference Bible;
-  // minor (amber) because it is a warning, never a block (Sam, 2026-10-02).
+  // AQU-1573: on by default; the quote findings stay silent until a lane
+  // names a reference Bible, while a dropped chapter-and-verse reference is
+  // flagged on any lane. Minor (amber) because it is a warning, never a block
+  // (Sam, 2026-10-02).
   "reference-quote": {
     id: "reference-quote",
     name: "Reference Bible quotes",
     description:
-      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine.",
+      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine. The translation must also keep each reference's chapter and verse numbers.",
     defaultSeverity: "minor",
     defaultEnabled: true,
     runsOnEmptyTarget: false,

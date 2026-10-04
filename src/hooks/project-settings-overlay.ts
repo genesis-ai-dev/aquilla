@@ -87,6 +87,8 @@ export function overlaySettings(
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
   assign("harmonize_min_role", settings.harmonize_min_role)
+  // Smart quotes must reach the workspace, where the cell editor reads it.
+  assign("smartQuotes", settings.smartQuotes)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     const merged = { ...record.ttsSettings, ...settings.ttsSettings }

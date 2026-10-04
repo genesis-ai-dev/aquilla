@@ -222,7 +222,10 @@ mergeSibling.post(
 
     // Register the lane on the host + bump settings version — through the
     // shared settings write, so the tag and the host's `lanes` records cannot
-    // disagree (AQU-1550).
+    // disagree (AQU-1550): it creates the record if the fold had nothing to
+    // write, and re-reads the settings rather than overwrite a change made
+    // while the fold ran. If it fails the donor stays live; the fold is
+    // idempotent, so running the merge again finishes the job.
     //
     // AQU-1602 asked for this registry write to go. It stays for now because
     // POST /:projectId/lanes — the canonical way a lane is created (AQU-1418) —
@@ -230,10 +233,7 @@ mergeSibling.post(
     // (billing's `project_settings.target_lanes`, the contextual project
     // context, the external API's PatchSettings). Dropping it here alone would
     // make a merged lane the only lane missing from them. AQU-1595 removes the
-    // four settings keys everywhere, once those readers are on lane rows: it creates the record if the fold had nothing to
-    // write, and re-reads the settings rather than overwrite a change made
-    // while the fold ran. If it fails the donor stays live; the fold is
-    // idempotent, so running the merge again finishes the job.
+    // four settings keys everywhere, once those readers are on lane rows.
     const registered = await mergeSettingsArray(
       c.env.AQUILLA_PG,
       hostId,

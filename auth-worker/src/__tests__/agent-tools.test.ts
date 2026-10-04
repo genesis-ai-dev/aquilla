@@ -949,7 +949,7 @@ describe("Lane plumbing (AQU-1447)", () => {
 
   it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
     await seedWorld()
-    // @ts-expect-error targetLang is required: no caller may leave the lane out
+    // @ts-expect-error a lane is required: no caller may leave it out (AQU-1610)
     const untyped = selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
     await untyped.catch(() => undefined)
     const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "no-such-lane" })

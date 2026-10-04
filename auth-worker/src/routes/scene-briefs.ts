@@ -114,6 +114,9 @@ const proposeSchema = z.object({
   fileId: z.string().min(1),
   startCellId: z.string().min(1),
   endCellId: z.string().min(1),
+  /** AQU-1610: the lane's id — the identity a brief is keyed on. */
+  laneId: z.string().max(64).optional(),
+  /** Legacy tag; still accepted until the client switches (AQU-1613). */
   targetLang: z.string().optional(),
   construal: z.string().min(1),
   ambiguityRegister: z.array(ambiguityEntrySchema).optional(),
@@ -141,7 +144,7 @@ sceneBriefs.post(
       fileId: body.fileId,
       startCellId: body.startCellId,
       endCellId: body.endCellId,
-      targetLang: body.targetLang,
+      ...(body.laneId ? { laneId: body.laneId } : { targetLang: body.targetLang }),
       construal: body.construal,
       ambiguityRegister: body.ambiguityRegister,
       l1Summary: body.l1Summary,

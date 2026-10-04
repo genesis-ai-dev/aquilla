@@ -168,6 +168,8 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
     {
       projectId: body.projectId,
       focusedFileId: body.fileId,
+      // AQU-1610: whatever the external DraftCells command carried — a tag
+      // today, a real lane id after AQU-1615 — resolved either way downstream.
       lane: body.laneId ?? "",
       aliases: new AliasMap(),
       sourceLanguage,

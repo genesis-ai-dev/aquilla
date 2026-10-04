@@ -8,6 +8,7 @@
 // via files.book_code.
 
 import { PLAN_UNIT_FILE_PREDICATE } from "../../../../../db/shared/plan-units"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
 import {
   parseRefRange,
@@ -31,7 +32,9 @@ export interface ReadContext {
   projectId: string
   /** Focused file (:file). */
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -380,7 +383,7 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const offset = Math.max(Number(args.offset) || 0, 0)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId })
   const filtered = filter === "all" ? all : all.filter((p) => statusOf(p) === filter)
   const page = filtered.slice(offset, offset + limit)
 

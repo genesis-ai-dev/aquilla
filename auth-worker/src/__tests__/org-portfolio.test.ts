@@ -823,15 +823,13 @@ describe("plan unit rollup", () => {
 })
 
 /**
- * AQU-1071 — the org's active-language count, served beside the rollup.
+ * AQU-1071 — the org's active-lane count, served beside the rollup.
  *
  * This is the number the enterprise billing band is read off, so it is counted by
- * the same helper billing counts with (`countTargetLanesByOrg` → the plans.ts
- * rule): distinct language tags; archived lanes, archived projects and paused
- * (`is_active = false`, AQU-1070) projects excluded.
- * The org dashboard tile reads it straight from here rather than tallying the
- * lane chips on screen, which would double-count a language two projects share
- * and would count an archived lane that still has progress rows.
+ * the same helper billing counts with (`countTargetLanesByOrg`): unarchived
+ * target lane rows. Archived projects and paused (`is_active = false`, AQU-1070)
+ * projects are excluded. The tile reads it from here rather than from the lane
+ * chips on screen.
  */
 describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)", () => {
   async function seedOrgWithLanes() {
@@ -845,12 +843,22 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
         ('pc', 'Luke', 1, 1, NULL),
         ('pz', 'Retired', 1, 1, '2026-01-01')`,
     ).run()
+    // Settings disagree with the lane rows on purpose: billing must follow lanes.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_settings (project_id, settings, version) VALUES
-        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Bambara","Dioula"]}', 1),
-        ('pb', '{"targetLanguage":"Dioula"}', 1),
-        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Dioula"]}', 1),
+        ('pb', '{"targetLanguage":"Bambara"}', 1),
+        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai","Ignored"],"archivedLanes":["Songhai"]}', 1),
         ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, archived_at) VALUES
+        ('eslane01', 'pa', 'target', 'Spanish', 'es', '', NULL),
+        ('eslane02', 'pa', 'target', 'Spanish', 'es', 'es-b', NULL),
+        ('eslane03', 'pa', 'target', 'Spanish', 'es', 'es-c', NULL),
+        ('frlane01', 'pb', 'target', 'French', 'fr', '', NULL),
+        ('fflane01', 'pc', 'target', 'Fulfulde', 'ff', '', '2026-01-01'),
+        ('zrlane01', 'pz', 'target', 'Zarma', 'dje', '', NULL)`,
     ).run()
   }
 
@@ -864,12 +872,11 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
     return ((await res.json()) as { activeLanguageCount: number }).activeLanguageCount
   }
 
-  it("counts each active target language once across the org", async () => {
+  it("counts each active target lane, including two lanes of one language", async () => {
     await seedOrgWithLanes()
-    // Bambara (pa, listed twice — primary and lane), Dioula (pa and pb), and
-    // Fulfulde (pc). Songhai is archived and Zarma's project is archived, so
-    // neither is a language this org is still translating into.
-    expect(await languageCount()).toBe(3)
+    // pa has three Spanish lanes. pb has one French lane. pc's only lane is
+    // archived, and pz's project is archived, so neither adds a lane.
+    expect(await languageCount()).toBe(4)
   })
 
   it("is zero for an org with no projects, rather than absent", async () => {
@@ -891,7 +898,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: unknown[]; activeLanguageCount: number }
     expect(body.projects).toHaveLength(1)
-    expect(body.activeLanguageCount).toBe(3)
+    expect(body.activeLanguageCount).toBe(4)
   })
 })
 

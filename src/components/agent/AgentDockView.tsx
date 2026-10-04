@@ -117,7 +117,7 @@ function ScopedAgentDockView({
   conversationPrelude,
 }: AgentDockViewProps & { draftScope: ComposerDraftScope }) {
   const t = useT()
-  const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
+  const { state, send, stop, startNewChat, noteActivity } = useAgentSession(projectId, author)
   // Bumped on every own-send: the scroller snaps to the end so the sent
   // message (and the reply about to stream) is in view even if the user had
   // scrolled up to read history.
@@ -218,10 +218,21 @@ function ScopedAgentDockView({
   }, [pendingPrompt, jwt, sendPrompt, onPendingPromptConsumed])
 
   // Insert a chip handed in from the editor's "Ask AI" selection action.
+  //
+  // AQU-1653: "Ask AI" is a fresh question about the passage the reader just
+  // selected, so it starts a NEW chat rather than appending to whatever the
+  // last conversation was about — safe now that the old chat is saved on the
+  // server and reopenable from the chat menu. Two cases keep the current chat:
+  // an empty one (there is nothing to start away from) and a streaming one
+  // (a new chat aborts the run in flight, which the reader did not ask for).
   useEffect(() => {
     if (!pendingChip) return
+    if (state.runs.length > 0 && !state.isStreaming) startNewChat()
     composerRef.current?.insertChip(pendingChip)
     onPendingChipConsumed?.()
+    // Deliberately keyed on the chip alone: re-running when runs/isStreaming
+    // change would start a second new chat for one "Ask AI".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChip, onPendingChipConsumed])
 
   const applyContext: ApplyContext = {

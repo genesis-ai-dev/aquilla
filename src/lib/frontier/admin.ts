@@ -43,10 +43,8 @@ export interface AdminOrg {
   memberCount: number
   projectCount: number
   /**
-   * AQU-1071: distinct ACTIVE target languages in the org (archived lanes and
-   * archived projects excluded) — the enterprise billing band's own count, which
-   * used to be visible one org at a time on the Billing tab. Optional so a
-   * server that predates the field renders "—" rather than a wrong 0.
+   * AQU-1071: active target lanes in the org — the enterprise billing band.
+   * Optional so a server that predates the field renders "—" rather than a wrong 0.
    */
   activeLanguageCount?: number
 }

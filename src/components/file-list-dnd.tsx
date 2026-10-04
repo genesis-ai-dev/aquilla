@@ -55,13 +55,18 @@ const accessibility = {
   },
 }
 
-// A file that is not one of this group's items reports activeIndex -1.
-// Shifting rows then would preview a move this list is not making; the file
-// joins the other group when the pointer lets go.
+// A file that is not one of this group's items reports activeIndex -1. That is
+// a refusal, or the moment before the preview puts the file in the other
+// corpus. Shifting rows then would preview a move this list is not making.
 const sameGroupVerticalStrategy: SortingStrategy = (args) => {
   if (args.overIndex < 0 || args.activeIndex < 0) return null
   return verticalListSortingStrategy(args)
 }
+
+// The preview has already placed the file in its slot. The shift strategy
+// would move it a second time, so the layout itself is the position and the
+// sortable's own layout animation is what slides the neighbours.
+const layoutHoldStrategy: SortingStrategy = () => null
 
 const rowSlide = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
 
@@ -168,24 +173,20 @@ export function CorpusGroupFrame({
   droppable,
   label,
   acceptsFileTransfer = false,
-  receiving = false,
   groupRef,
   children,
 }: {
   droppable: boolean
   label: string
   acceptsFileTransfer?: boolean
-  receiving?: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
-  const frameClass = receiving ? "rounded-lg ring-1 ring-primary/50" : undefined
-  if (!droppable) return <div ref={groupRef} className={frameClass}>{children}</div>
+  if (!droppable) return <div ref={groupRef}>{children}</div>
   return (
     <DroppableCorpusGroup
       label={label}
       acceptsFileTransfer={acceptsFileTransfer}
-      receiving={receiving}
       groupRef={groupRef}
     >
       {children}
@@ -197,16 +198,19 @@ export function GroupFileRows({
   sortable,
   label,
   fileIds,
+  holdLayout = false,
   children,
 }: {
   sortable: boolean
   label: string
   fileIds: string[]
+  /** The preview already put each row in its slot; don't shift them again. */
+  holdLayout?: boolean
   children: ReactNode
 }) {
   if (!sortable) return <div className="space-y-0.5">{children}</div>
   return (
-    <SidebarSortableGroup label={label} fileIds={fileIds}>
+    <SidebarSortableGroup label={label} fileIds={fileIds} holdLayout={holdLayout}>
       <div className="space-y-0.5">{children}</div>
     </SidebarSortableGroup>
   )
@@ -215,13 +219,11 @@ export function GroupFileRows({
 export function DroppableCorpusGroup({
   label,
   acceptsFileTransfer,
-  receiving,
   groupRef,
   children,
 }: {
   label: string
   acceptsFileTransfer: boolean
-  receiving: boolean
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
@@ -237,8 +239,6 @@ export function DroppableCorpusGroup({
         groupRef(element)
       }}
       data-reorder-group={label}
-      data-transfer-target={receiving ? "" : undefined}
-      className={receiving ? "rounded-lg ring-1 ring-primary/50" : undefined}
     >
       {children}
     </div>
@@ -248,14 +248,20 @@ export function DroppableCorpusGroup({
 export function SidebarSortableGroup({
   label,
   fileIds,
+  holdLayout = false,
   children,
 }: {
   label: string
   fileIds: string[]
+  holdLayout?: boolean
   children: ReactNode
 }) {
   return (
-    <SortableContext id={`sidebar-sort:${label}`} items={fileIds} strategy={sameGroupVerticalStrategy}>
+    <SortableContext
+      id={`sidebar-sort:${label}`}
+      items={fileIds}
+      strategy={holdLayout ? layoutHoldStrategy : sameGroupVerticalStrategy}
+    >
       {children}
     </SortableContext>
   )
@@ -317,6 +323,11 @@ function SortableFileSlot({
   const { setNodeRef, setActivatorNodeRef, listeners, transform, transition, isDragging } = useSortable({
     id,
     data,
+    // The default layout animation gives up when the row's index changes
+    // because a file left for another corpus. Both lists should slide: the
+    // one that opened a gap, and the one that closed it.
+    animateLayoutChanges: ({ isSorting, wasDragging }) =>
+      (isSorting || wasDragging) && !prefersReducedMotion(),
     transition: prefersReducedMotion() ? { duration: 0, easing: "linear" } : rowSlide,
     // Renaming: the row holds a text input. It can still be a drop slot,
     // but it must not start a drag or the pointer leaves the selection.

@@ -1,5 +1,6 @@
-// AQU-1647: which slot a file-sidebar drop landed on. The numbers written for
-// that slot still come from `planFileMove`; this module never computes them.
+// AQU-1647: which slot a file-sidebar drop landed on, and the live preview of a
+// file crossing into another custom corpus. The numbers written for that slot
+// still come from `planFileMove` / `planFileInsert`.
 
 import {
   closestCenter,
@@ -12,6 +13,8 @@ import {
   type Over,
 } from "@dnd-kit/core"
 import { hasSortableData } from "@dnd-kit/sortable"
+import { groupByCorpus, type CorpusGroup, type GroupableFile } from "@/lib/sidebar/group-by-corpus"
+import { planFileInsert, type SortIndexWrite } from "@/lib/sidebar/file-sort-index"
 
 /** Pointer movement (px) before a press becomes a drag, so a click still opens the file. */
 export const FILE_DRAG_ACTIVATION_DISTANCE = 8
@@ -39,8 +42,12 @@ export function readAcceptsFileTransfer(data: unknown): boolean {
  * Where an incoming file lands relative to the hovered row. The top half of
  * the row is that row's slot; the bottom half is the slot after it, which is
  * how a drop on the last row can land at the end of the group.
+ *
+ * `overIndex` is the hovered row's slot in the group the file is joining,
+ * counted without the file itself. The preview list's own sortable index is
+ * a different number once the file is already sitting in that list.
  */
-function insertionIndex(active: Active, over: Over, overIndex: number): number {
+export function sidebarInsertionIndex(active: Active, over: Over, overIndex: number): number {
   const translated = active.rect.current.translated
   if (!translated) return overIndex
   const mid = over.rect.top + over.rect.height / 2
@@ -83,7 +90,7 @@ export function resolveSidebarFileDrop(active: Active | null, over: Over | null)
       fileId: String(active.id),
       fromGroup: activeGroup,
       toGroup: overGroup,
-      toPosition: insertionIndex(active, over, overIndex),
+      toPosition: sidebarInsertionIndex(active, over, overIndex),
     }
   }
   if (!hasSortableData(over) || over.id === active.id) return { kind: "cancel" }
@@ -174,4 +181,107 @@ export const sidebarFileCollision: CollisionDetection = (args) => {
 
   if (rows.length > 0) return closestCenter({ ...args, droppableContainers: rows }).slice(0, 1)
   return groupHits
+}
+
+/** The slot a file is being shown in while it is dragged across custom corpuses. */
+export interface CorpusTransferPreview {
+  fileId: string
+  toGroup: string
+  toPosition: number
+}
+
+type PreviewFile = GroupableFile & { id: string }
+
+/**
+ * The file list the sidebar should draw while a drag is carrying a file into
+ * another custom corpus. The original list is unchanged — this is a picture
+ * of where the gap is, built from the same `planFileInsert` the drop commits.
+ * Returns the same array when there is nothing to preview.
+ */
+export function previewCorpusTransfer<T extends PreviewFile>(
+  files: readonly T[],
+  preview: CorpusTransferPreview | null,
+): readonly T[] {
+  if (!preview) return files
+  const moving = files.find((file) => file.id === preview.fileId)
+  if (!moving) return files
+  const target = groupByCorpus([...files]).find((group) => group.label === preview.toGroup)
+  const neighbours = (target?.files ?? []).filter((file) => file.id !== preview.fileId)
+  const writes = planFileInsert(neighbours, preview.fileId, preview.toPosition)
+  return applyTransferWrites(files, preview.fileId, preview.toGroup, writes)
+}
+
+/**
+ * Groups to render during that preview. A corpus that just gave up its only
+ * file stays on screen as an empty header, so the pointer can come back to it.
+ */
+export function previewSidebarGroups<T extends PreviewFile>(
+  files: readonly T[],
+  preview: CorpusTransferPreview | null,
+  sourceGroup: string | null,
+): CorpusGroup<T>[] {
+  const original = groupByCorpus([...files])
+  if (!preview) return original
+  const display = groupByCorpus([...previewCorpusTransfer(files, preview)])
+  if (!sourceGroup || display.some((group) => group.label === sourceGroup)) return display
+  const source = original.find((group) => group.label === sourceGroup)
+  if (!source) return display
+  const index = original.findIndex((group) => group.label === sourceGroup)
+  const next = display.slice()
+  next.splice(Math.min(Math.max(index, 0), next.length), 0, { ...source, files: [] })
+  return next
+}
+
+function applyTransferWrites<T extends PreviewFile>(
+  files: readonly T[],
+  fileId: string,
+  toGroup: string,
+  writes: readonly SortIndexWrite[],
+): readonly T[] {
+  const sortById = new Map(writes.map((write) => [write.fileId, write.sortIndex]))
+  let changed = false
+  const next = files.map((file) => {
+    const moving = file.id === fileId
+    const written = sortById.has(file.id)
+    if (!moving && !written) return file
+    const sortIndex = written ? sortById.get(file.id) : file.sortIndex
+    const corpusMarker = moving ? toGroup : file.corpusMarker
+    const cleared = sortIndex === null || sortIndex === undefined
+    if (file.corpusMarker === corpusMarker && (cleared ? file.sortIndex === undefined : file.sortIndex === sortIndex)) {
+      return file
+    }
+    changed = true
+    if (cleared) {
+      const { sortIndex: _dropped, ...rest } = file
+      return { ...rest, corpusMarker } as T
+    }
+    return { ...file, corpusMarker, sortIndex }
+  })
+  return changed ? next : files
+}
+
+export type CorpusPreviewAction = "set" | "clear" | "keep"
+
+/**
+ * Whether the live gap should follow this hover. The frames have a gap between
+ * them, and a pointer in that gap can still be reported as the nearest row.
+ * The gap stays where it is until the pointer is actually inside the corpus
+ * it would be leaving or joining.
+ */
+export function corpusPreviewAction(
+  kind: "transfer" | "move" | "refuse" | "cancel",
+  pointerY: number | null,
+  groupRect: { top: number; bottom: number } | null,
+  overRect: { top: number; bottom: number } | null,
+): CorpusPreviewAction {
+  const inside = (rect: { top: number; bottom: number } | null) =>
+    pointerY !== null && rect !== null && pointerY >= rect.top && pointerY <= rect.bottom
+  if (kind === "refuse") return "clear"
+  if (kind === "cancel") return inside(groupRect) ? "clear" : "keep"
+  if (kind === "transfer") {
+    if (pointerY === null || inside(groupRect) || inside(overRect)) return "set"
+    return "keep"
+  }
+  if (pointerY === null || inside(groupRect) || inside(overRect)) return "clear"
+  return "keep"
 }

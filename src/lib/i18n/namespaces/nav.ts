@@ -329,7 +329,6 @@ export const nav = defineNamespace({
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
     "nav.fileList.moveHandle": "Move {name} to another corpus",
-    "nav.fileList.dropIntoCorpus": "Drop to move into {group}",
     "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
     "nav.fileList.resetOrder": "Reset the order of {group}",
     "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
@@ -1416,12 +1415,6 @@ export const nav = defineNamespace({
           "another custom corpus exists to drop it into. Dragging it changes which " +
           "corpus the file belongs to. {name} is the file's own display name.",
         placeholders: { name: "The file's display name." },
-      },
-      "nav.fileList.dropIntoCorpus": {
-        description:
-          "Live-region message shown while a file is dragged over a different custom " +
-          "corpus that will accept it. {group} is that corpus's own label.",
-        placeholders: { group: "The custom corpus the file would move into." },
       },
       "nav.fileList.reorderWrongGroup": {
         description:

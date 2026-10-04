@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from "vitest"
 import type { Active, ClientRect, DroppableContainer, Over } from "@dnd-kit/core"
-import { resolveSidebarFileDrop, sidebarFileCollision } from "./file-list-dnd-model"
+import {
+  corpusPreviewAction,
+  previewSidebarGroups,
+  resolveSidebarFileDrop,
+  sidebarFileCollision,
+} from "./file-list-dnd-model"
 
 function active(id: string, group: string, index = 0, acceptsFileTransfer = false): Active {
   return {
@@ -256,5 +261,68 @@ describe("sidebarFileCollision", () => {
       pointerCoordinates: { x: 20, y: 210 },
     })
     expect(hits.map((hit) => hit.id)).toEqual(["sidebar-drop:Season 2"])
+  })
+})
+
+describe("previewSidebarGroups", () => {
+  const files = [
+    { id: "a", name: "a", corpusMarker: "Season 1", sortIndex: 0 },
+    { id: "b", name: "b", corpusMarker: "Season 1", sortIndex: 1024 },
+    { id: "c", name: "c", corpusMarker: "Season 2", sortIndex: 0 },
+    { id: "d", name: "d", corpusMarker: "Season 2", sortIndex: 1024 },
+  ]
+
+  it("shows the file in the other corpus at the slot the pointer is over", () => {
+    const groups = previewSidebarGroups(
+      files,
+      { fileId: "a", toGroup: "Season 2", toPosition: 1 },
+      "Season 1",
+    )
+    expect(groups.map((group) => [group.label, group.files.map((file) => file.id)])).toEqual([
+      ["Season 1", ["b"]],
+      ["Season 2", ["c", "a", "d"]],
+    ])
+  })
+
+  it("keeps an emptied corpus on screen so the file can come back", () => {
+    const groups = previewSidebarGroups(
+      [
+        { id: "only", name: "only", corpusMarker: "Season 1", sortIndex: 0 },
+        { id: "pilot", name: "pilot", corpusMarker: "Season 2", sortIndex: 0 },
+      ],
+      { fileId: "only", toGroup: "Season 2", toPosition: 0 },
+      "Season 1",
+    )
+    expect(groups.map((group) => [group.label, group.files.map((file) => file.id)])).toEqual([
+      ["Season 1", []],
+      ["Season 2", ["only", "pilot"]],
+    ])
+  })
+})
+
+describe("corpusPreviewAction", () => {
+  const frame = { top: 200, bottom: 360 }
+  const row = { top: 240, bottom: 280 }
+
+  it("follows the pointer once it is inside the corpus being joined", () => {
+    expect(corpusPreviewAction("transfer", 250, frame, row)).toBe("set")
+  })
+
+  it("holds the gap while the pointer is between corpuses", () => {
+    expect(corpusPreviewAction("transfer", 180, frame, row)).toBe("keep")
+    expect(corpusPreviewAction("move", 180, frame, row)).toBe("keep")
+  })
+
+  it("puts the file back once the pointer is inside its own corpus", () => {
+    expect(corpusPreviewAction("move", 250, frame, row)).toBe("clear")
+    expect(corpusPreviewAction("cancel", 250, frame, null)).toBe("clear")
+  })
+
+  it("keeps the gap when the pointer is on the gap the preview opened", () => {
+    expect(corpusPreviewAction("cancel", 250, { top: 0, bottom: 40 }, null)).toBe("keep")
+  })
+
+  it("drops the gap when the corpus will not take the file", () => {
+    expect(corpusPreviewAction("refuse", 250, frame, row)).toBe("clear")
   })
 })

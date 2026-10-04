@@ -290,7 +290,10 @@ describe("a drop into another custom corpus", () => {
     renderList(TWO_SEASONS)
     beginDrag("Episode 2")
     hoverDrag("Pilot")
-    expect(screen.getByText("Drop to move into Season 2")).toHaveAttribute("role", "status")
+    expect(screen.queryByText(/drop to move into/i)).toBeNull()
+    const season2 = document.querySelector('[data-reorder-group="Season 2"]')
+    expect(season2).not.toBeNull()
+    expect(within(season2 as HTMLElement).getByRole("button", { name: "Episode 2" })).toBeInTheDocument()
     releaseDrag("Pilot")
     expect(onReorderFiles).not.toHaveBeenCalled()
     expect(onTransferFile).toHaveBeenCalledWith(

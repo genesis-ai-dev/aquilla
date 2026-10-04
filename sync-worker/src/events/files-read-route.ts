@@ -20,6 +20,7 @@ import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
 import { usableSortIndex } from "./sort-index"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { visibleLanesForRead } from "./lane-read-wall"
 
@@ -318,7 +319,15 @@ export async function handleFilesReadRequest(
   if (cursorRaw && !cursor) return new Response("invalid cursor", { status: 400 })
 
   const tombstoneFilter = trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"
-  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`]
+  // AQU-1626: both listings drop the hidden companion files — the cue sheet an
+  // audio workflow records against, a linked video's caption track. They were
+  // never meant to appear in a file list (the client has always filtered them
+  // out of the sidebar by role), and an agent reading this API had no such
+  // filter, so a 500-cue track read back as 500 files' worth of untranslated
+  // work. The single-file fetch above deliberately keeps no such filter: the
+  // audio workflow follows `anchor_file_id` straight to its cue sheet, and a
+  // hidden file is ordinary readable content once you know its id.
+  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`, notHiddenFileSql("f")]
   // Unrestricted: [threshold project, page project]. Restricted: the lane
   // tags bind inside the clock subquery, which sits between those two.
   const tagList = grantedTags === null ? [] : [...grantedTags]

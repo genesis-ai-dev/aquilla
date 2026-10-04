@@ -269,6 +269,63 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file).toMatchObject({ fileType: "vtt", role: "audio-cues", anchorFileId: "f-text" })
   })
 
+  // AQU-1626. The sidebar has always filtered these out by role client-side, so
+  // this API was the one surface that handed them to a caller — and an agent
+  // reading it had no such filter, so a 500-cue caption track read back as 500
+  // files' worth of untranslated work. The by-id fetch above is deliberately
+  // NOT filtered: the audio workflow follows `anchor_file_id` straight to its
+  // cue sheet, and both halves of that pair have to stay reachable.
+  it("leaves hidden companion files out of the listing while by-id still returns them", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", kind: "vtt", cell_count: 12 },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text", cell_count: 500,
+        },
+        {
+          id: "f-track", project_id: "proj-a", name: "ep-101 · captions",
+          role: "timeline-content", kind: "vtt", anchor_file_id: "f-text", cell_count: 500,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const auth = { headers: { Authorization: `Bearer ${token}` } }
+    const list = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", auth), envWith(db),
+    ))!
+    const listed = (await list.json()) as { files: Array<{ fileId: string }> }
+    expect(listed.files.map((f) => f.fileId)).toEqual(["f-text"])
+
+    const byId = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/f-cues", auth), envWith(db),
+    ))!
+    expect(byId.status).toBe(200)
+    expect((await byId.json() as { file: { fileId: string } }).file.fileId).toBe("f-cues")
+  })
+
+  // Deleting the parent of a hidden companion tombstones the companion too, so
+  // without the same rule Recently deleted grew a "· audio cues" row for a
+  // person to puzzle over — and offered to restore machinery on its own.
+  it("leaves hidden companion files out of the trash listing too", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", kind: "vtt", deleted_at: 1700000000000 },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text", deleted_at: 1700000000000,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files?trash=1",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = (await res.json()) as { files: Array<{ fileId: string }> }
+    expect(body.files.map((f) => f.fileId)).toEqual(["f-text"])
+  })
+
   it("returns 404 for an unknown file id", async () => {
     const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })

@@ -790,6 +790,26 @@ describe("plan unit rollup", () => {
     expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
   })
 
+  // AQU-1626: the unit count above has applied the rule since AQU-1097, but the
+  // CELL rollups rendered on the same row had no such filter — so a linked
+  // video's 500-cue caption track added 500 untranslated cells to the org
+  // dashboard and the project read as barely started, two tiles away from a
+  // plan board showing the truth. Deleted files inflated it the same way.
+  it("keeps tombstoned files and hidden companions out of the cell rollups and the lane chips", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count) VALUES ('live', 'pa', 'Live', 'e1', 10, 4, 2)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 7, 7, 7, 123)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, role) VALUES ('cue', 'pa', 'Cues', 'e1', 500, 0, 'audio-cues')")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, role) VALUES ('caption-track', 'pa', 'Caption track', 'e1', 500, 0, 'timeline-content')")
+    for (const fileId of ["live", "gone", "cue", "caption-track"]) await progress(fileId, "file", "")
+    const row = await portfolio()
+    expect(row).toMatchObject({ totalCells: 10, filledCells: 4, validatedCells: 2 })
+    // The lane chip reads file_section_progress rather than files, so it is a
+    // separate path to the same wrong number: one progress row per file per
+    // lane means four rows here and only one of them is work.
+    expect(row.lanes.find((lane) => lane.lane === "")).toMatchObject({ totalCells: 10 })
+  })
+
   it("counts a unit as done from its explicit mark", async () => {
     await seedOrg()
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Mark', 'e1', 10)")

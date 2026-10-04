@@ -76,9 +76,9 @@ export function buildSourceArtifactPersistenceStatements(
     ),
     db.prepare(
       `INSERT INTO artifact_bindings (
-         id, project_id, artifact_id, file_id, binding_role,
+         id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
        ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
@@ -93,14 +93,14 @@ export function buildSourceArtifactPersistenceStatements(
       input.artifactId,
       input.fileId,
       input.bindingRole,
+      input.targetLang,
       input.memberPath,
       input.profileId,
       input.profileVersion,
       input.fidelity,
       JSON.stringify(input.manifest),
       input.recipe ? JSON.stringify(input.recipe) : null,
-      // AQU-1611: the lane is the row's only language identity (AQU-1240 slice
-      // 8 rule): source role -> source lane; else the target lane by tag.
+      // AQU-1240 slice 8: source role -> source lane; else target lane by tag.
       ...laneIdResolveBindingBinds(input.projectId, input.bindingRole, input.targetLang),
     ),
   )

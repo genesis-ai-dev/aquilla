@@ -349,12 +349,13 @@ export async function handleAudioRequest(
           ),
           db.prepare(
             `INSERT INTO artifact_bindings (
-               id, project_id, artifact_id, file_id, binding_role,
+               id, project_id, artifact_id, file_id, binding_role, target_lang,
                member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-             ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', 'builtin:media', '1',
+             ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', '', 'builtin:media', '1',
                        'preserved-only', '{}'::jsonb, NULL, ${laneIdResolveSql('source')})
              ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
-             DO UPDATE SET updated_at = now()`,
+             DO UPDATE SET
+               updated_at = now()`,
             // AQU-1240 slice 8: source-side media binding -> the source lane.
           ).bind(crypto.randomUUID(), projectId, artifactId, fileId, projectId),
           // Imported media is also the original source. Reuse its R2 object

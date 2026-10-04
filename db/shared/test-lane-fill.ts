@@ -52,16 +52,12 @@ BEGIN
       v_tag := COALESCE(NEW.target_lang, '');
     END IF;
   ELSIF TG_TABLE_NAME = 'artifact_bindings' THEN
-    -- AQU-1611: this table no longer stores a tag, so binding_role is all the
-    -- trigger has: 'source' -> the source lane, anything else -> the default
-    -- target lane. A test that needs a binding on a NON-default lane seeds the
-    -- lanes rows itself and lets the writer's resolver find them.
     IF NEW.binding_role = 'source' THEN
       v_role := 'source';
       v_tag := NULL;
     ELSE
       v_role := 'target';
-      v_tag := '';
+      v_tag := COALESCE(NEW.target_lang, '');
     END IF;
   ELSE
     v_role := 'target';

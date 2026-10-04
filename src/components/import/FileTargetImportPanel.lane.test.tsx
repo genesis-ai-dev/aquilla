@@ -17,7 +17,7 @@
 
 import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 vi.mock("@/lib/import", () => ({ applyEBibleTargetImport: vi.fn() }))
@@ -29,6 +29,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 import { FileTargetImportPanel } from "./FileTargetImportPanel"
 import { laneComboboxOptions } from "@/components/lane-options"
+import { applyEBibleTargetImport } from "@/lib/import"
 
 const BASE_CELLS = [
   {
@@ -119,5 +120,92 @@ describe("FileTargetImportPanel — destination language (AQU-1631)", () => {
   it("leaves the panel unchanged for a host that passes no lanes at all", () => {
     renderPanel({ laneOptions: undefined, onTargetLangChange: undefined })
     expect(screen.queryByTestId("file-target-lane-picker")).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The write path: the lane the user chose is the lane the commits carry.
+ *
+ * A QA walk of the branch preview confirmed the picker's UI — the field shows
+ * the open language and choosing another switches the editor behind the dialog
+ * — but could not check this half, because committing an import into the
+ * standing multi-lane fixture would damage shared data. So it is pinned here
+ * instead: a picked language must reach `applyEBibleTargetImport` as its
+ * `targetLang`, which is what decides the lane each `target.cell.commit` lands
+ * in. Without this, the picker could be purely decorative and every other test
+ * in this file would still pass.
+ *
+ * `Host` stands in for ProjectWorkspace: it owns `targetLang` and re-renders
+ * the panel when the picker reports a change, the way `setActiveLane` does.
+ */
+
+const USFM_FIXTURE = `\\id GEN
+\\c 1
+\\v 1 First verse translation
+`
+
+function Host({ initialLane }: { initialLane: string }) {
+  const [lane, setLane] = React.useState(initialLane)
+  return (
+    <FileTargetImportPanel
+      projectId="proj-1"
+      username="tester"
+      fileName="Genesis.usfm"
+      cells={BASE_CELLS}
+      getToken={async () => "tok"}
+      onImported={() => {}}
+      onCancel={() => {}}
+      applyOptimisticTargetEdits={() => {}}
+      laneOptions={LANE_OPTIONS}
+      onTargetLangChange={setLane}
+      targetLang={lane}
+    />
+  )
+}
+
+async function selectFile(file: File) {
+  const input = fileInput()
+  await act(async () => {
+    Object.defineProperty(input, "files", { value: [file], configurable: true })
+    fireEvent.change(input)
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
+
+async function importAll() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /import 1/i }))
+    await new Promise((r) => setTimeout(r, 0))
+  })
+  return vi.mocked(applyEBibleTargetImport).mock.calls[0][2] as { targetLang?: string }
+}
+
+describe("FileTargetImportPanel — the chosen language is the one written (AQU-1631)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 1, skippedCount: 0 })
+  })
+
+  it("commits into the language the user picked, not the one the dialog opened on", async () => {
+    const user = userEvent.setup()
+    render(<Host initialLane="" />)
+
+    await user.click(screen.getByTestId("file-target-lane-trigger"))
+    await user.click(await screen.findByRole("option", { name: "pt-BR" }))
+    // The host has re-rendered on the new lane; the field reflects it.
+    expect(screen.getByTestId("file-target-lane-trigger")).toHaveTextContent("pt-BR")
+
+    await selectFile(new File([USFM_FIXTURE], "genesis.usfm", { type: "text/plain" }))
+    await screen.findByText(/review matches/i)
+
+    expect((await importAll()).targetLang).toBe("pt-BR")
+  })
+
+  it("commits into the open language when the picker is left alone", async () => {
+    render(<Host initialLane="fr" />)
+    await selectFile(new File([USFM_FIXTURE], "genesis.usfm", { type: "text/plain" }))
+    await screen.findByText(/review matches/i)
+
+    expect((await importAll()).targetLang).toBe("fr")
   })
 })

@@ -16,6 +16,7 @@
 //     events table is unreachable.
 
 import { ROLE } from "../../types"
+import { countedFileSql } from "../../../../db/shared/counted-files"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -180,11 +181,14 @@ export async function computeProjectMetrics(
 
   const filesResult = await db
     .prepare(
-      `SELECT id, name, cell_count, filled_count, approved_count,
-              structural_cell_count, structural_filled_count, structural_approved_count
-         FROM files
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY name ASC`,
+      // AQU-1626: `files f` aliased so the counted-file rule can apply. A cue
+      // sheet or a caption track is machinery, not a deliverable, so it must
+      // not be pushed to Monday as a row for a partner to chase.
+      `SELECT f.id, f.name, f.cell_count, f.filled_count, f.approved_count,
+              f.structural_cell_count, f.structural_filled_count, f.structural_approved_count
+         FROM files f
+        WHERE f.project_id = ? AND ${countedFileSql('f')}
+        ORDER BY f.name ASC`,
     )
     .bind(projectId)
     .all<FileRow>()

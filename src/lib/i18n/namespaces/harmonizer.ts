@@ -10,6 +10,12 @@ export const harmonizer = defineNamespace({
       "The quotation that opens in {openedIn} ends here in the source, so close it at the end of this verse.",
     "harmonizer.reference.unclearSubject":
       "Someone new does this in the source, but a reader coming from {previous} may think it is the same person. Consider naming who it is.",
+    "harmonizer.sentence.brokenCase":
+      "This verse ends its sentence here, but {next} carries on in lowercase. Either the sentence continues or the next verse needs a capital.",
+    "harmonizer.sentence.brokenOff":
+      "In the source this sentence carries on into {next}, and here the translation stops before the sentence is complete.",
+    "harmonizer.sentence.runOn":
+      "The source sentence ends in this verse and {next} starts a new one, but the translation has no closing punctuation here.",
     "harmonizer.reference.impliedSubject":
       "Someone new does this in the source, but the translation leaves it unstated, so a reader coming from {previous} may assume the same person. Consider naming who it is.",
   },
@@ -37,6 +43,24 @@ export const harmonizer = defineNamespace({
           "Same as the reason above, for when the translation does not state who acts at all " +
           "(it is only implied by the verb).",
         placeholders: { previous: "Reference of the previous verse, e.g. 'JHN 6:27'." },
+      },
+      "harmonizer.sentence.brokenCase": {
+        description:
+          "Reason on the last word of a verse that ends with a full stop while the next verse starts " +
+          "with a lowercase letter. No automatic fix: either the stop or the capital is wrong.",
+        placeholders: { next: "Reference of the next verse, e.g. 'LUK 5:4'." },
+      },
+      "harmonizer.sentence.brokenOff": {
+        description:
+          "Reason on the last word of a verse whose translation ends with a full stop in the middle " +
+          "of a sentence that the source continues into the next verse. No automatic fix.",
+        placeholders: { next: "Reference of the next verse." },
+      },
+      "harmonizer.sentence.runOn": {
+        description:
+          "Reason on a suggestion that adds the project's usual full stop at the end of a verse " +
+          "whose sentence ends there in the source.",
+        placeholders: { next: "Reference of the next verse." },
       },
       "harmonizer.quotes.closeHere": {
         description:

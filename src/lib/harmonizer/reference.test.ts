@@ -100,7 +100,7 @@ describe("referenceCheck findings", () => {
 describe("runner with both checks", () => {
   it("keeps each check's questions and answers apart", () => {
     const run = planHarmonizer(JOHN_13, "m")
-    const ids = Object.keys(run.request!.questions)
+    const ids = Object.keys(run.request!.questions).filter((id) => id.startsWith("h1_"))
     expect(ids).toEqual(["h1_r0_switch", "h1_r0_clear", "h1_r0_word"])
     const findings = harmonizerFindings(run, JOHN_13, {
       answers: {

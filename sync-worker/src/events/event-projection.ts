@@ -2728,6 +2728,10 @@ case 'cell.audio.attach': {
 
     case 'source.cell.mirror': {
       // AQU-476: advance a downstream source cell to match the upstream.
+      // `upstream.laneId` names the UPSTREAM lane the text came from. The row
+      // written here is this project's source lane (`laneIdResolveSql('source')`);
+      // filing it under the payload's lane id would attach the mirror to a lane
+      // that belongs to the other project.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
       // UPDATE-only source.cell.commit shape — mirrors routinely hit cells
       // with no local row yet (new upstream cells post-seed, first-ever

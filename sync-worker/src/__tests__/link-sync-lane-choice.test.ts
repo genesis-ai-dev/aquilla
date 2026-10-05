@@ -10,7 +10,7 @@
 // AQU-1419.
 
 import { describe, it, expect } from 'vitest'
-import { mirrorSync, deterministicDownstreamFileId, resolveConsumedLaneTag } from '../events/link-sync'
+import { mirrorSync, deterministicDownstreamFileId, resolveConsumedLaneTag, isUndefinedColumn } from '../events/link-sync'
 import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import type { AquillaStatement } from '../../../db/shim/postgres'
@@ -143,12 +143,30 @@ describe('link-sync — the link consumes the upstream lane it names (AQU-1605)'
     const t = await makeTestDb()
     try {
       await seedUpstreamWithTwoLanes(t)
-      await linkDownstream(t, await upstreamLaneId(t, 'French'))
+      const frenchId = await upstreamLaneId(t, 'French')
+      await linkDownstream(t, frenchId)
 
       const result = await mirrorSync(t.db, DOWNSTREAM)
       expect(result.ranSync).toBe(true)
       expect(result.cellsMirrored).toBe(1)
       expect(await downstreamSourceValue(t)).toBe('french lane text')
+
+      const mirrored = await t.pg.query<{ payload: string; lane_id: string }>(
+        `SELECT e.payload, c.lane_id
+           FROM events e
+           JOIN cells c
+             ON c.project_id = e.project_id AND c.file_id = e.file_id
+            AND c.cell_id = e.cell_id AND c.side = 'source'
+          WHERE e.project_id = $1 AND e.kind = 'source.cell.mirror' AND e.cell_id = $2`,
+        [DOWNSTREAM, CELL],
+      )
+      const payload = JSON.parse(mirrored.rows[0]?.payload ?? '{}') as {
+        upstream: { laneId?: string; side: string }
+      }
+      expect(payload.upstream.side).toBe('target')
+      expect(payload.upstream.laneId).toBe(frenchId)
+      // The downstream row stays on the downstream source lane.
+      expect(mirrored.rows[0]?.lane_id).not.toBe(frenchId)
     } finally {
       await t.close()
     }
@@ -253,6 +271,54 @@ describe('link-sync — the link consumes the upstream lane it names (AQU-1605)'
     } finally {
       await t.close()
     }
+  })
+
+  it('a source link that stores its upstream source lane id keeps syncing', async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamWithTwoLanes(t)
+      const source = await t.pg.query<{ id: string }>(
+        `SELECT id FROM lanes WHERE project_id = $1 AND role = 'source'`,
+        [UPSTREAM],
+      )
+      const sourceLaneId = source.rows[0]?.id
+      expect(sourceLaneId).toBeTruthy()
+      await t.pg.query(
+        `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode,
+                               source_link_consumes, source_link_gate, source_link_cursor, source_link_lane_id)
+         VALUES ($1, 'Downstream', 1, $2, 'live', 'source', 'head', 0, $3)`,
+        [DOWNSTREAM, UPSTREAM, sourceLaneId],
+      )
+
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+      expect(result.ranSync).toBe(true)
+      expect(await downstreamSourceValue(t)).toBe('Source text')
+
+      const mirrored = await t.pg.query<{ payload: string; lane_id: string }>(
+        `SELECT e.payload, c.lane_id
+           FROM events e
+           JOIN cells c
+             ON c.project_id = e.project_id AND c.file_id = e.file_id
+            AND c.cell_id = e.cell_id AND c.side = 'source'
+          WHERE e.project_id = $1 AND e.kind = 'source.cell.mirror' AND e.cell_id = $2`,
+        [DOWNSTREAM, CELL],
+      )
+      const payload = JSON.parse(mirrored.rows[0]?.payload ?? '{}') as {
+        upstream: { laneId?: string; side: string }
+      }
+      expect(payload.upstream.side).toBe('source')
+      expect(payload.upstream.laneId).toBe(sourceLaneId)
+      expect(mirrored.rows[0]?.lane_id).not.toBe(sourceLaneId)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it('isUndefinedColumn matches 42703 only', () => {
+    expect(isUndefinedColumn({ code: '42703' })).toBe(true)
+    expect(isUndefinedColumn({ cause: { code: '42703' } })).toBe(true)
+    expect(isUndefinedColumn({ code: '42P01' })).toBe(false)
+    expect(isUndefinedColumn(new Error('column "source_link_lane_id" does not exist'))).toBe(false)
   })
 
   it('resolveConsumedLaneTag: id → legacy tag, absent → default lane, foreign → null', async () => {

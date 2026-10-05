@@ -121,6 +121,7 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import {
+  focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
   resolveDeepLinkLaneSelection,
 } from "./project-workspace-lane-deeplink"
@@ -4868,6 +4869,8 @@ export function ProjectWorkspace() {
     isError: commentsIsError,
     isLoadingRest: commentsIsLoadingRest,
     addComment: addCommentEvent,
+    editComment,
+    deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
   } = useComments({
@@ -12987,7 +12990,7 @@ export function ProjectWorkspace() {
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
-              <CommentsPageContent project={project} />
+              <CommentsPageContent project={project} mentionRoster={projectMembers} />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
@@ -13857,7 +13860,11 @@ export function ProjectWorkspace() {
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
                 onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                onEdit={(commentId, body) => { void editComment(commentId, body) }}
+                onDelete={(commentId) => { void deleteComment(commentId) }}
                 currentUsername={currentUsername}
+                mentionRoster={projectMembers}
+                focusCommentId={focusedCommentFromSearchParams(searchParams)}
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}

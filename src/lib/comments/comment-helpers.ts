@@ -77,7 +77,10 @@ export function renderCommentHtml(text: string): string {
   html = html.replace(/\*\*([^*]+?)\*\*/g, "<b>$1</b>")
   html = html.replace(/\*([^*]+?)\*/g, "<i>$1</i>")
   html = html.replace(/`([^`]+?)`/g, "<code>$1</code>")
-  html = html.replace(/(^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g, '$1<span class="mention">@$2</span>')
+  html = html.replace(
+    new RegExp(MENTION_TOKEN.source, "g"),
+    `<span class="${MENTION_CHIP_CLASS}">@$1</span>`,
+  )
   html = html.replace(/\n/g, "<br>")
   return html
 }

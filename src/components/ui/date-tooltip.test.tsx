@@ -27,6 +27,57 @@ describe("DateTooltip", () => {
     }, { timeout: 250 })
   })
 
+  it("shows a compact relative date and keeps the full datetime on hover", async () => {
+    const tenDaysAgo = Date.now() - 10 * 24 * 60 * 60 * 1000
+    render(
+      <TooltipProvider delay={0}>
+        <DateTooltip value={tenDaysAgo} label="Posted" variant="ago" />
+      </TooltipProvider>,
+    )
+
+    const trigger = screen.getByText("10d ago")
+    expect(trigger).toBeInTheDocument()
+    expect(trigger.className).toContain("hover:text-foreground")
+
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
+    fireEvent.mouseEnter(trigger)
+
+    await waitFor(() => {
+      expect(screen.getByRole("tooltip")).toHaveTextContent(
+        fmtLabeledDateTime(tenDaysAgo, "Posted"),
+      )
+    }, { timeout: 250 })
+  })
+
+  it("marks an edited time and lists when it was created and edited", async () => {
+    const created = Date.now() - 21 * 60 * 60 * 1000
+    const edited = created + 4 * 60 * 60 * 1000
+    render(
+      <TooltipProvider delay={0}>
+        <DateTooltip
+          value={created}
+          label=""
+          variant="ago"
+          editedAt={edited}
+          editedNotice="(edited)"
+        />
+      </TooltipProvider>,
+    )
+
+    const trigger = screen.getByText(/\(edited\)/).closest("[data-slot=tooltip-trigger]")
+    expect(trigger).toHaveTextContent("21h ago")
+    expect(trigger).toHaveTextContent("(edited)")
+
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
+    fireEvent.mouseEnter(trigger)
+
+    await waitFor(() => {
+      const tip = screen.getByRole("tooltip")
+      expect(tip).toHaveTextContent(/^Created:/)
+      expect(tip).toHaveTextContent(/Edited:/)
+    }, { timeout: 250 })
+  })
+
   it("renders nothing for a missing timestamp", () => {
     const { container } = render(<DateTooltip value={null} />)
     expect(container).toBeEmptyDOMElement()

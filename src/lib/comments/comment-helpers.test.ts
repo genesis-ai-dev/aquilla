@@ -53,7 +53,10 @@ describe("renderCommentHtml", () => {
   })
 
   it("renders mentions as styled spans", () => {
-    expect(renderCommentHtml("ping @alice please")).toBe('ping <span class="mention">@alice</span> please')
+    expect(renderCommentHtml("ping @[alice] please")).toBe(
+      'ping <span class="mention font-medium text-foreground">@alice</span> please',
+    )
+    expect(renderCommentHtml("ping @alice please")).toBe("ping @alice please")
   })
 
   it("escapes HTML to prevent XSS", () => {

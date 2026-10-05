@@ -1084,6 +1084,8 @@ export interface CommentMessage {
   authorType: "user" | "anonymous"
   text: string
   timestamp: string
+  /** Set when the body was changed after it was posted. */
+  editedAt?: string
   mentions?: string[]
 }
 

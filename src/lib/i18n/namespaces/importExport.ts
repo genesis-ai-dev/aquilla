@@ -41,12 +41,17 @@ export const importExport = defineNamespace({
     "importExport.mediaPreview.textSource": "Text source",
     "importExport.mediaPreview.automatic": "Transcribe audio",
     "importExport.mediaPreview.automaticHint": "Split the audio at pauses. You can choose automatic transcription after import.",
-    "importExport.mediaPreview.segmentCount": plural({ one: "{count} segment", other: "{count} segments" }),
-    "importExport.mediaPreview.needsAttention": plural({ one: "{count} segment needs attention", other: "{count} segments need attention" }),
-    "importExport.mediaPreview.wording": "Segment {number} wording",
-    "importExport.mediaPreview.start": "Segment {number} start (seconds)",
-    "importExport.mediaPreview.end": "Segment {number} end (seconds)",
-    "importExport.mediaPreview.remove": "Remove segment {number}",
+    // Sam's D2 (2026-10-05): a compact list, one line per caption, edited in
+    // place. The times are typed the way the list shows them (`1:02.5`).
+    "importExport.mediaPreview.captionCount": plural({ one: "{count} caption", other: "{count} captions" }),
+    "importExport.mediaPreview.needsAttention": plural({ one: "{count} needs attention", other: "{count} need attention" }),
+    "importExport.mediaPreview.listLabel": "Captions to import",
+    "importExport.mediaPreview.noWording": "No wording",
+    "importExport.mediaPreview.edit": "Edit caption {number}",
+    "importExport.mediaPreview.wording": "Caption {number} wording",
+    "importExport.mediaPreview.start": "Caption {number} start",
+    "importExport.mediaPreview.end": "Caption {number} end",
+    "importExport.mediaPreview.remove": "Remove caption {number}",
     "importExport.mediaPreview.confidence": "Alignment confidence: {percent}%",
     "importExport.mediaPreview.empty": "Choose a text source with at least one segment.",
     "importExport.mediaPreview.continue": "Continue import",
@@ -1269,41 +1274,55 @@ export const importExport = defineNamespace({
           name: "Filename of the media being imported — literal data, not translated.",
         },
       },
-      "importExport.mediaPreview.segmentCount": {
+      "importExport.mediaPreview.captionCount": {
         description:
-          "Live status line under the text-source picker: how many segments the selected text source contains. Count-governed. When some segments are invalid it is followed by ' · ' and mediaPreview.needsAttention on the same line.",
+          "Start of the live summary line above the caption list in the media import preview: how many captions the selected text source holds. Count-governed. The time span the captions cover follows after ' · ' as plain numbers, and when some captions are invalid mediaPreview.needsAttention follows after another ' · '.",
         placeholders: {
           count:
-            "Number of segments in the selected text source; also governs the plural form.",
+            "Number of captions in the selected text source; also governs the plural form.",
         },
       },
       "importExport.mediaPreview.needsAttention": {
         description:
-          "Second clause of that same status line, appended after ' · ' when some segments have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.segmentCount starts.",
+          "Last clause of that same summary line, appended after ' · ' when some captions have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.captionCount starts, so the captions are understood.",
         placeholders: {
           count:
-            "Number of segments that currently fail validation; also governs the plural form.",
+            "Number of captions that currently fail validation; also governs the plural form.",
         },
+      },
+      "importExport.mediaPreview.listLabel": {
+        description:
+          "Accessible name of the list of captions in the media import preview, announced by a screen reader when it enters the list. Not shown on screen.",
+      },
+      "importExport.mediaPreview.noWording": {
+        description:
+          "Shown in place of the wording on a caption line that has no text, in muted italics. A short state, not an instruction.",
+        maxLength: 24,
+      },
+      "importExport.mediaPreview.edit": {
+        description:
+          "Accessible name of the small pencil button on one caption line in the media import preview; it opens that line's wording and times for editing in place. Names the caption because one sits on every line.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.wording": {
         description:
-          "Label of the textarea holding one segment's text in the media import preview. Short field label, not an instruction.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the text box holding one caption's wording while that line is open for editing in the media import preview.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.start": {
         description:
-          "Label of the number input for one segment's start time in the media import preview. The '(seconds)' unit matters — the field takes a decimal second offset, not a timecode.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the field for one caption's start time while that line is open for editing. The field takes a time as the list shows it (1:02.5) or plain seconds.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.end": {
         description:
-          "Label of the number input for one segment's end time in the media import preview. As with mediaPreview.start, the unit is decimal seconds rather than a timecode.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the field for one caption's end time while that line is open for editing, as mediaPreview.start.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.remove": {
         description:
-          "Button that drops one segment from the import in the media import preview. Names the segment because several buttons with the same wording sit in the list.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the small X button that drops one caption from the import in the media import preview. Names the caption because one sits on every line.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.confidence": {
         description:

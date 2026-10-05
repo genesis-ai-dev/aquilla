@@ -141,8 +141,8 @@ test("YouTube original media offers embedded captions before publication", async
   const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
   await ws.previewYouTubeOriginalMedia(url,
     path.resolve(__dirname, "../../fixtures/embedded-captions.m4a"))
-  await expect(alice.getByLabel("Segment 1 wording", { exact: true })).toHaveValue("Embedded first caption.")
-  await expect(alice.getByLabel("Segment 2 wording", { exact: true })).toHaveValue("Embedded second caption.")
+  await expect(alice.getByTestId("media-preview-row").nth(0)).toContainText("Embedded first caption.")
+  await expect(alice.getByTestId("media-preview-row").nth(1)).toContainText("Embedded second caption.")
   await ws.confirmYouTubeOriginalMedia()
   await ws.openFileBySubstring("embedded-captions.m4a")
   await ws.openMediaView()

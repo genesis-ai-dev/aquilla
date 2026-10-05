@@ -126,13 +126,13 @@ export class Workspace {
     captions: FilePayload,
   ): Promise<void> {
     await this.chooseImportFiles([media, captions])
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
     await this.chooseImportFiles(media)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -160,7 +160,7 @@ export class Workspace {
     await this.page.getByTestId("tl-sources-menu").click()
     await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
     await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -178,7 +178,7 @@ export class Workspace {
     await empty.getByRole("button", { name: "Attach captions", exact: true })
       .click({ timeout: EDITOR_READY_TIMEOUT_MS })
     await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     // Rows mode asks for no destination track or track name.
     await expect(this.page.getByLabel("Destination track", { exact: true })).toHaveCount(0)

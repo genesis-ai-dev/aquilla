@@ -42,7 +42,6 @@ import { listDownstreamProjects, loadProjectWithSource } from "../services/sourc
 import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { mergeSettingsArray } from "./project-settings"
 import { listProjectLanes } from "../../../db/shared/lanes"
-import { matchLanguageTag } from "../../../db/shared/language-normalize"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 
 const mergeSibling = new Hono<AuthHonoEnv>()
@@ -180,15 +179,12 @@ mergeSibling.post(
       )
     }
 
-    // Lane must not already be registered on the host. AQU-1597: the match
-    // runs through the one language normalizer, so folding into "spanish"
-    // when the host already has "Spanish" is refused rather than opening a
-    // second lane of the same language by spelling.
+    // Exact tag only. A second lane of the same language is legal; a display
+    // name another lane already shows is refused just below.
     const hostSettings = await loadProjectSettings(c.env, hostId)
     const existingLanes = readTargetLanes(hostSettings.settings)
-    const clash = matchLanguageTag(lane, existingLanes)
-    if (clash !== undefined) {
-      return c.json({ error: `lane "${clash}" already exists on the host project` }, 400)
+    if (existingLanes.includes(lane)) {
+      return c.json({ error: `lane "${lane}" already exists on the host project` }, 400)
     }
 
     // AQU-1550: the fold creates the lane as a real lane, named after its

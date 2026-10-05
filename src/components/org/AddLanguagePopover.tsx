@@ -23,7 +23,6 @@ import {
   patchProjectSettings,
 } from "@/lib/sync/project-settings"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
-import { sameLanguageTag } from "@/lib/language-normalize"
 
 const MAX_LANE_LENGTH = 64
 
@@ -48,13 +47,10 @@ function validateNewLane(
   if (trimmed.length > MAX_LANE_LENGTH) {
     return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_LANE_LENGTH })
   }
-  // AQU-1597: "is this the project's default target language?" is a language
-  // question, so it goes through the one normalizer. The duplicate check below
-  // is a TAG check (two lanes may share a language, but not a spelling).
-  if (sameLanguageTag(trimmed, defaultTargetLanguage)) {
+  const lower = trimmed.toLowerCase()
+  if (lower === defaultTargetLanguage.trim().toLowerCase()) {
     return t("projectSettings.languages.alreadyDefaultError")
   }
-  const lower = trimmed.toLowerCase()
   if (existingLanes.some((l) => l.toLowerCase() === lower)) {
     return t("projectSettings.languages.alreadyExistsError")
   }

@@ -33,7 +33,7 @@ describe("lane read wall", () => {
     expect(languageSurfaceForms("es").sort()).toEqual(["es", "spa", "spanish"])
     expect(languageSurfaceForms("Spanish").sort()).toEqual(["es", "spa", "spanish"])
     expect(languageSurfaceForms("")).toEqual([""])
-    expect(languageSurfaceForms("Telugu")).toEqual(["telugu"])
+    expect(languageSurfaceForms("Telugu").sort()).toEqual(["te", "tel", "telugu"])
   })
 
   it("ignores a grant below viewer and keeps a viewer grant", () => {

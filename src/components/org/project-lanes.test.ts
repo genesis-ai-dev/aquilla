@@ -99,6 +99,15 @@ describe("withOptimisticLane (AQU-605)", () => {
     })
   })
 
+  it("appends a second lane of a language the row already shows", () => {
+    const p = baseProject({
+      lanes: [
+        { lane: "Spanish", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null },
+      ],
+    })
+    expect(displayLanes(withOptimisticLane(p, "es")).map((l) => l.lane)).toEqual(["", "Spanish", "es"])
+  })
+
   it("is a no-op for a case-insensitive duplicate", () => {
     const p = baseProject({
       lanes: [

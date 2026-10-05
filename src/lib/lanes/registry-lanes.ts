@@ -1,4 +1,9 @@
-import { sameLanguageTag } from "../language-normalize"
+import { languagesEqual } from "../language-normalize"
+
+/** Subtags after the language: "fr-CA" → "ca"; a bare name or code has none. */
+function subtags(tag: string): string {
+  return tag.trim().toLowerCase().split(/[-_]/).slice(1).join("-")
+}
 
 /**
  * AQU-1473: project create stores the primary language in `targetLanes` as well
@@ -6,10 +11,9 @@ import { sameLanguageTag } from "../language-normalize"
  * an additional lane. Readers that list the default lane beside this registry
  * must drop the primary or a new project shows its first language twice.
  *
- * `sameLanguageTag` (AQU-1597) keeps the region in the comparison: plain
- * `languagesEqual` strips it, so "fr-CA" and "French" both normalize to "fra".
- * A regional lane in a project whose primary is the base language is a real
- * extra lane and must stay listed.
+ * `languagesEqual` answers "same language?", and a region is not a different
+ * language, so "fr-CA" and "French" compare equal. Whether that regional tag
+ * is the primary *lane* is a lane question: the subtags have to match too.
  */
 export function isPrimaryRegistryLane(
   tag: string,
@@ -17,7 +21,7 @@ export function isPrimaryRegistryLane(
 ): boolean {
   const lane = tag.trim()
   if (!lane) return false
-  return sameLanguageTag(lane, targetLanguage)
+  return languagesEqual(lane, targetLanguage) && subtags(lane) === subtags(targetLanguage ?? "")
 }
 
 /** Registry tags that are real extra lanes, in their original order. */

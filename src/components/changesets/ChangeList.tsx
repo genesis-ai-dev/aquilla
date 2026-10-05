@@ -14,6 +14,11 @@ export interface ChangesetChange {
   source: string | null
   before: string | null
   after: string
+  /** AQU-1673: name of the file this proposal was imported from. Present only
+   *  on proposals staged by "Import as proposals" — an AI draft or a
+   *  hand-written agent proposal has none, so its presence is the signal that
+   *  a human translated this elsewhere. */
+  importedFrom?: string
 }
 
 export interface ChangesetChanges {
@@ -30,6 +35,7 @@ export interface ChangesetImportPreview {
 }
 
 export function ChangeRow({ change }: { change: ChangesetChange }) {
+  const t = useT()
   const label = [change.canonicalRef ?? change.cellId, change.laneId ? `lane ${change.laneId}` : null]
     .filter(Boolean)
     .join(" · ")
@@ -39,6 +45,11 @@ export function ChangeRow({ change }: { change: ChangesetChange }) {
         {change.fileName ? `${change.fileName} — ` : ""}
         {label}
       </p>
+      {change.importedFrom && (
+        <p className="text-xs text-muted-foreground">
+          {t("agent.changeset.importedFrom", { fileName: change.importedFrom })}
+        </p>
+      )}
       {change.source && (
         <p className="text-xs text-muted-foreground italic whitespace-pre-wrap">{change.source}</p>
       )}

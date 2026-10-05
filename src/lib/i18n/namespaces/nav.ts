@@ -186,6 +186,9 @@ export const nav = defineNamespace({
     ),
     "nav.workspaceActions.export": "Export",
     "nav.workspaceActions.importIntoFile": "Import target translations into this file",
+    // AQU-1673: sits next to the direct import, and names the difference —
+    // proposals are reviewed, not written.
+    "nav.workspaceActions.importProposalsIntoFile": "Import translations as proposals for review",
     "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
@@ -886,6 +889,16 @@ export const nav = defineNamespace({
           "open file's TARGET column from an already-translated document. Must keep " +
           "a word equivalent to 'target' so it isn't confused with the primary " +
           "source import.",
+        maxLength: 60,
+      },
+      "nav.workspaceActions.importProposalsIntoFile": {
+        description:
+          "AQU-1673: secondary action-menu item sitting directly beside " +
+          "nav.workspaceActions.importIntoFile. Same file-scoped target import, " +
+          "except the translations are staged for human approval instead of " +
+          "written into the file. The two items are otherwise identical, so this " +
+          "label must carry the difference — keep wording equivalent to 'as " +
+          "proposals' and 'for review'.",
         maxLength: 60,
       },
       "nav.workspaceActions.transcribeAll.label": {

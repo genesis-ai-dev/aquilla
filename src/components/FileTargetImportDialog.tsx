@@ -11,12 +11,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import {
+  FileTargetImportPanel,
+  type FileTargetImportMode,
+  type FileTargetPanelBack,
+} from "@/components/import/FileTargetImportPanel"
 import { ImportDialogBackButton } from "@/components/import/ImportDialogBackButton"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import type { StageTargetProposalsResult } from "@/lib/import-file-target-proposals"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import posthog from "@/lib/posthog"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED, IMPORT_FAILED } from "@/lib/event-names"
 
 export interface FileTargetImportDialogProps {
@@ -45,6 +51,13 @@ export interface FileTargetImportDialogProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to the panel's
    *  usfmToTargetRows). */
   excludeFrontMatter?: boolean
+  /** AQU-1673: `"commit"` writes the translations into the file (default);
+   *  `"proposal"` stages them for review behind the approval gate. */
+  mode?: FileTargetImportMode
+  /** Fired in `"proposal"` mode once the changeset is staged, so the workspace
+   *  can tell the user where to review it. Never reports committed cells —
+   *  nothing is written until a human approves. */
+  onProposalsStaged?: (result: StageTargetProposalsResult) => void
 }
 
 export function FileTargetImportDialog({
@@ -62,8 +75,11 @@ export function FileTargetImportDialog({
   onImported,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  mode = "commit",
+  onProposalsStaged,
 }: FileTargetImportDialogProps) {
   const t = useT()
+  const { session } = useFrontierSession()
   // Remount the panel each time the dialog opens so a previous run's step
   // state never leaks into the next one.
   const [panelKey, setPanelKey] = useState(0)
@@ -81,6 +97,11 @@ export function FileTargetImportDialog({
   // panel out from under the user mid-import. The outcome is the event that
   // needs the lane anyway — by then it is the lane actually written to.
   const laneProperty = targetLang || "default"
+  // AQU-1673: the dialog title names the mode, so a user who opened the wrong
+  // menu item sees it before picking a file rather than after staging.
+  const title = mode === "proposal"
+    ? t("importExport.fileTarget.proposalsTitle", { fileName })
+    : t("importExport.dialog.titleFileTarget")
   useEffect(() => {
     if (open) {
       setPanelKey((k) => k + 1)
@@ -96,10 +117,10 @@ export function FileTargetImportDialog({
             {back ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton label={back.label} onClick={back.onBack} disabled={back.disabled} />
-                {t("importExport.dialog.titleFileTarget")}
+                {title}
               </div>
             ) : (
-              t("importExport.dialog.titleFileTarget")
+              title
             )}
           </DialogTitle>
         </DialogHeader>
@@ -144,6 +165,22 @@ export function FileTargetImportDialog({
             onCancel={() => onOpenChange(false)}
             excludeFrontMatter={excludeFrontMatter}
             onBackChange={setBack}
+            mode={mode}
+            jwt={session?.jwt ?? null}
+            onProposalsStaged={(result) => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: "file-target-proposals",
+                // Staged, NOT committed — a proposal import that reported
+                // `cell_count` the way the direct path does would read as
+                // written text in the same dashboards.
+                staged_count: result.stagedCount,
+                skipped_unchanged_count: result.skippedUnchangedCount,
+                project_id: projectId,
+                target_lane: laneProperty,
+              })
+              onProposalsStaged?.(result)
+              onOpenChange(false)
+            }}
           />
         </div>
       </DialogContent>

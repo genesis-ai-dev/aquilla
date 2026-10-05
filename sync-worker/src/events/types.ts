@@ -244,6 +244,19 @@ export interface AiDraftProvenance {
   }
 }
 
+/** AQU-1673: where an imported proposal's text came from. Stamped on the
+ *  `target.cell.commit` a staged import compiles to (see `imported_origin`). */
+export interface ImportedOriginProvenance {
+  /** Display name of the uploaded file the value was read out of. */
+  fileName: string
+  /** Epoch ms at which the import was staged. */
+  importedAt: number
+}
+
+/** Longest `fileName` accepted on import provenance. Generous enough for real
+ *  upload names, bounded so provenance can never carry a payload. */
+export const IMPORTED_ORIGIN_FILENAME_MAX = 256
+
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
 export interface EventPayloads {
@@ -386,6 +399,20 @@ export interface EventPayloads {
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
      */
+    /**
+     * AQU-1673 / import provenance: set when this commit came from a
+     * translation set the user brought in as PROPOSALS (through the changeset
+     * approval gate) instead of the direct-commit importer. It records WHERE
+     * the text came from so a reviewer can tell an imported proposal from an
+     * AI draft (which carries `ai_suggestion` + `ai_draft`) and from a
+     * hand-typed edit (which carries neither).
+     *
+     * Deliberately NOT paired with `ai_suggestion`: imported text is somebody
+     * else's human translation, so the cell must not read back as an AI draft.
+     * Purely descriptive — it gates nothing and shifts no role floor, which is
+     * why (unlike `ai_draft`) the caller may set it.
+     */
+    imported_origin?: ImportedOriginProvenance
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string

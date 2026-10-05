@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { ApproveChangeset } from "./ApproveChangeset"
 
@@ -427,5 +428,84 @@ describe("ApproveChangeset", () => {
     // AQU-820: the server's raw message never renders — the keyed 403 sentence does.
     expect(await screen.findByText("You aren't authorized to view this approval.")).toBeInTheDocument()
     expect(screen.queryByText("not your changeset")).not.toBeInTheDocument()
+  })
+
+  /**
+   * AQU-1673 — the surface a partner actually lands on from an import.
+   *
+   * A QA walk of PR #1176 approved a session-staged import here and the cell
+   * never changed: approve only mints the confirmation, and the only
+   * commitChangeset caller in src/ was the in-chat agent card. For a plan the
+   * app staged itself there is no agent to come back, so approving here has to
+   * apply it — and must still NOT, for an agent's plan, or it races the agent.
+   */
+  function stubApproveFlow(credentialId?: string) {
+    const calls: { url: string; method: string }[] = []
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? "GET" })
+      if (url.includes("/sync-token")) {
+        return new Response(
+          JSON.stringify({ token: "sync-token", expiresAt: "2026-07-14T00:00:00.000Z" }),
+          { status: 200 },
+        )
+      }
+      if (url.includes("/commit")) {
+        return new Response(JSON.stringify({ ...APPROVAL_DATA, status: "committed" }), {
+          status: 200,
+        })
+      }
+      if (url.endsWith("/approve")) {
+        return new Response(
+          JSON.stringify({ confirmationId: "conf-1", expiresAt: "2026-07-14T00:00:00.000Z" }),
+          { status: 200 },
+        )
+      }
+      return new Response(
+        JSON.stringify(credentialId ? { ...APPROVAL_DATA, credentialId } : APPROVAL_DATA),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    return calls
+  }
+
+  it("applies a session-staged plan on approve, and says so instead of naming an agent", async () => {
+    const calls = stubApproveFlow("session")
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /approve/i }))
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url.includes("/commit"))).toBe(true),
+    )
+    const approveAt = calls.findIndex((c) => c.url.endsWith("/approve"))
+    const commitAt = calls.findIndex((c) => c.url.includes("/commit"))
+    expect(commitAt).toBeGreaterThan(approveAt)
+    // Nobody to return to — the copy must not send them to an agent.
+    expect(await screen.findByText(/now in the file/i)).toBeInTheDocument()
+    expect(screen.queryByText(/return to your agent/i)).not.toBeInTheDocument()
+  })
+
+  it("leaves an agent's plan for the agent to commit, and says to return to it", async () => {
+    const calls = stubApproveFlow("cred-pat-1")
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /approve/i }))
+
+    expect(await screen.findByText(/return to your agent/i)).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes("/commit"))).toBe(false)
+  })
+
+  it("treats an older server with no credentialId as an agent's plan", async () => {
+    const calls = stubApproveFlow()
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /approve/i }))
+
+    expect(await screen.findByText(/return to your agent/i)).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes("/commit"))).toBe(false)
   })
 })

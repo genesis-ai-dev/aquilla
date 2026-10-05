@@ -51,6 +51,9 @@ export interface WorkspaceActionRunArgs {
   runBatchValidateAudio: () => void
   /** File-scoped target import — populate the open file's translations. */
   runImportIntoFile: () => void
+  /** AQU-1673: the same file-scoped target import, staged as proposals behind
+   *  the human approval gate instead of committed as target text. */
+  runImportProposalsIntoFile: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
   navigate: NavigateFunction

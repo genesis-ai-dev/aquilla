@@ -128,6 +128,11 @@ export interface ChangesetApproval {
   projectName: string | null
   status: ChangesetStatusName
   autonomyMode: string
+  /** AQU-1673: the credential that STAGED this plan. `SESSION_CREDENTIAL_ID`
+   *  means a signed-in human staged it from the app, so no agent will come
+   *  back to commit it — see `needsCommitOnApproval`. Absent on older
+   *  servers, which is treated as "an agent's", preserving prior behaviour. */
+  credentialId?: string
   /** Who the changeset is ROUTED to (COMMAND-REGISTRY-P1 §2.2). Absent on
    *  older servers, `null` when unassigned. Routing never resolves anything:
    *  an assigned changeset is still `staged` and still needs a human. */
@@ -337,6 +342,76 @@ export async function commitChangeset(
     { method: "POST", headers: { Authorization: `Bearer ${token}` } },
   )
   if (!res.ok) return parseErrorAndThrow(res, "commit changeset failed")
+  return unwrapChangeset(
+    (await res.json()) as ChangesetStatus | { changeset: ChangesetStatus },
+  )
+}
+
+/** Sentinel `credential_id` the worker stores for a changeset staged from a
+ *  browser session rather than by a PAT-bearing agent. Mirrors sync-worker's
+ *  `SESSION_CREDENTIAL_ID` (external/session-routes.ts). */
+export const SESSION_CREDENTIAL_ID = "session"
+
+/**
+ * AQU-1673 — does approving this changeset also have to commit it?
+ *
+ * Approval and commit are two steps: `approveChangeset` only mints the
+ * one-time confirmation, and something then has to call `commitChangeset`.
+ * For an agent's plan that something is the agent, which polls `/wait` and
+ * commits once a human approves — so the approval surfaces deliberately do
+ * not commit, and must not, or they would race the agent.
+ *
+ * A SESSION-staged plan has no agent. "Import as proposals" stages one and
+ * walks away; if the approving surface does not commit it, the human sees
+ * "Approved", the plan stays `staged`, and the text they approved never
+ * reaches a cell. So for those, approving means applying.
+ *
+ * An older server omits `credentialId`; that reads as an agent's plan, which
+ * is the pre-AQU-1673 behaviour and never commits something twice.
+ */
+export function needsCommitOnApproval(
+  changeset: Pick<ChangesetApproval, "credentialId">,
+): boolean {
+  return changeset.credentialId === SESSION_CREDENTIAL_ID
+}
+
+/** One cell's proposed translation, as `prepareSessionChangeset` sends it.
+ *  Mirrors sync-worker's `SetTranslationCommand` (external/commands.ts) —
+ *  `importOrigin` is the AQU-1673 provenance the worker stamps onto the
+ *  compiled commit as `imported_origin`. */
+export interface SetTranslationCommandInput {
+  kind: "SetTranslation"
+  fileId: string
+  cellId: string
+  value: string
+  /** Omit for the project's default lane. */
+  laneId?: string
+  importOrigin?: { fileName: string; importedAt: number }
+}
+
+/** POST {sync}/api/v1/changesets/:projectId — stage a changeset from the
+ *  signed-in browser (AQU-926's session surface, same engine the Agent API
+ *  uses). Autonomy is forced to `ask` by the worker's session principal, so
+ *  what comes back is always a `staged` plan awaiting human approval; nothing
+ *  is written to any cell until it is approved and committed.
+ *
+ *  Used by "Import as proposals" (AQU-1673) to route an uploaded translation
+ *  set through the approval gate instead of committing it directly. */
+export async function prepareSessionChangeset(
+  jwt: string,
+  projectId: string,
+  commands: readonly SetTranslationCommandInput[],
+): Promise<ChangesetStatus> {
+  const token = await mintProjectSyncToken(jwt, projectId)
+  const res = await fetchWithTimeout(
+    `${syncWorkerHttpOrigin()}/api/v1/changesets/${encodeURIComponent(projectId)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ commands }),
+    },
+  )
+  if (!res.ok) return parseErrorAndThrow(res, "stage changeset failed")
   return unwrapChangeset(
     (await res.json()) as ChangesetStatus | { changeset: ChangesetStatus },
   )

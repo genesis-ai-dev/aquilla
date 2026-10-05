@@ -275,14 +275,13 @@ export async function buildPromptPreview(
   const draftContext = objectSetting(settings, "draftContext")
 
   const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // The default lane inherits the project target language; any other lane has
-  // its own, and that language lives on the LANE ROW (AQU-1586) — mirroring
-  // resolveActiveTargetLanguage in project-workspace-lane-target.ts. `targetLang`
-  // is the lane's `legacy_tag`, an event key that `planNewTargetLane` sets to
-  // the opaque lane id whenever a sibling already holds the language string, so
-  // using it directly told the model to translate "into a3f09c1e".
+  // Every lane's language lives on the row, including the default lane whose
+  // tag is '' (AQU-1592). `targetLang` is that tag — an event key `planNewTargetLane`
+  // sets to the opaque lane id when a sibling already holds the language — so
+  // using it directly told the model to translate "into a3f09c1e". The project
+  // setting is only the fallback when the row records no language.
   const targetLanguage =
-    (targetLang ? await laneLanguage(db, projectId, targetLang) : null) ||
+    (await laneLanguage(db, projectId, targetLang)) ||
     stringSetting(settings, "targetLanguage")
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA

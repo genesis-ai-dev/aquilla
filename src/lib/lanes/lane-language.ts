@@ -1,36 +1,29 @@
 /**
- * AQU-1586: a lane's LANGUAGE and its LABEL both come from its row — and a
- * lane's tag is only ever one of them.
+ * AQU-1586 / AQU-1592: a lane's language and its label both come from its row.
  *
- * `legacy_tag` is the immutable event key (`target_lang`). `planNewTargetLane`
- * (`lane-create.ts`) sets it to the language string when that string is free,
- * and otherwise to the lane's opaque 8-hex id: a second lane of a language, or
- * a lane whose language is the project default, cannot reuse the tag its
- * sibling already holds. So a tag is EITHER a language OR a lane id, never
- * anything else, and reading it blindly as the language drafted the second
- * Spanish lane of a Spanish project "into a3f09c1e" and printed that hex id in
- * lane pickers.
+ * `legacy_tag` is the immutable event key (`target_lang`). It is the language
+ * string when that string was free, and the opaque 8-hex lane id otherwise.
+ * Reading the tag as the language drafted a second Spanish lane "into
+ * a3f09c1e".
  *
- * Until a lane row carries a real `language` column (AQU-1592), the language of
- * such a lane survives only as `lang_code` — `codeForLanguageLabel` of what the
- * maintainer typed — because `name` must be UNIQUE among the project's lanes
- * and so cannot be the bare language a sibling already goes by. Hence two
- * resolvers with deliberately different precedence:
- *
- *   - `laneRowLanguage` — what we tell the MODEL. The tag when it is a language
- *     (every lane that already worked keeps its exact behavior), else the
- *     `lang_code`, else the name.
- *   - `laneRowLabel` — what we show a PERSON: the display name they chose.
- *
- * Neither ever returns a lane id.
+ * What we tell the model is `laneLanguage` — the typed `language` column, else
+ * the name a row stored before that column existed. What we show a person is
+ * `laneDisplayName`. A tag or a `lang_code` is only a fallback when those are
+ * blank, and an 8-hex lane id is never either answer.
  */
+
+import { laneDisplayName, laneLanguage } from "./lane-display"
+import { isLaneId } from "./lane-id"
 
 /** The identity fields of a lane row (`ProjectLaneView` / `ProjectRecord.lanes`). */
 export interface LaneLanguageRow {
   id: string
   role?: "source" | "target"
-  name: string
-  langCode: string | null
+  /** Freeform language the user typed. Null on a row that predates the column. */
+  language?: string | null
+  /** Optional display override. Null means "display the language". */
+  name?: string | null
+  langCode?: string | null
   legacyTag: string | null
 }
 
@@ -40,33 +33,35 @@ function targetRows(lanes: readonly LaneLanguageRow[] | null | undefined): LaneL
   return (lanes ?? []).filter((lane) => lane.role !== "source")
 }
 
-/** `value` unless it is blank or just the lane's own id. */
-function notTheLaneId(value: string | null | undefined, laneId: string): string | null {
+/** `value` unless it is blank or an opaque lane id (this row's, or any 8-hex id). */
+function notALaneId(value: string | null | undefined, laneId: string): string | null {
   const trimmed = value?.trim()
-  if (!trimmed || trimmed === laneId) return null
+  if (!trimmed || trimmed === laneId || isLaneId(trimmed)) return null
   return trimmed
 }
 
 /**
  * The language this lane translates into, or `null` when the row records none.
  *
- * The tag comes first ON PURPOSE: for a lane whose tag is its language that is
- * where the language the maintainer typed is stored verbatim, and preferring
- * `lang_code` there would silently rewrite a working lane's "French" into
- * "fra". It is skipped exactly when it is the lane's own id — the case this
- * ticket exists for — and then `lang_code` carries the typed language.
+ * `laneLanguage` comes first: the typed `language` column, and for a row that
+ * predates it the stored name. A tag or code is used only when that is blank,
+ * so editing the language (and leaving the old tag in place) is what the model
+ * is told.
  */
 export function laneRowLanguage(lane: LaneLanguageRow): string | null {
-  return (
-    notTheLaneId(lane.legacyTag, lane.id) ??
-    notTheLaneId(lane.langCode, lane.id) ??
-    notTheLaneId(lane.name, lane.id)
-  )
+  const typed = notALaneId(laneLanguage(lane), lane.id)
+  if (typed) return typed
+  return notALaneId(lane.legacyTag, lane.id) ?? notALaneId(lane.langCode, lane.id)
 }
 
-/** The display name to show for this lane, or `null` when the row has none. */
+/**
+ * The display name to show for this lane, or `null` when the row has none.
+ * A blank row is null rather than the role placeholder, so a picker's own
+ * fallback still applies.
+ */
 export function laneRowLabel(lane: LaneLanguageRow): string | null {
-  return notTheLaneId(lane.name, lane.id) ?? notTheLaneId(lane.langCode, lane.id)
+  if (!(lane.name ?? "").trim() && !(lane.language ?? "").trim()) return null
+  return notALaneId(laneDisplayName(lane), lane.id)
 }
 
 /** The row carrying `tag`, matched on `legacy_tag` ('' is the default lane). */

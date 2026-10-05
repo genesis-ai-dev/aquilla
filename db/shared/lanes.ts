@@ -23,7 +23,7 @@
 // src/lib/lanes/lane-display.ts), because a derived value captured at write
 // time keeps claiming the old language after the label is edited, which is
 // AQU-1585. Nothing can drift if nothing derived is stored. The one-off
-// backfill of rows that predate migration 0129 is AQU-1616's.
+// backfill of rows that predate migration 0136 is AQU-1616's.
 
 import {
   BLANK_LANE_PLACEHOLDER,
@@ -33,17 +33,19 @@ import {
 } from "../../src/lib/lanes/backfill-plan"
 import {
   canonicalLanguageCodeOverride,
+  derivedLaneLanguageCode,
   laneDisplayName,
+  laneLanguage,
 } from "../../src/lib/lanes/lane-display"
 import { planNewTargetLane, type ExistingLaneIdentity, type NewTargetLaneProblem } from "../../src/lib/lanes/lane-create"
 import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
-import { newLaneId } from "../../src/lib/lanes/lane-id"
+import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
 // on read. The upsert arm fills in a language that is still blank and retires a
-// stored PLACEHOLDER name (a derived value written before 0129) so the derived
+// stored PLACEHOLDER name (a derived value written before 0136) so the derived
 // display takes over — a name the user actually chose is never touched.
 const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
    VALUES (?, ?, 'source', ?, NULL, NULL, NULL, ?)
@@ -58,7 +60,19 @@ const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, language, name, 
 const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
    VALUES (?, ?, 'target', ?, NULL, NULL, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO UPDATE SET
-     language = COALESCE(NULLIF(lanes.language, ''), NULLIF(excluded.language, ''), lanes.language),
+     language = COALESCE(
+       CASE
+         WHEN NULLIF(lanes.language, '') IS NOT NULL
+          AND lanes.language <> lanes.id
+          AND lanes.language !~ '^[0-9a-f]{8}$'
+         THEN lanes.language
+       END,
+       CASE
+         WHEN excluded.language <> lanes.id
+          AND excluded.language !~ '^[0-9a-f]{8}$'
+         THEN NULLIF(excluded.language, '')
+       END
+     ),
      name = CASE
        WHEN lanes.name IN ('${BLANK_LANE_PLACEHOLDER}') THEN NULL
        ELSE lanes.name
@@ -270,7 +284,13 @@ export function ensureProjectLaneStmts(
   return kept.map(({ row, position }) =>
     row.role === "source"
       ? db.prepare(INSERT_SOURCE).bind(newLaneId(), projectId, row.language, position)
-      : db.prepare(INSERT_TARGET).bind(newLaneId(), projectId, row.language, row.legacyTag, position),
+      : db.prepare(INSERT_TARGET).bind(
+          newLaneId(),
+          projectId,
+          isLaneId(row.language) ? "" : row.language,
+          row.legacyTag,
+          position,
+        ),
   )
 }
 
@@ -307,8 +327,12 @@ export async function ensureProjectLanes(
  * a bare `name` silently drops those lanes. NULL when the joined row is
  * missing (a LEFT JOIN that found no lane).
  */
+/** Whitespace `String.trim` drops, which default `btrim` (spaces only) leaves behind. */
+const SQL_TRIM = "E' \\t\\n\\r'"
+
 export function laneDisplayNameSql(alias: string): string {
-  return `COALESCE(NULLIF(btrim(${alias}.name), ''), NULLIF(btrim(${alias}.language), ''),
+  const trim = (column: string) => `NULLIF(btrim(${column}, ${SQL_TRIM}), '')`
+  return `COALESCE(${trim(`${alias}.name`)}, ${trim(`${alias}.language`)},
     CASE ${alias}.role WHEN 'source' THEN '${SOURCE_LANE_PLACEHOLDER}' WHEN 'target' THEN '${BLANK_LANE_PLACEHOLDER}' END)`
 }
 
@@ -317,7 +341,7 @@ export interface ProjectLaneRecord {
   role: "source" | "target"
   /**
    * AQU-1592: the freeform language the user typed. Never derived. Null only
-   * on a row that predates migration 0129 — readers fall back to `name` via
+   * on a row that predates migration 0136 — readers fall back to `name` via
    * `laneLanguage` until the AQU-1616 backfill fills it.
    */
   language: string | null
@@ -413,12 +437,23 @@ export async function updateTargetLane(
   if (!current) return { status: "not_found" }
 
   // An untouched language keeps its stored value verbatim — including the NULL
-  // a row that predates migration 0129 carries, which `laneLanguage` resolves
+  // a row that predates migration 0136 carries, which `laneLanguage` resolves
   // from `name`. Writing '' over that NULL would lose the "not backfilled yet"
   // distinction the AQU-1616 backfill reads.
+  const previousLanguage = laneLanguage(current)
   const language = patch.language === undefined ? current.language : patch.language.trim()
-  const name =
+  let name =
     patch.name === undefined ? current.name : patch.name === null ? null : patch.name.trim() || null
+
+  // A pre-column row stored the derived name and code. Once the language
+  // actually changes, those are a stale override of the old language — drop
+  // them so display and the code follow the new language. A value the user
+  // set (it doesn't match what the old language would have derived) stays.
+  const languageChanged = patch.language !== undefined && (language ?? "") !== previousLanguage
+  if (languageChanged && patch.name === undefined) {
+    const derivedName = laneDisplayName({ role: "target", language: previousLanguage, name: null })
+    if ((name ?? "").trim() === derivedName) name = null
+  }
 
   // A lane must still render as SOMETHING, so the language is required unless a
   // display name stands in for it. Both blank is the "empty" problem.
@@ -438,6 +473,11 @@ export async function updateTargetLane(
     const override = canonicalLanguageCodeOverride(patch.code)
     if (!override.ok) return { status: "malformed_code" }
     langCode = override.code
+  } else if (languageChanged) {
+    const derivedCode = derivedLaneLanguageCode({ language: previousLanguage })
+    if (derivedCode && (langCode ?? "").trim().toLowerCase() === derivedCode.toLowerCase()) {
+      langCode = null
+    }
   }
 
   await db
@@ -581,7 +621,7 @@ export function ensureTargetLaneStmt(
          FROM lanes WHERE project_id = ?
        ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
     )
-    .bind(newLaneId(), projectId, tag, tag, projectId)
+    .bind(newLaneId(), projectId, isLaneId(tag) ? "" : tag, tag, projectId)
 }
 
 export type ArchiveLaneResult =

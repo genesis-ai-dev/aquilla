@@ -21,6 +21,7 @@
  */
 
 import { LANGUAGES } from '../languages/catalog'
+import { isLaneId } from './lane-id'
 import { isPrimaryRegistryLane } from './registry-lanes'
 
 /** Placeholder name for a default lane on a BLANK project (no targetLanguage). */
@@ -121,12 +122,16 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
         langCode: codeForLanguageLabel(primaryLabel),
       })
     } else {
+      // A tag that is an opaque lane id (dev writes those into settings.targetLanes)
+      // is an event key, not a language. Storing it would tell the model to
+      // translate into "a3f09c1e".
+      const language = isLaneId(tag) ? '' : tag
       plans.push({
         role: 'target',
         legacyTag: tag,
-        language: tag, // tags are language labels
-        name: tag, // tags are usually already display names
-        langCode: codeForLanguageLabel(tag),
+        language,
+        name: language ? tag : BLANK_LANE_PLACEHOLDER,
+        langCode: codeForLanguageLabel(language),
       })
     }
   }

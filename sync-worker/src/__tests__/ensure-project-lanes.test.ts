@@ -118,6 +118,31 @@ describe("ensureProjectLanes", () => {
     ])
   })
 
+  it("does not store a lane id from targetLanes as the language", async () => {
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e", "French"] },
+    })
+    const rows = await lanes(t)
+    const tagged = rows.find((row) => row.legacy_tag === "a3f09c1e")
+    expect(tagged).toBeTruthy()
+    expect(tagged?.language ?? "").not.toMatch(/^[0-9a-f]{8}$/)
+    expect(rows.find((row) => row.legacy_tag === "French")?.language).toBe("French")
+
+    // A language already stored on that id-tagged lane is left alone.
+    await insertTargetLane(t.db, PROJECT, {
+      id: "b0b0b0b0",
+      language: "Yoruba",
+      name: null,
+      langCode: null,
+      legacyTag: "b0b0b0b0",
+    })
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e", "b0b0b0b0", "French"] },
+    })
+    const kept = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "b0b0b0b0")
+    expect(kept?.language).toBe("Yoruba")
+  })
+
   it("moves the derived code with the language instead of letting it drift (AQU-1585)", async () => {
     await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
     const before = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "")!
@@ -129,6 +154,31 @@ describe("ensureProjectLanes", () => {
     expect(laneDisplayName(after)).toBe("French")
     expect(laneLanguageCode(after)).toBe("fr")
     expect(after.langCode).toBeNull()
+  })
+
+  it("drops a derived name and code when the language changes", async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES ('c0ffee01', $1, 'target', NULL, 'Yoruba', 'yo', 'Yoruba', 1)`,
+      [PROJECT],
+    )
+    const edited = await updateTargetLane(t.db, PROJECT, "c0ffee01", { language: "Yoruba (Oyo)" })
+    expect(edited.status).toBe("ok")
+    const after = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "c0ffee01")!
+    expect(after).toMatchObject({ language: "Yoruba (Oyo)", name: null, langCode: null })
+    expect(laneDisplayName(after)).toBe("Yoruba (Oyo)")
+  })
+
+  it("keeps a chosen name and a real code override across a language edit", async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES ('c0ffee02', $1, 'target', 'Yoruba', 'Team Yoruba', 'yo-NG', 'Yoruba', 1)`,
+      [PROJECT],
+    )
+    expect((await updateTargetLane(t.db, PROJECT, "c0ffee02", { language: "Yoruba (Oyo)" })).status).toBe("ok")
+    const after = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "c0ffee02")!
+    expect(after.name).toBe("Team Yoruba")
+    expect(after.langCode).toBe("yo-NG")
   })
 
   it("keeps a code override across a language edit", async () => {
@@ -202,7 +252,7 @@ describe("ensureProjectLanes", () => {
   })
 
   it("retires a stored placeholder name so the derived display takes over", async () => {
-    // A row written before migration 0129 stores the placeholder as its name.
+    // A row written before migration 0136 stores the placeholder as its name.
     await t.pg.query(
       `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
        VALUES ('aabbccdd', $1, 'target', NULL, $2, NULL, '', 0)`,
@@ -552,6 +602,21 @@ describe("readers that select lane rows directly see the display name", () => {
          FROM (SELECT 1) AS one LEFT JOIN lanes ln ON ln.id = 'no-such-lane'`,
     )
     expect(missing.rows).toEqual([{ label: null }])
+  })
+
+  it("agrees with the TS display name on a row that predates the language column", async () => {
+    const storedName = " \tFrench\r\n"
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES ('oldrow01', $1, 'target', NULL, $2, 'fr', '', 0)`,
+      [PROJECT, storedName],
+    )
+    const sql = await t.pg.query<{ label: string }>(
+      `SELECT ${laneDisplayNameSql("lanes")} AS label FROM lanes WHERE id = 'oldrow01'`,
+    )
+    const ts = laneDisplayName({ role: "target", language: null, name: storedName, langCode: "fr" })
+    expect(sql.rows[0]?.label).toBe(ts)
+    expect(ts).toBe("French")
   })
 })
 

@@ -66,7 +66,7 @@ describe('planLanesForProject', () => {
       legacyTag: '',
       // AQU-1592: `language` is the typed label ('' here) — the live writers
       // store only that. `name`/`langCode` stay on the plan for the one-off
-      // backfill daemon, which still writes the pre-0129 columns.
+      // backfill daemon, which still writes the pre-0136 columns.
       language: '',
       name: BLANK_LANE_PLACEHOLDER,
       langCode: null,
@@ -165,6 +165,18 @@ describe('planLanesForProject', () => {
       name: 'Grade 7 English',
       langCode: null,
     })
+  })
+
+  it('does not derive a language from a registry tag that is a lane id', () => {
+    const plans = planLanesForProject({
+      sourceLanguage: 'English',
+      targetLanguage: 'Spanish',
+      registryTargetLanes: ['a3f09c1e', 'French'],
+      dataTargetTags: [''],
+    })
+    const idLane = targets(plans).find((l) => l.legacyTag === 'a3f09c1e')
+    expect(idLane?.language).toBe('')
+    expect(targets(plans).find((l) => l.legacyTag === 'French')?.language).toBe('French')
   })
 
   it('deduplicates repeated data tags', () => {

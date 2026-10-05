@@ -26,6 +26,12 @@ import {
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
 import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
+import {
+  emptyPortfolioAggregate,
+  summarizePortfoliosByOrg,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "../../../src/lib/frontier/portfolio-metrics"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -2018,6 +2024,29 @@ export async function getOrgPortfolios(
 ): Promise<OrgPortfolioRow[]> {
   const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
   return projects
+}
+
+/**
+ * Overview totals for the same visible projects `getOrgPortfolios` would
+ * return. The client dashboard no longer needs that full payload to paint
+ * translated/validated averages and stalled, overdue, and attention counts.
+ *
+ * This does not change the portfolio SQL. Query-plan work on that rollup is
+ * separate (the cells-scan follow-up). Values stay the unweighted per-project
+ * mean, under the same visibility predicate and lane-activity rules.
+ */
+export async function summarizeVisiblePortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<{ totals: PortfolioAggregate; orgs: OrgPortfolioAggregate[] }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) {
+    return { totals: emptyPortfolioAggregate(), orgs: [] }
+  }
+  const { projects } = await listOrgPortfolioPage(env, uniqueOrgIds, viewer, null, now)
+  return summarizePortfoliosByOrg(projects, uniqueOrgIds, now)
 }
 
 export interface ProjectAccessBreakdown {

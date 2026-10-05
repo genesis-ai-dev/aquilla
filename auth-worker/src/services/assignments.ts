@@ -359,7 +359,7 @@ async function readThreshold(
  * bar. An assignment pinned to a DIFFERENT lane still appears — the cells are
  * spoken for either way, and hiding the row would make the unit look
  * unassigned — which is why every row carries its own `targetLang` for the
- * caller to label. Audio has no lane at all (below).
+ * caller to label. Audio is measured in that same lane (AQU-1591, below).
  *
  * AQU-1609: `laneId` is `lanes.id`. The route resolves it, accepting a legacy
  * `?lane=` tag from an older client; nothing below takes a tag from the caller.

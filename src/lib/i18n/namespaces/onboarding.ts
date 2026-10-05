@@ -342,14 +342,15 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
-    // — ComingSoonStep + its two checklist entries —
-    "onboarding.checklist.comingSoon.badge": "Coming soon",
-    "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
-    "onboarding.checklist.comingSoon.standards.description":
+    // — LinkStep: optional steps that open the surface where the work happens —
+    "onboarding.checklist.standards.title": "Set project standards",
+    "onboarding.checklist.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
-    "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or term lists to keep terminology consistent.",
+    "onboarding.checklist.standards.actionLabel": "Open standards",
+    "onboarding.checklist.glossary.title": "Import terminology",
+    "onboarding.checklist.glossary.description":
+      "Existing term lists (CSV, TBX, LIFT) to keep terminology consistent.",
+    "onboarding.checklist.glossary.actionLabel": "Open terminology",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)

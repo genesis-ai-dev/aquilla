@@ -1,0 +1,327 @@
+/**
+ * AQU-1365: a translation starts from the big Import button.
+ *
+ * WHY each group matters:
+ *  - The first screen still opens on New source text with the importer tiles
+ *    right below it: a source import must not gain a click (AC3), and the e2e
+ *    page objects wait for the "Upload files" card.
+ *  - "A translation" must be findable by the words people use (AQU-503:
+ *    "target"), and must default to the open file.
+ *  - The review matches against the lines it is handed when it mounts, so a
+ *    translation for another file must wait until that file is open and fully
+ *    loaded. Starting early matches against the wrong file's lines.
+ *  - A USFM file's own book may choose the file only while the person hasn't.
+ *  - Roles: a Contributor imports a translation (the old three-dot entry had
+ *    no gate), but not new source text.
+ */
+
+import React from "react"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, act, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+
+vi.mock("@/lib/import", () => ({
+  importFile: vi.fn(),
+  importEBible: vi.fn(),
+  importMacula: vi.fn(),
+  importTranslationNotes: vi.fn(),
+  importParatextProject: vi.fn(),
+  importParatextAsTarget: vi.fn(),
+  prepareEBibleTargetImport: vi.fn(),
+  applyEBibleTargetImport: vi.fn(),
+  prepareImportFile: vi.fn(),
+}))
+vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}))
+
+import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
+import { applyEBibleTargetImport } from "@/lib/import"
+import posthog from "@/lib/posthog"
+import { IMPORT_SUCCEEDED } from "@/lib/event-names"
+import type { FileTargetCellRef } from "@/lib/import-file-target"
+
+function cellsFor(fileId: string, book: string, verses: number): FileTargetCellRef[] {
+  return Array.from({ length: verses }, (_, i) => ({
+    cellId: `${fileId}-${i + 1}`,
+    fileId,
+    canonicalRef: `${book} 1:${i + 1}`,
+    sourceEventId: `se-${fileId}-${i + 1}`,
+    targetEventId: undefined,
+    translated: "",
+    original: `${book} source ${i + 1}`,
+  }))
+}
+
+const JONAH_CELLS = cellsFor("jonah", "JON", 2)
+const RUTH_CELLS = cellsFor("ruth", "RUT", 2)
+
+const FILES = [
+  { id: "jonah", name: "Jonah", bookCode: "JON", type: "usfm" },
+  { id: "ruth", name: "Ruth", bookCode: "RUT", type: "usfm" },
+  { id: "episode", name: "Episode 1", type: "vtt" },
+]
+
+const JON_USFM = "\\id JON Siberian Tatar (test)\n\\c 1\n\\v 1 Йона бер\n\\v 2 Йона ике\n"
+const RUT_USFM = "\\id RUT\n\\c 1\n\\v 1 Руфь бер\n\\v 2 Руфь ике\n"
+
+function host(overrides: Partial<TranslationImportHost> = {}): TranslationImportHost {
+  return {
+    files: FILES,
+    activeFileId: "jonah",
+    activeFileCells: JONAH_CELLS,
+    activeFileLoading: false,
+    activeFileFailed: false,
+    openFile: vi.fn(),
+    retryActiveFile: vi.fn(),
+    applyOptimisticTargetEdits: vi.fn(),
+    disabledReason: null,
+    languageLabel: "Siberian Tatar",
+    targetLanguages: ["Siberian Tatar"],
+    ...overrides,
+  }
+}
+
+const baseProps = {
+  open: true,
+  onOpenChange: vi.fn(),
+  projectId: "proj-1365",
+  username: "translator",
+  sourceLanguage: "English",
+  targetLanguage: "Siberian Tatar",
+  getToken: vi.fn(async () => "tok"),
+  onImported: vi.fn(async () => undefined),
+}
+
+function renderDialog(props: Partial<React.ComponentProps<typeof ImportDialog>> = {}) {
+  const translation = props.translation ?? host()
+  const all = { ...baseProps, translation, ...props }
+  const view = render(<ImportDialog {...all} />)
+  return {
+    ...view,
+    translation,
+    rerenderWith: (next: Partial<TranslationImportHost>) =>
+      view.rerender(<ImportDialog {...all} translation={{ ...translation, ...next }} />),
+  }
+}
+
+function usfm(text: string, name: string) {
+  return new File([text], name, { type: "text/plain" })
+}
+
+async function chooseTranslation() {
+  fireEvent.click(screen.getByRole("radio", { name: /^A translation/ }))
+  return screen.findByTestId("translation-chooser")
+}
+
+async function dropFiles(files: File[]) {
+  const input = screen.getByTestId("translation-drop-zone").querySelector('input[type="file"]') as HTMLInputElement
+  await act(async () => {
+    Object.defineProperty(input, "files", { value: files, configurable: true })
+    fireEvent.change(input)
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
+
+async function pickFile(name: string) {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("combobox", { name: "Which file does it translate?" }))
+  await user.click(await screen.findByRole("option", { name }))
+}
+
+describe("AQU-1365: the Import dialog's first screen", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("opens on New source text with today's importer tiles below it", () => {
+    renderDialog()
+    expect(screen.getByRole("radio", { name: /^New source text/ })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByText("Upload files")).toBeInTheDocument()
+    expect(screen.queryByTestId("translation-chooser")).not.toBeInTheDocument()
+  })
+
+  it("names the translation choice by the words people look for: translation, target", () => {
+    renderDialog()
+    const card = screen.getByTestId("import-intent-translation").textContent!.toLowerCase()
+    expect(card).toContain("translation")
+    expect(card).toContain("target")
+  })
+
+  it("offers no choice at all when the host has no translation path", () => {
+    renderDialog({ translation: undefined })
+    expect(screen.queryByRole("radio", { name: /^A translation/ })).not.toBeInTheDocument()
+    expect(screen.getByText("Upload files")).toBeInTheDocument()
+  })
+
+  it("preselects the open file and says which language it fills", async () => {
+    renderDialog()
+    const chooser = await chooseTranslation()
+    expect(screen.queryByText("Upload files")).not.toBeInTheDocument()
+    expect(within(chooser).getByRole("combobox", { name: "Which file does it translate?" })).toHaveTextContent("Jonah")
+    expect(chooser).toHaveTextContent("It fills the empty lines of the Siberian Tatar translation.")
+  })
+
+  it("greys out New source text for a Contributor and opens on A translation", () => {
+    renderDialog({ sourceDisabledReason: "You're a Contributor; you need at least Project lead access." })
+    expect(screen.getByRole("radio", { name: /^New source text/ })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("import-intent-source")).toHaveAttribute(
+      "data-tooltip", "You're a Contributor; you need at least Project lead access.",
+    )
+    expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("translation-chooser")).toBeInTheDocument()
+  })
+
+  it("greys out A translation in a project with no files, and says why", () => {
+    renderDialog({ translation: host({ files: [], activeFileId: null, activeFileCells: [] }) })
+    expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("import-intent-translation")).toHaveAttribute(
+      "data-tooltip", "Add a source text first. A translation goes into a file that's already here.",
+    )
+  })
+})
+
+describe("AQU-1365: importing a translation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  it("goes straight to the review for the open, loaded file, without reopening it", async () => {
+    const { translation } = renderDialog()
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+    expect(translation.openFile).not.toHaveBeenCalled()
+    expect(screen.queryByText(/opening/i)).not.toBeInTheDocument()
+  })
+
+  it("opens another file first and starts the review only once its lines are loaded", async () => {
+    const { translation, rerenderWith } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Ruth")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
+
+    // The editor switched, but Jonah's rows are still in the store: keep waiting.
+    rerenderWith({ activeFileId: "ruth" })
+    expect(screen.getByText("Opening Ruth…")).toBeInTheDocument()
+    rerenderWith({ activeFileId: "ruth", activeFileCells: [], activeFileLoading: true })
+    expect(screen.getByText("Opening Ruth…")).toBeInTheDocument()
+    rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS, activeFileLoading: false })
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+  })
+
+  it("lets a USFM file's book choose the file while the person hasn't", async () => {
+    const { translation } = renderDialog()
+    await chooseTranslation()
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
+  })
+
+  it("keeps the person's own choice over the file's book", async () => {
+    const { translation } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Jonah")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    expect(translation.openFile).not.toHaveBeenCalled()
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+  })
+
+  it("holds an upload until a file is chosen, and starts it only on Continue", async () => {
+    const { translation } = renderDialog({ translation: host({ activeFileId: null, activeFileCells: [] }) })
+    await chooseTranslation()
+    await dropFiles([new File(["Reference,Translation\nJON 1:1,a\n"], "JON-tatar.csv")])
+    const held = await screen.findByTestId("translation-held-file")
+    expect(held).toHaveTextContent("JON-tatar.csv")
+    expect(held).toHaveTextContent("Choose the file that JON-tatar.csv translates.")
+    expect(within(held).getByRole("button", { name: "Continue" })).toBeDisabled()
+
+    await pickFile("Jonah")
+    expect(translation.openFile).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByTestId("translation-held-file")).getByRole("button", { name: "Continue" }))
+    expect(translation.openFile).toHaveBeenCalledWith("jonah")
+    expect(await screen.findByText("Opening Jonah…")).toBeInTheDocument()
+  })
+
+  it("asks for one file at a time", async () => {
+    renderDialog()
+    await chooseTranslation()
+    fireEvent.drop(screen.getByTestId("translation-drop-zone"), {
+      dataTransfer: { files: [usfm(JON_USFM, "a.usfm"), usfm(RUT_USFM, "b.usfm")] },
+    })
+    expect(await screen.findByText("Add one file at a time.")).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+
+  it("refuses a file type the review can't read", async () => {
+    renderDialog()
+    await chooseTranslation()
+    await dropFiles([new File(["x"], "notes.docx")])
+    expect(await screen.findByText(/unsupported file type/i)).toBeInTheDocument()
+  })
+
+  it("goes back from the review to the file choice, keeping the file and the upload", async () => {
+    renderDialog()
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to file selection" }))
+    const chooser = await screen.findByTestId("translation-chooser")
+    expect(within(chooser).getByRole("combobox", { name: "Which file does it translate?" })).toHaveTextContent("Jonah")
+    expect(screen.getByTestId("translation-held-file")).toHaveTextContent("JON-tatar.usfm")
+    expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("imports, reports it as a file-target import, and closes", async () => {
+    const onOpenChange = vi.fn()
+    const { translation } = renderDialog({ onOpenChange })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    const importButton = await screen.findByRole("button", { name: /import 2 cells/i })
+    await act(async () => {
+      fireEvent.click(importButton)
+    })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(translation.applyOptimisticTargetEdits).toHaveBeenCalled()
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
+      import_type: "file-target", entry: "translation", auto_picked: false, file_count: 2,
+    }))
+  })
+
+  it("says when the file failed to open, and tries again", async () => {
+    const { translation, rerenderWith } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Ruth")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    rerenderWith({ activeFileId: "ruth", activeFileCells: [], activeFileFailed: true })
+    expect(await screen.findByText("Couldn't open Ruth. Check your connection and try again.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    expect(translation.retryActiveFile).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands the upload back when the file is deleted while it opens", async () => {
+    const { rerenderWith } = renderDialog()
+    await chooseTranslation()
+    await pickFile("Ruth")
+    await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
+    rerenderWith({ files: FILES.filter((f) => f.id !== "ruth") })
+    expect(await screen.findByText("That file is no longer in this project.")).toBeInTheDocument()
+    expect(screen.getByTestId("translation-held-file")).toHaveTextContent("RUT-tatar.usfm")
+  })
+
+  it("does not wait forever on an open file that has no lines", async () => {
+    renderDialog({ translation: host({ activeFileCells: [] }) })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+  })
+})

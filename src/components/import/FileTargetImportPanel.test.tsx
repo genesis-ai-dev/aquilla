@@ -1149,3 +1149,56 @@ describe("FileTargetImportPanel — the back arrow", () => {
     expect(back.current()).toMatchObject({ disabled: true })
   })
 })
+
+// AQU-1365: hosted by the Import dialog's "A translation" path, which has
+// already chosen the file. WHY: the person dropped it once; a second drop step
+// would read as the import having lost it, and Back must return to the
+// dialog's own file choice rather than to a drop zone they never saw.
+describe("FileTargetImportPanel — a file chosen by the host (AQU-1365)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  it("reads the host's file once, without showing its own drop step", async () => {
+    const file = makeFile(USFM_FIXTURE)
+    const arrayBuffer = vi.spyOn(file, "arrayBuffer")
+    renderPanel({ initialFile: file })
+    expect(screen.queryByText(/drop a file here/i)).not.toBeInTheDocument()
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
+  it("goes back to the host's file choice from the review", async () => {
+    let back: FileTargetPanelBack | null = null
+    const onBackToFileChoice = vi.fn()
+    renderPanel({
+      initialFile: makeFile(USFM_FIXTURE),
+      onBackToFileChoice,
+      onBackChange: (b) => { back = b },
+    })
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    act(() => back!.onBack())
+    expect(onBackToFileChoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("goes back from a spreadsheet's column mapping to the host's file choice", async () => {
+    let back: FileTargetPanelBack | null = null
+    const onBackToFileChoice = vi.fn()
+    renderPanel({
+      initialFile: makeFile("ref,target\nGEN 1:1,Uno\nGEN 1:2,Dos\n", "genesis.csv"),
+      onBackToFileChoice,
+      onBackChange: (b) => { back = b },
+    })
+    expect(await screen.findByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    act(() => back!.onBack())
+    expect(onBackToFileChoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows its own drop step with the reason when the host's file can't be read", async () => {
+    renderPanel({ initialFile: makeFile("\\id GEN\n\\c 1\n", "empty.usfm") })
+    expect(await screen.findByText(/drop a file here/i)).toBeInTheDocument()
+    expect(screen.getByText(/no verses/i)).toBeInTheDocument()
+  })
+})

@@ -29,6 +29,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -122,8 +123,60 @@ import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
 import { ROLE } from "@/lib/frontier/roles"
+import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
+import { TranslationChooser, type TranslationStartOptions } from "@/components/import/TranslationChooser"
+import type { FileTargetCellRef } from "@/lib/import-file-target"
+import {
+  CLOSED_IMPORT_FILE_GATE,
+  nextImportFileGate,
+  type ImportFileGate,
+  type ImportFileGateState,
+} from "@/lib/import/import-file-gate"
+import type { TranslationDestination } from "@/lib/import/translation-destination"
 
 type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
+  // AQU-1365: a translation's destination file is opening in the editor, then
+  // its review (FileTargetImportPanel) runs.
+  | "translationOpening" | "translationReview"
+
+/**
+ * AQU-1365: what the host gives the "A translation" path. The cell store only
+ * ever holds the OPEN file, so a translation for another file has to open that
+ * file in the editor first; `activeFile*` describe whatever file is open now.
+ */
+export interface TranslationImportHost {
+  /** Project files the translation can go into, in sidebar order. */
+  files: TranslationDestination[]
+  activeFileId: string | null
+  /** The open file's lines, in display order. */
+  activeFileCells: FileTargetCellRef[]
+  activeFileLoading: boolean
+  activeFileFailed: boolean
+  /** Opens a file in the editor behind the dialog. */
+  openFile: (fileId: string) => void
+  /** Loads the open file's lines again after a failure. */
+  retryActiveFile: () => void
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
+  /** Why this caller can't import a translation (role), or null. */
+  disabledReason: string | null
+  /** Name of the language the import fills (the active lane's), when known. */
+  languageLabel: string | null
+  /** Every target language of the project, for telling a translation from a
+   *  source upload. */
+  targetLanguages: string[]
+}
+
+/** One translation import in flight: the upload, its file, and a key that
+ *  remounts the review for every start. */
+interface TranslationRun {
+  file: File
+  fileId: string
+  key: string
+  autoPicked: boolean
+}
+
+const NO_TRANSLATION_FILES: TranslationDestination[] = []
 
 interface ImportDialogProps {
   open: boolean
@@ -196,6 +249,15 @@ interface ImportDialogProps {
     alreadyLinked: boolean
     onLinked: () => void
   }
+  /**
+   * AQU-1365: why a NEW SOURCE import is refused for this caller (role), or
+   * null. A Contributor can import a translation but not new source text, so
+   * the dialog opens for them with the source choice greyed out.
+   */
+  sourceDisabledReason?: string | null
+  /** AQU-1365: the "A translation" path. Absent, the dialog offers source
+   *  import only, as before. */
+  translation?: TranslationImportHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -221,9 +283,55 @@ export function ImportDialog({
   patchDcsCursor,
   excludeFrontMatter,
   linkSource,
+  sourceDisabledReason = null,
+  translation,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
+  // AQU-1365: "What are you importing?" and the translation path's choices.
+  // They live here, not in the chooser, so Back from the review finds the
+  // same file chosen and the same upload held.
+  const [intent, setIntent] = useState<ImportIntent>("source")
+  const [translationFileId, setTranslationFileId] = useState<string | null>(null)
+  const [translationTouched, setTranslationTouched] = useState(false)
+  const [heldTranslationFile, setHeldTranslationFile] = useState<File | null>(null)
+  const [translationRun, setTranslationRun] = useState<TranslationRun | null>(null)
+  const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
+    { gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" },
+  )
+  // Where the title's back arrow leads inside the review, as the panel reports it.
+  const [translationBack, setTranslationBack] = useState<FileTargetPanelBack | null>(null)
+  const [translationNotice, setTranslationNotice] = useState<string | null>(null)
+  const translationRunCount = useRef(0)
+  const translationFiles = translation?.files ?? NO_TRANSLATION_FILES
+  const translationDisabledReason = translation
+    ? translation.disabledReason
+      ?? (translationFiles.length === 0 ? t("importExport.intent.translation.noFiles") : null)
+    : null
+  const translationDestination = translationRun
+    ? translationFiles.find((file) => file.id === translationRun.fileId) ?? null
+    : null
+
+  // AQU-1365: each opening starts from the caller's situation: New source text
+  // unless only a translation is allowed, and the open file as the translation's
+  // destination. Adjusted while rendering (not in the reset effect below) because
+  // it reads the host's props, and an effect keyed on them would re-run on every
+  // file the dialog itself opens.
+  const [initialisedForOpen, setInitialisedForOpen] = useState(false)
+  if (open !== initialisedForOpen) {
+    setInitialisedForOpen(open)
+    if (open) {
+      const openFileId = translation?.activeFileId ?? null
+      setIntent(sourceDisabledReason !== null && translation ? "translation" : "source")
+      setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
+      setTranslationTouched(false)
+      setHeldTranslationFile(null)
+      setTranslationRun(null)
+      setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
+      setTranslationBack(null)
+      setTranslationNotice(null)
+    }
+  }
   // Which partner integration the "partner" screen is showing. Null everywhere else.
   const [partnerId, setPartnerId] = useState<string | null>(null)
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -476,6 +584,100 @@ export function ImportDialog({
     void finishPendingImport(pendingImport, true)
   }
 
+  // AQU-1365: the open file as the opening gate sees it.
+  function gateInput(wantedFileId: string) {
+    return {
+      wantedFileId,
+      activeFileId: translation?.activeFileId ?? null,
+      cellsLoading: translation?.activeFileLoading ?? false,
+      cellsError: translation?.activeFileFailed ?? false,
+      cellCount: translation?.activeFileCells.length ?? 0,
+      firstCellFileId: translation?.activeFileCells[0]?.fileId,
+    }
+  }
+
+  // AQU-1365: review `file` as the translation of `fileId`. When that is not
+  // the open file, the editor opens it behind the dialog, and the review waits
+  // until every one of its lines has loaded: it matches against the lines it
+  // is handed when it mounts.
+  function startTranslation(file: File, fileId: string, { autoPicked }: TranslationStartOptions) {
+    if (!translation) return
+    translationRunCount.current += 1
+    setTranslationFileId(fileId)
+    setHeldTranslationFile(null)
+    setTranslationNotice(null)
+    setTranslationBack(null)
+    setTranslationRun({ file, fileId, key: `${fileId}:${translationRunCount.current}`, autoPicked })
+    posthog.capture(IMPORT_STARTED, {
+      import_type: "file-target",
+      entry: "translation",
+      auto_picked: autoPicked,
+      project_id: projectId,
+    })
+    if (translation.activeFileId !== fileId) {
+      translation.openFile(fileId)
+      setOpening({ gate: { file: fileId, sawLoad: false }, state: "waiting" })
+      setScreen("translationOpening")
+      return
+    }
+    // Already open, and opened before this dialog was, so its load has had
+    // its chance: a settled file with no lines counts as loaded instead of
+    // waiting for a load that is not coming.
+    const first = nextImportFileGate(
+      { file: fileId, sawLoad: !translation.activeFileLoading },
+      gateInput(fileId),
+    )
+    setOpening(first)
+    setScreen(first.state === "ready" ? "translationReview" : "translationOpening")
+  }
+
+  // Stable on purpose: the review reports its back arrow from an effect keyed
+  // on this callback, and that report re-renders the dialog. A fresh function
+  // every render would loop.
+  const backToTranslationChooser = useCallback(() => {
+    if (translationRun) {
+      setHeldTranslationFile(translationRun.file)
+      setTranslationFileId(translationRun.fileId)
+    }
+    setTranslationRun(null)
+    setTranslationBack(null)
+    setScreen("landing")
+  }, [translationRun])
+
+  // AQU-1365: re-check the opening gate whenever the open file's state moves.
+  const openingFileId = screen === "translationOpening" ? translationRun?.fileId ?? null : null
+  const openingFileGone = openingFileId !== null && !translationFiles.some((file) => file.id === openingFileId)
+  const hostActiveFileId = translation?.activeFileId ?? null
+  const hostLoading = translation?.activeFileLoading ?? false
+  const hostFailed = translation?.activeFileFailed ?? false
+  const hostCellCount = translation?.activeFileCells.length ?? 0
+  const hostFirstCellFileId = translation?.activeFileCells[0]?.fileId
+  // Adjusted while rendering rather than in an effect: the gate is derived
+  // from props, and the reducer hands back the same object once it settles,
+  // so this converges in one extra pass instead of a commit per step.
+  if (openingFileId !== null) {
+    if (openingFileGone) {
+      // Deleted while it opened: its lines are never coming, so hand the
+      // upload back to the chooser with nothing chosen.
+      setHeldTranslationFile(translationRun?.file ?? null)
+      setTranslationFileId(null)
+      setTranslationRun(null)
+      setTranslationNotice(t("importExport.translation.fileGone"))
+      setScreen("landing")
+    } else {
+      const next = nextImportFileGate(opening.gate, {
+        wantedFileId: openingFileId,
+        activeFileId: hostActiveFileId,
+        cellsLoading: hostLoading,
+        cellsError: hostFailed,
+        cellCount: hostCellCount,
+        firstCellFileId: hostFirstCellFileId,
+      })
+      if (next.gate !== opening.gate || next.state !== opening.state) setOpening(next)
+      if (next.state === "ready") setScreen("translationReview")
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[90dvh] sm:max-w-2xl flex-col">
@@ -489,6 +691,24 @@ export function ImportDialog({
               t("importExport.dialog.titleResult")
             ) : screen === "collision" ? (
               t("importExport.dialog.titleCollision")
+            ) : screen === "translationOpening" || screen === "translationReview" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                {screen === "translationReview" && translationBack ? (
+                  <ImportDialogBackButton
+                    onClick={translationBack.onBack}
+                    label={translationBack.label}
+                    disabled={translationBack.disabled}
+                  />
+                ) : (
+                  <ImportDialogBackButton
+                    onClick={backToTranslationChooser}
+                    label={t("importExport.translation.backToChooser")}
+                  />
+                )}
+                <span className="min-w-0 truncate">
+                  {t("importExport.translation.titleInto", { fileName: translationDestination?.name ?? "" })}
+                </span>
+              </div>
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
@@ -527,9 +747,72 @@ export function ImportDialog({
           </DialogTitle>
         </DialogHeader>
 
+        {/* AQU-1365: the translation review owns its scroll and pins its footer,
+            so it sits outside the scrolling body (below), not inside it. */}
+        {screen !== "translationReview" && (
         <DialogBody>
 
-        {screen === "landing" && (
+        {screen === "landing" && translation && (
+          <div className="pt-1 pb-4">
+            <ImportIntentChoice
+              value={intent}
+              onChange={(next) => {
+                setIntent(next)
+                setTranslationNotice(null)
+              }}
+              sourceDisabledReason={sourceDisabledReason}
+              translationDisabledReason={translationDisabledReason}
+            />
+          </div>
+        )}
+
+        {screen === "landing" && intent === "translation" && translation && (
+          <div className="pb-2">
+            <TranslationChooser
+              files={translationFiles}
+              value={translationFileId}
+              onValueChange={(fileId) => {
+                setTranslationFileId(fileId)
+                setTranslationTouched(true)
+                setTranslationNotice(null)
+              }}
+              touched={translationTouched}
+              languageLabel={translation.languageLabel}
+              heldFile={heldTranslationFile}
+              onHeldFileChange={setHeldTranslationFile}
+              onStart={startTranslation}
+              notice={translationNotice}
+            />
+          </div>
+        )}
+
+        {screen === "translationOpening" && translationRun && (
+          opening.state === "failed" ? (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-destructive" role="alert">
+                {t("importExport.translation.openFailed", { fileName: translationDestination?.name ?? "" })}
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+                <Button onClick={() => translation?.retryActiveFile()}>{t("importExport.translation.tryAgain")}</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2" aria-busy="true">
+              <p className="text-sm font-medium" role="status">
+                {t("importExport.translation.opening", { fileName: translationDestination?.name ?? "" })}
+              </p>
+              <div className="space-y-2.5 rounded-md border p-3">
+                {[0, 1, 2, 3, 4].map((row) => <Skeleton key={row} className="h-4 w-full" />)}
+              </div>
+              <div className="flex justify-end">
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+              </div>
+            </div>
+          )
+        )}
+
+        {screen === "landing" && intent === "source" && (
           <ImportLanding
             allowDcs={patchDcsCursor !== undefined}
             linkProject={
@@ -907,6 +1190,49 @@ export function ImportDialog({
           />
         )}
         </DialogBody>
+        )}
+
+        {/* AQU-1365: the existing target-import review, handed the dropped
+            file so it starts matching straight away. Mounted only once every
+            line of the destination is loaded (the opening gate above). */}
+        {screen === "translationReview" && translationRun && translation && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <FileTargetImportPanel
+              key={translationRun.key}
+              projectId={projectId}
+              username={username}
+              targetLang={targetLang}
+              fileName={translationDestination?.name ?? ""}
+              cells={translation.activeFileCells}
+              getToken={getToken}
+              applyOptimisticTargetEdits={translation.applyOptimisticTargetEdits}
+              excludeFrontMatter={excludeFrontMatter}
+              initialFile={translationRun.file}
+              onBackToFileChoice={backToTranslationChooser}
+              onBackChange={setTranslationBack}
+              onImported={(committedCount) => {
+                posthog.capture(IMPORT_SUCCEEDED, {
+                  import_type: "file-target",
+                  entry: "translation",
+                  auto_picked: translationRun.autoPicked,
+                  file_count: committedCount,
+                  project_id: projectId,
+                })
+                onOpenChange(false)
+              }}
+              onError={(message, phase) => {
+                posthog.capture(IMPORT_FAILED, {
+                  import_type: "file-target",
+                  entry: "translation",
+                  phase,
+                  project_id: projectId,
+                  error: message,
+                })
+              }}
+              onCancel={() => onOpenChange(false)}
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )

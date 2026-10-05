@@ -116,6 +116,17 @@ function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): n
 }
 
 /**
+ * The Bible book a file holds, as a USFM code: its server-backed `bookCode`,
+ * or, for a scripture-capable file without one (a migrated Codex project's
+ * "1CH"), the code read off its name. Undefined for anything else. Shared by
+ * the grouping below and by the translation import's book matching (AQU-1365),
+ * so both agree on which file is which book.
+ */
+export function fileBookCode(file: GroupableFile): string | undefined {
+  return file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+}
+
+/**
  * The marker a file groups under. `corpusMarker` always wins so custom
  * groupings (seasons, series, …) are untouched. It is client-local state
  * though, and often missing after a reload or on a fresh device (see
@@ -133,7 +144,7 @@ function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): n
 function resolveMarker(file: GroupableFile): { marker: string; derived: boolean } | null {
   const raw = file.corpusMarker?.trim()
   if (raw) return { marker: raw, derived: false }
-  const code = file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+  const code = fileBookCode(file)
   const testament = code ? getTestament(code) : undefined
   if (testament) return { marker: testament, derived: true }
   return null

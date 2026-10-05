@@ -3,6 +3,10 @@
  * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
  * Target-only — source cells are never created or modified.
  *
+ * Opened from the Import dialog's "A translation" path (AQU-1365), which picks
+ * the destination file, opens it, and hands the dropped file over as
+ * `initialFile` so this panel starts at step 2.
+ *
  * Flow:
  *   1. User drops/picks a file
  *   2. USFM → refs are intrinsic, straight to review (match by canonical ref)
@@ -93,7 +97,16 @@ export interface FileTargetImportPanelProps {
    *  source import dialog does, so a wrong file is one click from the file
    *  picker instead of Cancel and the menu again. */
   onBackChange?: (back: FileTargetPanelBack | null) => void
+  /** AQU-1365: a file already chosen by the host. Read once on mount, so the
+   *  drop step is skipped. */
+  initialFile?: File
+  /** AQU-1365: where Back from the first step after the drop leads, when the
+   *  host chose the file. Replaces the panel's own return to its drop step. */
+  onBackToFileChoice?: () => void
 }
+
+/** The files this panel reads, as an `<input accept>` list. */
+export const FILE_TARGET_ACCEPT = ".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
 
 export interface FileTargetPanelBack {
   /** Accessible name for the arrow: where it goes. */
@@ -507,6 +520,8 @@ export function FileTargetImportPanel({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
   onBackChange,
+  initialFile,
+  onBackToFileChoice,
 }: FileTargetImportPanelProps) {
   const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
@@ -545,24 +560,34 @@ export function FileTargetImportPanel({
       onBackChange(null)
       return
     }
-    const toFilePicker = {
-      label: t("importExport.dialog.backToFileSelection"),
-      onBack: () => {
-        matchRun.current++
-        setRematching(null)
-        setMatchResult(null)
-        setSelectedCellIds(new Set())
-        setSheets([])
-        setSelectedSheet(null)
-        setSourceFile(null)
-        setSubtitleRows(null)
-        setExpandedRows(new Set())
-        setOverrides(NO_OVERRIDES)
-        setOnlyToCheck(false)
-        setError(null)
-        setStep("file")
-      },
-    }
+    const toFilePicker = onBackToFileChoice
+      ? {
+          // The host chose the file (AQU-1365), so going back means choosing
+          // again there, not this panel's own drop step.
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            onBackToFileChoice()
+          },
+        }
+      : {
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            setRematching(null)
+            setMatchResult(null)
+            setSelectedCellIds(new Set())
+            setSheets([])
+            setSelectedSheet(null)
+            setSourceFile(null)
+            setSubtitleRows(null)
+            setExpandedRows(new Set())
+            setOverrides(NO_OVERRIDES)
+            setOnlyToCheck(false)
+            setError(null)
+            setStep("file")
+          },
+        }
     const back =
       step === "review" && selectedSheet
         ? {
@@ -590,7 +615,7 @@ export function FileTargetImportPanel({
             }
           : toFilePicker
     onBackChange({ ...back, disabled: applying })
-  }, [step, selectedSheet, sheets.length, applying, onBackChange, t])
+  }, [step, selectedSheet, sheets.length, applying, onBackChange, onBackToFileChoice, t])
 
   const showReview = useCallback((
     result: FileTargetMatchResult,
@@ -752,6 +777,19 @@ export function FileTargetImportPanel({
     }
   }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
 
+  // AQU-1365: the host's file is read once. The ref, not the effect's deps,
+  // makes it once: StrictMode re-runs mount effects, and a later `cells`
+  // change re-creates handleFile.
+  const initialFileRead = useRef(false)
+  // While it is read, the matching skeleton stands in for the drop step, which
+  // the person never asked to see.
+  const [readingInitialFile, setReadingInitialFile] = useState(Boolean(initialFile))
+  useEffect(() => {
+    if (!initialFile || initialFileRead.current) return
+    initialFileRead.current = true
+    void handleFile(initialFile).then(() => setReadingInitialFile(false))
+  }, [initialFile, handleFile])
+
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
     const dataRows = hasHeader ? selectedSheet.rows.slice(1) : selectedSheet.rows
@@ -816,6 +854,24 @@ export function FileTargetImportPanel({
     }
   }
 
+  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
+  if (step === "matching" || (step === "file" && readingInitialFile)) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
+        <div className="shrink-0">
+          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
+          <Skeleton className="mt-1.5 h-3 w-48" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+          <SkeletonRows />
+        </div>
+        <div className="flex shrink-0 justify-end">
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Step: file selection ────────────────────────────────────────────────────
   if (step === "file") {
     return (
@@ -867,7 +923,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
+              accept={FILE_TARGET_ACCEPT}
               className="sr-only"
               disabled={laneCellsLoading}
               onChange={(e) => {
@@ -926,24 +982,6 @@ export function FileTargetImportPanel({
         onConfirm={handleMappingConfirm}
         onCancel={onCancel}
       />
-    )
-  }
-
-  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
-  if (step === "matching") {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
-        <div className="shrink-0">
-          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
-          <Skeleton className="mt-1.5 h-3 w-48" />
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
-          <SkeletonRows />
-        </div>
-        <div className="flex shrink-0 justify-end">
-          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
-        </div>
-      </div>
     )
   }
 

@@ -523,7 +523,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titlePaired": "Paired Translation Import",
-    "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.pairedNeedsSourceCells":
@@ -1269,6 +1268,30 @@ export const importExport = defineNamespace({
     }),
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
+    // AQU-1365: the Import dialog's "What are you importing?" choice and its
+    // translation path.
+    "importExport.intent.groupLabel": "What are you importing?",
+    "importExport.intent.source.title": "New source text",
+    "importExport.intent.source.description": "Adds new files to translate from.",
+    "importExport.intent.translation.title": "A translation",
+    "importExport.intent.translation.description": "Target text for a file that's already in this project.",
+    "importExport.intent.translation.noFiles": "Add a source text first. A translation goes into a file that's already here.",
+    "importExport.translation.destinationLabel": "Which file does it translate?",
+    "importExport.translation.destinationPlaceholder": "Choose a file",
+    "importExport.translation.searchPlaceholder": "Search files",
+    "importExport.translation.noMatches": "No files match.",
+    "importExport.translation.fillsLanguage": "It fills the empty lines of the {language} translation. You check every match before anything is saved.",
+    "importExport.translation.fillsNoLanguage": "It fills the empty lines of the file's translation. You check every match before anything is saved.",
+    "importExport.translation.heldNeedsFile": "Choose the file that {fileName} translates.",
+    "importExport.translation.removeHeld": "Remove",
+    "importExport.translation.continue": "Continue",
+    "importExport.translation.oneFileAtATime": "Add one file at a time.",
+    "importExport.translation.titleInto": "Import a translation into {fileName}",
+    "importExport.translation.opening": "Opening {fileName}…",
+    "importExport.translation.openFailed": "Couldn't open {fileName}. Check your connection and try again.",
+    "importExport.translation.tryAgain": "Try again",
+    "importExport.translation.fileGone": "That file is no longer in this project.",
+    "importExport.translation.backToChooser": "Back to choosing a file",
   },
   context: {
     _context: {
@@ -1767,10 +1790,6 @@ export const importExport = defineNamespace({
           count: "Number of cells uploaded so far, already locale-formatted.",
           total: "Total cell count, already locale-formatted.",
         },
-      },
-      "importExport.dialog.titleFileTarget": {
-        description:
-          "Title of the dialog that fills in the translated column of the file the reader currently has open, from a document or spreadsheet they upload. A heading naming what the dialog does, not a button. 'Target' here means the translated side of the file, as opposed to the original text being translated from.",
       },
       "importExport.dialog.downloadFile": {
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
@@ -3791,6 +3810,111 @@ export const importExport = defineNamespace({
           "Heading at the top of the spreadsheet import panel, shown when the user " +
           "has chosen to import a comma- or tab-separated file or an Excel " +
           "workbook. Short noun phrase naming the panel, not an instruction.",
+      },
+      // AQU-1365: the Import dialog's "What are you importing?" choice and its
+      // translation path (choose the file a translation belongs to, open it, review).
+      "importExport.intent.groupLabel": {
+        description:
+          "Accessible name and visible question above the two cards at the top of the Import dialog's first screen, where the user says whether the file is new source text or a translation of a file already in the project. Short question addressed to the user.",
+      },
+      "importExport.intent.source.title": {
+        description:
+          "Title of the first card in the Import dialog's 'What are you importing?' choice, preselected: the upload becomes new files in the project that will be translated FROM. Short noun phrase.",
+      },
+      "importExport.intent.source.description": {
+        description:
+          "One-line hint under the 'New source text' card in the Import dialog, saying what choosing it does. Short sentence.",
+      },
+      "importExport.intent.translation.title": {
+        description:
+          "Title of the second card in the Import dialog's 'What are you importing?' choice: the upload is the translated (target) text of a file already in the project. Short noun phrase; keep the word for 'translation'.",
+      },
+      "importExport.intent.translation.description": {
+        description:
+          "One-line hint under the 'A translation' card in the Import dialog. 'Target text' is the translated text, as opposed to the source text being translated from; people look for the word 'target', so keep it recognisable.",
+      },
+      "importExport.intent.translation.noFiles": {
+        description:
+          "Shown in place of the file picker, and as the tooltip of the disabled 'A translation' card, when the project has no files yet, so there is nothing a translation could go into. Two short sentences.",
+      },
+      "importExport.translation.destinationLabel": {
+        description:
+          "Label of the searchable file picker on the Import dialog's translation screen: the user chooses which project file the uploaded translation belongs to. 'It' is the uploaded translation. Short question.",
+      },
+      "importExport.translation.destinationPlaceholder": {
+        description:
+          "Text on the file picker on the Import dialog's translation screen while no file is chosen yet. Short imperative.",
+      },
+      "importExport.translation.searchPlaceholder": {
+        description:
+          "Placeholder and accessible name of the search box inside the file picker on the Import dialog's translation screen. Short imperative.",
+      },
+      "importExport.translation.noMatches": {
+        description:
+          "Shown in the file picker on the Import dialog's translation screen when the search matches no project file. Short sentence.",
+      },
+      "importExport.translation.fillsLanguage": {
+        description:
+          "Sentence under the file picker on the Import dialog's translation screen, saying what the import will do. 'It' is the uploaded translation; it only fills lines that have no translation yet, and the user reviews every match first.",
+        placeholders: {
+          language: "Name of the language the project translates into (the active target lane), e.g. 'Siberian Tatar'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.fillsNoLanguage": {
+        description:
+          "Same sentence as the one naming the language, used when the project's target language is not known. 'It' is the uploaded translation.",
+      },
+      "importExport.translation.heldNeedsFile": {
+        description:
+          "Shown on the Import dialog's translation screen after the user dropped a file before choosing which project file it belongs to. The upload waits until a file is chosen.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.csv'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.removeHeld": {
+        description:
+          "Link beside the name of a dropped file waiting on the Import dialog's translation screen; removes that file so another can be dropped. Single verb.",
+      },
+      "importExport.translation.continue": {
+        description:
+          "Button on the Import dialog's translation screen that starts reviewing a dropped file once its destination file is chosen. Single verb.",
+      },
+      "importExport.translation.oneFileAtATime": {
+        description:
+          "Error on the Import dialog's translation screen when the user drops several files at once; a translation is imported one file at a time. Short imperative sentence.",
+      },
+      "importExport.translation.titleInto": {
+        description:
+          "Title of the Import dialog while a translation is opened and reviewed for a project file. Imperative phrase naming the destination.",
+        placeholders: {
+          fileName: "Display name of the project file the translation goes into, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.opening": {
+        description:
+          "Status line on the Import dialog while the destination file is opened in the editor and its lines load, before the review can start. Keep the trailing ellipsis.",
+        placeholders: {
+          fileName: "Display name of the project file being opened. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.openFailed": {
+        description:
+          "Error on the Import dialog when the destination file's lines failed to load, shown with a 'Try again' button. Two short sentences.",
+        placeholders: {
+          fileName: "Display name of the project file that failed to open. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.tryAgain": {
+        description:
+          "Button under the error shown when the destination file failed to open on the Import dialog; loads it again. Short imperative.",
+      },
+      "importExport.translation.fileGone": {
+        description:
+          "Shown on the Import dialog's translation screen when the file chosen as the destination was deleted while it was being opened. Short sentence.",
+      },
+      "importExport.translation.backToChooser": {
+        description:
+          "Accessible name of the back arrow in the Import dialog's title while a translation is being opened or reviewed; returns to choosing which file it translates. Never shown as text.",
       },
     },
   },

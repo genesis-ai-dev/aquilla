@@ -88,7 +88,7 @@ export const org = defineNamespace({
     "org.egress.options.targetLanes": "Target lanes",
     "org.egress.options.lane": "Lane {lane}",
     "org.egress.options.includeSources": "Include original source documents",
-    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, exactly as stored.",
+    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, as stored.",
     "org.egress.options.audioMode": "Audio export mode",
     "org.egress.options.audio.none.description": "No audio in the export.",
     "org.egress.options.audio.separate.label": "Every clip separately",
@@ -158,10 +158,9 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
-    // AQU-1071: the enterprise billing band is read off this number — distinct
-    // active target languages across the org, archived lanes excluded.
-    "org.orgHome.activeLanguages": "Active languages",
-    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
+    // AQU-1071 / AQU-1598: the enterprise billing band — active target lanes.
+    "org.orgHome.activeLanguages": "Active lanes",
+    "org.orgHome.activeLanguagesHint": "Target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -277,7 +276,7 @@ export const org = defineNamespace({
       "This organization has restricted who can view the member list. Ask an owner or maintainer if you need access.",
     "org.membersPage.currentMembersHeading": "Current members",
     "org.membersPage.rosterHint":
-      "Everyone who currently has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
+      "Everyone who has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
     "org.membersPage.noMembersYet": "No members yet.",
     "org.membersPage.noDirectMembers": "No one has been added directly to this project yet.",
     "org.membersPage.orgAccessHeading": "Organization members with access",
@@ -512,7 +511,7 @@ export const org = defineNamespace({
     "org.projectOverview.audioValidatedTooltip":
       "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":
-      "Of the audio actually recorded, {percent}% is validated.",
+      "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
@@ -945,7 +944,7 @@ export const org = defineNamespace({
     "org.accessModelLegend.meaningColumn": "Meaning",
     "org.accessModelLegend.maxWinsHeading": "Effective role = max-wins",
     "org.accessModelLegend.maxWinsDescription":
-      "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To fully remove someone, all contributing grant paths must be cleared.",
+      "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To remove someone, all contributing grant paths must be cleared.",
     "org.accessModelLegend.direct.label": "Direct",
     "org.accessModelLegend.direct.description":
       "A role granted explicitly to this person on this project only. The most specific path — adding or removing it affects only this project.",
@@ -1038,7 +1037,7 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
       "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",

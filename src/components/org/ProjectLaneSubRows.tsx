@@ -110,6 +110,7 @@ export function ProjectLaneSubRows({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={lane.lane}
+                    laneId={lane.laneId}
                     laneLabel={label}
                     orgId={orgId}
                     onDone={onStaffed}

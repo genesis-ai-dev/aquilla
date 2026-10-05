@@ -379,14 +379,12 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  // AQU-1071: the active-language count rides along with the rollup the org
+  // AQU-1071: the active-lane count rides along with the rollup the org
   // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same rule billing bills on (distinct active target-language tags;
-  // archived lanes, archived projects and — AQU-1070 — paused projects
-  // excluded), and deliberately org-wide
-  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
-  // a partner reading a smaller figure than their invoice is the confusion this
-  // ticket exists to remove, and a bare count names no project, so it discloses
+  // is the same count billing bills on, and deliberately org-wide rather than
+  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
+  // reading a smaller figure than their invoice is the confusion this ticket
+  // exists to remove, and a bare count names no project, so it discloses
   // nothing the visibility rule guards.
   const [{ projects, nextCursor }, laneCounts] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),

@@ -15,10 +15,16 @@
 //                                   tool's INTERNAL model call is answered
 //                                   here too — strict [{i,t}] JSON)
 //   * check/validate/aquifer      : legacy execute flows (sql/emit/aquifer)
+//   * reference verses (AQU-1573) : when the system prompt carries a
+//                                   "Scripture quotations — copy from" block,
+//                                   copilot and agent drafts append the cited
+//                                   verses' text, as a real model copying them
 //
 // Run: npx tsx scripts/mock-openrouter.ts [port]
 
 import http from "node:http"
+import { REFERENCE_VERSES_HEADING } from "../src/lib/completion/prompt-build"
+import { findScriptureReferences } from "../src/lib/reference-bible/reference-finder"
 
 const PORT = Number(process.argv[2]) || 9456
 
@@ -187,6 +193,35 @@ function contextualMockResponse(marker: string, userText: string) {
   return respond(`[mock] unknown contextual marker: ${marker}`)
 }
 
+/**
+ * AQU-1573: the verses a reference-verses block (buildReferenceVersesBlock)
+ * put in the system prompt, canonical ref → verse text (a range's verses
+ * joined by spaces). Empty when no system message carries the block.
+ */
+export function referenceVersesFromMessages(messages: ChatMessage[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const message of messages) {
+    if (message.role !== "system" || typeof message.content !== "string") continue
+    const at = message.content.indexOf(REFERENCE_VERSES_HEADING)
+    if (at < 0) continue
+    let current: string | null = null
+    // Line 1 is the heading, line 2 the instruction; the block ends at the
+    // first blank line.
+    for (const line of message.content.slice(at).split("\n").slice(2)) {
+      if (!line.trim()) break
+      const head = /^- .*? \[([1-3A-Z][A-Z0-9]{2} [0-9:-]+)\]:(?: (.*))?$/.exec(line)
+      if (head) {
+        current = head[1]
+        if (head[2]) out.set(current, head[2])
+        continue
+      }
+      const verse = /^ {2}\d+:\d+ (.*)$/.exec(line)
+      if (verse && current) out.set(current, [out.get(current), verse[1]].filter(Boolean).join(" "))
+    }
+  }
+  return out
+}
+
 export function scriptMockResponse(messages: ChatMessage[]) {
   // (Manual reverse scan — .findLastIndex needs lib es2023, which the
   // auth-worker tsconfig, whose tests import this module, doesn't target.)
@@ -291,9 +326,13 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   // Copilot single-cell draft (buildPrompt in completion-service.ts): the user
   // message ends with "Source: <text>\nTranslation:" awaiting the completion.
   // Answer deterministically so the editor sparkle/Replace flow works end-to-end.
+  // AQU-1573: a cited verse is "copied" from the reference-verses block, so
+  // the local stack (no real model) shows the Bible's wording in the draft.
+  const referenceVerses = referenceVersesFromMessages(messages)
   const copilotMatch = /(?:^|\n)Source: (.*)\nTranslation:$/.exec(userText.trimEnd())
   if (copilotMatch) {
-    return respond(`[mock] ${copilotMatch[1].trim()}`)
+    const verses = [...referenceVerses.values()]
+    return respond([`[mock] ${copilotMatch[1].trim()}`, ...verses].join(" "))
   }
 
   // The draft tool's INTERNAL two-pass model workflow. Route on the
@@ -325,10 +364,14 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     const numberedInput = translateMatch
       ? userText.slice((translateMatch.index ?? 0) + translateMatch[0].length)
       : userText
-    const drafts = extractNumberedLines(numberedInput).map(({ i, body }) => ({
-      i,
-      t: `[bozza] ${body}`,
-    }))
+    // AQU-1573: each segment carries the verses IT cites from the block.
+    const drafts = extractNumberedLines(numberedInput).map(({ i, body }) => {
+      const verses = referenceVerses.size === 0
+        ? []
+        : [...new Set(findScriptureReferences(body).map((f) => f.canonical))]
+            .flatMap((canonical) => referenceVerses.get(canonical) ?? [])
+      return { i, t: [`[bozza] ${body}`, ...verses].join(" ") }
+    })
     return respond(JSON.stringify(drafts))
   }
   // Match action words, not status adjectives: "translated" and "validated"

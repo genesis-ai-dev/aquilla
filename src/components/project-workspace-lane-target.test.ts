@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { planNewTargetLane } from "@/lib/lanes/lane-create"
 
 describe("resolveActiveTargetLanguage (AQU-602)", () => {
   it("uses the active lane tag as the target language for a non-default lane", () => {
     // Switching to the 'es' lane must translate into Spanish, regardless of the
-    // file/project default target — the core AQU-602 regression.
+    // file/project default target — the core AQU-602 regression. With no lane
+    // rows (a server that predates AQU-1418) the tag is all there is.
     expect(resolveActiveTargetLanguage("es", "fr", "fr")).toBe("es")
     expect(resolveActiveTargetLanguage("swh", undefined, "fr")).toBe("swh")
     expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", "French")).toBe("fr-CA")
@@ -27,5 +29,96 @@ describe("resolveActiveTargetLanguage (AQU-602)", () => {
     expect(resolveActiveTargetLanguage("", "fr", "")).toBeUndefined()
     expect(resolveActiveTargetLanguage("", null, null)).toBeUndefined()
     expect(resolveActiveTargetLanguage("", undefined, undefined)).toBeUndefined()
+  })
+})
+
+describe("resolveActiveTargetLanguage — the language comes from the lane row (AQU-1586)", () => {
+  // `planNewTargetLane` hands a lane the opaque 8-hex lane id as its
+  // `legacy_tag` whenever the language string is already taken by a sibling or
+  // matches the project default. A second Spanish lane in a Spanish project is
+  // therefore tagged `a3f09c1e`, and reading that tag as the language drafted
+  // "into a3f09c1e".
+  const lanes = [
+    { id: "defa0001", name: "Spanish", langCode: "es", legacyTag: "" },
+    // The second Spanish lane. Its NAME has to differ from the first lane's
+    // (`laneNameProblem` refuses a duplicate), so the language it translates
+    // into survives on the row only as `lang_code`.
+    { id: "a3f09c1e", name: "Spanish (Mexico team)", langCode: "es", legacyTag: "a3f09c1e" },
+    { id: "frc00002", name: "French (Canada)", langCode: "fra", legacyTag: "fr-CA" },
+  ]
+
+  it("sends the lane's LANGUAGE, not its id, for a lane tagged with its own id", () => {
+    expect(resolveActiveTargetLanguage("a3f09c1e", null, "Spanish", lanes)).toBe("es")
+  })
+
+  it("leaves a lane whose tag IS a language exactly as it was", () => {
+    // Nothing that already worked may change: this lane's tag is its language,
+    // so it keeps going to the model verbatim rather than becoming "fra".
+    expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", "Spanish", lanes)).toBe("fr-CA")
+  })
+
+  it("uses the lane's name when its language is not in the code registry", () => {
+    expect(
+      resolveActiveTargetLanguage("b0b0b0b0", null, "Spanish", [
+        { id: "b0b0b0b0", name: "Nuer", langCode: null, legacyTag: "b0b0b0b0" },
+      ]),
+    ).toBe("Nuer")
+  })
+
+  it("inherits the project target when the row records no language", () => {
+    // Never the lane id, and never an empty string either: an empty target
+    // language would substitute into the prompt as nothing at all. A lane that
+    // records none inherits the project's, exactly as the default lane does.
+    expect(
+      resolveActiveTargetLanguage("b0b0b0b0", null, "Spanish", [
+        { id: "b0b0b0b0", name: "", langCode: null, legacyTag: "b0b0b0b0" },
+      ]),
+    ).toBe("Spanish")
+  })
+
+  it("is undefined only when nothing at all records a target language", () => {
+    // Then — and only then — the caller shows "Set target language".
+    expect(
+      resolveActiveTargetLanguage("b0b0b0b0", "English", null, [
+        { id: "b0b0b0b0", name: "", langCode: null, legacyTag: "b0b0b0b0" },
+      ]),
+    ).toBeUndefined()
+  })
+
+  it("leaves the default lane on the project target, whatever the rows say", () => {
+    expect(resolveActiveTargetLanguage("", "fr", "Spanish", lanes)).toBe("Spanish")
+  })
+
+  // AGENTS.md rule 12: run the real PRODUCER's output through the consumer.
+  // A synthetic lane row cannot catch a change in how `planNewTargetLane`
+  // chooses a tag — which is the half of this bug that lives upstream.
+  it.each([
+    ["the language matches the project default", "Spanish", "es"],
+    ["a sibling lane already holds the language", "Yoruba", "yo"],
+  ])("plan → row → editor target, when %s", (_case, language, expectedTarget) => {
+    const laneId = "a3f09c1e"
+    const plan = planNewTargetLane({
+      laneId,
+      // A second lane of a language needs its own display name — the planner
+      // refuses a duplicate — which is precisely why the language cannot be
+      // read back off the name.
+      name: `${language} (second team)`,
+      language,
+      targetLanguage: "Spanish",
+      existing: [
+        { id: "defa0001", name: "Spanish", legacyTag: "" },
+        { id: "sib00003", name: "Yoruba", legacyTag: "Yoruba" },
+      ],
+    })
+    if (!plan.ok) throw new Error(`planNewTargetLane refused the lane: ${plan.problem}`)
+    // The tag the planner picked really is the opaque lane id — that is the
+    // precondition this bug needs, so assert it rather than assume it.
+    expect(plan.legacyTag).toBe(laneId)
+
+    const row = { id: laneId, name: plan.name, langCode: plan.langCode, legacyTag: plan.legacyTag }
+    const target = resolveActiveTargetLanguage(plan.legacyTag, null, "Spanish", [row])
+    expect(target).toBe(expectedTarget)
+    // The point of the ticket: whatever we send, it is never the lane id.
+    expect(target).not.toBe(laneId)
   })
 })

@@ -1571,6 +1571,22 @@ describe("buildParagraphPrompt", () => {
     expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
   })
 
+  it("labels an unreviewed preceding draft so the model weighs it below approved work", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "Greek", targetLanguage: "English",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE_SRC" }],
+      examples: [],
+      precedingContext: [
+        { source: "OK_SRC", target: "OK_TGT" },
+        { source: "DRAFT_SRC", target: "DRAFT_TGT", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: OK_TGT")
+    expect(user.content).toContain("Translation (unreviewed draft): DRAFT_TGT")
+    expect(user.content).not.toContain("Translation: DRAFT_TGT")
+  })
+
   it("renders a blank-target preceding cell as source-only fallback, not a Translation pair (D4)", () => {
     const [, user] = buildParagraphPrompt({
       sourceLanguage: "English", targetLanguage: "French",

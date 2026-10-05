@@ -45,6 +45,7 @@ import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
@@ -175,11 +176,21 @@ export function OverviewLaneTable({
     return () => { alive = false }
   }, [jwt, projectId, scopableUserIds])
 
+  // AQU-1607: a lane scope is a lane id; the rows below are keyed by lane
+  // tag, so read the ids back as tags through the portfolio's own lane rows.
+  const laneIdentities = useMemo(
+    () =>
+      [...lanes, ...(archivedLanes ?? [])]
+        .filter((lane): lane is PortfolioLane & { laneId: string } => Boolean(lane.laneId))
+        .map((lane) => ({ id: lane.laneId, name: "", legacyTag: lane.lane })),
+    [lanes, archivedLanes],
+  )
+
   // lane tag -> members scoped to that lane.
   const membersByLane = useMemo(() => {
     const map = new Map<string, ProjectMember[]>()
     for (const m of members) {
-      for (const scope of scopesByUser[m.userId] ?? []) {
+      for (const scope of laneScopesAsTags(scopesByUser[m.userId] ?? [], laneIdentities)) {
         if (scope.kind !== "lane") continue
         const list = map.get(scope.value) ?? []
         list.push(m)
@@ -187,7 +198,7 @@ export function OverviewLaneTable({
       }
     }
     return map
-  }, [members, scopesByUser])
+  }, [members, scopesByUser, laneIdentities])
 
   const laneLabel = (lane: PortfolioLane) =>
     lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane)
@@ -271,6 +282,7 @@ export function OverviewLaneTable({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={row.original.lane}
+                    laneId={row.original.laneId}
                     laneLabel={label}
                     orgId={orgId}
                     anchorOnly

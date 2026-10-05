@@ -8,6 +8,7 @@
 // the spec's acceptance criterion: an agent that stages a bad plan must be able
 // to fix ONE thing and re-prepare, not bisect a composite command by trial.
 
+import { resolveProjectTextDirection } from '../../../db/shared/text-direction'
 import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { parseArtifactToCells } from './import-parse-core'
@@ -19,6 +20,8 @@ import {
 } from './commands-membership'
 import {
   previewSettingValue,
+  referenceBibleOpProblem,
+  REFERENCE_BIBLE_SETTINGS_KEY,
   resolveLanguageEditMinRole,
   resolveTermbaseEditMinRole,
   LANGUAGE_SETTINGS_KEYS,
@@ -150,20 +153,6 @@ export async function prepareProjectSetup(
     if (problem) return fieldError('validation_failed', `settings.${op.key}`, problem)
   }
 
-  const current = await loadProjectSettings(db, urlProjectId)
-  const loosening = loosensPolicy(ops.policy, current.settings)
-  if (loosening.length > 0) {
-    return fieldError(
-      'permission_denied',
-      `settings.${loosening[0].key}`,
-      'policy settings keys are writable in the restrictive direction only',
-      {
-        policyKeys: ops.policy.map((op) => op.key),
-        loosening: loosening.map(({ key, current: c, proposed, reason }) => ({ key, current: c, proposed, reason })),
-      },
-    )
-  }
-
   // ── brief sections ───────────────────────────────────────────────────────
   for (const sectionId of Object.keys(cmd.brief?.parameters ?? {})) {
     if (!isBriefFieldId(sectionId)) {
@@ -182,6 +171,32 @@ export async function prepareProjectSetup(
     return errorResponse('permission_denied', 'insufficient project role to stage this project setup', {
       requiredRole,
     })
+  }
+
+  // Checks that read the project's live settings come AFTER the role floor:
+  // their errors echo lane names, the target language and current policy
+  // values, which a caller without the role must not learn (review
+  // 2026-10-02; PatchSettings orders it the same way).
+  const current = await loadProjectSettings(db, urlProjectId)
+
+  // AQU-1573: the shape passed above; the Bible must be installed and each lane
+  // key a lane of the project as this plan leaves it.
+  const referenceProblem = await referenceBibleOpProblem(db, [...ops.plain, ...ops.policy], current.settings)
+  if (referenceProblem) {
+    return fieldError('validation_failed', `settings.${REFERENCE_BIBLE_SETTINGS_KEY}`, referenceProblem)
+  }
+
+  const loosening = loosensPolicy(ops.policy, current.settings)
+  if (loosening.length > 0) {
+    return fieldError(
+      'permission_denied',
+      `settings.${loosening[0].key}`,
+      'policy settings keys are writable in the restrictive direction only',
+      {
+        policyKeys: ops.policy.map((op) => op.key),
+        loosening: loosening.map(({ key, current: c, proposed, reason }) => ({ key, current: c, proposed, reason })),
+      },
+    )
   }
 
   const warnings: ChangesetWarning[] = []
@@ -283,6 +298,16 @@ export async function prepareProjectSetup(
   const planNames = new Set<string>()
   let sourceCellsAdded = 0
   let filesCreated = 0
+  // AQU-1471: what direction will the files this plan creates actually render
+  // in? Resolved against the settings the plan LEAVES BEHIND, not the ones it
+  // found — a plan that writes `targetTextDirection: "rtl"` and imports 49
+  // files in the same approval must report "rtl", not the pre-plan answer.
+  const settingsAfterPlan: Record<string, unknown> = { ...current.settings }
+  for (const op of [...ops.plain, ...ops.policy]) {
+    if (op.value === null) delete settingsAfterPlan[op.key]
+    else settingsAfterPlan[op.key] = op.value
+  }
+  const importDirections: string[] = []
 
   for (const [i, spec] of imports.entries()) {
     const index = steps.length
@@ -346,6 +371,12 @@ export async function prepareProjectSetup(
       )
     }
 
+    const resolvedSource = spec.sourceTextDirection
+      ?? resolveProjectTextDirection(settingsAfterPlan, 'source', spec.sourceLanguage ?? null)
+    const resolvedTarget = spec.targetTextDirection
+      ?? resolveProjectTextDirection(settingsAfterPlan, 'target', spec.targetLanguage ?? null)
+    importDirections.push(`${spec.fileName}: source ${resolvedSource}, target ${resolvedTarget}`)
+
     steps.push({
       index,
       kind: 'import',
@@ -356,6 +387,8 @@ export async function prepareProjectSetup(
       ...(spec.resultIndex !== undefined ? { resultIndex: spec.resultIndex } : {}),
       ...(spec.sourceLanguage !== undefined ? { sourceLanguage: spec.sourceLanguage } : {}),
       ...(spec.targetLanguage !== undefined ? { targetLanguage: spec.targetLanguage } : {}),
+      ...(spec.sourceTextDirection !== undefined ? { sourceTextDirection: spec.sourceTextDirection } : {}),
+      ...(spec.targetTextDirection !== undefined ? { targetTextDirection: spec.targetTextDirection } : {}),
       cellCount: cells.length,
       // Minted per import (W1-B): a crash-retry re-posts IDENTICAL ids, so the
       // /events idempotency layer dedupes instead of creating a second file.
@@ -393,6 +426,7 @@ export async function prepareProjectSetup(
     ...(membershipChanges.length > 0 ? { membershipChanges } : {}),
     ...(filesCreated > 0 ? { filesCreated } : {}),
     ...(sourceCellsAdded > 0 ? { sourceCellsAdded } : {}),
+    ...(importDirections.length > 0 ? { importTextDirection: summarizeImportDirections(importDirections) } : {}),
     warnings,
   }
 
@@ -425,4 +459,12 @@ function findUnregisteredLane(
     }
   }
   return null
+}
+
+/** One receipt line for the plan's resolved import directions: the shared pair
+ *  when every file agrees (the normal case — a project has one language pair),
+ *  else one clause per file so a mixed plan cannot read as uniform. */
+function summarizeImportDirections(lines: readonly string[]): string {
+  const pairs = new Set(lines.map((line) => line.slice(line.indexOf(': ') + 2)))
+  return pairs.size === 1 ? [...pairs][0] : lines.join('; ')
 }

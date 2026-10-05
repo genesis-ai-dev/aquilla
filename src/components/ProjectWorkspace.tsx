@@ -31,6 +31,7 @@ import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, write
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelsByTag } from "@/lib/lanes/lane-language"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -79,6 +80,8 @@ import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useStyleRules } from "@/hooks/useStyleRules"
+import { useReferenceBible } from "@/hooks/useReferenceBible"
+import { referenceBibleForLane } from "@/lib/reference-bible/lane-setting"
 import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "@/lib/rules/applicability"
 import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
@@ -267,7 +270,9 @@ import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canOpenAssignUi, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { laneComboboxOptions } from "@/components/lane-options"
+import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -385,7 +390,7 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
-import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes } from "@/lib/store/file-operations"
+import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
@@ -406,6 +411,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import {
   detectStrongTextDirection,
+  projectSettingTextDirection,
   resolveTextDirection,
   summarizePairedDirections,
   type TextDirection,
@@ -699,6 +705,10 @@ export function ProjectWorkspace() {
   // Optimistic file-label renames (fileId → new name), applied locally before
   // the file.rename event round-trips so the new label shows instantly.
   const [optimisticRenames, setOptimisticRenames] = useState<Map<string, string>>(new Map())
+  // AQU-1569: the drop's new positions. The sidebar renders the server file
+  // list, and the IDB patch does not reach that list, so without this the row
+  // jumps back to its old slot the moment the pointer lets go.
+  const [optimisticSortIndexes, setOptimisticSortIndexes] = useState<Map<string, number | null>>(new Map())
   // FRO-272: soft-deleted file ids hidden from the sidebar until the server
   // read reflects the file.delete event. Same class as optimistic renames —
   // patchProject(IDB) writes are invisible (useProject reads server), so
@@ -721,6 +731,7 @@ export function ProjectWorkspace() {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
     setOptimisticRenames(new Map())
+    setOptimisticSortIndexes(new Map())
     setOptimisticDeletes(new Set())
     setOptimisticTrash([])
     setDeletedFiles([])
@@ -762,6 +773,10 @@ export function ProjectWorkspace() {
           const renamed = optimisticRenames.get(file.id)
           return renamed !== undefined && renamed !== file.name ? { ...file, name: renamed } : file
         })
+    // A drop's new order, until the server read carries the same positions.
+    if (optimisticSortIndexes.size > 0) {
+      base = overlayPendingSortIndexes(base, optimisticSortIndexes)
+    }
     // Hide optimistically soft-deleted files until the server read drops them.
     if (optimisticDeletes.size > 0) {
       const filtered = base.filter((file) => !optimisticDeletes.has(file.id))
@@ -774,7 +789,7 @@ export function ProjectWorkspace() {
       (file) => !seen.has(file.id) && !optimisticDeletes.has(file.id),
     )
     return pending.length > 0 ? [...base, ...pending] : base
-  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
+  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticSortIndexes, optimisticDeletes])
 
   // AQU-1393: the Examples panel names where each match came from. Resolved
   // here because the file inventory lives at this level and the editor table
@@ -845,6 +860,13 @@ export function ProjectWorkspace() {
       return changed ? next : current
     })
   }, [hydratedProject, optimisticDeletes.size])
+
+  // Drop a pending reorder once the server read carries the same positions.
+  useEffect(() => {
+    if (!hydratedProject || optimisticSortIndexes.size === 0) return
+    const settled = settlePendingSortIndexes(hydratedProject.files, optimisticSortIndexes)
+    if (settled !== optimisticSortIndexes) setOptimisticSortIndexes(settled)
+  }, [hydratedProject, optimisticSortIndexes])
 
   // Drop an optimistic rename once the server read carries the new name.
   useEffect(() => {
@@ -1515,7 +1537,17 @@ export function ProjectWorkspace() {
   // AQU-633: the current user's own lane/file scopes, so bulk validate skips
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
   const myScopeGrant = useMyScopeGrant(project?.id ?? null)
-  const myScopes = myScopeGrant.scopes
+  // AQU-1607: a lane scope is a lane id. Everything below compares it to the
+  // active lane's TAG, so read the ids back as tags here, once — the server
+  // resolves by id and stays the authority on every write.
+  const myScopes = useMemo(
+    () =>
+      laneScopesAsTags(
+        myScopeGrant.scopes,
+        (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+      ),
+    [myScopeGrant.scopes, project?.lanes],
+  )
 
   // AQU-538: the active target lane. Declared here (above useActiveCellStore)
   // because the store's cell list is lane-filtered on this value. Persisted
@@ -2134,17 +2166,6 @@ export function ProjectWorkspace() {
   // NOT consulted — it would otherwise both shadow a later Settings change and
   // surface a stamped language when the project has none set.
   const activeTargetLanguage = project?.targetLanguage
-  // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
-  // its target language, so switching lanes switches what the editor
-  // reads/writes/translates into (source stays shared). The completion path was
-  // already lane-aware; this routes the editor project + file metadata through
-  // the same rule so the target language actually changes on lane switch.
-  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
-    activeLane,
-    activeFile?.targetLanguage,
-    project?.targetLanguage,
-  )
-
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
   const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
@@ -2152,14 +2173,23 @@ export function ProjectWorkspace() {
     () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     [project?.lanes],
   )
-  const laneLabels = useMemo(() => {
-    const labels: Record<string, string> = {}
-    for (const lane of laneRows) {
-      const key = lane.legacyTag ?? ""
-      if (lane.name.trim()) labels[key] = lane.name
-    }
-    return labels
-  }, [laneRows])
+  // AQU-1586: tag → the language the row names, never the opaque lane id a
+  // tag can be. Shared with the completion target below so the editor labels
+  // a lane with the same language it asks the model to translate into.
+  const laneLabels = useMemo(() => laneLabelsByTag(laneRows), [laneRows])
+  // AQU-602: the target language of the ACTIVE lane, so switching lanes
+  // switches what the editor reads/writes/translates into (source stays
+  // shared). The completion path was already lane-aware; this routes the
+  // editor project + file metadata through the same rule so the target
+  // language actually changes on lane switch. AQU-1586: it is resolved from
+  // the lane ROW — a lane tagged with its own id otherwise sent that hex id
+  // to the AI as the target language.
+  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
+    activeLane,
+    activeFile?.targetLanguage,
+    project?.targetLanguage,
+    laneRows,
+  )
   // Lane rows win when the project has them: order is `position`, the label
   // is `name`, and the value the editor stores is still `legacyTag` ('' for
   // the default lane) because cell rows are keyed by that tag.
@@ -2229,12 +2259,27 @@ export function ProjectWorkspace() {
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
   const scopedLanes = useMemo(
-    () => scopedLanesFor(project?.syncRole?.level, myScopes, availableLanes),
-    [project?.syncRole?.level, myScopes, availableLanes],
+    () => scopedLanesFor(project?.syncRole?.level, myScopes, availableLanes, laneRows),
+    [project?.syncRole?.level, myScopes, availableLanes, laneRows],
   )
   useEffect(() => {
     if (scopedLanes && scopedLanes.length > 0 && !scopedLanes.includes(activeLane)) setActiveLane(scopedLanes[0])
   }, [scopedLanes, activeLane, setActiveLane])
+  // AQU-1631: the file-target import's destination-language picker. The same
+  // lanes the editor's switcher offers (AQU-608: MAINTAINER+ over every lane,
+  // a lane-limited member over their own), labelled the same way — so the
+  // import names the destination the way the user just saw it named. Below two
+  // lanes there is nothing to choose and the picker hides itself.
+  const fileImportLaneOptions = useMemo(() => {
+    const switchable = canSwitchLanes(project?.syncRole?.level) ? availableLanes : scopedLanes
+    if (!switchable || switchable.length < 2) return undefined
+    return laneComboboxOptions({
+      lanes: switchable,
+      laneLabels,
+      defaultLaneLabel: laneLabels[""] || activeTargetLanguage || "Target",
+      archivedLanes: archivedLaneTags,
+    })
+  }, [project?.syncRole?.level, availableLanes, scopedLanes, laneLabels, activeTargetLanguage, archivedLaneTags])
   // AQU-538 deep link: `/project/:id/editor?lane=<lane>` — PM surfaces link into
   // the editor at the lane they were viewing. Read the param ONCE per project
   // (after the lane registry loads so an unknown lane can be told apart from a
@@ -2295,9 +2340,19 @@ export function ProjectWorkspace() {
     const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
     return { ...project, sourceLanguage, targetLanguage, terminology: localConcepts }
   }, [activeSourceLanguage, activeLaneTargetLanguage, project, localConcepts])
+  // AQU-1471: direction resolves file row → project setting → language.
+  // useFileMeta already falls back to the language, so the only thing added
+  // here is the project-level default sitting between the two — which is why
+  // this passes the project's EXPLICIT setting (never its language-derived
+  // answer): a project that says nothing must still let the file's own language
+  // decide, as it did before the setting existed.
   const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeLaneTargetLanguage, {
-    sourceTextDirection: activeFile?.sourceTextDirection,
-    targetTextDirection: activeFile?.targetTextDirection,
+    sourceTextDirection:
+      activeFile?.sourceTextDirection
+      ?? projectSettingTextDirection(projectSettings?.settings, "source"),
+    targetTextDirection:
+      activeFile?.targetTextDirection
+      ?? projectSettingTextDirection(projectSettings?.settings, "target"),
   })
   const activeFileDirectionSummary = useMemo(
     () => summarizePairedDirections(cellSummaries, summaryDirections),
@@ -5610,6 +5665,28 @@ export function ProjectWorkspace() {
     confirmCommitted(cell.id, eventId)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, confirmCommitted])
 
+  // AQU-1573: the Bible the active lane quotes from. When a source cell cites
+  // a verse ("Isaiah 40:25"), every drafting path adds that verse's wording
+  // from this Bible to the prompt with a MUST-copy instruction. Independent of
+  // Bible resources (bibleResourcesEnabled), which is the Aquifer feature.
+  const referenceBibleVersionId = referenceBibleForLane(
+    { referenceBibleVersions: project?.referenceBibleVersions, targetLanguage: project?.targetLanguage },
+    activeLane,
+  )
+  const referenceBible = useReferenceBible({
+    jwt: frontierSession?.jwt,
+    versionId: referenceBibleVersionId,
+    getCells: getActiveCells,
+    cellsVersion: cellStoreVersion,
+  })
+  const referenceBlockFor = referenceBible.blockFor
+  const referenceBibleCheckContext = useMemo(
+    () => (referenceBible.checkContext ? { referenceBible: referenceBible.checkContext } : undefined),
+    [referenceBible.checkContext],
+  )
+  const ensureReferenceVersesLoaded = referenceBible.ensureLoaded
+  const currentReferenceCheckContext = referenceBible.currentCheckContext
+
   const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
@@ -5620,6 +5697,7 @@ export function ProjectWorkspace() {
     activeLane,
     commitCompletedCells,
     styleInstructionsFor,
+    referenceBlockFor,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so
@@ -5791,7 +5869,7 @@ export function ProjectWorkspace() {
 
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
-      .map((c) => ({ source: c.original!, target: c.translated }))
+      .map((c) => ({ source: c.original!, target: c.translated, id: c.id }))
     const seeds = buildGlosserSeeds({
       corpusCells,
       backtranslationCache,
@@ -5935,7 +6013,7 @@ export function ProjectWorkspace() {
         corpusByCellId,
         currentCellId: cell.id,
       })
-      const glossRaw = getGlosser().gloss(cell.translated).trim()
+      const glossRaw = getGlosser().gloss(cell.translated, { excludeId: cell.id }).trim()
       const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
       const projectPairsGloss = norm(glossRaw) === norm(cell.translated) ? "" : glossRaw
       const btText = await generateBacktranslation({
@@ -5975,9 +6053,11 @@ export function ProjectWorkspace() {
    * reference" section. Computed from the project's own translation pairs,
    * never persisted — it's a rough corpus-derived hint, not the BT of record.
    */
-  const getStatisticalBt = useCallback((translatedText: string): string => {
+  const getStatisticalBt = useCallback((translatedText: string, cellId: string): string => {
     if (!translatedText.trim()) return ""
-    const gloss = getGlosser().gloss(translatedText).trim()
+    // Leave-one-out: the cell's own pair is in the corpus, and glossing it with
+    // a model that has memorized it just replays its source.
+    const gloss = getGlosser().gloss(translatedText, { excludeId: cellId }).trim()
     // A gloss that only echoes the translation back is the glosser's
     // no-corpus fallback (unknown tokens pass through) — return "" so the
     // BT tab can say "not enough pairs yet" instead of presenting the
@@ -6252,6 +6332,11 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      // AQU-1573: the active lane's reference Bible, for the "Reference Bible
+      // quotes" check. The sig changes when verses arrive, so cells checked
+      // before their verse loaded are checked again.
+      checkContext: referenceBibleCheckContext,
+      checkContextSig: referenceBible.sig,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6578,12 +6663,21 @@ export function ProjectWorkspace() {
     setCheckRunning(true)
     try {
       // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+      const cells = getActiveCells()
+      // AQU-1573: every verse the file cites must be loaded before the quote
+      // check runs, or a cited verse still in flight would read as clean. A
+      // failed lookup only means the check has fewer verses to compare.
+      await ensureReferenceVersesLoaded(cells).catch((err: unknown) => {
+        console.warn("[check] reference verses lookup failed:", err)
+      })
+      const referenceCheck = currentReferenceCheckContext()
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: getActiveCells(),
+        cells,
         rules,
         concepts: localConcepts,
         termMatching: project?.termMatching,
+        checkContext: referenceCheck ? { referenceBible: referenceCheck } : undefined,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6592,7 +6686,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching, ensureReferenceVersesLoaded, currentReferenceCheckContext])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -8935,17 +9029,37 @@ export function ProjectWorkspace() {
     writes: ReadonlyArray<{ fileId: string; sortIndex: number | null }>,
   ) => {
     if (!project || writes.length === 0) return
-    await patchProject(project.id, (p) => applyFileSortIndexes(p, writes))
-    void Promise.all(
-      writes.map((w) =>
-        emitFileReorder({
-          projectId: project.id,
-          fileId: w.fileId,
-          sortIndex: w.sortIndex,
-          author: currentUsername,
-        }),
-      ),
-    ).then(() => refresh())
+    // Before any await, so this paint is the one that replaces the drag
+    // preview: the row is already in the slot the pointer let go of.
+    setOptimisticSortIndexes((current) => {
+      const next = new Map(current)
+      for (const write of writes) next.set(write.fileId, write.sortIndex)
+      return next
+    })
+    try {
+      await patchProject(project.id, (p) => applyFileSortIndexes(p, writes))
+      await Promise.all(
+        writes.map((w) =>
+          emitFileReorder({
+            projectId: project.id,
+            fileId: w.fileId,
+            sortIndex: w.sortIndex,
+            author: currentUsername,
+          }),
+        ),
+      )
+    } catch (error) {
+      console.error("[reorder] file.reorder failed", error)
+      setOptimisticSortIndexes((current) => {
+        const next = new Map(current)
+        for (const write of writes) {
+          if (next.get(write.fileId) === write.sortIndex) next.delete(write.fileId)
+        }
+        return next
+      })
+      return
+    }
+    refresh()
   }, [project, currentUsername, refresh])
 
   const handleDismissBanner = useCallback(async () => {
@@ -14019,6 +14133,12 @@ export function ProjectWorkspace() {
             // so step 1 cannot become a second ungated route to the dialog.
             openImportFlow()
           }}
+          onNavigate={(path) => {
+            // Same as onOpenImport: hide without persisting a dismissal, so the
+            // setup chip can bring the checklist back after the detour.
+            setChecklistOpen(false)
+            navigate(path)
+          }}
         />
       )}
       {project && (
@@ -14192,6 +14312,12 @@ export function ProjectWorkspace() {
             projectId={project.id}
             username={currentUsername}
             targetLang={activeLane}
+            // AQU-1631: picking a language here moves the editor's lane too —
+            // the cells below carry that lane's current translations and AD-2
+            // event heads, and the import must commit against those.
+            laneOptions={fileImportLaneOptions}
+            onTargetLangChange={setActiveLane}
+            laneCellsLoading={cellsLoading}
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}

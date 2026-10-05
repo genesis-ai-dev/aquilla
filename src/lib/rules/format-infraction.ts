@@ -37,6 +37,32 @@ export function formatInfractionReason(infraction: RuleInfraction, t: TFunction)
     const count = infraction.reasonParams?.count ?? "0"
     return t("rules.infraction.builtin.placeholderIntegrity", { tokens, count })
   }
+  if (infraction.reason === "builtin:reference-quote") {
+    // AQU-1573: `refs`, `missingRefs` and `droppedRefs` (reader labels such
+    // as "Isaiah 40:25") and `version` (the Bible's name) are data,
+    // interpolated, never translated. One sentence per kind of finding, each
+    // naming only its own verses.
+    const p = infraction.reasonParams ?? {}
+    const refs = p.refs ?? ""
+    const version = p.version ?? ""
+    const dropped = (droppedRefs: string, count: string) =>
+      t("rules.infraction.builtin.referenceDropped", { refs: droppedRefs, count })
+    if (p.kind === "dropped") return dropped(refs, p.count ?? "1")
+    const sentences: string[] = []
+    if (p.kind === "both") {
+      // One cell with a changed quote AND a quote not taken from the Bible.
+      sentences.push(
+        t("rules.infraction.builtin.referenceQuoteDiffers", { refs, version }),
+        t("rules.infraction.builtin.referenceQuoteMissing", { refs: p.missingRefs ?? "", version }),
+      )
+    } else if (p.kind === "missing") {
+      sentences.push(t("rules.infraction.builtin.referenceQuoteMissing", { refs, version }))
+    } else {
+      sentences.push(t("rules.infraction.builtin.referenceQuoteDiffers", { refs, version }))
+    }
+    if (p.droppedRefs) sentences.push(dropped(p.droppedRefs, p.droppedCount ?? "1"))
+    return sentences.join(". ")
+  }
   if (infraction.reason === "source-requires-target") {
     const sourceCount = infraction.reasonParams?.sourceCount ?? "1"
     const targetCount = infraction.reasonParams?.targetCount ?? "0"

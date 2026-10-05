@@ -13,6 +13,7 @@ import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
+import type { DirectionMode } from "@/lib/text-direction"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,6 +50,20 @@ export type CellEditingTier =
 export interface ProjectWideSettings {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * AQU-1471: the project's DEFAULT text direction per side — the answer to
+   * "this project's target language is right-to-left", asked once instead of
+   * once per file.
+   *
+   * "auto", and an ABSENT key, mean "take it from the language"
+   * (`languageDefaultDirection`), which is what every project did before these
+   * keys existed. A per-file direction still wins over this, and nothing copies
+   * this onto the file rows: resolution happens on every read
+   * (db/shared/text-direction.ts states the order), so switching
+   * `targetLanguage` to Arabic moves every file that has no override with it.
+   */
+  sourceTextDirection?: DirectionMode
+  targetTextDirection?: DirectionMode
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
@@ -223,6 +238,16 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1573: the Bible each target language quotes verses from — a map from
+   * lane tag to reference Bible id, "" being the default lane (e.g.
+   * `{ "": "arb-vandyck", "en": "eng-kjv" }`). The ticket's one-item array
+   * `["arb-vandyck"]` is also accepted and means the default lane. Read it
+   * through referenceBibleForLane (src/lib/reference-bible/lane-setting.ts),
+   * never directly. Independent of `bibleResourcesEnabled`. A PatchSettings
+   * `null` clears it server-side; the SPA itself always writes a map.
+   */
+  referenceBibleVersions?: Record<string, string> | string[]
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.
@@ -267,6 +292,10 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** Typing " or ' in the translation editor produces curly quotes in the
+   *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
+   *  (the default) leaves straight quotes alone. */
+  smartQuotes?: boolean
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode

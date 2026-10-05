@@ -21,7 +21,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
-import { overlayProjectSettings } from "@/lib/sync/overlay-project-settings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
@@ -246,7 +246,7 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
   })
 
   it("leaves the gear path unchanged: the record already carries the stored values", () => {
-    currentProject = overlayProjectSettings(makeProject(), STORED)
+    currentProject = overlaySettings(makeProject(), STORED)
     currentSettings = STORED
     currentHasFetched = false
     const { rerender } = render(tree("validation"))

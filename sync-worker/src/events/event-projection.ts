@@ -28,6 +28,7 @@ import { usableCorpusMarker } from './corpus-marker'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 
@@ -151,12 +152,15 @@ export function buildBulkTargetCellCommitStmt(
  * (source rows are shared by all lanes and never carry a lane). Part of
  * the cells row key and, for non-default lanes, of the AD-2 chain slot
  * (chain-claims.ts laneQualifiedParentKey).
+ *
+ * AQU-1612: the tag-only arm of the one lane resolver
+ * (src/lib/lanes/event-lane.ts). An event may also carry `laneId`; the
+ * perimeter resolves that to this tag before the event is stored, and
+ * replay prefers the id where it has the lane rows to resolve it with
+ * (chain-head-replay.ts). Every key keeps its historical tag shape.
  */
 export function laneOfEvent(kind: string, payload: unknown): string {
-  if (!kind.startsWith('target.cell.')) return ''
-  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
-  if (typeof lang === 'string' && lang !== '') return lang
-  return ''
+  return eventLaneTag(kind, payload)
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv

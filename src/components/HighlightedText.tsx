@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 export const EXAMPLE_COLORS = [
@@ -18,11 +18,29 @@ export interface RangeHighlight {
   ruleId: string
 }
 
-/** When two ranges start at the same offset, the more severe one owns the span. */
+/** The more severe finding sits innermost, closest to the text. */
 const KIND_PRECEDENCE: Record<RangeHighlight["kind"], number> = {
   "violation-major": 0,
   "violation-minor": 1,
   "violation-waived": 2,
+}
+
+/** One underline offset per stacked finding, innermost (most severe) first.
+ *  Two checks covering the same words draw two wavy lines at different
+ *  offsets instead of the outer one hiding the inner (AQU-1633). Stacks
+ *  deeper than this reuse the outermost offset. */
+const UNDERLINE_OFFSET_CLASSES = [
+  "underline-offset-[3px]",
+  "underline-offset-[6px]",
+  "underline-offset-[9px]",
+]
+
+/** A run of text with every range that covers it, most severe LAST (the
+ *  innermost span). An empty `ranges` is plain text. */
+interface DisplayChunk {
+  text: string
+  start: number
+  ranges: RangeHighlight[]
 }
 
 interface HighlightedTextProps {
@@ -48,65 +66,103 @@ export function HighlightedText({
     return map
   }, [highlights])
 
-  const displayRanges = useMemo(
-    () => normalizeDisplayRanges(text, ranges),
-    [ranges, text],
-  )
+  const chunks = useMemo(() => buildDisplayChunks(text, ranges), [ranges, text])
+  const hasRanges = chunks.some((chunk) => chunk.ranges.length > 0)
 
-  if (highlights.length === 0 && displayRanges.length === 0) return <span>{text}</span>
-
-  // First split into chunks honoring ranges; then in non-ranged chunks apply
-  // token-level evidence highlights when showEvidence is true.
-  //
-  // Ranges from different rules can overlap (EditorTable concatenates spans
-  // from every rule without merging), so each range is clamped to the cursor:
-  // the first range by start (severity-tiebroken) owns the shared sub-span,
-  // later ranges keep only their uncovered tail. Without the clamp the
-  // overlapping characters were emitted twice.
-  const chunks: Array<{ text: string; start: number; range?: RangeHighlight }> = []
-  let cursor = 0
-  for (const r of displayRanges) {
-    if (r.start > cursor) chunks.push({ text: text.slice(cursor, r.start), start: cursor })
-    const start = Math.max(r.start, cursor)
-    if (r.end <= start) continue // fully covered by an earlier range
-    chunks.push({ text: text.slice(start, r.end), start, range: r })
-    cursor = r.end
-  }
-  if (cursor < text.length) chunks.push({ text: text.slice(cursor), start: cursor })
+  if (highlights.length === 0 && !hasRanges) return <span>{text}</span>
 
   return (
     <span>
       {chunks.map((chunk, i) => {
-        if (chunk.range) {
-          const isTerminologyRange = chunk.range.ruleId.startsWith("term:")
-          return (
-            <span
-              key={i}
-              role={onRangeClick ? "button" : undefined}
-              tabIndex={onRangeClick ? 0 : undefined}
-              onClick={onRangeClick ? (e) => {
-                // A terminology blot can sit inside the managed-term popover
-                // trigger. Keep this click owned by the blot so one gesture
-                // never opens both popovers (AQU-1006 review regression).
-                e.stopPropagation()
-                onRangeClick(chunk.range!.ruleId, e.currentTarget)
-              } : undefined}
-              className={cn(
-                isTerminologyRange && "terminology-highlight",
-                chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
-                chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
-                chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",
-              )}
-              data-rule-id={chunk.range.ruleId}
-            >
-              {chunk.text}
-            </span>
-          )
+        if (chunk.ranges.length > 0) {
+          return <RangeStack key={i} chunk={chunk} onRangeClick={onRangeClick} />
         }
         if (!showEvidence || highlights.length === 0) return <span key={i}>{chunk.text}</span>
         return <EvidenceTokens key={i} text={chunk.text} highlightMap={highlightMap} />
       })}
     </span>
+  )
+}
+
+/** Nests one span per finding over the same characters, most severe innermost.
+ *  A click is owned by the innermost span under the pointer, so the most
+ *  severe finding wins a fully shared span while a partially overlapping one
+ *  stays clickable on the characters only it covers. */
+function RangeStack({
+  chunk, onRangeClick,
+}: { chunk: DisplayChunk; onRangeClick?: HighlightedTextProps["onRangeClick"] }) {
+  let node: ReactNode = chunk.text
+  for (let depth = 0; depth < chunk.ranges.length; depth++) {
+    const range = chunk.ranges[chunk.ranges.length - 1 - depth]
+    node = (
+      <span
+        role={onRangeClick ? "button" : undefined}
+        tabIndex={onRangeClick ? 0 : undefined}
+        onClick={onRangeClick ? (e) => {
+          // A terminology blot can sit inside the managed-term popover
+          // trigger, and a stacked finding sits inside another blot. Keep
+          // this click owned by the innermost span so one gesture never
+          // opens two popovers (AQU-1006 review regression).
+          e.stopPropagation()
+          onRangeClick(range.ruleId, e.currentTarget)
+        } : undefined}
+        className={rangeSpanClass(range, depth)}
+        data-rule-id={range.ruleId}
+      >
+        {node}
+      </span>
+    )
+  }
+  return <>{node}</>
+}
+
+function rangeSpanClass(range: RangeHighlight, depth: number): string {
+  return cn(
+    range.ruleId.startsWith("term:") && "terminology-highlight",
+    "decoration-wavy underline",
+    UNDERLINE_OFFSET_CLASSES[Math.min(depth, UNDERLINE_OFFSET_CLASSES.length - 1)],
+    range.kind === "violation-major" && "decoration-red-500",
+    range.kind === "violation-minor" && "decoration-amber-500",
+    range.kind === "violation-waived" && "decoration-muted-foreground/60 opacity-60",
+  )
+}
+
+/** Splits the text at every range boundary and hands each run the full set of
+ *  ranges covering it. Ranges from different rules can overlap, and one can
+ *  sit wholly inside another (EditorTable concatenates spans from every rule
+ *  without merging) — every character is emitted exactly once and no finding
+ *  is dropped (AQU-1633). */
+function buildDisplayChunks(text: string, ranges: RangeHighlight[]): DisplayChunk[] {
+  const normalized = normalizeDisplayRanges(text, ranges)
+  if (normalized.length === 0) return [{ text, start: 0, ranges: [] }]
+
+  const cuts = new Set<number>([0, text.length])
+  for (const range of normalized) { cuts.add(range.start); cuts.add(range.end) }
+  const offsets = [...cuts].sort((a, b) => a - b)
+
+  const chunks: DisplayChunk[] = []
+  for (let i = 0; i + 1 < offsets.length; i++) {
+    const start = offsets[i]
+    const end = offsets[i + 1]
+    if (end <= start) continue
+    const covering = normalized.filter((range) => range.start <= start && range.end >= end)
+    chunks.push({ text: text.slice(start, end), start, ranges: stackOrder(covering) })
+  }
+  return chunks
+}
+
+/** Outermost first: least severe outside, most severe innermost. One span per
+ *  rule — the same rule reported twice over a run underlines it once. */
+function stackOrder(covering: RangeHighlight[]): RangeHighlight[] {
+  const byRule = new Map<string, RangeHighlight>()
+  for (const range of covering) {
+    const seen = byRule.get(range.ruleId)
+    if (!seen || KIND_PRECEDENCE[range.kind] < KIND_PRECEDENCE[seen.kind]) byRule.set(range.ruleId, range)
+  }
+  return [...byRule.values()].sort(
+    (a, b) =>
+      KIND_PRECEDENCE[b.kind] - KIND_PRECEDENCE[a.kind] ||
+      a.ruleId.localeCompare(b.ruleId),
   )
 }
 
@@ -119,12 +175,6 @@ function normalizeDisplayRanges(text: string, ranges: RangeHighlight[]): RangeHi
     if (start >= end) continue
     out.push({ ...range, start, end })
   }
-  out.sort(
-    (a, b) =>
-      a.start - b.start ||
-      KIND_PRECEDENCE[a.kind] - KIND_PRECEDENCE[b.kind] ||
-      b.end - a.end,
-  )
   return out
 }
 

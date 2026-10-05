@@ -3,9 +3,9 @@
 // overlay drops is a setting that page shows as its default (PR1 leftover #2).
 
 import { describe, it, expect } from "vitest"
-import { overlayProjectSettings } from "./overlay-project-settings"
+import { overlaySettings } from "./project-settings-overlay"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import type { ProjectWideSettings } from "./project-settings"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 function makeRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -19,9 +19,9 @@ function makeRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   } as unknown as ProjectRecord
 }
 
-describe("overlayProjectSettings", () => {
+describe("overlaySettings", () => {
   it("carries the text validation trio and count", () => {
-    const out = overlayProjectSettings(makeRecord(), {
+    const out = overlaySettings(makeRecord(), {
       validationCount: 2,
       validationRoleFloor: "project_lead",
       validationNamedUsers: ["ana"],
@@ -34,7 +34,7 @@ describe("overlayProjectSettings", () => {
   })
 
   it("carries the audio validation trio and count as separate keys", () => {
-    const out = overlayProjectSettings(makeRecord({ allowSelfValidation: true }), {
+    const out = overlaySettings(makeRecord({ allowSelfValidation: true }), {
       validationCountAudio: 3,
       validationRoleFloorAudio: "maintainer",
       validationNamedUsersAudio: ["dev", "alice"],
@@ -49,7 +49,7 @@ describe("overlayProjectSettings", () => {
   })
 
   it("carries the harmonize floor, which the overlay used to drop", () => {
-    const out = overlayProjectSettings(makeRecord(), { harmonize_min_role: "maintainer" })
+    const out = overlaySettings(makeRecord(), { harmonize_min_role: "maintainer" })
     expect(out.harmonize_min_role).toBe("maintainer")
   })
 
@@ -65,7 +65,7 @@ describe("overlayProjectSettings", () => {
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
     }
-    const out = overlayProjectSettings(makeRecord({ timingLocked: true }), blob)
+    const out = overlaySettings(makeRecord({ timingLocked: true }), blob)
     expect(out.sourceLanguage).toBe("English")
     expect(out.targetLanguage).toBe("French")
     expect(out.allowTrackEditing).toBe(true)
@@ -79,7 +79,7 @@ describe("overlayProjectSettings", () => {
 
   it("skips null and undefined so absent stays absent", () => {
     const record = makeRecord({ allowSelfValidation: false, harmonize_min_role: "maintainer" })
-    const out = overlayProjectSettings(record, {
+    const out = overlaySettings(record, {
       allowSelfValidation: undefined,
       harmonize_min_role: null as unknown as undefined,
     })
@@ -90,10 +90,10 @@ describe("overlayProjectSettings", () => {
 
   it("returns the input by reference when nothing changes, and never mutates it", () => {
     const record = makeRecord({ validationCount: 2, allowSelfValidation: false })
-    expect(overlayProjectSettings(record, {})).toBe(record)
-    expect(overlayProjectSettings(record, { validationCount: 2, allowSelfValidation: false })).toBe(record)
+    expect(overlaySettings(record, {})).toBe(record)
+    expect(overlaySettings(record, { validationCount: 2, allowSelfValidation: false })).toBe(record)
 
-    const out = overlayProjectSettings(record, { validationCount: 3 })
+    const out = overlaySettings(record, { validationCount: 3 })
     expect(out).not.toBe(record)
     expect(record.validationCount).toBe(2)
   })

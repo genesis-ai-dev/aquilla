@@ -26,6 +26,9 @@ import {
   type ChatMessage,
 } from "../../../src/lib/completion/prompt-build"
 import { compileConceptsToRulesCore } from "../../../src/lib/terminology/compile-core"
+import { buildReferenceVersesBlock } from "../../../src/lib/completion/prompt-build"
+import { installFixtureReferenceBibles } from "../../../db/shared/reference-bible-fixtures"
+import { lookupPassages } from "../../../db/shared/reference-bible"
 
 const SECRET = "test-secret"
 const CRED_A = "00000000-0000-0000-0000-0000000000a1"
@@ -52,6 +55,12 @@ interface PreviewBody {
     }[]
     examples: { cellId?: string; source: string; target: string }[]
     precedingContext: { source: string; target: string }[]
+    referenceVerses: {
+      versionId: string
+      versionName: string | null
+      block: string
+      passages: { canonical: string; label: string; verses: { chapter: number; verse: number; text: string }[] }[]
+    } | null
   }
   generation: {
     provider: string
@@ -594,6 +603,107 @@ describe("external prompt preview", () => {
     })
   })
 
+  // AQU-1573: a sermon cell that cites a verse shows the lane's reference
+  // Bible wording as its own labelled part, and the same text in messages[0]
+  // — with Bible resources (the Aquifer feature) off.
+  describe("reference Bible verses", () => {
+    const ISAIAH = 'Isaiah 40:25 says, "To whom will you compare me? Or who is my equal?" says the Holy One.'
+    const LOTE = {
+      sourceLanguage: "English",
+      targetLanguage: "Arabic",
+      targetLanes: ["en"],
+      bibleResourcesEnabled: false,
+      referenceBibleVersions: { "": "arb-vandyck", en: "eng-kjv" },
+    }
+
+    beforeEach(async () => {
+      await installFixtureReferenceBibles(testDb.db)
+      await putSettings(testDb, "proj-a", LOTE)
+      await insertCell(testDb, { cellId: "cell-isa", seq: 1, source: ISAIAH })
+      await insertCell(testDb, { cellId: "cell-plain", seq: 2, source: "God is beyond compare." })
+    })
+
+    it("injects the Van Dyck verse and labels it parts.referenceVerses", async () => {
+      const { status, body } = await preview(testDb, token, "cell-isa")
+      expect(status).toBe(200)
+      const { passages } = await lookupPassages(testDb.db, "arb-vandyck", ["ISA 40:25"])
+      const block = buildReferenceVersesBlock({ versionName: "Van Dyck", languageName: "Arabic", passages })
+      expect(body.parts.referenceVerses).toEqual({
+        versionId: "arb-vandyck",
+        versionName: "Van Dyck",
+        block,
+        passages,
+      })
+      expect(body.parts.referenceVerses!.passages[0].canonical).toBe("ISA 40:25")
+      expect(body.messages[0].content).toContain(`- Isaiah 40:25 [ISA 40:25]: ${passages[0].verses[0].text}`)
+      expect(body.messages[0].content.endsWith(block)).toBe(true)
+      expect(body.warnings).toEqual([])
+    })
+
+    it("matches what the copilot sends: buildPrompt with the same block", async () => {
+      const { body } = await preview(testDb, token, "cell-isa")
+      const expected = buildPrompt({
+        sourceLanguage: "English",
+        targetLanguage: "Arabic",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        sourceText: ISAIAH,
+        examples: [],
+        validatedPairs: [],
+        precedingContext: [],
+        exampleFormat: "source-and-target",
+        referenceBlock: body.parts.referenceVerses!.block,
+      })
+      expect(body.messages).toEqual(expected)
+    })
+
+    it("reads the lane's own Bible: the English lane quotes the KJV", async () => {
+      const { body } = await preview(testDb, token, "cell-isa", "?targetLang=en")
+      expect(body.parts.referenceVerses?.versionId).toBe("eng-kjv")
+      expect(body.parts.referenceVerses?.block).toContain("King James Version (English)")
+    })
+
+    it("is null for a lane with no Bible, and an empty block for a cell that cites nothing", async () => {
+      await putSettings(testDb, "proj-a", { ...LOTE, referenceBibleVersions: { "": "arb-vandyck" } })
+      const noBible = await preview(testDb, token, "cell-isa", "?targetLang=en")
+      expect(noBible.body.parts.referenceVerses).toBeNull()
+      expect(noBible.body.messages[0].content).not.toContain("Scripture quotations")
+
+      const plain = await preview(testDb, token, "cell-plain")
+      expect(plain.body.parts.referenceVerses).toEqual({
+        versionId: "arb-vandyck",
+        versionName: "Van Dyck",
+        block: "",
+        passages: [],
+      })
+      expect(plain.body.messages[0].content).not.toContain("Scripture quotations")
+    })
+
+    it("warns when the lane's Bible is not installed, and adds no verses", async () => {
+      await putSettings(testDb, "proj-a", { ...LOTE, referenceBibleVersions: { "": "spa-rv1909" } })
+      const { body } = await preview(testDb, token, "cell-isa")
+      expect(body.parts.referenceVerses).toEqual({ versionId: "spa-rv1909", versionName: null, block: "", passages: [] })
+      expect(body.messages[0].content).not.toContain("Scripture quotations")
+      expect(body.warnings.map((w) => w.code)).toEqual(["reference_bible_not_installed"])
+      expect(body.warnings[0].message).toContain("spa-rv1909")
+    })
+
+    it("says when a long cited range was cut to its first 30 verses (review 2026-10-02)", async () => {
+      await insertCell(testDb, { cellId: "cell-long", seq: 3, source: "Read Isaiah 40:1-31 tonight." })
+      const { body } = await preview(testDb, token, "cell-long")
+      const [passage] = body.parts.referenceVerses!.passages as { canonical: string; verses: unknown[]; truncated?: boolean }[]
+      expect([passage.canonical, passage.verses.length, passage.truncated]).toEqual(["ISA 40:1-30", 30, true])
+      expect(body.parts.referenceVerses!.block).toContain("(the rest of this passage is not shown)")
+    })
+
+    it("warns about a cited verse the Bible does not have", async () => {
+      await insertCell(testDb, { cellId: "cell-bad", seq: 3, source: "Isaiah 40:99 and John 3:16 say so." })
+      const { body } = await preview(testDb, token, "cell-bad")
+      expect(body.parts.referenceVerses?.passages.map((p) => p.canonical)).toEqual(["JHN 3:16"])
+      expect(body.warnings.map((w) => w.code)).toEqual(["reference_not_found"])
+      expect(body.warnings[0].message).toContain("ISA 40:99")
+    })
+  })
+
   describe("scope", () => {
     it("a PAT scoped to another project gets 403", async () => {
       await insertCell(testDb, { cellId: "cell-live", seq: 1, source: "God saw the light" })
@@ -636,6 +746,52 @@ describe("external prompt preview", () => {
         env(testDb),
       )
       expect(res!.status).toBe(401)
+    })
+  })
+
+  // AQU-1586: `?targetLang=` carries a lane's `legacy_tag`, which is an EVENT
+  // KEY, not a language. `planNewTargetLane` sets that tag to the lane's opaque
+  // 8-hex id whenever the language string is already taken by a sibling or
+  // matches the project default — so passing it through as the target language
+  // asked the model to translate "into a3f09c1e". The language lives on the
+  // lane ROW, and the preview must report what the editor would really send.
+  describe("the target language comes from the lane row", () => {
+    beforeEach(async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "God saw the light" })
+    })
+
+    it("resolves a lane tagged with its own id to the lane's language", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('a3f09c1e', 'proj-a', 'target', 'Spanish (Mexico team)', 'es', 'a3f09c1e', 1)`,
+      )
+      const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=a3f09c1e")
+      expect(status).toBe(200)
+      expect(body.targetLang).toBe("a3f09c1e")
+      expect(body.targetLanguage).toBe("es")
+      // And the assembled prompt carries the language, not the key.
+      expect(body.messages[0].content).toContain("es")
+      expect(body.messages[0].content).not.toContain("a3f09c1e")
+    })
+
+    it("leaves a lane whose tag IS a language exactly as it was", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('frc00002', 'proj-a', 'target', 'French (Canada)', 'fra', 'fr-CA', 1)`,
+      )
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=fr-CA")
+      expect(body.targetLanguage).toBe("fr-CA")
+    })
+
+    it("falls back to the project target when no lane row carries the tag", async () => {
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
+      expect(body.targetLanguage).toBe("French")
+    })
+
+    it("still inherits the project target for the default lane", async () => {
+      const { body } = await preview(testDb, token, "cell-live")
+      expect(body.targetLang).toBe("")
+      expect(body.targetLanguage).toBe("French")
     })
   })
 })

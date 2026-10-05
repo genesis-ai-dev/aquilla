@@ -131,7 +131,7 @@ vi.mock("@/components/StaffLanePopover", () => ({
 }))
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
-  putMemberScopes: vi.fn(async () => []),
+  putMemberScopes: vi.fn(async () => ({ scopes: [], laneNames: {} })),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
 const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})

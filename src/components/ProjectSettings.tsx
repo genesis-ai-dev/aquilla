@@ -57,7 +57,7 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { overlayProjectSettings } from "@/lib/sync/overlay-project-settings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import {
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -110,6 +110,8 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { ReferenceBibleSection } from "./ProjectSettings/ReferenceBibleSection"
+import { fetchReferenceBibles } from "@/lib/frontier/reference-bibles"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -271,6 +273,8 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
 
@@ -326,16 +330,14 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    smartQuotes: project.smartQuotes ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
 
-/**
- * The baseline fields that live in the shared project-settings blob: exactly
- * the keys handleSave writes into `sharedUpdates`. The shared-settings effect
- * re-syncs these, and only these, once the settings GET lands.
- */
-const SHARED_BASELINE_KEYS = [
+/** Baseline fields whose stored value lives only in the shared settings blob.
+ *  Each is written to the blob on Save, so each must be read back from it. */
+const BLOB_BACKED_KEYS = [
   "sourceLanguage",
   "targetLanguage",
   "validationCount",
@@ -351,15 +353,13 @@ const SHARED_BASELINE_KEYS = [
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
-  "importExcludeFrontMatter",
   "precedingTargetCells",
+  "importExcludeFrontMatter",
+  "smartQuotes",
   "termMatching",
 ] as const satisfies readonly (keyof Baseline)[]
+type BlobBackedKey = (typeof BLOB_BACKED_KEYS)[number]
 
-type SharedBaselineKey = (typeof SHARED_BASELINE_KEYS)[number]
-
-/** Value equality for a baseline field: arrays and objects by content (the
- *  same JSON comparison isDirty and handleSave use), everything else by `===`. */
 /** The provenance line under the project name. The settings response names
  *  the saver only by id, so without a username it gives the date alone rather
  *  than "Last edited by undefined" (walk 10-02). */
@@ -369,10 +369,12 @@ function lastEditedLine(name: string | null, date: string, t: TFunction): string
     : t("projectSettings.shared.lastEditedOn", { date })
 }
 
-function sameSettingValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (a == null || b == null || typeof a !== "object" || typeof b !== "object") return false
-  return JSON.stringify(a) === JSON.stringify(b)
+function sameSetting(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+function adoptKey<K extends BlobBackedKey>(target: Baseline, source: Baseline, key: K) {
+  target[key] = source[key]
 }
 
 function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined): boolean {
@@ -487,6 +489,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+  // AQU-1573: the installed reference Bibles for the Reference Bible card.
+  const loadReferenceBibles = useCallback(() => {
+    const jwt = session?.jwt
+    return jwt ? fetchReferenceBibles(jwt) : Promise.reject(new Error("not signed in"))
+  }, [session?.jwt])
 
   const renameLane = useCallback(async (laneId: string, name: string) => {
     const jwt = session?.jwt
@@ -662,6 +669,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  const [smartQuotes, setSmartQuotes] = useState(false)
   // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
   const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
@@ -725,6 +733,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setSmartQuotes(b.smartQuotes)
     setTermMatching(b.termMatching)
   }, [])
 
@@ -739,51 +748,39 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   useEffect(() => {
     if (!project || seededRef.current) return
     const b = buildBaseline(
-      sharedSettingsFetched ? overlayProjectSettings(project, sharedSettingsBlob ?? {}) : project,
+      sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
     )
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
   }, [project, applyBaseline, sharedSettingsFetched, sharedSettingsBlob])
 
-  // Every shared field showed its DEFAULT on a direct load or reload of this
-  // page (PR1 leftover #2): this page passes `includeSettings: false` to
-  // `useProject` (it owns the editable settings hook above, and a second
-  // overlay request would be a duplicate GET), so `project` is
-  // `minimalProjectRecord`, which carries none of the shared settings and
-  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""`. The seed above runs
-  // on the first non-null `project`, usually before the settings GET lands, so
-  // it locked in defaults. Opening from the editor's gear only worked because
-  // the route modal seeds from the workspace's already-overlaid snapshot. A
-  // stored OFF that displays as ON could not even be turned ON: the toggle
-  // equalled the wrong baseline, so Save sent nothing.
+  // Settings that live ONLY in the shared settings blob never reach `project`
+  // on this page: it passes `includeSettings: false` to `useProject` (it owns
+  // the editable settings hook above, and a second overlay request would be a
+  // duplicate GET), so `project` is `minimalProjectRecord` and the seed above
+  // shows each of these at its default. A saved value then read back wrong
+  // after every reload — languages blank (AQU-1115), Bible resources on for a
+  // project that turned them off (AQU-460), switches off that the server has
+  // on — and a user could "re-enable" something already enabled.
   //
-  // Two fields had their own one-off fixes before this effect replaced them:
-  // - AQU-460: Bible resources painted `resolveBibleResourcesEnabled(undefined,
-  //   hasScriptureFiles)`, wrongly `true` for a scripture project whose server
-  //   value is really `false`.
-  // - AQU-1115: the Source/Target Language fields stayed permanently EMPTY,
-  //   while the Languages card below (which reads the blob directly) showed the
-  //   right language.
-  //
-  // Once this page's own settings GET has resolved, re-sync every shared field
-  // (exactly the keys handleSave writes) from the overlaid record, once. The
-  // baseline always moves, so settling to the stored value never reads as an
-  // edit; the draft moves only where the user has not already changed it, so
-  // an in-progress edit is never stomped. Device-local fields stay out of it,
-  // which also makes this a no-op on the gear path, whose snapshot already
-  // holds the stored values. `hasFetched` fails closed (stays false on a failed
-  // GET), so a settings outage leaves the previous behaviour rather than
-  // blanking anything. Absent stays absent: the overlay skips null/undefined,
-  // so a genuinely empty language stays empty and an unset Bible-resources
-  // choice stays unset.
-  const sharedSettingsResyncedRef = useRef(false)
+  // Once this page's own settings GET has resolved, rebuild the baseline
+  // through the same overlay the rest of the app reads with, and adopt it for
+  // these keys. Once only, matching the "seed once" contract above. A field the
+  // user has already moved off the (stale) seed keeps their edit; the baseline
+  // still moves, so settling to the server value never reads as an edit.
+  // `hasFetched` fails closed (stays false on a failed GET), so a settings
+  // outage leaves the seeded values rather than blanking anything.
+  const blobResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
-    if (sharedSettingsResyncedRef.current) return
-    sharedSettingsResyncedRef.current = true
-    const next = buildBaseline(overlayProjectSettings(project, sharedSettingsBlob ?? {}))
-    const draftSetters: { [K in SharedBaselineKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+    if (blobResyncedRef.current) return
+    blobResyncedRef.current = true
+    if (!sharedSettingsBlob) return
+    const hydrated = buildBaseline(overlaySettings(project, sharedSettingsBlob))
+    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
+    if (changed.length === 0) return
+    const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
       sourceLanguage: setSourceLanguage,
       targetLanguage: setTargetLanguage,
       validationCount: setValidationCount,
@@ -799,22 +796,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
-      importExcludeFrontMatter: setImportExcludeFrontMatter,
       precedingTargetCells: setPrecedingTargetCells,
+      importExcludeFrontMatter: setImportExcludeFrontMatter,
+      smartQuotes: setSmartQuotes,
       termMatching: setTermMatching,
     }
-    const settled: Partial<Baseline> = {}
-    const adopt = <K extends SharedBaselineKey>(key: K) => {
-      const stale = baseline[key]
-      const stored = next[key]
-      if (sameSettingValue(stale, stored)) return
-      settled[key] = stored
-      const setDraft = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
-      setDraft((prev) => (sameSettingValue(prev, stale) ? stored : prev))
+    setBaseline((prev) => {
+      if (!prev) return prev
+      const next = { ...prev }
+      for (const key of changed) adoptKey(next, hydrated, key)
+      return next
+    })
+    const adoptDraft = <K extends BlobBackedKey>(key: K) => {
+      const setter = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
+      setter((prev) => (sameSetting(prev, baseline[key]) ? hydrated[key] : prev))
     }
-    for (const key of SHARED_BASELINE_KEYS) adopt(key)
-    if (Object.keys(settled).length === 0) return
-    setBaseline((prev) => (prev ? { ...prev, ...settled } : prev))
+    for (const key of changed) adoptDraft(key)
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -915,6 +912,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
       importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      smartQuotes !== baseline.smartQuotes ||
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
@@ -928,7 +926,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter, termMatching,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -1147,6 +1145,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -1231,6 +1230,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        smartQuotes,
         termMatching,
       }
       setBaseline(newBaseline)
@@ -1283,7 +1283,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1346,9 +1346,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    // AQU-1573: server-side texts, so cloud projects only.
+    { id: "section-reference-bible", label: "Reference Bible", keywords: ["reference bible", "bible version", "quote", "quotation", "scripture", "verse", "van dyck", "kjv", "king james", "sermon"], visible: isCloudProject },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
@@ -1418,10 +1420,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, content structure, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible resources, reference Bible",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-reference-bible", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1562,6 +1564,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-project-info",
       "section-languages",
       "section-bible-resources",
+      "section-reference-bible",
       "section-import",
       "section-user",
       "section-members",
@@ -1923,6 +1926,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   </DisabledFieldTooltip>
                 }
               />
+              <SettingsRow
+                label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
+                description={t("projectSettings.info.smartQuotesDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="smart-quotes"
+                      checked={smartQuotes}
+                      onCheckedChange={(checked) => setSmartQuotes(checked)}
+                      disabled={!canEditShared}
+                      aria-label={t("projectSettings.info.smartQuotesLabel")}
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
             </SettingsGroup>
           </div>
         )}
@@ -2023,6 +2041,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
+          </div>
+        )}
+
+        {searchGroupLabel("section-reference-bible")}
+        {sectionsToRender.some((s) => s.id === "section-reference-bible") && (
+          <div id="section-reference-bible">
+            {/* AQU-1573. Saves on change, like the repetition-propagation
+                control — see the component's note for why it patches the
+                shared blob directly instead of riding this page's Save. */}
+            <ReferenceBibleSection
+              value={sharedSettingsBlob?.referenceBibleVersions}
+              targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
+              targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+              archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
+              laneRecords={sharedLanes ?? undefined}
+              loadVersions={loadReferenceBibles}
+              disabled={!canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
           </div>
         )}
 

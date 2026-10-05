@@ -18,7 +18,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { overlayProjectSettings } from "@/lib/sync/overlay-project-settings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
@@ -253,7 +253,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(
-    () => project ? overlayProjectSettings(project, syncedSettings, projectSettings.lanes) : null,
+    () => project ? overlaySettings(project, syncedSettings, projectSettings.lanes) : null,
     [project, syncedSettings, projectSettings.lanes],
   )
 

@@ -43,9 +43,21 @@ let _firstValidateFired = false
 /**
  * AQU-1462: a non-empty lane tag rides on the event so an archived lane can
  * refuse it. The default lane is omitted. An absent tag is a shared write.
+ *
+ * AQU-1612: the lane row's id rides along with it when the caller has one.
+ * Both forms name the same lane and the server refuses an event where they
+ * disagree, so a caller passes the pair it read off one lane row — never a tag
+ * from one lane and an id from another. The tag stays mandatory for a named
+ * lane: it is the frozen event key replay and the chain slot are built from.
  */
-function namedTargetLane(targetLang: string | undefined): { targetLang: string } | Record<string, never> {
-  return targetLang ? { targetLang } : {}
+function targetLaneFields(lane: {
+  targetLang?: string
+  laneId?: string
+}): { targetLang?: string; laneId?: string } {
+  return {
+    ...(lane.targetLang ? { targetLang: lane.targetLang } : {}),
+    ...(lane.laneId ? { laneId: lane.laneId } : {}),
+  }
 }
 
 // ── Envelope construction ─────────────────────────────────────────────────
@@ -223,6 +235,8 @@ export interface CellCommitInput {
    * chain slot server-side.
    */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   value: string
   valueHtml?: string
   author: string
@@ -287,7 +301,7 @@ function targetCellCommitEventInput(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
       ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
@@ -347,6 +361,8 @@ export interface CellValidateInput {
    * OMITTED from the wire payload, so N=1 validations are byte-identical.
    */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   /**
    * AQU-1572: who performed the gesture — telemetry only, never written to the
    * wire payload. Defaults to a person in the UI.
@@ -392,7 +408,7 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     payload: {
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -425,7 +441,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     payload: {
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -456,6 +472,8 @@ export interface CellWaiveInput {
   reason?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -472,7 +490,7 @@ export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
     payload: {
       ruleId: input.ruleId,
       ...(input.reason ? { reason: input.reason } : {}),
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -486,6 +504,8 @@ export interface CellUnwaiveInput {
   ruleId: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -499,7 +519,7 @@ export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> 
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { ruleId: input.ruleId, ...namedTargetLane(input.targetLang) },
+    payload: { ruleId: input.ruleId, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -538,6 +558,8 @@ export interface CellAudioAttachInput {
   transcription?: string
   /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -592,7 +614,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -626,6 +648,8 @@ export interface CellAudioRenameInput {
   label: string | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -639,7 +663,7 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, label: input.label, ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, label: input.label, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -655,6 +679,8 @@ export interface CellAudioTrimInput {
   trimEndMs: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -682,7 +708,7 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
       audioId: input.audioId,
       trimStartMs: input.trimStartMs,
       trimEndMs: input.trimEndMs,
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -700,6 +726,8 @@ export interface CellAudioPlaceInput {
   targetOffsetMs: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -728,7 +756,7 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -792,6 +820,8 @@ export interface CellAudioMeasureInput {
   durationMs: number
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -809,7 +839,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -825,6 +855,8 @@ export interface CellAudioSelectInput {
   slot: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -838,7 +870,7 @@ export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, slot: input.slot, ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, slot: input.slot, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -902,6 +934,8 @@ export interface CellLaneRetimeInput {
   targetStartMs?: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -931,7 +965,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
       ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -1047,6 +1081,8 @@ export interface CellAudioRemoveInput {
   audioId: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -1060,7 +1096,7 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1083,6 +1119,8 @@ export interface CellAudioValidateInput {
   audioId: string
   /** AQU-1462: lane the member is working in. The vote itself stays shared. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
   source?: TelemetrySource
   /**
@@ -1106,7 +1144,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, ...namedTargetLane(input.targetLang) },
+    payload: { audioId: input.audioId, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   captureCellValidation(true, { // AQU-1572
@@ -1144,7 +1182,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     payload: {
       audioId: input.audioId,
       ...(input.targetUsername ? { targetUsername: input.targetUsername } : {}),
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -1174,6 +1212,8 @@ export interface CellBacktranslationSetInput {
   polished: boolean
   /** AQU-1462: lane whose translation this back-translation describes. */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -1198,7 +1238,7 @@ export async function emitCellBacktranslationSet(
       ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
       targetEventId: input.targetEventId,
       polished: input.polished,
-      ...namedTargetLane(input.targetLang),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })

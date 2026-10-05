@@ -1065,7 +1065,14 @@ export async function handleEventsWriteRequest(
       parentId: rawEvent.parentId ?? null,
       kind: rawEvent.kind,
       author: authResult.event.claims.username,
-      payload: rawEvent.payload,
+      // AQU-1612: the AUTHORIZED payload, not the one off the wire. authorize()
+      // resolves an event that named its lane by `laneId` into the lane's frozen
+      // `targetLang` tag, and the chain slot + head key below are built from that
+      // tag. Reading the raw payload here would key an id-only commit on the
+      // default lane while the claim insert (handlers/cell-events.ts, which uses
+      // the authorized payload) keyed it on the real one — two slots for one
+      // lane, and two commits on a cell both winning.
+      payload: authResult.event.event.payload,
       clientTs: rawEvent.clientTs,
       serverTs,
     }

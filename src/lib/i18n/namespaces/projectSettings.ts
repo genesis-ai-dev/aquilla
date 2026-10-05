@@ -402,6 +402,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
     "projectSettings.info.sourceLanguageLabel": "Source Language",
     "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.smartQuotesLabel": "Smart quotes",
+    "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
     "projectSettings.bible.enableLabel": "Enable Bible resources",
@@ -497,7 +499,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
     "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
@@ -508,7 +510,7 @@ export const projectSettings = defineNamespace({
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
     "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
-    "projectSettings.advancedLlm.modelOverrideHelp": "Optionally specify an OpenRouter model (e.g. {example}).",
+    "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
     "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
@@ -558,7 +560,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.textGroup": "Text validation",
     "projectSettings.validation.audioGroup": "Audio validation",
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
-    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
+    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
@@ -592,6 +594,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.on": "Propagate",
     "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
+
+    // AQU-1573 — the Bible each target language copies quoted verses from.
+    "projectSettings.section.referenceBible": "Reference Bible",
+    "projectSettings.referenceBible.description":
+      "Choose the Bible each language quotes from. When a source line quotes a verse and " +
+      "gives its reference, such as Isaiah 40:25, the AI copies the quoted words from this " +
+      "Bible instead of translating them, and a check warns when a quote does not match. " +
+      "A verse that is only mentioned is translated as usual. It works whether or not Bible resources " +
+      "is on: use it for sermons, devotionals, curriculum and books that quote Scripture.",
+    "projectSettings.referenceBible.defaultLane": "Default language",
+    "projectSettings.referenceBible.none": "None",
+    "projectSettings.referenceBible.optionLabel": "{name} ({language})",
+    "projectSettings.referenceBible.notInstalled": "{id} (not installed)",
+    "projectSettings.referenceBible.noneInstalled":
+      "No reference Bibles are installed on this server yet.",
+    "projectSettings.referenceBible.loading": "Loading the Bibles…",
+    "projectSettings.referenceBible.loadFailed": "Could not load the list of Bibles.",
+    "projectSettings.referenceBible.selectLabel": "Reference Bible for {lane}",
+    "projectSettings.referenceBible.saveFailed": "Could not save that change",
 
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     // AQU-1571: the server refuses the vote up front, for every role, and the
@@ -648,9 +669,9 @@ export const projectSettings = defineNamespace({
       "Decide when audio recordings are downloaded from storage to this device. You " +
       "can switch any time without re-recording — only future loads are affected.",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
     "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
@@ -896,6 +917,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
     "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
+    // AQU-1600: every target lane is archivable, including the former default
+    // one — but a project must keep one active, so the last one's archive
+    // control is disabled with this reason.
+    "projectSettings.languages.lastActiveLaneTooltip":
+      "This is the project's only active lane. Add another target lane before archiving this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
@@ -1056,6 +1082,63 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      // AQU-1573 — Reference Bible card.
+      "projectSettings.section.referenceBible": {
+        description:
+          "Heading of the Project settings card where each target language picks the Bible " +
+          "it copies quoted verses from. \"Reference Bible\" means a published Bible text used " +
+          "as the source of verse wording, not a study tool.",
+      },
+      "projectSettings.referenceBible.description": {
+        description:
+          "Explanation under the Reference Bible heading. \"Bible resources\" is the name of " +
+          "the separate card above it; translate it the same way that card's heading is translated.",
+      },
+      "projectSettings.referenceBible.defaultLane": {
+        description:
+          "Small caption under the project's main target language in the Reference Bible card, " +
+          "marking it as the project's default language.",
+      },
+      "projectSettings.referenceBible.none": {
+        description: "Dropdown option meaning this language quotes from no reference Bible.",
+        maxLength: 24,
+      },
+      "projectSettings.referenceBible.optionLabel": {
+        description: "One Bible in the dropdown, e.g. \"Van Dyck (Arabic)\".",
+        placeholders: {
+          name: "Short name of the Bible, e.g. \"Van Dyck\" or \"King James Version\" (data, not translated).",
+          language: "Language the Bible is written in, in English, e.g. \"Arabic\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.notInstalled": {
+        description:
+          "Shown in the dropdown when the project names a Bible that this server does not have.",
+        placeholders: {
+          id: "The Bible's id as stored in the settings, e.g. \"arb-vandyck\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.noneInstalled": {
+        description:
+          "Shown in the Reference Bible card when the server has no Bibles loaded: on its own, or above " +
+          "the dropdowns when a language still names a Bible from before.",
+      },
+      "projectSettings.referenceBible.loading": {
+        description: "Shown in the Reference Bible card while the list of Bibles loads.",
+      },
+      "projectSettings.referenceBible.loadFailed": {
+        description:
+          "Shown in the Reference Bible card when the list of Bibles could not be loaded, next to a " +
+          "Retry button.",
+      },
+      "projectSettings.referenceBible.selectLabel": {
+        description: "Accessible name of one language's Bible dropdown (read by screen readers).",
+        placeholders: {
+          lane: "The target language's name, e.g. \"Arabic\" (data, not translated).",
+        },
+      },
+      "projectSettings.referenceBible.saveFailed": {
+        description: "Error under a Bible dropdown when the choice could not be saved.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

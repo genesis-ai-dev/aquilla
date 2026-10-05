@@ -1,11 +1,3 @@
-// Overlay of the synced project-wide settings blob onto a ProjectRecord.
-//
-// Lives in lib rather than in useProject because two callers need it:
-// useProject (its read-only overlay) and Project Settings, which owns its own
-// editable settings hook and asks useProject for a record WITHOUT settings.
-// Project Settings tests mock `@/hooks/useProject` wholesale, so the function
-// has to be importable from somewhere else.
-
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
@@ -14,7 +6,7 @@ import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-se
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
  * Mutates a shallow copy — never the input.
  */
-export function overlayProjectSettings(
+export function overlaySettings(
   record: ProjectRecord,
   settings: ProjectWideSettings,
   lanes?: ProjectLaneView[] | null,
@@ -67,10 +59,6 @@ export function overlayProjectSettings(
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
-  // The harmonize floor never rode the overlay, so even Project Settings
-  // opened from the editor's gear showed the default instead of the stored
-  // role (PR1 leftover #2).
-  assign("harmonize_min_role", settings.harmonize_min_role)
   // AQU-490: the audio policy. Must reach the workspace or the gutter control
   // would apply the TEXT project's rules to recordings — the one thing Sam's
   // "separate settings" ruling exists to prevent.
@@ -88,6 +76,14 @@ export function overlayProjectSettings(
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
+  // AQU-1573: which Bible each lane quotes from. Must reach the workspace or
+  // drafting and the quote check would never see the choice. A PatchSettings
+  // `null` means "cleared"; assign() skips null, so it is read as {} here
+  // rather than leaving the old choice in place.
+  assign(
+    "referenceBibleVersions",
+    (settings.referenceBibleVersions as unknown) === null ? {} : settings.referenceBibleVersions,
+  )
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.
@@ -98,6 +94,9 @@ export function overlayProjectSettings(
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
+  assign("harmonize_min_role", settings.harmonize_min_role)
+  // Smart quotes must reach the workspace, where the cell editor reads it.
+  assign("smartQuotes", settings.smartQuotes)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     const merged = { ...record.ttsSettings, ...settings.ttsSettings }

@@ -54,6 +54,13 @@ vi.mock("@/components/org/OrgBreadcrumb", () => ({
 
 import type { ProjectRecord } from "@/lib/parsers/types"
 
+// AQU-1573: the Reference Bible card lists the server's Bibles when the General
+// pane renders on a cloud project; answer locally (none installed).
+vi.mock("@/lib/frontier/reference-bibles", () => ({
+  fetchReferenceBibles: vi.fn(async () => []),
+  fetchReferencePassages: vi.fn(async () => null),
+}))
+
 const PROJECT_ID = "proj-submenu-ia"
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
@@ -408,6 +415,9 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
+    // AQU-1573: the Reference Bible card sits in the General pane of a cloud
+    // project, beside Bible resources (this fixture's server has none installed).
+    expect(screen.getByText("Reference Bible")).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
     // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
     expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()

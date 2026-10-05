@@ -4,6 +4,7 @@ import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import { inCountedFileSql, countedFileSql, notHiddenFileSql } from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 import {
@@ -1321,7 +1322,12 @@ async function fetchPortfolioLanes(
               fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'
+          -- AQU-1626: one progress row per file per lane, so a hidden or
+          -- deleted file contributes one here too — and a lane chip that
+          -- disagreed with the project total beside it is how the caption-track
+          -- inflation first showed up.
+          AND ${inCountedFileSql('fsp')}${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
       // Driven FROM projects, not from project_settings: a project that has
@@ -1431,18 +1437,27 @@ async function fetchPortfolioLanes(
     entry.position = Number(row.position) || 0
   }
   // AQU-1458: a lane is archived when its row says so, or when an older
-  // project only recorded the tag in settings.archivedLanes. The default
-  // lane ('') cannot be archived.
+  // project only recorded the tag in settings.archivedLanes.
+  //
+  // AQU-1600: the former default lane ('') archives like any other, so the
+  // empty tag is carried through both maps instead of being dropped. Only the
+  // ROW can archive it — settings.archivedLanes is a list of non-empty tags
+  // and never names it — so the settings mirror is consulted for non-empty
+  // tags only.
   const archivedTagsByProject = new Map<string, Set<string>>()
   for (const row of settingsRows.results ?? []) {
-    const tags = new Set(readTargetLanes(row.archived_lanes).map((tag) => tag.toLowerCase()))
+    const tags = new Set(
+      readTargetLanes(row.archived_lanes)
+        .map((tag) => tag.toLowerCase())
+        .filter((tag) => tag !== ""),
+    )
     if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
   }
   const archivedRowTags = new Map<string, Set<string>>()
   for (const row of nameRows.results ?? []) {
     if (row.archived_at == null || row.archived_at === "") continue
-    const tag = (row.legacy_tag ?? "").trim().toLowerCase()
-    if (!tag) continue
+    if (row.legacy_tag == null) continue
+    const tag = row.legacy_tag.trim().toLowerCase()
     let tags = archivedRowTags.get(row.project_id)
     if (!tags) {
       tags = new Set()
@@ -1455,9 +1470,8 @@ async function fetchPortfolioLanes(
     const fromRows = archivedRowTags.get(projectId)
     if (!fromSettings && !fromRows) continue
     for (const entry of lanes.values()) {
-      if (!entry.lane) continue
       const key = entry.lane.toLowerCase()
-      if (fromRows?.has(key) || fromSettings?.has(key)) entry.archived = true
+      if (fromRows?.has(key) || (key !== "" && fromSettings?.has(key))) entry.archived = true
     }
   }
   for (const [projectId, lanes] of acc) {
@@ -1538,9 +1552,20 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
             ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
 
-/** Shared join tail — the org default now has to reach the rollups too. */
+/**
+ * Shared join tail — the org default now has to reach the rollups too.
+ *
+ * AQU-1626: the files join carries `countedFileSql`, so a tombstoned file and a
+ * hidden companion (a cue sheet, a linked video's caption track) stay out of
+ * every column above. Without it a 500-cue caption track added 500 untranslated
+ * cells to this org's totals while the plan board — which has always applied the
+ * rule — showed the real number two tiles away. It belongs in the JOIN rather
+ * than the WHERE because this is a LEFT join: in the WHERE it would discard the
+ * project row itself for a project whose only file is hidden, instead of
+ * counting it as empty.
+ */
 const PORTFOLIO_JOINS = `
-       LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
@@ -1594,10 +1619,15 @@ const portfolioCtes = (orgPredicate: string) => `
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
      ), structural_cells AS (
+       -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
+       -- and has to describe the same files the totals above now do. A heading
+       -- inside a hidden or deleted file is no longer in the numerator, so
+       -- subtracting it would push a project's count below its real one.
        SELECT DISTINCT c.project_id, c.file_id, c.cell_id
          FROM cells c
          JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
         WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+          AND ${inCountedFileSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1628,6 +1658,11 @@ const portfolioCtes = (orgPredicate: string) => `
           AND sc.file_id = a.file_id
           AND sc.cell_id = a.cell_id
         WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          -- AQU-1626: takes recorded against a cue sheet or a deleted file are
+          -- not coverage of the work. The recorded-milliseconds sum takes the
+          -- same filter: a tombstoned file's hours are not hours the project
+          -- has banked.
+          AND ${inCountedFileSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
@@ -1682,6 +1717,11 @@ async function aiDraftedByLane(
        FROM cells c
        JOIN pol ON pol.project_id = c.project_id
       WHERE c.side = 'target' AND c.ai_drafted = 1
+        -- AQU-1626: the client divides this by the portfolio's total_cells, so
+        -- it has to be scoped to the same files that total now counts. A
+        -- caption track machine-drafted on import would otherwise push the
+        -- share past 100% against a denominator that no longer includes it.
+        AND ${inCountedFileSql('c')}
         AND NOT (
           pol.excluded AND EXISTS (
             SELECT 1 FROM cells src
@@ -1902,6 +1942,10 @@ export async function getOrgDeletedFiles(
        JOIN projects p ON p.id = f.project_id
       WHERE p.org_id = ?
         AND f.deleted_at IS NOT NULL
+        -- AQU-1626: a hidden companion file is machinery, so deleting its
+        -- parent must not put a "Cues" row in Recently deleted for a person to
+        -- puzzle over (or restore on its own).
+        AND ${notHiddenFileSql('f')}
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
   ).bind(

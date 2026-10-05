@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
+import { HEALTH_SPAN_CLASS, type DraftHealthSpan } from "@/lib/completion/draft-health-spans"
 
 export const EXAMPLE_COLORS = [
   "#3b82f6", "#f97316", "#22c55e", "#a855f7",
@@ -36,12 +37,16 @@ const UNDERLINE_OFFSET_CLASSES = [
 ]
 
 /** A run of text with every range that covers it, most severe LAST (the
- *  innermost span). An empty `ranges` is plain text. */
+ *  innermost span). An empty `ranges` is plain text. `health` is the
+ *  provenance wash under those underlines, when one covers the run. */
 interface DisplayChunk {
   text: string
   start: number
   ranges: RangeHighlight[]
+  health?: HealthDisplaySpan
 }
+
+export type HealthDisplaySpan = DraftHealthSpan & { title?: string }
 
 interface HighlightedTextProps {
   text: string
@@ -50,6 +55,8 @@ interface HighlightedTextProps {
   highlights?: TokenHighlight[]
   /** Byte-range violation highlights. Always rendered. */
   ranges?: RangeHighlight[]
+  /** Display-only AI-draft provenance wash (#946). Layers under violations. */
+  healthSpans?: HealthDisplaySpan[]
   showEvidence?: boolean
   /** Called with the rule id and the span element itself, so callers can
    *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
@@ -58,6 +65,7 @@ interface HighlightedTextProps {
 
 export function HighlightedText({
   text, highlights = [], ranges = [],
+  healthSpans = [],
   showEvidence = false, onRangeClick,
 }: HighlightedTextProps) {
   const highlightMap = useMemo(() => {
@@ -66,20 +74,39 @@ export function HighlightedText({
     return map
   }, [highlights])
 
-  const chunks = useMemo(() => buildDisplayChunks(text, ranges), [ranges, text])
+  const chunks = useMemo(
+    () => buildDisplayChunks(text, ranges, healthSpans),
+    [healthSpans, ranges, text],
+  )
   const hasRanges = chunks.some((chunk) => chunk.ranges.length > 0)
+  const hasHealth = chunks.some((chunk) => chunk.health)
 
-  if (highlights.length === 0 && !hasRanges) return <span>{text}</span>
+  if (highlights.length === 0 && !hasRanges && !hasHealth) return <span>{text}</span>
+
+  // A health wash is one element even where violation boundaries split the
+  // text inside it, so the wash stays continuous under the stacked underlines.
+  const groups: Array<{ health?: HealthDisplaySpan; chunks: DisplayChunk[] }> = []
+  for (const chunk of chunks) {
+    const prev = groups[groups.length - 1]
+    if (prev && prev.health === chunk.health) prev.chunks.push(chunk)
+    else groups.push({ health: chunk.health, chunks: [chunk] })
+  }
 
   return (
     <span>
-      {chunks.map((chunk, i) => {
-        if (chunk.ranges.length > 0) {
-          return <RangeStack key={i} chunk={chunk} onRangeClick={onRangeClick} />
-        }
-        if (!showEvidence || highlights.length === 0) return <span key={i}>{chunk.text}</span>
-        return <EvidenceTokens key={i} text={chunk.text} highlightMap={highlightMap} />
-      })}
+      {groups.map((group, i) => (
+        <HealthSpanWrap key={i} span={group.health}>
+          {group.chunks.map((chunk) => {
+            if (chunk.ranges.length > 0) {
+              return <RangeStack key={chunk.start} chunk={chunk} onRangeClick={onRangeClick} />
+            }
+            if (showEvidence && highlights.length > 0) {
+              return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
+            }
+            return <span key={chunk.start}>{chunk.text}</span>
+          })}
+        </HealthSpanWrap>
+      ))}
     </span>
   )
 }
@@ -127,17 +154,24 @@ function rangeSpanClass(range: RangeHighlight, depth: number): string {
   )
 }
 
-/** Splits the text at every range boundary and hands each run the full set of
- *  ranges covering it. Ranges from different rules can overlap, and one can
- *  sit wholly inside another (EditorTable concatenates spans from every rule
- *  without merging) — every character is emitted exactly once and no finding
- *  is dropped (AQU-1633). */
-function buildDisplayChunks(text: string, ranges: RangeHighlight[]): DisplayChunk[] {
+/** Splits the text at every violation and health-span boundary and hands each
+ *  run the full set of ranges covering it, plus the health wash under it.
+ *  Ranges from different rules can overlap, and one can sit wholly inside
+ *  another (EditorTable concatenates spans from every rule without merging) —
+ *  every character is emitted exactly once and no finding is dropped
+ *  (AQU-1633). */
+function buildDisplayChunks(
+  text: string,
+  ranges: RangeHighlight[],
+  healthSpans: HealthDisplaySpan[],
+): DisplayChunk[] {
   const normalized = normalizeDisplayRanges(text, ranges)
-  if (normalized.length === 0) return [{ text, start: 0, ranges: [] }]
+  const health = normalizeHealthSpans(text, healthSpans)
+  if (normalized.length === 0 && health.length === 0) return [{ text, start: 0, ranges: [] }]
 
   const cuts = new Set<number>([0, text.length])
   for (const range of normalized) { cuts.add(range.start); cuts.add(range.end) }
+  for (const span of health) { cuts.add(span.start); cuts.add(span.end) }
   const offsets = [...cuts].sort((a, b) => a - b)
 
   const chunks: DisplayChunk[] = []
@@ -146,7 +180,12 @@ function buildDisplayChunks(text: string, ranges: RangeHighlight[]): DisplayChun
     const end = offsets[i + 1]
     if (end <= start) continue
     const covering = normalized.filter((range) => range.start <= start && range.end >= end)
-    chunks.push({ text: text.slice(start, end), start, ranges: stackOrder(covering) })
+    chunks.push({
+      text: text.slice(start, end),
+      start,
+      ranges: stackOrder(covering),
+      health: health.find((span) => span.start <= start && start < span.end),
+    })
   }
   return chunks
 }
@@ -164,6 +203,38 @@ function stackOrder(covering: RangeHighlight[]): RangeHighlight[] {
       KIND_PRECEDENCE[b.kind] - KIND_PRECEDENCE[a.kind] ||
       a.ruleId.localeCompare(b.ruleId),
   )
+}
+
+function HealthSpanWrap({
+  span,
+  children,
+}: {
+  span?: HealthDisplaySpan
+  children: ReactNode
+}) {
+  if (!span) return <>{children}</>
+  return (
+    <span
+      data-health-span={span.kind}
+      title={span.title}
+      className={HEALTH_SPAN_CLASS[span.kind]}
+    >
+      {children}
+    </span>
+  )
+}
+
+function normalizeHealthSpans(text: string, spans: HealthDisplaySpan[]): HealthDisplaySpan[] {
+  const length = text.length
+  const out: HealthDisplaySpan[] = []
+  for (const span of spans) {
+    const start = Math.max(0, Math.min(length, span.start))
+    const end = Math.max(0, Math.min(length, span.end))
+    if (start >= end) continue
+    out.push({ ...span, start, end })
+  }
+  out.sort((a, b) => a.start - b.start || b.end - a.end)
+  return out
 }
 
 function normalizeDisplayRanges(text: string, ranges: RangeHighlight[]): RangeHighlight[] {

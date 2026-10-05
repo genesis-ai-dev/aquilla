@@ -41,6 +41,7 @@ import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
 import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
+import { dataTargetTagsFromEvents, ensureProjectLanes } from '../../../db/shared/lanes'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -737,6 +738,29 @@ export async function handleBulkImportRequest(
       clientTs,
       serverTs: serverTs++,
     })
+  }
+
+  // AQU-1240: projection resolves cells.lane_id from `lanes`. Projects created
+  // by /__dev__/seed (and any path that skipped createProjectShared) have no
+  // rows there, so the subquery is NULL and the NOT NULL column 500s the
+  // whole chunk as "DB batch failed". Codex ingest already calls this;
+  // /import did not. Idempotent.
+  try {
+    await ensureProjectLanes(db, body.projectId, {
+      settings: body.file
+        ? {
+            sourceLanguage: body.file.sourceLanguage,
+            targetLanguage: body.file.targetLanguage,
+          }
+        : undefined,
+      dataTargetTags: dataTargetTagsFromEvents(targetEvents),
+    })
+  } catch (err) {
+    console.error('[import] ensure lanes failed:', err)
+    return withCors(
+      Response.json({ error: 'DB batch failed' }, { status: 500 }),
+      request,
+    )
   }
 
   try {

@@ -23,6 +23,7 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { ROLE } from "../types"
+import { ensureProjectLanes } from "../../../db/shared/lanes"
 
 const DEV_USERNAME = "dev"
 const DEV_EMAIL = "dev@local.test"
@@ -412,6 +413,21 @@ async function seedDev(db: AquillaDb): Promise<{
   await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
   await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
   await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
+
+  // AQU-1240: createProjectShared mints source + default-target lanes; this
+  // route INSERTs projects directly, so import/cell writes resolved lane_id
+  // to NULL and POST /import 500'd on the local stack.
+  for (const projectId of [
+    DEV_PROJECT_ID,
+    GENESIS_PROJECT_ID,
+    EXODUS_PROJECT_ID,
+    LEVITICUS_PROJECT_ID,
+    NUMBERS_PROJECT_ID,
+    SHARED_MATTHEW_PROJECT_ID,
+    SHARED_AUDIO_PROJECT_ID,
+  ]) {
+    await ensureProjectLanes(db, projectId)
+  }
 
   await applyDemoTimestamps(db, { userId, aliceId, bobId, carolId, orgId })
 

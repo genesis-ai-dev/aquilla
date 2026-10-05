@@ -548,6 +548,33 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(cellRows).toHaveLength(CELL_COUNT)
   })
 
+  it('creates project lanes and stamps cells.lane_id without the test filler (local /__dev__ seed shape)', async () => {
+    // Production and `pnpm dev` do not install aquilla_test_fill_lane_id.
+    // Without ensureProjectLanes, the lane_id subquery is NULL and Postgres
+    // rejects the cells INSERT — the UI error is HTTP 500 "DB batch failed".
+    const token = await leadToken()
+    const { db, rows, pg } = await makeTestDb()
+    await pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+
+    const req = await makeImportRequest(token, {
+      idPrefix: 'nolanes',
+      cellCount: 2,
+      includeFile: true,
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    expect(await res?.json()).toMatchObject({ accepted: 2 })
+
+    const lanes = await rows<{ role: string; legacy_tag: string | null }>('lanes')
+    expect(lanes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'source', legacy_tag: null }),
+      expect.objectContaining({ role: 'target', legacy_tag: '' }),
+    ]))
+    const cells = await rows<{ lane_id: string | null }>('cells')
+    expect(cells).toHaveLength(2)
+    expect(cells.every((c) => typeof c.lane_id === 'string' && c.lane_id.length > 0)).toBe(true)
+  })
+
   it('cells projection carries derived columns (word_count, content_hash) like the dispatcher', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()

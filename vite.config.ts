@@ -253,6 +253,7 @@ export default defineConfig(({ mode }) => ({
             "scripts/**/*.test.mjs",
             "scripts/lib/e2e-lock.test.ts",
             "scripts/lib/worktree-install-guard.test.ts",
+            "scripts/lib/spawn-command.test.ts",
           ],
         },
       },

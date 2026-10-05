@@ -27,6 +27,7 @@ export default defineConfig({
       // exclude in the root vitest config.
       "lib/e2e-lock.test.ts",
       "lib/worktree-install-guard.test.ts",
+      "lib/spawn-command.test.ts",
     ],
     passWithNoTests: false,
   },

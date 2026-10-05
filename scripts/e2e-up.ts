@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from "node:child_process"
+import { spawnSync } from "node:child_process"
+import { spawn } from "./lib/spawn-command"
 import { existsSync, writeFileSync, rmSync, copyFileSync, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"

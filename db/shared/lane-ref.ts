@@ -53,13 +53,14 @@ export async function resolveLane(
   const laneId = (ref?.laneId ?? "").trim()
   if (laneId) {
     const row = await db
-      .prepare("SELECT legacy_tag FROM lanes WHERE project_id = ? AND id = ?")
+      .prepare("SELECT role, legacy_tag FROM lanes WHERE project_id = ? AND id = ?")
       .bind(projectId, laneId)
-      .first<{ legacy_tag: string | null }>()
-    // An id naming no lane stays the caller's id: reads match nothing and a
-    // write fails its foreign key, both louder than silently widening to
-    // another lane.
-    return { laneId, targetLang: row?.legacy_tag ?? ref?.targetLang ?? "" }
+      .first<{ role: string; legacy_tag: string | null }>()
+    // An unknown id, or the source lane, is not a target lane. Returning the
+    // caller's id would let a read route treat the source lane as a target,
+    // and inventing a tag here would attach the write to a different lane.
+    if (!row || row.role !== "target") return { laneId: null, targetLang: "" }
+    return { laneId, targetLang: row.legacy_tag ?? "" }
   }
   const tag = ref?.targetLang ?? ""
   const row = await db
@@ -124,7 +125,7 @@ export type RequiredLaneRef =
  * Which column the contextual pipeline's live-row uniqueness rules are keyed
  * on in THIS database, right now.
  *
- * Migration 0129 moves `contextual_runs_active`, `contextual_drafts_live` and
+ * Migration 0139 moves `contextual_runs_active`, `contextual_drafts_live` and
  * `scene_briefs_live` from the legacy tag to `lane_id`. The Workers deploy
  * separately from the migration and in either order, so for one window the
  * running code meets the other world's indexes — and the mismatch is not

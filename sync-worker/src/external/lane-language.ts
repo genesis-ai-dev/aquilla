@@ -12,7 +12,6 @@
 // The resolution rule is the client's (`src/lib/lanes/lane-language.ts`), so
 // the preview reports the language the editor would actually send.
 
-import type { AquillaDb } from '../aquilla-db'
 import { laneRowLanguage } from '../../../src/lib/lanes/lane-language'
 
 interface LaneRow {

@@ -2402,6 +2402,29 @@ export async function getOrgCountStructuralCells(env: Env, orgId: number): Promi
   return typeof raw === "boolean" ? raw : DEFAULT_COUNT_STRUCTURAL_CELLS
 }
 
+/**
+ * Whether the org lets bulk text validation sign off untouched AI drafts
+ * (`allowBulkValidateAiDrafts`, off unless the org opts in), resolved through
+ * a project's org. Null for a project with no org.
+ *
+ * Read here, for the project settings response, because the org settings
+ * route answers only org members: a project member who is not in the org got
+ * a 403 there, so the switch always read off for them however the org set it.
+ */
+export async function getOrgAllowBulkValidateAiDraftsForProject(
+  env: Env,
+  projectId: string,
+): Promise<boolean | null> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return null
+  const settings = await loadOrgSettingsBlob(env, project.org_id)
+  return (settings as Record<string, unknown>)?.allowBulkValidateAiDrafts === true
+}
+
 export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
   const settings = await loadOrgSettingsBlob(env, orgId)
   return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)

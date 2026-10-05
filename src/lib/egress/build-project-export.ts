@@ -68,8 +68,8 @@ export interface BuildProjectExportDeps {
    *  naming). Undefined degrades to preset voices — never fatal. */
   ttsSettings?: ProjectTtsSettings
   /** Audio-attachments listings the orchestrator pre-fetched for its
-   *  freshness digest, keyed by fileId — files absent here are fetched via
-   *  fetchAudioAttachments so standalone callers still work. */
+   *  freshness digest, keyed by {@link audioListingKey} — entries absent here
+   *  are fetched via fetchAudioAttachments so standalone callers still work. */
   audioListings?: ReadonlyMap<string, FileAudioAttachmentsResponse>
   onProgress?: (phase: "text" | "audio", done: number, total: number) => void
   signal?: AbortSignal
@@ -117,6 +117,22 @@ const NATIVE_TEXT_BY_FILE_TYPE: Partial<Record<string, NativeTextPlan>> = {
 /** Shared slug convention: path-hostile runs → "-", trimmed. Dots survive the
  *  charset filter, so all-dot results ("."/"..") — which would escape their
  *  zip folder as path segments — take the fallback too. */
+/**
+ * AQU-1591: the key an audio-attachments listing is cached under — per FILE AND
+ * LANE, because a take belongs to one lane now.
+ *
+ * Exported so the orchestrator's pre-fetch (org-egress) and the memo here
+ * cannot drift: a pre-fetch keyed on the file alone would silently miss every
+ * lookup and re-fetch every listing, which is the quiet kind of regression that
+ * only shows up as a slow export.
+ *
+ * NUL as the separator, not `/` or `:` — a lane tag is free text off the
+ * project's settings and could contain either.
+ */
+export function audioListingKey(fileId: string, lane: string): string {
+  return `${fileId}\u0000${lane}`
+}
+
 export function egressSlug(raw: string, fallback: string): string {
   const slug = raw.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")
   return !slug || /^\.+$/.test(slug) ? fallback : slug
@@ -291,21 +307,32 @@ export async function buildProjectExport(
   // (buildCellData doesn't populate them — the workspace merges the per-file
   // audio read separately), so audio modes must fetch the listings and fold
   // them in with mergeCellsWithAudio or every cell reads as "no audio".
-  // Listings are lane-independent → memoized per file, pre-fetched ones from
-  // the orchestrator (its freshness digest) are reused, not fetched twice.
-  const listingByFile = new Map<string, Promise<FileAudioAttachmentsResponse>>()
-  const getAudioListing = (file: EgressFileRef): Promise<FileAudioAttachmentsResponse> => {
-    let promise = listingByFile.get(file.id)
+  //
+  // AQU-1591: memoized per (file, LANE), not per file. Listings used to be
+  // lane-independent because `cell_audio` had no lane at all — one listing
+  // served every unit, which meant a three-language export wrote the same takes
+  // into `audio/fra/`, `audio/swh/` and `audio/por/` whoever had voiced them.
+  // A take belongs to one lane now, so each unit reads its own, and the shared
+  // programme audio comes back in all of them (the read always returns
+  // `role = 'source'`). Pre-fetched ones from the orchestrator (its freshness
+  // digest) are reused under the same key, not fetched twice.
+  const listingByFileLane = new Map<string, Promise<FileAudioAttachmentsResponse>>()
+  const getAudioListing = (
+    file: EgressFileRef,
+    lane: string,
+  ): Promise<FileAudioAttachmentsResponse> => {
+    const key = audioListingKey(file.id, lane)
+    let promise = listingByFileLane.get(key)
     if (!promise) {
-      const prefetched = deps.audioListings?.get(file.id)
+      const prefetched = deps.audioListings?.get(key)
       promise = prefetched
         ? Promise.resolve(prefetched)
         : (async () => {
             const token = await deps.getToken(file.id)
             if (!token) throw new Error(`Couldn't get a read token for ${file.name}.`)
-            return fetchAudioAttachments(selection.projectId, file.id, token)
+            return fetchAudioAttachments(selection.projectId, file.id, token, lane)
           })()
-      listingByFile.set(file.id, promise)
+      listingByFileLane.set(key, promise)
     }
     return promise
   }
@@ -410,7 +437,7 @@ export async function buildProjectExport(
 
     if (audioMode !== null) {
       try {
-        const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file)])
+        const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file, lane)])
         const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
         const result = await assembleAudio({
           cells,

@@ -87,6 +87,17 @@ export const settings = defineNamespace({
     "settings.autoPropagateRepetitions.blocked":
       "Only org maintainers and owners can change this default.",
 
+    // ── BulkValidateAiDraftsSection (Sam, 2026-10-01) ──
+    "settings.bulkValidateAiDrafts.label": "Allow bulk validation of AI drafts",
+    "settings.bulkValidateAiDrafts.description":
+      "When on, \"Validate text\" on a selection and \"Batch validate text…\" " +
+      "also validate AI drafts that nobody has edited. When off, each untouched " +
+      "AI draft has to be opened and validated on its own. Applies to every " +
+      "project in the organization.",
+    "settings.bulkValidateAiDrafts.saveFailed": "Save failed",
+    "settings.bulkValidateAiDrafts.blocked":
+      "Only org maintainers and owners can change this setting.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
@@ -376,6 +387,21 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.bulkValidateAiDrafts.label": {
+        description:
+          "Label of an organization setting (a switch, off by default). When on, " +
+          "the two bulk text-validation actions also sign off AI-generated " +
+          "translations that no person has edited yet; when off, such drafts " +
+          "must be validated one at a time. \"AI drafts\" = machine-drafted " +
+          "translations awaiting human review.",
+      },
+      "settings.bulkValidateAiDrafts.description": {
+        description:
+          "Help text under that switch. The two quoted names are the labels of " +
+          "the actions it affects (the selection bar's \"Validate text\" button " +
+          "and the file menu's \"Batch validate text…\" item) — use the same " +
+          "wording this catalog gives those labels.",
+      },
       "settings.localLlm.detectedOne": {
         description:
           "Confirmation shown under the Model field after \"Detect models\" finds exactly " +

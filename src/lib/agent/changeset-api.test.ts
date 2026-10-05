@@ -218,6 +218,25 @@ describe("rejectChangeset", () => {
 })
 
 describe("commitChangeset", () => {
+  // AQU-1572: the worker reports what the plan applies to PostHog only when
+  // this browser's analytics switch is on, and it can only know by being told.
+  it.each([
+    ["true", "on"],
+    ["false", "off"],
+  ])("states the analytics switch on the commit (stored %s → %s)", async (stored, sent) => {
+    window.localStorage.setItem("aquilla:analyticsEnabled", stored)
+    try {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse(SYNC_TOKEN))
+        .mockResolvedValueOnce(jsonResponse(COMMITTED))
+      await commitChangeset(JWT, PROJECT_ID, CHANGESET_ID)
+      const [commitUrl] = fetchMock.mock.calls[1] as [string, RequestInit]
+      expect(new URL(commitUrl).searchParams.get("analytics")).toBe(sent)
+    } finally {
+      window.localStorage.removeItem("aquilla:analyticsEnabled")
+    }
+  })
+
   it("mints a __project__-scoped sync token, then POSTs commit with it", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(SYNC_TOKEN))

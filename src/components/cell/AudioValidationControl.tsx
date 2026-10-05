@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useState, type SyntheticEvent } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -96,6 +97,11 @@ export function AudioValidationControl({
 }: AudioValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
+  // Closes the list THROUGH Base UI, as the text control does: setting `open`
+  // to false from outside leaves Base UI remembering a click that opened the
+  // list, and while it remembers one it ignores hover, so the check stopped
+  // opening the list on hover after "Remove your validation".
+  const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
   /**
    * audioId → the vote we asked for, plus what the server said at the moment
    * we asked.
@@ -400,7 +406,7 @@ export function AudioValidationControl({
   }
 
   const body = (
-    <Popover open={popoverOpen} onOpenChange={(next: boolean, details: { reason: string; cancel(): void }) => {
+    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void }) => {
       if (!next) { setPopoverOpen(false); return }
       // A press on a line the viewer can still act on is the VOTE, not the
       // popover — the same bargain the text control strikes. Once there is
@@ -471,7 +477,10 @@ export function AudioValidationControl({
                               className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => {
                                 change(take.audioId, false)
-                                if (displayed.length === 1) setPopoverOpen(false)
+                                if (displayed.length === 1) {
+                                  if (listActionsRef.current) listActionsRef.current.close()
+                                  else setPopoverOpen(false)
+                                }
                               }}
                             >
                               <Trash2 className="h-3 w-3" />

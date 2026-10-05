@@ -97,7 +97,8 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `languageEditMinRole` makes the catalog conservative rather than permissive.
 - **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
   `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
-  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  their audio twins `validationRoleFloorAudio`, `validationNamedUsersAudio` and
+  `allowSelfValidationAudio` (AQU-1571), `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
   `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
   are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
   oversight stages like any other (still ask-mode, still human-approved); one that would

@@ -2,10 +2,12 @@
  * AQU-266: Global error boundary + crash telemetry.
  *
  * Wraps the router output so that any unhandled render throw shows a branded
- * recovery screen rather than a white screen of death. Also registers
- * window.onerror + unhandledrejection handlers that funnel uncaught errors into
- * posthog.captureException (consent-gated via the posthog module which already
- * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
+ * recovery screen rather than a white screen of death, and reports the throw
+ * via posthog.captureException (consent-gated via the posthog module which
+ * already respects isAnalyticsEnabled() on init and responds to
+ * onAnalyticsConsentChange). Also registers window error + unhandledrejection
+ * handlers for chunk-reload recovery; uncaught errors reach PostHog through its
+ * own exception autocapture (AQU-1572, see the handlers below).
  *
  * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
@@ -20,6 +22,7 @@ import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isChunkLoadError, recoverFromChunkError } from "@/lib/chunk-reload"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -48,15 +51,25 @@ function DevCrashTrigger() {
 
 // ---------------------------------------------------------------------------
 // Window-level error handlers — registered once when the module first loads.
-// Both forward to posthog.captureException; consent-gating is already baked
-// into posthog.ts (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// They exist for chunk-reload recovery, which must run on every uncaught error.
+//
+// AQU-1572: on the web they no longer report to PostHog. posthog.ts inits with
+// `capture_exceptions: true`, which wraps window.onerror and
+// window.onunhandledrejection itself, so a capture here sent every uncaught
+// error twice.
+//
+// The desktop shell is the exception. posthog-js lazy-loads that autocapture
+// from its CDN as a <script>, and the shell's CSP (`script-src 'self'` in
+// src-tauri/tauri.conf.json) blocks it, so autocapture never starts there and
+// these handlers are the only capture. Consent-gating is baked into posthog.ts
+// either way (opt_out_capturing_by_default + onAnalyticsConsentChange).
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event: ErrorEvent) => {
     const err = event.error instanceof Error
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
-    posthog.captureException(err, { properties: { source: "window.onerror" } })
+    if (isTauriRuntime()) posthog.captureException(err, { source: "window.onerror" })
     recoverFromChunkError(err)
   })
 
@@ -64,7 +77,7 @@ if (typeof window !== "undefined") {
     const err = event.reason instanceof Error
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
-    posthog.captureException(err, { properties: { source: "unhandledrejection" } })
+    if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
     recoverFromChunkError(err)
   })
 }
@@ -149,12 +162,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Not a duplicate of PostHog's autocapture (AQU-1572): React 19 reports an
+    // error a boundary caught to console.error, never to window.onerror, and
+    // `capture_exceptions: true` leaves console errors alone — so this is the
+    // only capture of a render throw. The second argument is the event's
+    // property bag itself; wrapping it in `{ properties: … }` filed all three
+    // under one nested `properties` key instead of as event properties.
     posthog.captureException(error, {
-      properties: {
-        source: "react_error_boundary",
-        boundary: this.props.label ?? "root",
-        componentStack: info.componentStack,
-      },
+      source: "react_error_boundary",
+      boundary: this.props.label ?? "root",
+      componentStack: info.componentStack,
     })
     // Stale-chunk render throws get one automatic reload before showing the
     // "App updated" fallback (see @/lib/chunk-reload).

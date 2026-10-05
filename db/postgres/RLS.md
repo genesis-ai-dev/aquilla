@@ -8,7 +8,7 @@ Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ## What is protected
 
-**21 of the schema's 55 project-scoped tables have RLS enabled.** The list below is
+**25 of the schema's 60 project-scoped tables have RLS enabled.** The list below is
 generated from the migrations; `scripts/rls-coverage.test.ts` fails if this table and
 the migrations disagree, and if any project-scoped table is neither covered nor
 explicitly recorded as uncovered. Before that guard existed this section said "nine
@@ -30,6 +30,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `contextual_drafts` | `rls_contextual_drafts_select` / `_insert` / `_update` | 0074 |
 | `contextual_project_leases` | `rls_contextual_project_leases_select` / `_insert` / `_update` / `_delete` | 0074 |
 | `contextual_run_events` | `rls_contextual_run_events_select` / `_insert` | 0074 |
+| `contextual_run_traces` | `rls_contextual_run_traces_select` / `_insert` / `_delete` | 0136 |
 | `contextual_runs` | `rls_contextual_runs_select` / `_insert` / `_update` | 0074 |
 | `contextual_steering` | `rls_contextual_steering_select` / `_insert` / `_update` | 0074 |
 | `events` | `rls_events_project_access` | 0034 |

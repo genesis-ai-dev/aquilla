@@ -53,6 +53,13 @@ const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
   ),
   "utf8",
 )
+const CONTEXTUAL_TRACES_RLS_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0136_contextual_run_traces_rls.sql",
+  ),
+  "utf8",
+)
 
 beforeAll(async () => {
   // Execute the RLS migration into the shared PGlite.
@@ -63,6 +70,7 @@ beforeAll(async () => {
     await pg.exec(RLS_MIGRATION)
     await pg.exec(ORG_WIDE_FLOOR_MIGRATION)
     await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
+    await pg.exec(CONTEXTUAL_TRACES_RLS_MIGRATION)
   } catch (e) {
     // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
     // policy syntax), log the error and continue — we still get function tests.
@@ -285,6 +293,86 @@ describe("contextual activity RLS migration", () => {
          VALUES ($1, $2, $3, 'file-two', 'run_state', 'bare worker append')`,
         [bareEvent, runTwo, projectTwo],
       )
+    } finally {
+      await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
+    }
+  })
+
+  it("opts contextual_run_traces into exact-project RLS with read, append and prune grants only", async () => {
+    const relation = await pg.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+      `SELECT relrowsecurity, relforcerowsecurity
+         FROM pg_class WHERE oid = 'contextual_run_traces'::regclass`,
+    )
+    expect(relation.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true })
+
+    const policies = await pg.query<{ cmd: string; roles: string; expression: string }>(
+      `SELECT cmd, roles::text AS roles, COALESCE(qual, with_check, '') AS expression
+         FROM pg_policies
+        WHERE tablename = 'contextual_run_traces'
+        ORDER BY cmd`,
+    )
+    expect(policies.rows.map((policy) => policy.cmd)).toEqual(["DELETE", "INSERT", "SELECT"])
+    expect(policies.rows.every((policy) => policy.roles === "{app_runtime}")).toBe(true)
+    expect(policies.rows.every((policy) =>
+      policy.expression.includes("app_contextual_project_scope(project_id)")))
+      .toBe(true)
+
+    // Rows are never rewritten: no UPDATE privilege reaches the runtime role.
+    const grants = await pg.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'app_runtime' AND table_name = 'contextual_run_traces'
+        ORDER BY privilege_type`,
+    )
+    expect(grants.rows.map((grant) => grant.privilege_type)).toEqual(["DELETE", "INSERT", "SELECT"])
+  })
+
+  it("contains app_runtime trace reads, writes and deletes to the scoped project while preserving the bare recorder and retention sweep", async () => {
+    const userId = 8_267_402
+    const projectOne = "trace-rls-project-one"
+    const projectTwo = "trace-rls-project-two"
+    const insertTrace = `INSERT INTO contextual_run_traces
+        (run_id, project_id, tier, model, system_prompt, user_prompt)
+      VALUES ($1, $2, 'draft', 'test-model', 'system', 'user')`
+    const tracedProjects = async () =>
+      (await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_run_traces ORDER BY project_id, id`,
+      )).rows.map((row) => row.project_id)
+
+    await seedUser(userId, "trace-rls-member")
+    await seedProject(projectOne, userId)
+    await seedProject(projectTwo, userId)
+    await seedDirectMember(projectOne, userId)
+    await seedDirectMember(projectTwo, userId)
+    await pg.query(insertTrace, ["run-one", projectOne])
+    await pg.query(insertTrace, ["run-two", projectTwo])
+
+    try {
+      await pg.exec(
+        `SET ROLE app_runtime;
+         SET app.user_id = '${userId}';
+         SET app.project_id = '${projectOne}';`,
+      )
+
+      // Membership in projectTwo is deliberate, as above: the exact project
+      // GUC, not membership alone, is what keeps its prompts out of reach.
+      expect(await tracedProjects()).toEqual([projectOne])
+      await expect(pg.query(insertTrace, ["run-two", projectTwo])).rejects.toThrow(/row-level security/i)
+      await expect(pg.query(`UPDATE contextual_run_traces SET output = 'rewritten'`))
+        .rejects.toThrow(/permission denied/i)
+      const scopedDelete = await pg.query(`DELETE FROM contextual_run_traces`)
+      expect(scopedDelete.affectedRows).toBe(1)
+
+      // The recorder, the traces route and the retention sweep all use the
+      // identity-less runtime handle; both GUCs empty must keep working.
+      await pg.exec("RESET app.user_id; RESET app.project_id;")
+      expect(await tracedProjects()).toEqual([projectTwo])
+      // Also exercises the bigserial sequence grant.
+      await pg.query(insertTrace, ["run-one", projectOne])
+      expect(await tracedProjects()).toEqual([projectOne, projectTwo])
+      const sweep = await pg.query(
+        `DELETE FROM contextual_run_traces WHERE created_at < now() + make_interval(days => 1)`,
+      )
+      expect(sweep.affectedRows).toBe(2)
     } finally {
       await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
     }

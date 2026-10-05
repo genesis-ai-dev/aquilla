@@ -147,6 +147,15 @@ export const workspaceActions: WorkspaceAction[] = [
       // "Validate" key stays for the agent card, whose per-row button is not
       // text-specific and whose accessible name already carries the reference.
       confirmLabelKey: "editor.selection.validateText",
+      // Same summary as the body: a run that would validate nothing (no
+      // permission, nothing here, nothing eligible) cannot be confirmed. The
+      // walk on 10-02 ticked the box, pressed "Validate text" and got only the
+      // body's sentence back as an error toast.
+      canConfirm: (c) => {
+        if (!c.activeFileId) return false
+        const summary = c.batchValidateSummary?.()
+        return !!summary && summary.validatable.length > 0
+      },
     },
     run: (_c, args) => args.runBatchValidate(),
   },

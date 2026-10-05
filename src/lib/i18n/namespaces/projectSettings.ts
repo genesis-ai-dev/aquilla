@@ -288,6 +288,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
     "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
@@ -555,6 +556,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──
+    // Card headings: the text and audio rules each get their own card.
+    "projectSettings.validation.textGroup": "Text validation",
+    "projectSettings.validation.audioGroup": "Audio validation",
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
@@ -592,13 +596,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
-    "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
-    "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
+    // AQU-1571: the server refuses the vote up front, for every role, and the
+    // editor greys the check out; "ignored" and "a contributor's" were both wrong.
+    "projectSettings.validation.allowSelfDescription":
+      "When off, nobody can validate a line whose latest change is their own, whatever " +
+      "their role. Someone else has to.",
+    "projectSettings.validation.namedValidatorsLabel": "Named validators",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
+    // AQU-1571: people off the list cannot vote at all (the server refuses it),
+    // and the field is a member picker, not a comma-separated box.
     "projectSettings.validation.namedValidatorsDescription":
-      "Comma-separated usernames. When set, only these users' votes count toward the " +
-      "threshold (AND'd with the role floor). Leave empty to allow any " +
-      "sufficiently-privileged user.",
+      "When anyone is listed, only these people can validate text, and they still " +
+      "need the minimum role above. Leave empty to allow anyone who meets the " +
+      "minimum role.",
 
     // ── AQU-490: the audio policy, beside the text policy rather than folded
     // into it. Sam's ruling is that these are SEPARATE settings, so every
@@ -1060,6 +1070,14 @@ export const projectSettings = defineNamespace({
           "period. Separated by a middle dot.",
         placeholders: {
           name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
+      "projectSettings.shared.lastEditedOn": {
+        description:
+          "The same provenance line as lastEdited, when the app does not know " +
+          "who saved the shared settings, only when. Not a sentence, no period.",
+        placeholders: {
           date: "Date of that save, already formatted for the viewer's locale.",
         },
       },

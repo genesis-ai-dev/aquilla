@@ -451,8 +451,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
     expect(screen.getByText(/^health$/i)).toBeTruthy()
     // AQU-764: the decay panel is named "Health", not "Retrieval support".
-    // It sits under Validation + Harmonization on this pane.
-    const validationHeading = screen.getByText(/^validation$/i)
+    // It sits under the validation cards + Harmonization on this pane. The
+    // text and audio rules are two cards since 2026-10-03.
+    expect(screen.getByText(/^audio validation$/i)).toBeTruthy()
+    const validationHeading = screen.getByText(/^text validation$/i)
     const retrievalHeading = screen.getByText(/^health$/i)
     expect(
       validationHeading.compareDocumentPosition(retrievalHeading) &

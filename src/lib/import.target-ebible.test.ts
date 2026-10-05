@@ -247,7 +247,12 @@ describe("applyEBibleTargetImport — commit shape", () => {
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
-  it("counts a selected cell without a valid parent as skipped", async () => {
+  // AQU-1669: this used to assert the opposite — that an unchainable selected
+  // cell was quietly "skipped", returning committedCount 0 and reporting
+  // success. That is the silent data loss a partner hit: the dialog closed over
+  // an optimistic patch nobody undid, so the translations looked saved and were
+  // gone on reopen. A selected cell with no AD-2 parent must fail the apply.
+  it("throws instead of silently skipping a selected cell with no valid parent", async () => {
     const missingParent: EBibleMatchResult = {
       matched: [{
         ...matchResult.matched[0],
@@ -262,10 +267,31 @@ describe("applyEBibleTargetImport — commit shape", () => {
       },
     }
 
-    const result = await applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx)
+    await expect(
+      applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx),
+    ).rejects.toThrow(/no event to chain/i)
 
-    expect(result).toEqual({ committedCount: 0, skippedCount: 1 })
+    // Nothing was uploaded and nothing was queued — the failure is total, so
+    // the caller's rollback leaves no half-import behind.
     expect(fetchCalls).toBe(0)
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+  })
+
+  it("fails the whole apply when only SOME selected cells are unchainable", async () => {
+    // The partial case is the dangerous one: the chainable cells would commit,
+    // the rest would vanish, and committedCount would under-report the result
+    // the user approved without ever saying so.
+    const partial: EBibleMatchResult = {
+      ...matchResult,
+      matched: [
+        matchResult.matched[0],
+        { ...matchResult.matched[1], parentId: "" },
+      ],
+    }
+
+    await expect(
+      applyEBibleTargetImport(partial, new Set(["cell-1", "cell-2"]), ctx),
+    ).rejects.toThrow(/no event to chain/i)
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 

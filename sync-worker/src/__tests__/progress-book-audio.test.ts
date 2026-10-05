@@ -297,6 +297,38 @@ describe("audio counts", () => {
     expect(byLane.get("fr")!.audio_count).toBe(0)
   })
 
+  // The source lane's row also reads '' in `target_lang`, and a lane-less take
+  // reads as the '' tag. Joined on that, the source row picked up the default
+  // lane's dubs. It joins on the target-only `join_tag` and counts none.
+  it("puts no dub on the source lane's row", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "lnsrc000", project_id: P, role: "source", name: "Greek", lang_code: "el", legacy_tag: null },
+        { id: "ln000000", project_id: P, role: "target", name: "Swahili", lang_code: "sw", legacy_tag: "" },
+      ],
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "", value: "neno" }),
+      ],
+      cell_audio: [audioSeed({ selected: 1, validator_count: 1, lane_id: null })],
+    })
+    await recompute(db)
+    const r = await db
+      .prepare(
+        `SELECT l.role, p.audio_count, p.audio_validated_count
+           FROM file_section_progress p
+           JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+          WHERE p.project_id = ? AND p.file_id = ? AND p.scope = 'book'`,
+      )
+      .bind(P, F)
+      .all<{ role: string; audio_count: number; audio_validated_count: number }>()
+    const byRole = new Map(r.results.map((row) => [row.role, row]))
+    expect(byRole.get("target")!.audio_count).toBe(1)
+    expect(byRole.get("target")!.audio_validated_count).toBe(1)
+    expect(byRole.get("source")!.audio_count).toBe(0)
+    expect(byRole.get("source")!.audio_validated_count).toBe(0)
+  })
+
   it("counts validated audio only when the SELECTED take has a vote", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],

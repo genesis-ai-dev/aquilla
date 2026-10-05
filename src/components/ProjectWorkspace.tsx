@@ -67,6 +67,7 @@ import {
 } from "@/lib/completion/translate-as-read"
 import { branchingResponseToScoredPairs, fetchBranchingSearch } from "@/lib/sync/branching-search-read"
 import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
+import type { FileTargetImportMode } from "./import/FileTargetImportPanel"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
@@ -1090,6 +1091,10 @@ export function ProjectWorkspace() {
   const [importOpen, setImportOpen] = useState(false)
   // File-scoped target import dialog ("Import target translations into this file").
   const [fileImportOpen, setFileImportOpen] = useState(false)
+  // AQU-1673: which of the two file-target import modes the open dialog is in.
+  // The direct import commits text; "proposal" stages it for review. One
+  // dialog, two menu items — the mode is chosen at open and read by the panel.
+  const [fileImportMode, setFileImportMode] = useState<FileTargetImportMode>("commit")
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -9612,6 +9617,14 @@ export function ProjectWorkspace() {
     },
     runImportIntoFile: () => {
       if (!activeFileId) return
+      setFileImportMode("commit")
+      setFileImportOpen(true)
+    },
+    // AQU-1673: same dialog, same mapping + review, but the reviewed rows are
+    // staged as proposals behind the approval gate instead of committed.
+    runImportProposalsIntoFile: () => {
+      if (!activeFileId) return
+      setFileImportMode("proposal")
       setFileImportOpen(true)
     },
     runTranscribeAll: () => {
@@ -14331,6 +14344,18 @@ export function ProjectWorkspace() {
             applyOptimisticTargetEdits={applyOptimisticTargetEdits}
             excludeFrontMatter={project.importExcludeFrontMatter}
             onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
+            mode={fileImportMode}
+            onProposalsStaged={({ stagedCount, skippedUnchangedCount }) => {
+              // Nothing was written, so there is nothing to revalidate — the
+              // only job here is telling the user where the proposals went.
+              toast.add({
+                title: t("importExport.proposals.staged", { count: stagedCount }),
+                description:
+                  skippedUnchangedCount > 0
+                    ? t("importExport.proposals.skippedUnchanged", { count: skippedUnchangedCount })
+                    : undefined,
+              })
+            }}
           />
         </Suspense>
       )}

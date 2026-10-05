@@ -580,6 +580,12 @@ export async function commitChangesetCore(
         // pending AI draft — identical to an in-app draft. Only the server
         // sets this (validateCommands drops a caller-supplied aiDraft).
         ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
+        // AQU-1673: an "import as proposals" staging carries the uploaded
+        // file's name, so the approved commit records that this text was
+        // imported rather than typed or AI-drafted. Note it does NOT set
+        // `ai_suggestion` — imported text is a human translation from
+        // elsewhere, so the cell must not land as a pending AI draft.
+        ...(cmd.importOrigin ? { imported_origin: cmd.importOrigin } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,

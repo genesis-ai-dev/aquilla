@@ -26,6 +26,10 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
+import {
+  stageTargetImportAsProposals,
+  type StageTargetProposalsResult,
+} from "@/lib/import-file-target-proposals"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { cn } from "@/lib/utils"
@@ -90,7 +94,25 @@ export interface FileTargetImportPanelProps {
    *  source import dialog does, so a wrong file is one click from the file
    *  picker instead of Cancel and the menu again. */
   onBackChange?: (back: FileTargetPanelBack | null) => void
+  /** AQU-1673: where the reviewed translations land.
+   *
+   *  `"commit"` (the default) is the original behaviour — `target.cell.commit`
+   *  events straight into the outbox, so the text becomes committed target
+   *  text and the editor is patched optimistically.
+   *
+   *  `"proposal"` stages the same reviewed rows as ONE changeset of
+   *  `SetTranslation` proposals behind the human approval gate, reviewed like
+   *  an agent proposal. Nothing is written and the editor is NOT patched. */
+  mode?: FileTargetImportMode
+  /** Session JWT — required in `"proposal"` mode to stage the changeset. */
+  jwt?: string | null
+  /** Fired instead of `onImported` once proposals are staged, so the host can
+   *  report the outcome without claiming cells were written. */
+  onProposalsStaged?: (result: StageTargetProposalsResult) => void
 }
+
+/** Where a file-target import's reviewed rows land (AQU-1673). */
+export type FileTargetImportMode = "commit" | "proposal"
 
 export interface FileTargetPanelBack {
   /** Accessible name for the arrow: where it goes. */
@@ -452,7 +474,11 @@ export function FileTargetImportPanel({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
   onBackChange,
+  mode = "commit",
+  jwt,
+  onProposalsStaged,
 }: FileTargetImportPanelProps) {
+  const proposalMode = mode === "proposal"
   const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
@@ -716,6 +742,45 @@ export function FileTargetImportPanel({
     setApplying(true)
     setError(null)
     const selected = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
+
+    // AQU-1673 — proposal mode: stage one changeset behind the approval gate.
+    // Deliberately BEFORE the optimistic patch below: nothing is committed
+    // here, so painting the proposals into the open editor would show the user
+    // text that no cell actually holds — the precise lie this mode exists to
+    // avoid.
+    if (proposalMode) {
+      if (!jwt) {
+        const message = t("importExport.proposals.notStaged", { status: "unauthenticated" })
+        setError(message)
+        onError?.(message, "apply")
+        setApplying(false)
+        return
+      }
+      try {
+        const result = await stageTargetImportAsProposals(matchResult.matched, selectedCellIds, {
+          jwt,
+          projectId,
+          targetLang,
+          sourceFileName: sourceFile.name,
+        })
+        if (result.stagedCount === 0) {
+          // Every ticked row already matched the current translation. Nothing
+          // was staged, so report it in place rather than closing the dialog
+          // over an empty reviewer queue.
+          setError(t("importExport.proposals.nothingToStage"))
+          setApplying(false)
+          return
+        }
+        onProposalsStaged?.(result)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
+        setError(message)
+        onError?.(message, "apply")
+        setApplying(false)
+      }
+      return
+    }
+
     // Optimistic: show imported translations in the open editor immediately
     // (before the local enqueue settles) so the instant-render win is kept.
     applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.incomingText })))
@@ -1117,6 +1182,16 @@ export function FileTargetImportPanel({
           />
         )}
 
+        {/* AQU-1673: say which of the two modes this is, every time. The
+            review list looks identical either way, so the only thing telling
+            the user whether this writes text or queues it for approval is
+            this line. */}
+        <p className="shrink-0 text-xs text-muted-foreground">
+          {proposalMode
+            ? t("importExport.proposals.explainer")
+            : t("importExport.proposals.directExplainer")}
+        </p>
+
         {error && <p className="shrink-0 text-xs text-destructive">{error}</p>}
 
         <div className="flex shrink-0 items-center justify-between">
@@ -1142,7 +1217,13 @@ export function FileTargetImportPanel({
               disabled={selectedCellIds.size === 0 || applying || rematching !== null}
               onClick={handleApply}
             >
-              {t("importExport.review.importCellCount", { count: formatCount(selectedCellIds.size, locale) })}
+              {proposalMode
+                ? t("importExport.review.stageProposalCount", {
+                    count: formatCount(selectedCellIds.size, locale),
+                  })
+                : t("importExport.review.importCellCount", {
+                    count: formatCount(selectedCellIds.size, locale),
+                  })}
             </Button>
           </div>
         </div>

@@ -1102,6 +1102,25 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
+    // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
+    // values land as staged proposals behind the approval gate.
+    "importExport.fileTarget.proposalsTitle": "Import translations as proposals into \"{fileName}\"",
+    "importExport.proposals.explainer": "These translations will be staged as proposals for review — " +
+      "nothing is written to the file until someone approves them.",
+    "importExport.proposals.directExplainer": "These translations are written straight into the file as " +
+      "committed text.",
+    "importExport.proposals.notStaged": "The proposals could not be staged for review (the plan came back " +
+      "\"{status}\"). Nothing was written.",
+    "importExport.proposals.nothingToStage": "Every selected row already matches the current translation, so " +
+      "there is nothing to propose.",
+    "importExport.proposals.staged": plural({
+      one: "{count} proposal staged for review.",
+      other: "{count} proposals staged for review.",
+    }),
+    "importExport.proposals.skippedUnchanged": plural({
+      one: "{count} row skipped — already matches the current translation.",
+      other: "{count} rows skipped — already match the current translation.",
+    }),
     "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
       "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
@@ -1126,6 +1145,10 @@ export const importExport = defineNamespace({
       "yet verified.",
     "importExport.preview.reviewBeforeImporting": "Review before importing",
     "importExport.preview.structuralContentAriaLabel": "Structural content",
+    "importExport.review.stageProposalCount": plural({
+      one: "Propose {count} cell",
+      other: "Propose {count} cells",
+    }),
     "importExport.review.alreadyThereCount": plural({
       one: "{count} already there",
       other: "{count} already there",
@@ -3105,6 +3128,77 @@ export const importExport = defineNamespace({
           "on preview rows that hold structure rather than translatable prose, such " +
           "as a heading or a layout marker. Short noun phrase; sighted users see " +
           "only the dash.",
+      },
+      "importExport.fileTarget.proposalsTitle": {
+        description:
+          "AQU-1673: title of the file-scoped target-import dialog when it was " +
+          "opened in PROPOSAL mode — the translations will be staged for review " +
+          "rather than written. Sibling of importExport.dialog.titleFileTarget " +
+          "(the committing mode); the wording must make the difference obvious, " +
+          "since the two dialogs are otherwise identical.",
+        placeholders: {
+          fileName: "Display name of the open file the translations will be proposed against.",
+        },
+      },
+      "importExport.proposals.explainer": {
+        description:
+          "AQU-1673: one-line statement under the import review list in PROPOSAL " +
+          "mode, saying the rows will be staged for approval and that nothing is " +
+          "written until someone approves. This is the only thing distinguishing " +
+          "the two modes at the point of no return, so it must stay explicit that " +
+          "the file does not change yet.",
+      },
+      "importExport.proposals.directExplainer": {
+        description:
+          "AQU-1673: the same line in the ordinary COMMITTING mode, saying the " +
+          "translations go straight into the file as committed text. Paired with " +
+          "importExport.proposals.explainer — keep the contrast between them clear.",
+      },
+      "importExport.proposals.notStaged": {
+        description:
+          "AQU-1673: error shown when the server answered the staging request but " +
+          "not with a reviewable plan, so the proposals are not in anyone's queue. " +
+          "Must state that nothing was written, because the user has just been " +
+          "through a full review screen and would otherwise assume it landed.",
+        placeholders: {
+          status: "Raw server status word for the plan (e.g. 'stale', 'expired') — not translated, shown verbatim.",
+        },
+      },
+      "importExport.proposals.nothingToStage": {
+        description:
+          "AQU-1673: shown in place of a success when every row the user ticked " +
+          "already matches the cell's current translation, so there was nothing to " +
+          "propose and no changeset was created.",
+      },
+      "importExport.proposals.staged": {
+        description:
+          "AQU-1673: success notification after an import was staged as proposals. " +
+          "Says how many proposals are now waiting for review — deliberately NOT " +
+          "phrased as cells imported or written, because nothing has been applied " +
+          "to the file yet.",
+        placeholders: {
+          count: "Number of proposals staged for review; also selects the plural form.",
+        },
+      },
+      "importExport.proposals.skippedUnchanged": {
+        description:
+          "AQU-1673: supporting line under the staged-proposals notification, " +
+          "reporting how many rows were dropped because their text already matched " +
+          "the cell's current translation. Omitted entirely when none were.",
+        placeholders: {
+          count: "Number of rows skipped as no-ops; also selects the plural form.",
+        },
+      },
+      "importExport.review.stageProposalCount": {
+        description:
+          "AQU-1673: the confirm button on the import review screen in PROPOSAL " +
+          "mode, naming how many ticked cells will be staged for review. Sibling " +
+          "of importExport.review.importCellCount (the committing mode's button) — " +
+          "use a verb meaning 'propose' or 'suggest', never one meaning 'import' " +
+          "or 'save', since this button writes nothing.",
+        placeholders: {
+          count: "Number of ticked cells that will be staged as proposals; also selects the plural form.",
+        },
       },
       "importExport.review.alreadyThereCount": {
         description:

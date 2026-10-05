@@ -30,6 +30,10 @@ interface SetTranslationCommandLike {
   cellId: string
   value: string
   laneId?: string
+  /** AQU-1673: present when the value came from an uploaded translation set
+   *  staged as proposals. Rendered as provenance so a reviewer can tell
+   *  imported text from an AI draft. */
+  importOrigin?: { fileName?: unknown; importedAt?: unknown }
 }
 
 interface PlanImportCommandLike {
@@ -54,6 +58,10 @@ export interface ApprovalChange {
   before: string | null
   /** The text the changeset will write. */
   after: string
+  /** AQU-1673: set only on a proposal imported from a file — the name of that
+   *  file. Absent on AI drafts and on hand-written agent proposals, which is
+   *  exactly the distinction the reviewer needs. */
+  importedFrom?: string
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -175,6 +183,9 @@ export async function buildChangeDetails(
         source: source?.value ?? null,
         before: targetByLane.get(`${key}\u0000${lane}`) ?? null,
         after: s.value,
+        ...(typeof s.importOrigin?.fileName === "string" && s.importOrigin.fileName !== ""
+          ? { importedFrom: s.importOrigin.fileName }
+          : {}),
       }
     }),
   }

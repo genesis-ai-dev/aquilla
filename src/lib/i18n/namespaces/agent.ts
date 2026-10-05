@@ -367,6 +367,9 @@ export const agent = defineNamespace({
       other: "…and {count} more changes.",
     }),
     "agent.changeset.moreCellsPreview": "…and {count} more cells.",
+    // AQU-1673: marks a proposal that came from an imported translation set
+    // rather than from the model, so a reviewer knows a human wrote it.
+    "agent.changeset.importedFrom": "Imported from {fileName}",
     "agent.changeset.approveAgentChanges": "Approve agent changes",
     "agent.changeset.signInNotice": "Sign in to review and approve this changeset.",
     "agent.changeset.approvedFull": "Approved — return to your agent, it can now commit.",
@@ -854,6 +857,14 @@ export const agent = defineNamespace({
           "Truncation notice under a sampled list of per-cell changes in a staged " +
           "changeset, stating how many further changes exist beyond the ones shown.",
         placeholders: { count: "How many additional changes are not shown; also selects the plural form." },
+      },
+      "agent.changeset.importedFrom": {
+        description:
+          "Provenance line on a per-cell change in a staged changeset, naming the " +
+          "file the proposed translation was imported from. Shown only for " +
+          "proposals staged by \"Import as proposals\" — its presence is how a " +
+          "reviewer tells an imported human translation from an AI draft.",
+        placeholders: { fileName: "Name of the uploaded file the translation came from, shown verbatim." },
       },
       "agent.changeset.moreCellsPreview": {
         description:

@@ -342,6 +342,48 @@ export async function commitChangeset(
   )
 }
 
+/** One cell's proposed translation, as `prepareSessionChangeset` sends it.
+ *  Mirrors sync-worker's `SetTranslationCommand` (external/commands.ts) —
+ *  `importOrigin` is the AQU-1673 provenance the worker stamps onto the
+ *  compiled commit as `imported_origin`. */
+export interface SetTranslationCommandInput {
+  kind: "SetTranslation"
+  fileId: string
+  cellId: string
+  value: string
+  /** Omit for the project's default lane. */
+  laneId?: string
+  importOrigin?: { fileName: string; importedAt: number }
+}
+
+/** POST {sync}/api/v1/changesets/:projectId — stage a changeset from the
+ *  signed-in browser (AQU-926's session surface, same engine the Agent API
+ *  uses). Autonomy is forced to `ask` by the worker's session principal, so
+ *  what comes back is always a `staged` plan awaiting human approval; nothing
+ *  is written to any cell until it is approved and committed.
+ *
+ *  Used by "Import as proposals" (AQU-1673) to route an uploaded translation
+ *  set through the approval gate instead of committing it directly. */
+export async function prepareSessionChangeset(
+  jwt: string,
+  projectId: string,
+  commands: readonly SetTranslationCommandInput[],
+): Promise<ChangesetStatus> {
+  const token = await mintProjectSyncToken(jwt, projectId)
+  const res = await fetchWithTimeout(
+    `${syncWorkerHttpOrigin()}/api/v1/changesets/${encodeURIComponent(projectId)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ commands }),
+    },
+  )
+  if (!res.ok) return parseErrorAndThrow(res, "stage changeset failed")
+  return unwrapChangeset(
+    (await res.json()) as ChangesetStatus | { changeset: ChangesetStatus },
+  )
+}
+
 /** POST {sync}/api/v1/changesets/:projectId/:changesetId/discard. */
 export async function discardChangeset(
   jwt: string,

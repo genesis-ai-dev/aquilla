@@ -8,7 +8,8 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
-import type { AiDraftProvenance } from '../events/types'
+import type { AiDraftProvenance, ImportedOriginProvenance } from '../events/types'
+import { IMPORTED_ORIGIN_FILENAME_MAX } from '../events/types'
 import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
@@ -179,6 +180,14 @@ export interface SetTranslationCommand {
    *  rebuilds every command from known keys only, so a caller CANNOT set this
    *  on a hand-written SetTranslation — provenance is never self-asserted. */
   aiDraft?: AiDraftProvenance
+  /** AQU-1673: CALLER-SUPPLIED import provenance — the name of the file this
+   *  value was read out of, stamped onto the compiled commit as
+   *  `imported_origin`. Unlike `aiDraft` this is accepted from the caller,
+   *  because it asserts no authorship and gates nothing: it is a descriptive
+   *  label that lets a reviewer tell imported text from AI-drafted text. It
+   *  never sets `ai_suggestion`, so an imported cell does not read back as an
+   *  AI draft. */
+  importOrigin?: ImportedOriginProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -351,6 +360,19 @@ export type ValidateCommandsResult =
   | { ok: true; commands: Command[] }
   | { ok: false; issues: CommandValidationIssue[] }
 
+/** AQU-1673: validate caller-supplied import provenance and rebuild it from
+ *  known keys only. Returns null when the shape is wrong so the caller can
+ *  report a named validation issue rather than stage unlabelled proposals. */
+export function parseImportOrigin(raw: unknown): ImportedOriginProvenance | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.fileName !== 'string') return null
+  const fileName = o.fileName.trim()
+  if (fileName.length === 0 || fileName.length > IMPORTED_ORIGIN_FILENAME_MAX) return null
+  if (typeof o.importedAt !== 'number' || !Number.isFinite(o.importedAt)) return null
+  return { fileName, importedAt: o.importedAt }
+}
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
 }
@@ -443,6 +465,24 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         })
         return
       }
+      // AQU-1673: parsed, never passed through. A caller may label a value as
+      // imported, but only in this exact shape — the rebuilt command carries
+      // the two known keys and nothing else, so provenance cannot smuggle
+      // extra fields into the compiled event payload.
+      let importOrigin: ImportedOriginProvenance | undefined
+      if (c.importOrigin !== undefined) {
+        const parsed = parseImportOrigin(c.importOrigin)
+        if (!parsed) {
+          issues.push({
+            index,
+            message:
+              'SetTranslation.importOrigin must be { fileName: non-empty string (max ' +
+              `${IMPORTED_ORIGIN_FILENAME_MAX} chars), importedAt: finite epoch-ms number } when present`,
+          })
+          return
+        }
+        importOrigin = parsed
+      }
       commands.push({
         kind: 'SetTranslation',
         fileId: c.fileId,
@@ -450,6 +490,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         value: c.value,
         ...(c.valueHtml !== undefined ? { valueHtml: c.valueHtml } : {}),
         ...(c.laneId !== undefined ? { laneId: c.laneId } : {}),
+        ...(importOrigin ? { importOrigin } : {}),
       })
       return
     }

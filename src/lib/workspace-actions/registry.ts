@@ -206,6 +206,18 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runImportIntoFile(),
   },
   {
+    // AQU-1673: sits right next to the direct import so a partner holding
+    // candidate translations finds it where they already looked. The label
+    // carries the difference ("as proposals for review") because the two
+    // dialogs are otherwise identical until the final button.
+    id: "import-proposals-into-file",
+    labelKey: "nav.workspaceActions.importProposalsIntoFile",
+    icon: Upload,
+    group: "secondary",
+    isAvailable: (c) => c.activeFileId != null,
+    run: (_c, args) => args.runImportProposalsIntoFile(),
+  },
+  {
     id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",
     isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.untranscribed ?? 0) > 0,
     requiresConfirmation: {

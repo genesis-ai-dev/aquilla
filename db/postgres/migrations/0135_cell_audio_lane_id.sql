@@ -1,4 +1,4 @@
--- 0129_cell_audio_lane_id.sql — AQU-1591: audio takes belong to a lane.
+-- 0135_cell_audio_lane_id.sql — AQU-1591: audio takes belong to a lane.
 --
 -- AQU-1200 decided it: audio is per lane. Source audio (the shared programme
 -- audio an import attaches) belongs to the project's source lane; a dub — a

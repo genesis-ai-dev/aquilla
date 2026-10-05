@@ -14,14 +14,14 @@ export const importExport = defineNamespace({
     "importExport.captionTrack.attach": "Attach captions",
     "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
     "importExport.captionTrack.title": "Attach captions to {name}",
-    "importExport.captionTrack.description": "Add captions as a new text track, or explicitly replace the content in an existing track.",
+    "importExport.captionTrack.description": "Add captions as a new text track, or replace the content in an existing track.",
     "importExport.captionTrack.file": "Caption file",
     "importExport.captionTrack.destination": "Destination track",
     "importExport.captionTrack.new": "New caption track",
     "importExport.captionTrack.name": "Track name",
     "importExport.captionTrack.overwrite": plural({
       one: "{count} segment currently in this track will be overwritten.",
-      other: "{count} segments currently in this track will be overwritten.",
+      other: "{count} segments in this track will be overwritten.",
     }),
     "importExport.captionTrack.consent": "Overwrite the existing content in this track",
     "importExport.captionTrack.add": "Add caption track",
@@ -51,7 +51,7 @@ export const importExport = defineNamespace({
     "importExport.scriptAlignment.trackName": "Track name",
     "importExport.scriptAlignment.destination": "Destination track",
     "importExport.scriptAlignment.newTrack": "New track",
-    "importExport.scriptAlignment.overwrite": "{count} segments currently in this track will be overwritten.",
+    "importExport.scriptAlignment.overwrite": "{count} segments in this track will be overwritten.",
     "importExport.scriptAlignment.align": "Align script",
     "importExport.scriptAlignment.aligning": "Aligning script…",
     "importExport.scriptAlignment.use": "Use aligned segments",
@@ -292,7 +292,7 @@ export const importExport = defineNamespace({
       "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project.",
     "importExport.landing.ebible.title": "eBible Corpus",
     "importExport.landing.ebible.hint": "public library",
-    "importExport.landing.ebible.description": "Openly-licensed Bible translations, imported directly — no download.",
+    "importExport.landing.ebible.description": "Bible translations with open licenses. Import them with no download.",
     "importExport.landing.helloao.title": "Bible API",
     "importExport.landing.helloao.hint": "helloao.org",
     "importExport.landing.helloao.description":
@@ -484,7 +484,7 @@ export const importExport = defineNamespace({
     "importExport.upload.idmlReading": "Reading",
     "importExport.upload.idmlCountSuffix": " ({completed}/{total})",
     "importExport.upload.idmlPhase": "{action} {fileName}{count}…",
-    "importExport.upload.oneSpreadsheetAtATime": "Import one spreadsheet at a time so its columns can be mapped safely.",
+    "importExport.upload.oneSpreadsheetAtATime": "Import one spreadsheet at a time so you can map its columns.",
     "importExport.upload.readingFile": "Reading {fileName}…",
     "importExport.upload.analyzingFile": "Analyzing {fileName}…",
     "importExport.upload.parseFailed": "Parse failed",
@@ -933,6 +933,18 @@ export const importExport = defineNamespace({
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
+    // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
+    "importExport.errors.unchainableTargetCells": plural({
+      one:
+        "Import failed: {count} of the {total} selected lines has no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+      other:
+        "Import failed: {count} of the {total} selected lines have no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+    }),
+
     // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
     "importExport.errors.oversizedCells": plural({
       one:
@@ -1083,6 +1095,9 @@ export const importExport = defineNamespace({
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.laneLabel": "Fill which language",
+    "importExport.fileTarget.laneHint": "The translations go into this language. Choosing another one opens it in the editor.",
+    "importExport.fileTarget.laneLoading": "Opening this language… you can choose a file in a moment.",
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
@@ -1133,7 +1148,7 @@ export const importExport = defineNamespace({
       one: "Import {count} cell",
       other: "Import {count} cells",
     }),
-    "importExport.review.looseFitWarning": "Many cues only partly overlap their lines. Check the pairings.",
+    "importExport.review.looseFitWarning": "Many cues cover only part of their lines. Check the pairings.",
     "importExport.review.matchedCount": "{count} matched",
     "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
@@ -2066,6 +2081,20 @@ export const importExport = defineNamespace({
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
       },
+      "importExport.errors.unchainableTargetCells": {
+        description:
+          "Thrown when a target import is asked to fill lines that have no event to " +
+          "attach a translation to, so none of them can be saved. Aquilla chains every " +
+          "translation onto the line's latest event; a line whose events are not known " +
+          "to the app yet — usually because the chosen language's lines had not finished " +
+          "loading — cannot be chained, and the import is abandoned whole rather than " +
+          "saving part of it. The closing sentence is the remedy: reopen the file so the " +
+          "lines load, then import again.",
+        placeholders: {
+          count: "How many of the selected lines could not be chained.",
+          total: "How many lines the user selected for import in total.",
+        },
+      },
       "importExport.errors.oversizedCells": {
         description:
           "Thrown before any upload when one or more parsed cells exceed the server's " +
@@ -2879,6 +2908,30 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.laneLabel": {
+        description:
+          "Label above the language picker on the panel that fills in the open " +
+          "file's translations. The picker chooses which of the project's target " +
+          "languages the uploaded translations are written into, and it only " +
+          "appears when the project has more than one. Short noun phrase, no " +
+          "closing full stop.",
+        maxLength: 32,
+      },
+      "importExport.fileTarget.laneHint": {
+        description:
+          "Small grey note under that language picker, in two short sentences: the " +
+          "first states that the uploaded translations go into the chosen " +
+          "language, the second warns that choosing a different one also switches " +
+          "the language shown in the editor behind the dialog. Keep both " +
+          "sentences — the second is the only warning the user gets.",
+      },
+      "importExport.fileTarget.laneLoading": {
+        description:
+          "Replaces the note under the language picker while the newly chosen " +
+          "language is still loading, during which the file picker is disabled. " +
+          "Reassurance that the wait is short, not an error. Keep the trailing " +
+          "ellipsis on the first clause.",
       },
       "importExport.fileTarget.noCuesInSubtitle": {
         description:

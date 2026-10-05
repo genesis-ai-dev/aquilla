@@ -264,7 +264,7 @@ describe('the per-file read is lane-scoped', () => {
   })
 
   it('reads an un-backfilled take into the default lane', async () => {
-    // Every take that predates migration 0129 has lane_id NULL until the batch
+    // Every take that predates migration 0135 has lane_id NULL until the batch
     // backfill (AQU-1616) runs. The read applies that backfill's own rule, so
     // the answer does not change when it lands — rather than hiding a project's
     // entire audio history until it does.

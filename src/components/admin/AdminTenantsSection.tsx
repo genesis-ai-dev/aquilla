@@ -24,12 +24,15 @@ export function AdminTenantsSection({
   teams,
   onOpenOrg,
   onOpenOrgPath,
+  onOpenInvites,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
   onOpenOrg: (orgId: number) => void
   /** Open an org subpage such as "/members" or "/access". */
   onOpenOrgPath: (orgId: number, subpath: string) => void
+  /** Open the admin invites tab with this org pre-selected. */
+  onOpenInvites?: (orgId: number) => void
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -98,12 +101,12 @@ export function AdminTenantsSection({
       },
       {
         // AQU-1071: the billing band's own count, per tenant. Sorts missing last
-        // so a server without the field cannot read as "fewest languages".
+        // so a server without the field cannot read as "fewest lanes".
         id: "languages",
         accessorFn: (o) => missingLast(o.activeLanguageCount),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Languages" className="justify-end" />
+          <DataTableColumnHeader column={column} title="Lanes" className="justify-end" />
         ),
         cell: ({ row }) =>
           row.original.activeLanguageCount == null ? (
@@ -134,6 +137,10 @@ export function AdminTenantsSection({
             e.stopPropagation()
             onOpenOrgPath(orgId, subpath)
           }
+          const openInvites = (e: MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation()
+            onOpenInvites?.(orgId)
+          }
           const linkClass = "text-xs text-primary hover:underline"
           return (
             <div className="flex justify-end gap-3 whitespace-nowrap">
@@ -143,12 +150,17 @@ export function AdminTenantsSection({
               <button type="button" className={linkClass} onClick={open("/access")}>
                 People &amp; access
               </button>
+              {onOpenInvites && (
+                <button type="button" className={linkClass} onClick={openInvites}>
+                  Invites &amp; links
+                </button>
+              )}
             </div>
           )
         },
       },
     ],
-    [teamCountByOrg, onOpenOrgPath],
+    [teamCountByOrg, onOpenOrgPath, onOpenInvites],
   )
 
   return (

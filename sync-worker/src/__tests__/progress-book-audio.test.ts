@@ -238,7 +238,7 @@ describe("audio counts", () => {
     expect(byLane.get("")!.audio_validated_count).toBe(0)
   })
 
-  // Every take predating migration 0129 has lane_id NULL until the batch
+  // Every take predating migration 0135 has lane_id NULL until the batch
   // backfill (AQU-1616) runs, and that backfill puts a tag-less dub on the lane
   // whose legacy_tag is ''. The CTE reads a NULL the same way, so these numbers
   // do not move when the backfill lands — the alternative was every project's

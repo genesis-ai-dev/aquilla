@@ -9,6 +9,7 @@
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import type { AiDraftProvenance } from '../events/types'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -189,6 +190,13 @@ export interface PlanImportCommand {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file text direction, stamped onto the created file row. OMIT
+   *  IT unless this one file really runs against the project — absent means the
+   *  project's `sourceTextDirection`/`targetTextDirection` setting decides (and
+   *  below that, the language), so a whole RTL project is one PatchSettings
+   *  rather than one override per import. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
   /** Optional uploaded artifact to preserve + link to the created file. */
   artifactId?: string
   /** Optional normalized profile/recipe selected by the unified importer. */
@@ -466,6 +474,14 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'PlanImport.artifactId must be a non-empty string when present' })
         return
       }
+      let directionInvalid = false
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (c[key] !== undefined && normalizeTextDirection(c[key]) === null) {
+          issues.push({ index, message: `PlanImport.${key} must be "ltr" or "rtl" when present` })
+          directionInvalid = true
+        }
+      }
+      if (directionInvalid) return
       if (!Array.isArray(c.cells)) {
         issues.push({ index, message: 'PlanImport.cells must be an array' })
         return
@@ -634,6 +650,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         fileType: c.fileType,
         ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage as string } : {}),
         ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage as string } : {}),
+        ...(c.sourceTextDirection !== undefined ? { sourceTextDirection: c.sourceTextDirection as TextDirection } : {}),
+        ...(c.targetTextDirection !== undefined ? { targetTextDirection: c.targetTextDirection as TextDirection } : {}),
         ...(c.artifactId !== undefined ? { artifactId: c.artifactId as string } : {}),
         ...(manifest ? { manifest } : {}),
         cells,

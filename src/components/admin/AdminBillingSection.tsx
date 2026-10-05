@@ -158,7 +158,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
             <span className="text-muted-foreground"> / {formatAgentCredits(row.original.allowanceCredits)}</span>
             {normalizeBillingPlan(row.original.plan) === "enterprise" ? (
               <div className="text-[10px] text-muted-foreground">
-                {row.original.languageCount} language{row.original.languageCount === 1 ? "" : "s"}
+                {row.original.languageCount} lane{row.original.languageCount === 1 ? "" : "s"}
               </div>
             ) : null}
           </div>
@@ -255,7 +255,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <AmountField label="Field Plan ($ / 4 weeks)" value={price} onChange={setPrice} />
           <AmountField label="Add-on credits / pack" value={addonCredits} onChange={setAddonCredits} />
           <AmountField label="Add-on ($ / pack)" value={addonPrice} onChange={setAddonPrice} />
-          <AmountField label="Enterprise credits / language / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
+          <AmountField label="Enterprise credits / lane / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button onClick={() => void saveCatalog()} disabled={busy || !catalog} data-testid="save-field-plan">

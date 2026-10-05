@@ -230,6 +230,9 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         // belongs to the lane it was generated in. Without the tag it landed in
         // the default lane and was heard there instead.
         ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        // AQU-1572: one event per cell the clip was attached to, matching the
+        // per-cell shape of every other audio event.
+        audioOrigin: "generate",
         author: username,
       })
     }

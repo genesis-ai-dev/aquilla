@@ -65,6 +65,13 @@ export interface CellRow {
    * is shared by all lanes. Optional so cached/older responses parse.
    */
   targetLang?: string
+  /**
+   * AQU-1240: the lane's opaque `lanes.id`. Null/absent until AQU-1616's
+   * backfill has populated `cells.lane_id` (and on a cached/older response),
+   * so a consumer that keys by lane must fall back to `targetLang` — see
+   * `localLaneKey` in src/lib/offline/schema.ts.
+   */
+  laneId?: string | null
   value: string
   /** Rich-text variant. Null for plain-text cells. */
   valueHtml: string | null

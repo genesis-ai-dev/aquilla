@@ -31,6 +31,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
@@ -391,6 +392,8 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
+  /** Curly quotes as you type, in `lang`'s style. Read when the editor mounts. */
+  smartQuotes?: boolean
   /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -490,6 +493,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   textDirection = "ltr",
   directionMode = "ltr",
   lang,
+  smartQuotes = false,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -786,6 +790,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
             () => latestTerminologyConceptsRef.current,

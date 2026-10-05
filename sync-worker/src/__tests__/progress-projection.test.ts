@@ -250,6 +250,105 @@ describe('GET file progress', () => {
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
+  it('reports an empty lane as unfilled when only another lane has translations', async () => {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [{ id: PROJECT, name: 'Genesis', org_id: 1 }],
+      project_settings: [{
+        project_id: PROJECT,
+        settings: JSON.stringify({ countStructuralCells: false, validationCount: 1 }),
+        version: 1,
+      }],
+      lanes: [
+        { id: 'lane-default', project_id: PROJECT, role: 'target', name: 'Spanish', legacy_tag: '' },
+        { id: 'lane-fr', project_id: PROJECT, role: 'target', name: 'French', legacy_tag: 'fr' },
+      ],
+      files: [{
+        id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event',
+        cell_count: 10, structural_cell_count: 2,
+        filled_count: 8, structural_filled_count: 4,
+        approved_count: 3, structural_approved_count: 1,
+      }],
+      file_section_progress: [{
+        project_id: PROJECT, file_id: FILE, scope: 'file', section_key: '',
+        target_lang: 'fr', lane_id: 'lane-fr',
+        total_count: 10, structural_count: 2,
+        filled_count: 8, structural_filled_count: 1,
+        validator_histogram: { '1': 3 },
+        structural_validator_histogram: { '1': 1 },
+        revision: 3, updated_at: 3,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const read = async (lane: string) => {
+      const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress${lane}`
+      const response = (await handleProgressReadRequest(new Request(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+      expect(response.status).toBe(200)
+      return response.json() as Promise<FileProgressResponse>
+    }
+
+    const empty = await read('')
+    expect(empty.source).toBe('file-counter-fallback')
+    expect(empty.file).toMatchObject({ totalCount: 8, filledCount: 0, validatedCount: 0 })
+
+    const french = await read('?lane=fr')
+    expect(french.source).toBe('projection')
+    expect(french.file).toMatchObject({ totalCount: 8, filledCount: 7, validatedCount: 2 })
+  })
+
+  it('uses the files counters when a single-lane project has no progress rows', async () => {
+    const counters = {
+      cell_count: 10, structural_cell_count: 2,
+      filled_count: 8, structural_filled_count: 4,
+      approved_count: 3, structural_approved_count: 1,
+    }
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [
+        { id: PROJECT, name: 'Genesis', org_id: 1 },
+        { id: 'proj-none', name: 'Bare', org_id: 1 },
+      ],
+      project_settings: [
+        {
+          project_id: PROJECT,
+          settings: JSON.stringify({ countStructuralCells: false, validationCount: 2 }),
+          version: 1,
+        },
+        {
+          project_id: 'proj-none',
+          settings: JSON.stringify({ countStructuralCells: false, validationCount: 2 }),
+          version: 1,
+        },
+      ],
+      lanes: [
+        { id: 'lane-default', project_id: PROJECT, role: 'target', name: 'Spanish', legacy_tag: '' },
+      ],
+      files: [
+        { id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event', ...counters },
+        { id: 'file-none', project_id: 'proj-none', name: 'Bare', event_id: 'file-none', ...counters },
+      ],
+    })
+    const read = async (projectId: string, fileId: string) => {
+      const token = await makeTestToken(SECRET, { projectId, fileId })
+      const response = (await handleProgressReadRequest(new Request(
+        `https://worker/api/v1/projects/${projectId}/files/${fileId}/progress`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+      expect(response.status).toBe(200)
+      return response.json() as Promise<FileProgressResponse>
+    }
+    // Parked at the threshold (2): 3 approved minus 1 structural. No lanes
+    // yet is the same case as the one lane above.
+    const oneLane = await read(PROJECT, FILE)
+    expect(oneLane.source).toBe('file-counter-fallback')
+    expect(oneLane.file).toMatchObject({ totalCount: 8, filledCount: 4, validatedCount: 2 })
+    const noLanes = await read('proj-none', 'file-none')
+    expect(noLanes.source).toBe('file-counter-fallback')
+    expect(noLanes.file).toMatchObject({ totalCount: 8, filledCount: 4, validatedCount: 2 })
+  })
+
   it('returns compact verse state, with the cell id, only when a chapter is explicitly requested', async () => {
     const { db } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))

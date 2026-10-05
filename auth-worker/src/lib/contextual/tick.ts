@@ -16,6 +16,7 @@
 // the [[ctx:*]] prompt markers.
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import {
   getRun,
   failRun,
@@ -1003,6 +1004,12 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    shared.ctx.targetLanguage,
+  )
   try {
     report = await runSpan({
       seed,
@@ -1020,9 +1027,7 @@ async function processSpan(
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(run.targetLang || shared.ctx.targetLanguage
-        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
-        : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.

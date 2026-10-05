@@ -36,6 +36,8 @@ import {
   MAX_COMPLETION_BATCH_SIZE,
   completionBatchSizeFromSettings,
 } from "../../../db/shared/completion-batch"
+import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
+import { languageOfTargetLane } from "../../../db/shared/lane-language"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -162,15 +164,22 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   }
 
   let costCents = 0
+  let lane = body.laneId ?? ""
+  if (lane) {
+    const resolved = await resolveLaneIdOrTag(db, body.projectId, lane)
+    if (resolved.laneId) {
+      lane = resolved.laneId
+      const fromLane = await languageOfTargetLane(db, body.projectId, resolved.laneId)
+      if (fromLane) targetLanguage = fromLane
+    }
+  }
   const gen = await generateDrafts(
     db,
     { fileId: body.fileId, cellIds: body.cellIds, limit: body.cellIds.length, instructions: body.instructions },
     {
       projectId: body.projectId,
       focusedFileId: body.fileId,
-      // AQU-1610: whatever the external DraftCells command carried — a tag
-      // today, a real lane id after AQU-1615 — resolved either way downstream.
-      lane: body.laneId ?? "",
+      lane,
       aliases: new AliasMap(),
       sourceLanguage,
       targetLanguage,

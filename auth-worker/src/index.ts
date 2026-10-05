@@ -89,7 +89,6 @@ import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
-import referenceBiblesRoutes from "./routes/reference-bibles"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
@@ -399,9 +398,6 @@ app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
-// AQU-1573: installed reference Bibles (Settings card) and verse lookups
-// (copilot drafting block, live quote check). Any signed-in user.
-app.route("/api/v2/reference-bibles", referenceBiblesRoutes)
 
 // Usage stats (read-only): per-user Preferences page + per-org Overview dashboard.
 // /api/v1/usage/me (JWT-authed), /api/v1/usage/org/:orgId (maintainer-gated).

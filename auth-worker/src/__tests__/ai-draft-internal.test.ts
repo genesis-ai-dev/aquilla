@@ -11,8 +11,6 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser } from "./helpers/db"
-import { installFixtureReferenceBibles } from "../../../db/shared/reference-bible-fixtures"
-import { lookupPassages } from "../../../db/shared/reference-bible"
 
 const PROJECT = "proj-draft-1"
 
@@ -220,37 +218,5 @@ describe("POST /api/v1/ai/agent/internal/draft-cells", () => {
     expect(ledger?.rail).toBe("agent")
     // Two model calls at cost 0.0001 each → 0.02 cents raw.
     expect(Number(ledger?.raw_cost_cents)).toBeCloseTo(0.02, 4)
-  })
-
-  // AQU-1573: DraftCells is how an agent drafts LOTE's Arabic sermons; a cell
-  // that quotes Isaiah 40:25 must reach both passes with the Van Dyck wording.
-  it("adds the lane's cited reference-Bible verses to both passes, Bible resources off", async () => {
-    await installFixtureReferenceBibles(env.AQUILLA_PG)
-    await seedProject({
-      roleLevel: 400,
-      cells: 0,
-      settings: {
-        sourceLanguage: "English",
-        targetLanguage: "Arabic",
-        bibleResourcesEnabled: false,
-        referenceBibleVersions: ["arb-vandyck"],
-      },
-    })
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at)
-       VALUES (?, 'file-d', 'c1', 'source', ?, ?, 0)`,
-    )
-      .bind(PROJECT, 'Isaiah 40:25 says, "To whom will you compare me?"', crypto.randomUUID())
-      .run()
-    const calls = mockDraftModel(["مسودة"])
-
-    const res = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, cellIds: ["c1"] })
-    expect(res.status).toBe(200)
-    const { passages } = await lookupPassages(env.AQUILLA_PG, "arb-vandyck", ["ISA 40:25"])
-    expect(calls).toHaveLength(2)
-    for (const call of calls) {
-      const system = (call.body.messages as { content: string }[])[0].content
-      expect(system).toContain(`- Isaiah 40:25 [ISA 40:25]: ${passages[0].verses[0].text}`)
-    }
   })
 })

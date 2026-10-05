@@ -16,7 +16,6 @@ import {
   checkScopeSummary,
   termFindingHeadline,
   findingCellLabel,
-  findingRowNumbers,
 } from "./CheckFindingsDrawer"
 import type { CheckRunResult, TermConsistencyFinding } from "@/lib/check/deterministic-check"
 import type { CellData } from "@/hooks/useCells"
@@ -223,84 +222,5 @@ describe("findingCellLabel", () => {
   it("falls back to the id only when the cell is unknown or untimed", () => {
     expect(findingCellLabel(undefined, "uuid-1")).toBe("uuid-1")
     expect(findingCellLabel(mk({ context: "GEN 1:1" }), "uuid-2")).toBe("uuid-2")
-  })
-})
-
-// ── AQU-1573: sermon (Markdown) rows and Reference Bible findings ──────────
-
-describe("findingCellLabel row fallback (AQU-1573)", () => {
-  const mk = (o: Partial<CellData>): CellData => ({ id: "x", context: "", ...o }) as unknown as CellData
-
-  it("uses the row label for a known cell with no verse label or cue time", () => {
-    expect(findingCellLabel(mk({ context: "" }), "uuid-1", "Row 6")).toBe("Row 6")
-  })
-
-  it("still prefers a verse label or a cue time over the row label", () => {
-    expect(findingCellLabel(mk({ cellLabel: "MAT 1:1" }), "uuid-1", "Row 6")).toBe("MAT 1:1")
-    expect(findingCellLabel(mk({ context: "00:00:01.000 --> 00:00:02.000" }), "uuid-1", "Row 6"))
-      .toBe("0:01.0–0:02.0")
-  })
-
-  it("keeps the id for a cell the drawer does not know", () => {
-    expect(findingCellLabel(undefined, "uuid-1", "Row 6")).toBe("uuid-1")
-  })
-})
-
-describe("findingRowNumbers (AQU-1573)", () => {
-  const mk = (id: string, type: string, metadata?: Record<string, unknown>): CellData =>
-    ({ id, type, context: "", metadata }) as unknown as CellData
-
-  it("numbers content rows like the editor gutter, skipping headings", () => {
-    const numbers = findingRowNumbers([
-      mk("h", "heading"),
-      mk("a", "text"),
-      mk("b", "text"),
-      mk("t", "text", { aquillaImport: { displayLabel: null } }),
-      mk("c", "text"),
-    ])
-    expect(numbers.get("a")).toBe(1)
-    expect(numbers.get("b")).toBe(2)
-    expect(numbers.get("c")).toBe(3)
-    // Unnumbered rows keep their plain position.
-    expect(numbers.get("h")).toBe(1)
-    expect(numbers.get("t")).toBe(4)
-  })
-})
-
-describe("CheckFindingsDrawer — Reference Bible findings (AQU-1573)", () => {
-  it("titles a sermon row by its row number and says what is wrong with the quote", () => {
-    const cells = [
-      { ...makeCell("h1", "", "عنوان"), type: "heading" },
-      makeCell("c1", "", "قال المرنم: الرب راعيّ فلا يعوزني شيء (مز 23: 1)."),
-    ] as CellData[]
-    const result: CheckRunResult = {
-      ...baseResult,
-      ruleFindings: [{
-        rule: {
-          id: "builtin:reference-quote", name: "Reference Bible quotes", description: "",
-          severity: "minor", source: "builtin", scope: "project", enabled: true, createdAt: "2026-01-01",
-        } as unknown as CheckRunResult["ruleFindings"][number]["rule"],
-        infractions: [{
-          ruleId: "builtin:reference-quote", cellId: "c1", fileId: "f1",
-          reason: "builtin:reference-quote",
-          reasonParams: { kind: "missing", refs: "Psalm 23:1", version: "Van Dyck" },
-          spans: [{ side: "source", start: 40, end: 47, matchedText: "Ps 23:1" }],
-        }],
-      }],
-      totalFindingCount: 1,
-    }
-    render(
-      <CheckFindingsDrawer
-        result={result} running={false} cells={cells}
-        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
-      />,
-    )
-    expect(screen.getByText("Row 1")).toBeTruthy()
-    expect(screen.queryByText("c1")).toBeNull()
-    expect(
-      screen.getByText("The source quotes Psalm 23:1, but the translation does not use the Van Dyck wording"),
-    ).toBeTruthy()
-    // The bare reference alone said nothing about the problem.
-    expect(screen.queryByText('matched "Ps 23:1"')).toBeNull()
   })
 })

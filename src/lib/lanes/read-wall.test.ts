@@ -102,39 +102,6 @@ describe("lane read wall", () => {
     expect(named.settings.targetLanes).toEqual(["Yoruba Team"])
   })
 
-  it("keeps only the granted lanes' reference Bibles (AQU-1573 review)", () => {
-    const lanes = [
-      { id: "def", name: "Arabic", legacyTag: "" },
-      { id: "en", name: "Plain English", legacyTag: "en" },
-      { id: "fr", name: "French", legacyTag: "fr" },
-    ]
-    const settings = {
-      targetLanguage: "Arabic",
-      targetLanes: ["Arabic", "en", "fr"],
-      referenceBibleVersions: { "": "arb-vandyck", en: "eng-kjv", fr: "fra-x" },
-    }
-    const english = filterSettingsToVisibleLanes({ settings }, new Set(["en"]), lanes)
-    expect(english.settings.referenceBibleVersions).toEqual({ en: "eng-kjv" })
-    expect(english.settings.targetLanguage).toBe("")
-    expect(filterSettingsToVisibleLanes({ settings }, new Set(["def"]), lanes).settings.referenceBibleVersions).toEqual({
-      "": "arb-vandyck",
-    })
-    expect(filterSettingsToVisibleLanes({ settings }, new Set<string>(), lanes).settings.referenceBibleVersions).toEqual({})
-    // The array form and a primary-language key both mean the default lane.
-    const arrayForm = { ...settings, referenceBibleVersions: ["arb-vandyck"] }
-    expect(filterSettingsToVisibleLanes({ settings: arrayForm }, new Set(["en"]), lanes).settings.referenceBibleVersions).toEqual({})
-    expect(filterSettingsToVisibleLanes({ settings: arrayForm }, new Set(["def"]), lanes).settings.referenceBibleVersions).toEqual({
-      "": "arb-vandyck",
-    })
-    const named = { ...settings, referenceBibleVersions: { Arabic: "arb-vandyck", EN: "eng-kjv" } }
-    expect(filterSettingsToVisibleLanes({ settings: named }, new Set(["en"]), lanes).settings.referenceBibleVersions).toEqual({
-      EN: "eng-kjv",
-    })
-    // Unrestricted callers and settings without the key are untouched.
-    expect(filterSettingsToVisibleLanes({ settings }, null, lanes).settings).toBe(settings)
-    expect("referenceBibleVersions" in filterSettingsToVisibleLanes({ settings: { targetLanguage: "Arabic" } }, new Set(["en"]), lanes).settings).toBe(false)
-  })
-
   it("sums only the granted lanes and hides the default language name", () => {
     const lanes = [
       { id: "def", name: "Spanish", legacyTag: "" },

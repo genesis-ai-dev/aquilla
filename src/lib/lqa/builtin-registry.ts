@@ -9,10 +9,6 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
-import * as referenceQuote from "./check-functions/reference-quote"
-import type { BuiltinCheckContext, BuiltinCheckResult } from "./check-context"
-
-export type { BuiltinCheckContext, BuiltinCheckResult } from "./check-context"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -22,11 +18,7 @@ export interface BuiltinCheckDefinition {
   defaultEnabled: boolean
   /** True if the check should run even when target is empty. */
   runsOnEmptyTarget: boolean
-  /** `ctx` carries what a check needs beyond the cell (AQU-1573: the lane's
-   *  reference Bible). A check may return `{ spans, params }` when its
-   *  localized reason names something (rule-engine.ts maps `params` onto
-   *  `reasonParams`). */
-  run: (source: string, target: string, ctx?: BuiltinCheckContext) => BuiltinCheckResult
+  run: (source: string, target: string) => InfractionSpan[] | null
   /** Static copy, or a builder that derives copy from the offending spans
    *  (e.g. placeholder-integrity names the missing token). Dead field as of
    *  AQU-832 — no consumer reads it (rule-engine.ts uses only `run` and
@@ -148,21 +140,6 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
-  // AQU-1573: on by default; the quote findings stay silent until a lane
-  // names a reference Bible, while a dropped chapter-and-verse reference is
-  // flagged on any lane. Minor (amber) because it is a warning, never a block
-  // (Sam, 2026-10-02).
-  "reference-quote": {
-    id: "reference-quote",
-    name: "Reference Bible quotes",
-    description:
-      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine. The translation must also keep each reference's chapter and verse numbers.",
-    defaultSeverity: "minor",
-    defaultEnabled: true,
-    runsOnEmptyTarget: false,
-    run: referenceQuote.runCheck,
-    message: referenceQuote.MESSAGE,
-  },
 }
 
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
@@ -176,5 +153,4 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
-  "reference-quote",
 ]

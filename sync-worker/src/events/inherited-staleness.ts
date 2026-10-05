@@ -40,6 +40,7 @@
 // not a design constraint.
 
 import { contentHash } from "./event-projection"
+import { isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
 
 const MAX_HOPS = 32
 
@@ -53,6 +54,15 @@ interface LinkChainLink {
   mode: string | null
   consumes: "source" | "target"
   cursor: number
+  /** Upstream lane this hop consumes. Null means the ancestor's `legacy_tag = ''` lane. */
+  laneId: string | null
+}
+
+/** A target lane this hop's queries are pinned to. `id` may be empty when the
+ *  '' lane has no row yet; rows that lack `lane_id` then match on `tag`. */
+interface ConsumedTargetLane {
+  id: string
+  tag: string
 }
 
 /** Load one project's link row (id, upstream, mode, consumes, cursor). */
@@ -70,13 +80,64 @@ async function loadLinkChainLink(db: AquillaDb, projectId: string): Promise<Link
       source_link_cursor: number | string
     }>()
   if (!row) return null
+  // AQU-1644: the consumed lane (migration 0138) is its own statement so a
+  // database that predates the column still walks the '' lane. Only 42703 is
+  // that case.
+  let laneId: string | null = null
+  try {
+    const lane = await db
+      .prepare("SELECT source_link_lane_id FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ source_link_lane_id: string | null }>()
+    laneId = lane?.source_link_lane_id ?? null
+  } catch (err) {
+    if (!isUndefinedColumn(err)) throw err
+  }
   return {
     projectId,
     sourceProjectId: row.source_project_id,
     mode: row.source_link_mode,
     consumes: row.source_link_consumes === "target" ? "target" : "source",
     cursor: Number(row.source_link_cursor ?? 0),
+    laneId,
   }
+}
+
+/** NULL `source_link_lane_id` is the ancestor's `legacy_tag = ''` target lane.
+ *  A stored id that is not a target lane of that ancestor matches nothing. */
+async function resolveConsumedTargetLane(
+  db: AquillaDb,
+  ancestorProjectId: string,
+  laneId: string | null,
+): Promise<ConsumedTargetLane> {
+  if (!laneId) {
+    const row = await db
+      .prepare(
+        `SELECT id FROM lanes
+          WHERE project_id = ? AND role = 'target' AND legacy_tag = ''`,
+      )
+      .bind(ancestorProjectId)
+      .first<{ id: string }>()
+    return { id: row?.id ?? "", tag: "" }
+  }
+  const row = await db
+    .prepare(
+      `SELECT id, legacy_tag FROM lanes
+        WHERE id = ? AND project_id = ? AND role = 'target'`,
+    )
+    .bind(laneId, ancestorProjectId)
+    .first<{ id: string; legacy_tag: string | null }>()
+  if (!row || row.legacy_tag === null) return { id: laneId, tag: "\u0000" }
+  return { id: row.id, tag: row.legacy_tag }
+}
+
+/** Prefer `lane_id`. Rows that have none still match the legacy tag. */
+function targetLaneSql(alias: string): string {
+  const p = alias ? `${alias}.` : ""
+  return `(
+    (${p}lane_id IS NOT NULL AND ${p}lane_id <> '' AND ${p}lane_id = ?)
+    OR ((${p}lane_id IS NULL OR ${p}lane_id = '') AND ${p}target_lang = ?)
+  )`
 }
 
 /**
@@ -113,16 +174,21 @@ async function loadAncestorLaneHead(
   ancestorProjectId: string,
   side: "source" | "target",
   cellIds: readonly string[],
+  /** Target rows only. Source rows are the one source lane (`target_lang ''`). */
+  lane: ConsumedTargetLane | null,
 ): Promise<Map<string, { eventId: string; contentHash: string | null }>> {
   const out = new Map<string, { eventId: string; contentHash: string | null }>()
   if (cellIds.length === 0) return out
   const placeholders = cellIds.map(() => "?").join(", ")
+  const laneSql = side === "target" && lane ? ` AND ${targetLaneSql("")}` : ""
+  const binds: unknown[] = [ancestorProjectId, side, ...cellIds]
+  if (side === "target" && lane) binds.push(lane.id, lane.tag)
   const { results } = await db
     .prepare(
       `SELECT cell_id, event_id, content_hash FROM cells
-       WHERE project_id = ? AND side = ? AND cell_id IN (${placeholders})`,
+       WHERE project_id = ? AND side = ? AND cell_id IN (${placeholders})${laneSql}`,
     )
-    .bind(ancestorProjectId, side, ...cellIds)
+    .bind(...binds)
     .all<{ cell_id: string; event_id: string; content_hash: string | null }>()
   for (const r of results) {
     out.set(r.cell_id, { eventId: r.event_id, contentHash: r.content_hash })
@@ -172,6 +238,7 @@ async function loadAncestorTargetPinAndSiblingSource(
   db: AquillaDb,
   ancestorProjectId: string,
   cellIds: readonly string[],
+  lane: ConsumedTargetLane,
 ): Promise<Map<string, { targetSourceEventId: string | null; siblingSourceEventId: string }>> {
   const out = new Map<string, { targetSourceEventId: string | null; siblingSourceEventId: string }>()
   if (cellIds.length === 0) return out
@@ -186,9 +253,10 @@ async function loadAncestorTargetPinAndSiblingSource(
          ON s.project_id = t.project_id
         AND s.cell_id    = t.cell_id
         AND s.side       = 'source'
-       WHERE t.project_id = ? AND t.side = 'target' AND t.cell_id IN (${placeholders})`,
+       WHERE t.project_id = ? AND t.side = 'target' AND t.cell_id IN (${placeholders})
+         AND ${targetLaneSql("t")}`,
     )
-    .bind(ancestorProjectId, ...cellIds)
+    .bind(ancestorProjectId, ...cellIds, lane.id, lane.tag)
     .all<{ cell_id: string; target_source_event_id: string | null; sibling_source_event_id: string }>()
   for (const r of results) {
     out.set(r.cell_id, {
@@ -249,7 +317,20 @@ export async function computeUpstreamStaleCellIds(
     // Step 1: mirror check — D's local mirrored source row's
     // upstream_event_id vs U's consumed-lane row head for this cell_id.
     const localMirrors = await loadLocalMirrorRows(env.AQUILLA_PG, d.projectId, dCellIds)
-    const ancestorLane = await loadAncestorLaneHead(env.AQUILLA_PG, u.projectId, d.consumes, dCellIds)
+    // AQU-1644: the lane D consumes of U. NULL is U's '' lane. Without this,
+    // an edit on another of U's target lanes overwrites the map entry and
+    // flags D stale for a lane it does not follow.
+    const consumedLane =
+      d.consumes === "target"
+        ? await resolveConsumedTargetLane(env.AQUILLA_PG, u.projectId, d.laneId)
+        : null
+    const ancestorLane = await loadAncestorLaneHead(
+      env.AQUILLA_PG,
+      u.projectId,
+      d.consumes,
+      dCellIds,
+      consumedLane,
+    )
 
     for (const cellId of dCellIds) {
       const local = localMirrors.get(cellId)
@@ -270,8 +351,13 @@ export async function computeUpstreamStaleCellIds(
     // sibling source row; if so, that staleness is inherited by D
     // regardless of whether D's mirror of U has caught up yet (the dormant-
     // middle-hop case, §9.4).
-    if (d.consumes === "target") {
-      const ancestorPins = await loadAncestorTargetPinAndSiblingSource(env.AQUILLA_PG, u.projectId, dCellIds)
+    if (d.consumes === "target" && consumedLane) {
+      const ancestorPins = await loadAncestorTargetPinAndSiblingSource(
+        env.AQUILLA_PG,
+        u.projectId,
+        dCellIds,
+        consumedLane,
+      )
       for (const cellId of dCellIds) {
         const pin = ancestorPins.get(cellId)
         if (!pin || pin.targetSourceEventId == null) continue
@@ -283,11 +369,18 @@ export async function computeUpstreamStaleCellIds(
     // Step 3: ancestor-behind fallback (link granularity, v1 approximation
     // per §6/§15 — no per-cell precision attempted here).
     if (u.mode === "live" && u.sourceProjectId) {
-      // laneRelevantHeadSeq is imported lazily to avoid a circular import
-      // (link-sync.ts doesn't depend on this module, but keeping the
-      // require local documents the one-directional dependency clearly).
-      const { laneRelevantHeadSeq } = await import("./link-sync")
-      const uHead = await laneRelevantHeadSeq(env.AQUILLA_PG, u.sourceProjectId, u.consumes)
+      // U's own consumed lane. An edit on a lane U does not follow must not
+      // mark the chain behind.
+      const uLane =
+        u.consumes === "target"
+          ? await resolveConsumedTargetLane(env.AQUILLA_PG, u.sourceProjectId, u.laneId)
+          : null
+      const uHead = await laneRelevantHeadSeq(
+        env.AQUILLA_PG,
+        u.sourceProjectId,
+        u.consumes,
+        uLane?.tag,
+      )
       if (uHead > u.cursor) ancestorBehind = true
     }
 

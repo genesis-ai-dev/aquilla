@@ -33,6 +33,27 @@ import type { FileTargetMatchedCell } from "@/lib/import-file-target"
  *  trimmed here rather than failing a whole staging on validation. */
 export const IMPORT_ORIGIN_FILENAME_MAX = 256
 
+/**
+ * Most proposals one import may stage in a single changeset.
+ *
+ * This is NOT a performance guess — it mirrors auth-worker's
+ * `MAX_APPROVAL_CHANGES` (changeset-approval-changes.ts), the number of
+ * per-cell changes the approval page will render. Past it the page truncates,
+ * so the reviewer would be approving rows they were never shown. A proposal
+ * nobody can see is not reviewable, which makes this a correctness bound.
+ *
+ * It also keeps this path away from the failure AQU-1670 fixed: that ticket
+ * batched the per-cell reads in AUTH-worker's agent staging path, and the
+ * session changeset route used here goes through sync-worker's own prepare
+ * instead. Prepare's preconditions read is already one batched query, but
+ * nothing caps `SetTranslation` count per changeset the way cell-field and
+ * visibility commands are capped — so a multi-thousand-row CSV would stage one
+ * enormous plan. Raising this bound means giving sync-worker's prepare the
+ * same treatment AQU-1670 gave auth-worker's, and raising
+ * `MAX_APPROVAL_CHANGES` with it; it is not a number to bump on its own.
+ */
+export const MAX_PROPOSALS_PER_IMPORT = 200
+
 export interface StageTargetProposalsResult {
   /** Cells staged as proposals in the changeset. */
   stagedCount: number
@@ -77,6 +98,18 @@ export async function stageTargetImportAsProposals(
 
   if (toStage.length === 0) {
     return { stagedCount: 0, skippedUnchangedCount, changesetId: null }
+  }
+
+  // Refuse before staging rather than after: an over-cap plan would be
+  // accepted, then truncated on the approval page, and the reviewer would
+  // approve rows they never saw.
+  if (toStage.length > MAX_PROPOSALS_PER_IMPORT) {
+    throw new Error(
+      t("importExport.proposals.tooMany", {
+        count: toStage.length,
+        max: MAX_PROPOSALS_PER_IMPORT,
+      }),
+    )
   }
 
   // One timestamp for the whole import: every proposal in this changeset came

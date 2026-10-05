@@ -14,8 +14,12 @@ vi.mock("@/lib/agent/changeset-api", () => ({
   prepareSessionChangeset: (...args: unknown[]) => prepareSessionChangeset(...args),
 }))
 
-const { stageTargetImportAsProposals, isUnchangedProposal, IMPORT_ORIGIN_FILENAME_MAX } =
-  await import("./import-file-target-proposals")
+const {
+  stageTargetImportAsProposals,
+  isUnchangedProposal,
+  IMPORT_ORIGIN_FILENAME_MAX,
+  MAX_PROPOSALS_PER_IMPORT,
+} = await import("./import-file-target-proposals")
 
 function cell(over: Partial<FileTargetMatchedCell> & { cellId: string }): FileTargetMatchedCell {
   return {
@@ -156,6 +160,51 @@ describe("stageTargetImportAsProposals", () => {
     const matched = [cell({ cellId: "c1", parentId: "" })]
     const result = await stageTargetImportAsProposals(matched, new Set(["c1"]), CTX)
     expect(result.stagedCount).toBe(1)
+  })
+
+  it("stages right up to the reviewable cap", async () => {
+    const matched = Array.from({ length: MAX_PROPOSALS_PER_IMPORT }, (_, i) =>
+      cell({ cellId: `c${i}` }),
+    )
+    const result = await stageTargetImportAsProposals(
+      matched,
+      new Set(matched.map((m) => m.cellId)),
+      CTX,
+    )
+    expect(result.stagedCount).toBe(MAX_PROPOSALS_PER_IMPORT)
+  })
+
+  it("refuses past the cap BEFORE staging, so no plan is left truncated", async () => {
+    // The approval page renders at most MAX_APPROVAL_CHANGES per-cell changes;
+    // staging more would have the reviewer approving rows they never saw.
+    const matched = Array.from({ length: MAX_PROPOSALS_PER_IMPORT + 1 }, (_, i) =>
+      cell({ cellId: `c${i}` }),
+    )
+    await expect(
+      stageTargetImportAsProposals(matched, new Set(matched.map((m) => m.cellId)), CTX),
+    ).rejects.toThrow(new RegExp(String(MAX_PROPOSALS_PER_IMPORT)))
+    expect(prepareSessionChangeset).not.toHaveBeenCalled()
+  })
+
+  it("counts only what it would stage against the cap, not the no-ops it drops", async () => {
+    // An over-cap selection that is mostly unchanged rows is still importable:
+    // the no-ops never become proposals, so they cannot push it over.
+    const changed = Array.from({ length: MAX_PROPOSALS_PER_IMPORT }, (_, i) =>
+      cell({ cellId: `c${i}` }),
+    )
+    const noops = Array.from({ length: 50 }, (_, i) =>
+      cell({ cellId: `n${i}`, incomingText: "same", currentText: "same" }),
+    )
+    const matched = [...changed, ...noops]
+    const result = await stageTargetImportAsProposals(
+      matched,
+      new Set(matched.map((m) => m.cellId)),
+      CTX,
+    )
+    expect(result).toMatchObject({
+      stagedCount: MAX_PROPOSALS_PER_IMPORT,
+      skippedUnchangedCount: 50,
+    })
   })
 
   it("throws when prepare answers with something other than a staged plan", async () => {

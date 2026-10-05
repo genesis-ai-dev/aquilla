@@ -1111,6 +1111,8 @@ export const importExport = defineNamespace({
       "committed text.",
     "importExport.proposals.notStaged": "The proposals could not be staged for review (the plan came back " +
       "\"{status}\"). Nothing was written.",
+    "importExport.proposals.tooMany": "This would propose {count} cells, more than the {max} a single review can " +
+      "show. Narrow the selection (or import in smaller files) so the reviewer can see every proposal.",
     "importExport.proposals.nothingToStage": "Every selected row already matches the current translation, so " +
       "there is nothing to propose.",
     "importExport.proposals.staged": plural({
@@ -3162,6 +3164,18 @@ export const importExport = defineNamespace({
           "through a full review screen and would otherwise assume it landed.",
         placeholders: {
           status: "Raw server status word for the plan (e.g. 'stale', 'expired') — not translated, shown verbatim.",
+        },
+      },
+      "importExport.proposals.tooMany": {
+        description:
+          "AQU-1673: refusal shown when an import would stage more proposals than " +
+          "the approval page can render, so the reviewer would be approving rows " +
+          "they were never shown. Must read as a limit on what is REVIEWABLE, not " +
+          "as a file-size or performance error, and should point at narrowing the " +
+          "selection.",
+        placeholders: {
+          count: "How many proposals the import would have staged.",
+          max: "The most proposals one review can show.",
         },
       },
       "importExport.proposals.nothingToStage": {

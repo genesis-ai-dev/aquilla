@@ -1,4 +1,4 @@
--- 0129_artifact_bindings_lane_member_key.sql — AQU-1611, EXPAND step
+-- 0134_artifact_bindings_lane_member_key.sql — AQU-1611, EXPAND step
 -- (table group: artifact_bindings).
 --
 -- artifact_bindings.lane_id became the row's identity in AQU-1240 and 0108

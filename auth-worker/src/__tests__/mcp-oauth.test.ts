@@ -10,7 +10,8 @@ import { env } from "cloudflare:test"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { validateApiCredential } from "../../../db/shared/api-credentials"
+import { OAUTH_ORG_ALLOWLIST_FLOOR, validateApiCredential } from "../../../db/shared/api-credentials"
+import { ROLE } from "../types"
 
 import { listOrgsForCredential } from "../../../sync-worker/src/external/orgs-list"
 import { listProjectsForCredential } from "../../../sync-worker/src/external/projects-list"
@@ -370,6 +371,39 @@ describe("OAuth organization grants across real consumers (AQU-1529)", () => {
     expect((await scopeCredentialToProject(env, cred, "beta")).ok).toBe(false)
     await expect(assertCredentialScope(env.AQUILLA_PG, cred, "beta")).rejects.toMatchObject({ code: "scope_denied" })
     expect((await listProjectsForCredential(env.AQUILLA_PG, cred)).map((project) => project.id)).toEqual(["p"])
+  })
+
+  // [Pen test] Auth & session mgmt (2026-10-05, OPS-43). The test above covers
+  // the approver *leaving* the org. Demotion is the commoner case and was the
+  // uncovered one: the re-filter's floor was VIEWER (100) while consent and
+  // the mint-time re-check both require MAINTAINER (600), so of the three
+  // places the grant floor is applied, the only one that runs after the token
+  // exists was the one a demotion could not narrow.
+  it("drops an org the approver no longer maintains, not only one they left (OPS-43)", async () => {
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET role_level = 100 WHERE org_id = 11 AND user_id = 1",
+    ).run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
+    expect(cred.orgIds).toEqual(["10"])
+    expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10"])
+    expect((await scopeCredentialToProject(env, cred, "beta")).ok).toBe(false)
+    await expect(assertCredentialScope(env.AQUILLA_PG, cred, "beta"))
+      .rejects.toMatchObject({ code: "scope_denied" })
+  })
+
+  it("keeps an org whose owner the approver still is, at any org_members level (OPS-43)", async () => {
+    // Org 10 is alice's own; the owner arm must not be narrowed by the floor.
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET role_level = 100 WHERE org_id = 11 AND user_id = 1",
+    ).run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
+    expect((await scopeCredentialToProject(env, cred, "p")).ok).toBe(true)
+  })
+
+  it("re-filters at the same floor the consent screen and the mint enforce (OPS-43)", () => {
+    expect(OAUTH_ORG_ALLOWLIST_FLOOR).toBe(ROLE.MAINTAINER)
   })
 
   it("does not mint a partially widened grant when one selected org is unauthorized", async () => {

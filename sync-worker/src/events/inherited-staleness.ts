@@ -60,7 +60,7 @@ interface LinkChainLink {
 
 /** A target lane this hop's queries are pinned to. `id` may be empty when the
  *  '' lane has no row yet; rows that lack `lane_id` then match on `tag`. */
-interface ConsumedTargetLane {
+export interface ConsumedTargetLane {
   id: string
   tag: string
 }
@@ -105,7 +105,7 @@ async function loadLinkChainLink(db: AquillaDb, projectId: string): Promise<Link
 
 /** NULL `source_link_lane_id` is the ancestor's `legacy_tag = ''` target lane.
  *  A stored id that is not a target lane of that ancestor matches nothing. */
-async function resolveConsumedTargetLane(
+export async function resolveConsumedTargetLane(
   db: AquillaDb,
   ancestorProjectId: string,
   laneId: string | null,
@@ -379,7 +379,7 @@ export async function computeUpstreamStaleCellIds(
         env.AQUILLA_PG,
         u.sourceProjectId,
         u.consumes,
-        uLane?.tag,
+        uLane ?? undefined,
       )
       if (uHead > u.cursor) ancestorBehind = true
     }

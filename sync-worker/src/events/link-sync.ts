@@ -396,28 +396,38 @@ export async function laneRelevantHeadSeq(
   upstreamProjectId: string,
   consumes: string | null = 'source',
   /** When set on a target-consumption link, target-lane events on any other
-   *  lane do not move the head. Omitted: every lane counts, as before. */
-  laneTag?: string,
+   *  lane do not move the head. Omitted: every lane counts, as before. `id`
+   *  may be empty when the '' lane has no row yet. */
+  lane?: { id: string; tag: string },
 ): Promise<number> {
   const kindList = laneKindsFor(consumes).map((k) => `'${k}'`).join(', ')
-  const filterLane = laneTag !== undefined && linkConsumesOf(consumes) === 'target'
-  // An absent targetLang is the '' lane, matching laneTagOfPayload. Source
-  // kinds stay in the head: a target link still borrows structure from them.
+  const filterLane = lane !== undefined && linkConsumesOf(consumes) === 'target'
+  // An event that names its lane is matched by id. One that predates
+  // AQU-1612 carries only the tag; an absent targetLang is the '' lane,
+  // matching laneTagOfPayload. Source kinds stay in the head: a target link
+  // still borrows structure from them.
   const laneSql = filterLane
     ? ` AND (
          kind NOT IN ('target.cell.commit', 'cell.validate', 'cell.unvalidate')
-         OR COALESCE(
-           CASE WHEN jsonb_typeof(payload::jsonb -> 'targetLang') = 'string'
-                THEN payload::jsonb ->> 'targetLang' END,
-           ''
-         ) = ?
+         OR CASE
+           WHEN COALESCE(payload::jsonb ->> 'laneId', '') <> ''
+             THEN payload::jsonb ->> 'laneId' = ?
+           ELSE COALESCE(
+             CASE WHEN jsonb_typeof(payload::jsonb -> 'targetLang') = 'string'
+                  THEN payload::jsonb ->> 'targetLang' END,
+             ''
+           ) = ?
+         END
        )`
     : ''
   const stmt = db.prepare(
     `SELECT COALESCE(MAX(server_seq), 0) AS head
      FROM events WHERE project_id = ? AND kind IN (${kindList})${laneSql}`,
   )
-  const row = await (filterLane ? stmt.bind(upstreamProjectId, laneTag) : stmt.bind(upstreamProjectId)).first<{
+  const row = await (filterLane
+    ? stmt.bind(upstreamProjectId, lane.id, lane.tag)
+    : stmt.bind(upstreamProjectId)
+  ).first<{
     head: number | string
   }>()
   return Number(row?.head ?? 0)

@@ -384,10 +384,31 @@ describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
         [downstream],
       )
       const at = Number(cursor.rows[0]?.source_link_cursor ?? 0)
-      const frenchHead = await laneRelevantHeadSeq(t.db, upstream, "target", "French")
+      const frenchLane = { id: frenchId!, tag: "French" }
+      const frenchHead = await laneRelevantHeadSeq(t.db, upstream, "target", frenchLane)
       const anyHead = await laneRelevantHeadSeq(t.db, upstream, "target")
       expect(frenchHead).toBeLessThanOrEqual(at)
       expect(anyHead).toBeGreaterThan(at)
+
+      const staleSource = async () => {
+        const res = await handleStaleSourceRequest(
+          new Request(`https://sync.test/api/v1/projects/${downstream}/files/${file}/stale-source`, {
+            headers: { Authorization: `Bearer ${await makeToken(downstream, file)}` },
+          }),
+          { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
+        )
+        return (await (res as Response).json()) as { behindSeq: unknown }
+      }
+      expect((await staleSource()).behindSeq).toBeNull()
+
+      // An event that names its lane is matched by id, whatever its tag says.
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane B by id", targetLang: "Zulu", laneId: frenchId },
+      })
+      expect(await laneRelevantHeadSeq(t.db, upstream, "target", frenchLane)).toBeGreaterThan(at)
+      expect((await staleSource()).behindSeq).not.toBeNull()
 
       await emit(t, upstream, "target.cell.commit", {
         fileId: file,

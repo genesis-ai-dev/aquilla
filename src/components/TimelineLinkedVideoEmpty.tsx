@@ -39,6 +39,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { LinkedVideoCaptionTrack } from "@/lib/editor/linked-video-empty-state"
 
 /** Same audio/video extensions TimelineAddMedia and the Import dialog take. */
@@ -215,12 +216,24 @@ export function TimelineLinkedVideoEmpty({
                 {t("editor.media.openMediaView")}
               </Button>
             ) : null}
-            {onAttachFile && (
+            {onAttachFile && (captionAction || onOpenMediaView ? (
+              // "or" joins this to the button above; only the action is a link.
+              <p className="mt-2 text-[0.8rem] text-muted-foreground">
+                <RichMessage k="editor.media.linkedVideoUseRecording" values={{
+                  link: (
+                    <Button variant="link" size="sm" className={cn("h-auto p-0 align-baseline", QUIET_LINK)}
+                      onClick={() => { setRecordingStep(true); setError(null) }}>
+                      {t("editor.media.linkedVideoUseRecordingLink")}
+                    </Button>
+                  ),
+                }} />
+              </p>
+            ) : (
               <Button variant="link" size="sm" className={cn("mt-1", QUIET_LINK)}
                 onClick={() => { setRecordingStep(true); setError(null) }}>
-                {t(captionAction || onOpenMediaView ? "editor.media.linkedVideoUseRecording" : "editor.media.linkedVideoAddRecording")}
+                {t("editor.media.linkedVideoAddRecording")}
               </Button>
-            )}
+            ))}
           </>
         )}
       </div>

@@ -137,7 +137,7 @@ describe("EditorTable — empty time-ordered file", () => {
     // Sam's D1: the recording, and its explanation, wait behind a quiet link.
     expect(screen.queryByText("Choose media file")).toBeNull()
     expect(screen.queryByText(/same timing as the video/)).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "use the original recording" }))
     expect(screen.getByText("Use the original recording")).toBeInTheDocument()
     expect(screen.getByText("Choose media file")).toBeInTheDocument()
     // AQU-1565 follow-up: the caveat says the video keeps its own sound and
@@ -341,17 +341,21 @@ describe("EditorTable — empty time-ordered file", () => {
     const card = await screen.findByTestId("linked-video-empty")
     expect(card).toHaveAttribute("data-placement", "text")
     expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
-      "Attach captions", "or use the original recording",
+      "Attach captions", "use the original recording",
     ])
     expect(screen.getByRole("button", { name: "Attach captions" })).toHaveAttribute("data-variant", "default")
-    expect(screen.getByRole("button", { name: "or use the original recording" })).toHaveAttribute("data-variant", "link")
+    expect(screen.getByRole("button", { name: "use the original recording" })).toHaveAttribute("data-variant", "link")
     // Quiet grey text says nothing about being clickable, so the link keeps a
     // dashed underline at rest, not just on hover (Sam, Oct 5).
-    expect(screen.getByRole("button", { name: "or use the original recording" }).className)
+    expect(screen.getByRole("button", { name: "use the original recording" }).className)
       .toMatch(/(^|\s)underline(\s|$).*decoration-dashed|decoration-dashed.*(^|\s)underline(\s|$)/)
+    // ...and only the action is the link: the "or" that joins it to the button
+    // above is plain text beside it (Sam, Oct 5).
+    expect(screen.getByRole("button", { name: "use the original recording" }).parentElement)
+      .toHaveTextContent(/^or use the original recording$/)
     // The recording's explanation waits on its own step...
     expect(screen.queryByText(/same timing as the video/)).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "use the original recording" }))
     expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
     // ...and the way back is right there.
@@ -369,7 +373,7 @@ describe("EditorTable — empty time-ordered file", () => {
     })
     await screen.findByTestId("linked-video-empty")
     expect(screen.getByText("The video's owner can download its captions from YouTube Studio.")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "use the original recording" }))
     expect(screen.getByText("The video's owner can download the video file from YouTube Studio.")).toBeInTheDocument()
   })
 
@@ -380,7 +384,7 @@ describe("EditorTable — empty time-ordered file", () => {
     })
     await screen.findByTestId("linked-video-empty")
     expect(screen.queryByText(/YouTube Studio/)).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "use the original recording" }))
     expect(screen.queryByText(/YouTube Studio/)).toBeNull()
   })
 
@@ -396,12 +400,12 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(card).toHaveAttribute("data-placement", "media")
     expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
     expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
-      "Attach captions", "or use the original recording",
+      "Attach captions", "use the original recording",
     ])
     expect(screen.queryByText("Choose media file")).toBeNull()
     expect(screen.queryByTestId("table-column-headers")).toBeNull()
     // The timeline has no upload of its own, so the recording stays reachable.
-    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "use the original recording" }))
     expect(screen.getByText("Choose media file")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Back to captions" }))
     expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()

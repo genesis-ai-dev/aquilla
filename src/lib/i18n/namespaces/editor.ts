@@ -225,7 +225,10 @@ export const editor = defineNamespace({
     // Sam's D1 (2026-10-05): the empty state is one card with one action;
     // the original recording is a quiet second way in, and its explanation
     // waits on the step it explains.
-    "editor.media.linkedVideoUseRecording": "or use the original recording",
+    // Sam, Oct 5: only the action is underlined, not the "or" that joins it to
+    // the button above, so the link is its own key inside the sentence.
+    "editor.media.linkedVideoUseRecording": "or {link}",
+    "editor.media.linkedVideoUseRecordingLink": "use the original recording",
     "editor.media.linkedVideoAddRecording": "Add the original recording",
     "editor.media.linkedVideoRecordingTitle": "Use the original recording",
     "editor.media.linkedVideoBackToCaptions": "Back to captions",
@@ -2796,11 +2799,21 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoUseRecording": {
         description:
-          "Quiet link under the 'Attach captions' button in the linked-video empty " +
-          "state. It opens a second step for uploading the original audio or video " +
-          "recording instead, which also produces rows for this file. Lower-case " +
-          "and starting with 'or' because it continues the button above it.",
+          "Quiet line under the 'Attach captions' button in the linked-video empty " +
+          "state, offering a second way in. Lower-case and starting with 'or' " +
+          "because it continues the button above it. {link} is the clickable part " +
+          "(editor.media.linkedVideoUseRecordingLink); only it is underlined.",
+        placeholders: {
+          link: "The clickable words, editor.media.linkedVideoUseRecordingLink.",
+        },
         maxLength: 40,
+      },
+      "editor.media.linkedVideoUseRecordingLink": {
+        description:
+          "The clickable part of that line. It opens a second step for uploading " +
+          "the original audio or video recording instead, which also produces rows " +
+          "for this file. Lower-case: it continues the sentence.",
+        maxLength: 36,
       },
       "editor.media.linkedVideoAddRecording": {
         description:

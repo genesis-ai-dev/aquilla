@@ -44,7 +44,11 @@ import { buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, t
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import type { EventPayloads } from './types'
-import { ensureTargetLaneStmt, listProjectLanes } from '../../../db/shared/lanes'
+import {
+  ensureTargetLaneStmt,
+  listProjectLanes,
+  retryingLaneIdCollision,
+} from '../../../db/shared/lanes'
 import {
   chooseDonorLane,
   donorLaneRefusalMessage,
@@ -275,8 +279,13 @@ export async function mergeSibling(
   // The lane statement leads the FIRST batch, so the record and the first rows
   // that use it commit together: a fold that fails before writing anything
   // leaves no empty lane behind, and a re-run finds the record and reuses it.
-  allStmts.unshift(ensureTargetLaneStmt(db, hostProjectId, lane))
-  for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
+  // AQU-1606: that statement mints an id. A global collision rolls the batch
+  // back, so the same statements run again with a new id and nothing is written twice.
+  const lead = Math.min(BATCH_LIMIT - 1, allStmts.length)
+  await retryingLaneIdCollision(() =>
+    runFoldBatch(db, [ensureTargetLaneStmt(db, hostProjectId, lane), ...allStmts.slice(0, lead)]),
+  )
+  for (let i = lead; i < allStmts.length; i += BATCH_LIMIT) {
     await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))
   }
 

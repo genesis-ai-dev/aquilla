@@ -77,6 +77,8 @@ import {
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
+import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
+import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -546,6 +548,76 @@ export function useCompletion(
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
+
+  // Move an existing translation into the source cell's style runs. The model
+  // does not rewrite the words; a placement that would change them is refused.
+  const alignCellStyles = useCallback(async (
+    cell: CellData,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (!isConfigured || !isAvailable) return false
+    setErrors((p) => {
+      if (!p.has(lk(cell.id))) return p
+      const next = new Map(p)
+      next.delete(lk(cell.id))
+      return next
+    })
+    if (!cellCanAlignStyles(cell)) {
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnavailable")))
+      return false
+    }
+    setCompleting((p) => new Map(p).set(lk(cell.id), "aligning"))
+    try {
+      const aligned = await alignIdmlStyles(cell, (messages) => complete({
+        settings: { ...effectiveSettings, temperature: 0 },
+        session,
+        messages: [...messages],
+        stream: false,
+        signal,
+      }))
+      if (!aligned.changed) {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
+        return false
+      }
+      posthog.capture("ai styles aligned", {
+        provider,
+        model: modelName,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+      })
+      await commitCompletedCell?.(
+        cell,
+        aligned.completion.valueHtml ?? aligned.completion.value,
+        modelName,
+        {
+          model: modelName,
+          provider,
+          promptVersion: "align-styles-v1",
+          exampleIds: [],
+          generatedAt: Date.now(),
+          mode: "align-styles",
+          projectState: {
+            sourceLanguage,
+            targetLanguage,
+            approvedExampleCount: 0,
+          },
+        },
+      )
+      setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+      return true
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        return false
+      }
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+      return false
+    }
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -1268,5 +1340,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, alignCellStyles, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

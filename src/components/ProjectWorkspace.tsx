@@ -5663,7 +5663,7 @@ export function ProjectWorkspace() {
     confirmCommitted(cell.id, eventId)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, confirmCommitted])
 
-  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, alignCellStyles, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -5713,6 +5713,11 @@ export function ProjectWorkspace() {
   const handleCompleteParagraph = useCallback(
     (cellId: string) => completeParagraph(cellId),
     [completeParagraph],
+  )
+
+  const handleAlignStyles = useCallback(
+    (cell: CellData) => alignCellStyles(cell),
+    [alignCellStyles],
   )
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
@@ -13636,6 +13641,7 @@ export function ProjectWorkspace() {
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
+            onAlignStyles={handleAlignStyles}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}

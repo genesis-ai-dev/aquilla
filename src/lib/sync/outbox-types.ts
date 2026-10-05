@@ -141,7 +141,7 @@ export interface AiDraftProvenance {
   promptVersion: string
   exampleIds: string[]
   generatedAt: number
-  mode: "single" | "batch" | "paragraph" | "agent" | "read"
+  mode: "single" | "batch" | "paragraph" | "agent" | "read" | "align-styles"
   projectState: {
     sourceLanguage: string
     targetLanguage: string

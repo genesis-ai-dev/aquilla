@@ -81,6 +81,8 @@ import {
 } from "@/lib/completion/bt-record"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { AlignStylesButton } from "./cell/AlignStylesButton"
+import { cellCanAlignStyles } from "@/lib/idml/align-styles"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
@@ -859,6 +861,9 @@ interface EditorTableProps {
    *  `cellId` as one model call. Omit to keep the rail button hidden
    *  (legacy/prop-less callers render unchanged). */
   onCompleteParagraph?: (cellId: string) => void
+  /** Move this cell's existing translation into the source style runs.
+   *  Omit to hide the overflow action (callers that are not the editor). */
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -1012,7 +1017,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onCompleteBatch, onCompleteParagraph, onAlignStyles, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -2397,7 +2402,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // `MemoizedRowProps.paragraphGroupInFlight`.
           const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
             const state = completing.get(id)
-            return state === "searching" || state === "generating"
+            return state === "searching" || state === "generating" || state === "aligning"
           }) ?? false
           // AQU-646 / AQU-1068: the row's STRUCTURAL controls — add a cell
           // here, take one back. One map lookup and one predicate call per
@@ -2543,6 +2548,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
           onCompleteParagraph={onCompleteParagraph}
+          onAlignStyles={onAlignStyles}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
           paragraphGroupInFlight={paragraphGroupInFlight}
@@ -2686,6 +2692,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClaimCell,
     onCompleteSingle,
     onCompleteParagraph,
+    onAlignStyles,
     paragraphGroupInfoByCellId,
     onFootnoteCreated,
     onJumpToCell,
@@ -3605,6 +3612,7 @@ interface MemoizedRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true` (computed by the parent from the ordered
    *  cell list). undefined ⇒ not a paragraph start, or a 1-cell group. */
@@ -3747,7 +3755,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getEditorActivationVersion,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
+    ruleMap, onCompleteSingle, onCompleteParagraph, onAlignStyles, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
     insertAboveReason, insertBelowReason, removeReason,
     structuralEditing, untimedInserts,
@@ -3788,7 +3796,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const isLoading = completingState === "searching" || completingState === "generating"
+  const isLoading = completingState === "searching" || completingState === "generating" || completingState === "aligning"
   // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
   // is true while ANY cell in this row's paragraph group is ACTIVELY
   // completing — not just this row's own (a validated start cell never gets
@@ -3801,12 +3809,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
   const completionPreview = previewText
-  const loadingPhase: "searching" | "generating" | null =
+  const loadingPhase: "searching" | "generating" | "aligning" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
-        : null
+        : completingState === "aligning"
+          ? "aligning"
+          : null
   const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
@@ -3878,6 +3888,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
         onCompleteParagraph={onCompleteParagraph}
+        onAlignStyles={onAlignStyles}
         paragraphGroupSize={paragraphGroupSize}
         paragraphDraftableCount={paragraphDraftableCount}
         paragraphGroupInFlight={paragraphGroupInFlight}
@@ -4033,7 +4044,7 @@ interface EditorRowProps {
   completionPreview: string | undefined
   /** Which phase of the completion is currently running, if any. Drives the
    *  placeholder copy ("Looking up examples…" vs "Generating…"). */
-  loadingPhase: "searching" | "generating" | null
+  loadingPhase: "searching" | "generating" | "aligning" | null
   cellExamples: ScoredPair[]
   exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   highlights: ReturnType<typeof buildHighlightsFromExamples>
@@ -4046,6 +4057,7 @@ interface EditorRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true`. undefined ⇒ not a start, or a 1-cell group. */
   paragraphGroupSize?: number
@@ -4976,7 +4988,7 @@ function EditorRow({
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
-  onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
+  onCompleteParagraph, onAlignStyles, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
   insertAboveReason = null, insertBelowReason = null, removeReason = null,
   structuralEditing, untimedInserts,
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
@@ -5347,7 +5359,7 @@ function EditorRow({
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const showCompletionOverlay = isLoading && (!hasTranslatedText || loadingPhase === "aligning")
   const sourceCellDirection = useMemo(
     () =>
       resolveTextDirection(
@@ -5778,6 +5790,20 @@ function EditorRow({
       savedTimerRef.current = null
     }, 2400)
   }, [onCompleteSingle, cell, onActivateEditor, getEditorActivationVersion])
+
+  const alignStylesAndReturn = useCallback(async () => {
+    if (!onAlignStyles) return
+    const activationVersion = getEditorActivationVersion()
+    const saved = await onAlignStyles(cell)
+    onActivateEditor(cell.id, { ifActivationVersion: activationVersion })
+    if (!saved) return
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onAlignStyles, cell, onActivateEditor, getEditorActivationVersion])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -7841,7 +7867,9 @@ function EditorRow({
                       <span>
                         {loadingPhase === "searching"
                           ? t("editor.ai.lookingUpExamples")
-                          : t("editor.ai.generatingTranslation")}
+                          : loadingPhase === "aligning"
+                            ? t("editor.ai.aligningStyles")
+                            : t("editor.ai.generatingTranslation")}
                       </span>
                     </div>
                   )}
@@ -7916,10 +7944,12 @@ function EditorRow({
               className="sr-only"
             >
               {isLoading && !completionPreview
-                ? // i18n-exempt "searching" is a loading-phase tag, not copy
+                ? // i18n-exempt "searching" / "aligning" are loading-phase tags, not copy
                   (loadingPhase === "searching"
                     ? t("editor.row.draftSearching", { cellRef })
-                    : t("editor.row.draftGenerating", { cellRef }))
+                    : loadingPhase === "aligning"
+                      ? t("editor.row.aligningStyles", { cellRef })
+                      : t("editor.row.draftGenerating", { cellRef }))
                 : isLoading && completionPreview
                   ? t("editor.row.draftPreviewReady", { cellRef })
                   : null}
@@ -8260,6 +8290,20 @@ function EditorRow({
                   icon={<Play className="h-3.5 w-3.5" />}
                   tooltip={t("editor.cue.playFrom")}
                   onClick={() => onSeekToCue(cell.id)}
+                />
+              )}
+
+              {onAlignStyles && cellCanAlignStyles(cell) && (
+                <AlignStylesButton
+                  hasText={Boolean(visibleTranslated.trim())}
+                  editable={editable}
+                  isAnonymous={Boolean(isAnonymous)}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  onAlign={alignStylesAndReturn}
+                  onAiSetupNeeded={onAiSetupNeeded}
                 />
               )}
             </CellActionRail>

@@ -17,12 +17,14 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  getQueueState, hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  startQueueAtTime,
   setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { useVideoController } from "@/lib/timeline/video-controller"
+import { useVideoClockSec } from "@/lib/timeline/video-clock"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
@@ -137,6 +139,51 @@ export function VoicePlaybackBar({
     startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from, explicit)
   }, [cells, projectId, session, onActiveCell])
 
+  // AQU-1643. Armed when Play is handed to the picture or the virtual clock
+  // before a source clip is on the cells. The read and the click race; under
+  // two shards the click wins, the clip then removes that clock, and the
+  // queue — what Play all actually has to start — never hears the press.
+  // A picture's seconds, kept off the effect deps so a ticking playhead does
+  // not re-run the handoff. Read on the render that first sees the source clip,
+  // before a slaved pane clears the store.
+  const pictureSec = useVideoClockSec()
+  const sourceHandoffRef = useRef<{ fileId: string | null } | null>(null)
+  useEffect(() => {
+    const armed = sourceHandoffRef.current
+    if (!armed) return
+    if (armed.fileId !== fileId) {
+      sourceHandoffRef.current = null
+      return
+    }
+    if (!anyCellClockIsFileTime) return
+    sourceHandoffRef.current = null
+    if (!session?.jwt) return
+    const qs = getQueueState()
+    const queueAlready =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      cells.some((c) => c.id === qs.cellId)
+    if (queueAlready) return
+    if (pictureSec != null) {
+      // A picture had already moved. Continue from that frame so a following
+      // seek is not pulled back to the start.
+      startQueueAtTime(
+        { cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) },
+        Math.max(0, pictureSec),
+        { play: true },
+      )
+      return
+    }
+    // Timings-only clock. Play all has to walk the segments from the
+    // highlighted one: the chip strip follows a cell-to-cell advance, and
+    // jumping to wherever that clock had already reached skips the advance.
+    const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
+    startQueue(
+      { cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) },
+      from >= 0 ? from : 0,
+      from >= 0,
+    )
+  }, [anyCellClockIsFileTime, fileId, cells, session, projectId, onActiveCell, startCellId, pictureSec])
+
   const onPlayPause = useCallback(() => {
     // The picture owns this file: drive the element, never the queue. Starting
     // the queue here is what played a lone recorded take with no film behind it.
@@ -146,9 +193,21 @@ export function VoicePlaybackBar({
       // the same as it does during the queue's cold load below. The element is
       // still `paused` all through that wait, so without this the press would
       // just re-ask and the spinner would be the only way out.
-      if (transport.kind === "loading") { videoController.pause(); return }
-      if (videoController.isPaused()) videoController.play()
-      else videoController.pause()
+      if (transport.kind === "loading") {
+        sourceHandoffRef.current = null
+        videoController.pause()
+        return
+      }
+      if (videoController.isPaused()) {
+        videoController.play()
+        // No source clip yet. Remember the press so the queue can take it
+        // when the clip lands. A timings-only file never grows one, and the
+        // clock started above just keeps playing.
+        if (!anyCellClockIsFileTime) sourceHandoffRef.current = { fileId }
+      } else {
+        sourceHandoffRef.current = null
+        videoController.pause()
+      }
       return
     }
     if (isPlaying) { pauseQueue(); return }
@@ -164,7 +223,7 @@ export function VoicePlaybackBar({
     // plain play-all keeps skipping forward past a missing clip.
     const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
     startAt(from >= 0 ? from : 0, from >= 0)
-  }, [drivesVideo, videoController, isPlaying, transport.kind, startAt, cells, startCellId])
+  }, [drivesVideo, videoController, isPlaying, transport.kind, startAt, cells, startCellId, anyCellClockIsFileTime, fileId])
 
   // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
   // only renders in the audio lens, so the binding is naturally scoped to it).

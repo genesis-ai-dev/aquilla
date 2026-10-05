@@ -173,7 +173,7 @@ import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
+import { videoOwnsFile, virtualOwnsFile, shouldHandPlaybackToSourceQueue } from "@/lib/audio/transport"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
@@ -10628,14 +10628,12 @@ export function ProjectWorkspace() {
    * what made the playhead and the bar detach from the film. One expression
    * means they cannot drift apart again.
    */
+  // True once a source clip is on a cell. Until the attachment read lands this
+  // is false, and a media file is indistinguishable from a timings-only one.
+  const sourceClockIsFileTime = audioMergedCells.some((c) => queueClockIsFileTime(c))
   const videoIsTransport = useMemo(
-    () =>
-      videoOwnsFile(
-        activeFile?.coreMediaUrl,
-        audioMergedCells.some((c) => queueClockIsFileTime(c)),
-        showVideoPane,
-      ),
-    [activeFile?.coreMediaUrl, audioMergedCells, showVideoPane],
+    () => videoOwnsFile(activeFile?.coreMediaUrl, sourceClockIsFileTime, showVideoPane),
+    [activeFile?.coreMediaUrl, sourceClockIsFileTime, showVideoPane],
   )
 
   // AQU-646 round 5: DUBS OVER THE PICTURE.
@@ -10698,7 +10696,7 @@ export function ProjectWorkspace() {
   )
   const virtualIsTransport = virtualOwnsFile(
     videoIsTransport,
-    audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    sourceClockIsFileTime,
     timelineDurationSec,
   )
   useEffect(() => {
@@ -10721,6 +10719,76 @@ export function ProjectWorkspace() {
   }, [virtualIsTransport])
   const virtualSec = useVirtualClockSec()
   const virtualPlaying = useVirtualClockPlaying()
+  // AQU-1643. Play can land while the source-clip read is still in flight.
+  // The file then looks timings-only, so the press starts this clock or the
+  // standalone picture. When the clip arrives, `virtualIsTransport` flips
+  // off and the effect above tears that clock down — and nothing starts the
+  // queue, which is the real master. The bar falls back to "Nothing playing"
+  // and a picture that moved one frame stays there. Two e2e shards make the
+  // read lose the race to the click; one shard usually wins it, which is why
+  // the same specs pass alone.
+  //
+  // The snapshot is taken from the render, because this effect's own turn
+  // runs after the teardown above has already cleared `playing`. A file
+  // switch stores a still clock so the next file cannot inherit it.
+  const playbackHandoffRef = useRef<{
+    fileId: string | null
+    sourceClock: boolean
+    videoPlaying: boolean
+    virtualPlaying: boolean
+  } | null>(null)
+  useEffect(() => {
+    const prev = playbackHandoffRef.current
+    const fileId = activeFileId ?? null
+    const sameFile = prev != null && prev.fileId === fileId
+    const wasPlaying =
+      prev != null &&
+      prev.fileId === fileId &&
+      (prev.videoPlaying || prev.virtualPlaying || videoDubPlaying || virtualPlaying)
+    const handOff = shouldHandPlaybackToSourceQueue({
+      wasPlaying,
+      hadSourceClock: prev != null && prev.fileId === fileId && prev.sourceClock,
+      sourceClockNow: sourceClockIsFileTime,
+      sameFile,
+    })
+    playbackHandoffRef.current = {
+      fileId,
+      sourceClock: sourceClockIsFileTime,
+      videoPlaying: prev != null && prev.fileId === fileId && videoDubPlaying,
+      virtualPlaying: prev != null && prev.fileId === fileId && virtualPlaying,
+    }
+    if (!handOff || !project?.id || !frontierSession?.jwt) return
+    const qs = getQueueState()
+    const queueAlready =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      audioMergedCells.some((c) => c.id === qs.cellId)
+    if (queueAlready) return
+    const ctx = {
+      cells: audioMergedCells,
+      projectId: project.id,
+      session: frontierSession,
+      onCellChange: (_index: number, cellId: string) => handleBarActiveCell(cellId),
+    }
+    if (videoDubPlaying && videoDubSec != null) {
+      startQueueAtTime(ctx, Math.max(0, videoDubSec), { play: true })
+      return
+    }
+    const from = timelineSelectedCellId
+      ? audioMergedCells.findIndex((c) => c.id === timelineSelectedCellId)
+      : -1
+    if (from >= 0) startQueue(ctx, from, true)
+    else startQueue(ctx, 0)
+  }, [
+    sourceClockIsFileTime,
+    activeFileId,
+    videoDubPlaying,
+    virtualPlaying,
+    audioMergedCells,
+    project?.id,
+    frontierSession,
+    timelineSelectedCellId,
+    handleBarActiveCell,
+  ])
   // The same driver, the same cells, the same four calls the picture makes.
   useEffect(() => {
     if (!virtualIsTransport || !project?.id || !frontierSession) return

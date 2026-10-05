@@ -206,3 +206,25 @@ export function selectTransportForFile(
     source: "video",
   }
 }
+
+/**
+ * AQU-1643. A media file whose source-clip read has not landed yet looks like a
+ * timings-only file, so Play starts the virtual clock or the standalone
+ * picture. When the clip arrives that clock is removed — in an effect cleanup,
+ * before any later effect can see it was playing — and the queue, the real
+ * master, is never started. The bar falls back to "Nothing playing" and a
+ * picture that had moved one frame stays there.
+ *
+ * `wasPlaying` is the clock on the render that first sees the source clip,
+ * while it is still playing. Hand that playback to the queue only for that
+ * arrival, on the same file. A pause, a file switch, and a timings-only file
+ * are not this.
+ */
+export function shouldHandPlaybackToSourceQueue(args: {
+  wasPlaying: boolean
+  hadSourceClock: boolean
+  sourceClockNow: boolean
+  sameFile: boolean
+}): boolean {
+  return args.wasPlaying && args.sameFile && args.sourceClockNow && !args.hadSourceClock
+}

@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest"
 import {
   selectTransportForFile,
+  shouldHandPlaybackToSourceQueue,
   videoOwnsFile,
   virtualOwnsFile,
   type VideoTransportInput,
@@ -287,5 +288,34 @@ describe("selectTransportForFile — the virtual arm", () => {
 
   it("is the queue when nothing else is offered — every ordinary file", () => {
     expect(selectTransportForFile(idleQueue, null, null).source).toBe("queue")
+  })
+})
+
+describe("shouldHandPlaybackToSourceQueue", () => {
+  const arrived = {
+    wasPlaying: true,
+    hadSourceClock: false,
+    sourceClockNow: true,
+    sameFile: true,
+  }
+
+  it("hands a clock that was already playing to the queue when the source clip arrives", () => {
+    expect(shouldHandPlaybackToSourceQueue(arrived)).toBe(true)
+  })
+
+  it("leaves a paused file paused when the clip arrives", () => {
+    expect(shouldHandPlaybackToSourceQueue({ ...arrived, wasPlaying: false })).toBe(false)
+  })
+
+  it("does not restart a file that already had its source clip", () => {
+    expect(shouldHandPlaybackToSourceQueue({ ...arrived, hadSourceClock: true })).toBe(false)
+  })
+
+  it("does not start the queue before a source clip exists", () => {
+    expect(shouldHandPlaybackToSourceQueue({ ...arrived, sourceClockNow: false })).toBe(false)
+  })
+
+  it("does not carry playback across a file switch", () => {
+    expect(shouldHandPlaybackToSourceQueue({ ...arrived, sameFile: false })).toBe(false)
   })
 })

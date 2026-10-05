@@ -2650,8 +2650,12 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     // rejection here would race that path and surface "Failed to load because
     // no supported source was found." for a merely-missing clip (AQU-660).
     // Genuine playback refusals (e.g. autoplay's NotAllowedError) don't fire
-    // onerror, so they still report here.
-    if (e instanceof DOMException && e.name === "NotSupportedError") return
+    // onerror, so they still report here. AbortError is the pause that won
+    // the race against this play() — AQU-1643's handoff starts the queue while
+    // a click on Pause is already in flight — and onpause has already recorded
+    // the pause. Publishing the DOMException left the transport in error, and
+    // a later seek no-op'd.
+    if (e instanceof DOMException && (e.name === "NotSupportedError" || e.name === "AbortError")) return
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
   }
 }

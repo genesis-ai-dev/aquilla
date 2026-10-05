@@ -368,32 +368,6 @@ function backfillMissingLocalProgress(): void {
 }
 
 /**
- * AQU-1573: put the reference Bibles (Van Dyck Arabic, KJV) into the local
- * database from the committed text in db/reference-bibles/. Idempotent: a
- * Bible whose stored hash matches the manifest costs one query, so only the
- * first boot (or a boot after the committed text changes) spends a few
- * seconds loading. A failure never stops the boot — drafting simply has no
- * verses to inject and Settings says no Bibles are installed.
- */
-function loadReferenceBibles(): void {
-  const result = spawnSync("npx", ["tsx", "scripts/reference-bibles.ts", "load"], {
-    cwd: REPO_ROOT,
-    env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
-    encoding: "utf8",
-    stdio: VERBOSE ? "inherit" : ["ignore", "pipe", "pipe"],
-  })
-  const output = result.stdout?.trim()
-  if (output) console.log(`[dev-stack] ${output.replace(/\n/g, "\n[dev-stack] ")}`)
-  if (result.status !== 0) {
-    console.warn(
-      `[dev-stack] warning: loading the reference Bibles failed; continuing without them.\n` +
-        `[dev-stack]   retry: AQUILLA_DATABASE_URL=<the local Postgres URL> npx tsx scripts/reference-bibles.ts load\n` +
-        `${(result.stderr || "").trim()}`,
-    )
-  }
-}
-
-/**
  * Additive-only drift repair: create tables (plus their indexes) and add
  * columns that schema.sql has but the live container lacks. Never drops or
  * rewrites anything, so it's safe on every boot.
@@ -616,7 +590,6 @@ async function main(): Promise<void> {
 
   await ensureLocalPostgres()
   backfillMissingLocalProgress()
-  loadReferenceBibles()
 
   // Without a real OpenRouter key, boot the scripted mock so the agent and
   // chat paths work end-to-end (deterministic model, zero cost). A real key

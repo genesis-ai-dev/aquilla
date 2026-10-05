@@ -24,13 +24,6 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 import userEvent from "@testing-library/user-event"
 
-// AQU-1573: the Reference Bible card lists the server's Bibles when the General
-// pane renders on a cloud project; answer locally (none installed).
-vi.mock("@/lib/frontier/reference-bibles", () => ({
-  fetchReferenceBibles: vi.fn(async () => []),
-  fetchReferencePassages: vi.fn(async () => null),
-}))
-
 const PROJECT_ID = "proj-cell-editing"
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {

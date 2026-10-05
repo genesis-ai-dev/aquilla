@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { mockTranscription, referenceVersesFromMessages, scriptMockResponse } from "./mock-openrouter"
+import { mockTranscription, scriptMockResponse } from "./mock-openrouter"
 import { expandSlashCommand } from "../src/lib/agent/slash-commands"
-import { buildPrompt, buildReferenceVersesBlock, DEFAULT_SYSTEM_PROMPT } from "../src/lib/completion/prompt-build"
 
 type MockResponse = ReturnType<typeof scriptMockResponse>
 
@@ -140,76 +139,5 @@ describe("scripted local agent", () => {
 
     // The bodies are deliberately identical — only the ids must differ.
     expect(new Set(ids).size).toBe(ids.length)
-  })
-
-  // AQU-1573: the local stack has no real model, so the mock "copies" the
-  // verses the reference-verses block hands it — that is how Sam sees the
-  // Van Dyck wording land in a sermon draft on the dev stack.
-  describe("reference verses (AQU-1573)", () => {
-    const ISA = "«فَبِمَنْ تُشَبِّهُونَنِي فَأُسَاوِيَهُ؟» يَقُولُ ٱلْقُدُّوسُ."
-    const JHN16 = "لِأَنَّهُ هَكَذَا أَحَبَّ ٱللهُ ٱلْعَالَمَ"
-    const JHN17 = "لِأَنَّهُ لَمْ يُرْسِلِ ٱللهُ ٱبْنَهُ"
-    const ROM = "وَلَكِنَّ ٱللهَ بَيَّنَ مَحَبَّتَهُ لَنَا"
-    const block = buildReferenceVersesBlock({
-      versionName: "Van Dyck",
-      languageName: "Arabic",
-      passages: [
-        { canonical: "ISA 40:25", label: "Isaiah 40:25", verses: [{ chapter: 40, verse: 25, text: ISA }] },
-        {
-          canonical: "JHN 3:16-17",
-          label: "John 3:16–17",
-          verses: [{ chapter: 3, verse: 16, text: JHN16 }, { chapter: 3, verse: 17, text: JHN17 }],
-        },
-        { canonical: "ROM 5:8", label: "Romans 5:8", verses: [{ chapter: 5, verse: 8, text: ROM }] },
-      ],
-    })
-
-    it("reads the verses back out of the block, a range joined in order", () => {
-      const verses = referenceVersesFromMessages([{ role: "system", content: `Base prompt.\n\n${block}\n\nOutput contract.` }])
-      expect([...verses.entries()]).toEqual([
-        ["ISA 40:25", ISA],
-        ["JHN 3:16-17", `${JHN16} ${JHN17}`],
-        ["ROM 5:8", ROM],
-      ])
-      expect(referenceVersesFromMessages([{ role: "system", content: "Base prompt." }]).size).toBe(0)
-    })
-
-    it("a copilot draft carries the cited verse after the echoed source", () => {
-      const source = 'Isaiah 40:25 says, "To whom will you compare me?"'
-      const single = buildReferenceVersesBlock({
-        versionName: "Van Dyck",
-        languageName: "Arabic",
-        passages: [{ canonical: "ISA 40:25", label: "Isaiah 40:25", verses: [{ chapter: 40, verse: 25, text: ISA }] }],
-      })
-      const messages = buildPrompt({
-        sourceLanguage: "English",
-        targetLanguage: "Arabic",
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        sourceText: source,
-        examples: [],
-        referenceBlock: single,
-      })
-      expect(message(scriptMockResponse(messages)).content).toBe(`[mock] ${source} ${ISA}`)
-      // Without the block the reply is what it always was.
-      const plain = buildPrompt({ sourceLanguage: "English", targetLanguage: "Arabic", systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: source, examples: [] })
-      expect(message(scriptMockResponse(plain)).content).toBe(`[mock] ${source}`)
-    })
-
-    it("an agent draft gives each segment only the verses it cites", () => {
-      const generation = message(scriptMockResponse([
-        { role: "system", content: `You translate into Arabic.\n\n${block}\n\nYou are the GENERATION pass. Use the evidence.` },
-        {
-          role: "user",
-          content:
-            "Evidence record from the completed research pass:\n<evidence>\nMock evidence\n</evidence>\n\n" +
-            "Translate these 3 segments:\n1. Isaiah 40:25 asks who compares.\n2. Romans 5:8; John 3:16-17 show his love.\n3. Amen.",
-        },
-      ]))
-      expect(JSON.parse(generation.content ?? "")).toEqual([
-        { i: 1, t: `[bozza] Isaiah 40:25 asks who compares. ${ISA}` },
-        { i: 2, t: `[bozza] Romans 5:8; John 3:16-17 show his love. ${ROM} ${JHN16} ${JHN17}` },
-        { i: 3, t: "[bozza] Amen." },
-      ])
-    })
   })
 })

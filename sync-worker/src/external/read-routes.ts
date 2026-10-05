@@ -3,7 +3,6 @@
 //   GET /api/v1/external/me                                — identity bootstrap
 //   GET /api/v1/external/orgs                              — list accessible orgs      (org-read-routes.ts)
 //   GET /api/v1/external/orgs/:orgId/projects              — that org's projects       (org-read-routes.ts)
-//   GET /api/v1/external/reference-bibles                  — installed reference Bibles (reference-bibles-route.ts)
 //   GET /api/v1/external/projects?orgId=                   — list accessible projects
 //   GET /api/v1/external/projects/:projectId                — one project + settings/version
 //   GET /api/v1/external/search?q=&projectIds=a,b          — cross-project search      (search-reads.ts)
@@ -71,7 +70,6 @@ import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
-import { handleExternalReferenceBiblesRequest } from "./reference-bibles-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
 import {
@@ -536,10 +534,6 @@ export async function handleExternalReadRequest(
   // /orgs and /orgs/:orgId/projects (AQU-1236).
   const orgResponse = await handleExternalOrgReadRequest(request, env)
   if (orgResponse) return orgResponse
-
-  // AQU-1573: credential-only like /orgs — no project in play.
-  const referenceBibles = await handleExternalReferenceBiblesRequest(request, env)
-  if (referenceBibles) return referenceBibles
 
   let match = url.pathname.match(SEARCH_RE)
   if (match) return handleExternalSearch(request, env, decodeURIComponent(match[1]))

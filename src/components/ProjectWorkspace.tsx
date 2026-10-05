@@ -129,7 +129,7 @@ import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
 } from "./pending-cell-scroll"
-import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { laneTargetLanguages, resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
 import { importTimelineTextTrack } from "@/lib/import/timeline-text"
@@ -14330,13 +14330,9 @@ export function ProjectWorkspace() {
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
             // One entry per lane, so the check can tell a file in this lane's
             // language (offer the translation import) from one in another
-            // lane's (say so; the import only fills the open lane).
-            targetLanguages: availableLanes.flatMap((lane) => {
-              const language = lane === "" ? project.targetLanguage : lane
-              return language
-                ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }]
-                : []
-            }),
+            // lane's (say so; the import only fills the open lane). The
+            // language comes from the lane's row, never its tag (AQU-1586).
+            targetLanguages: laneTargetLanguages(availableLanes, activeLane, project.targetLanguage, laneLabels, laneRows),
             // AQU-1631: picking a language here moves the editor's lane too —
             // the open file's lines then carry that lane's current
             // translations and AD-2 event heads, and the import must commit

@@ -4531,21 +4531,114 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(attach).toHaveBeenCalledOnce()
   })
 
-  // Walk r3 (2026-10-05): in Free timing the empty timeline is ~2 s wide and
-  // the one-line prompt ran past the lane's end.
-  it("stays inside the lane, breaking its line rather than running past a short lane's end", () => {
+  // ── Walk r3 (2026-10-05): the prompt on a short Free timing lane, and zoom ──
+  //
+  // happy-dom has no layout: every width is 0 and scrollLeft keeps whatever is
+  // written to it. These give the timeline's scroll column what a browser
+  // gives it — a view of `viewPx`, a scroll range set by the track inside it,
+  // and the browser's clamp on scrollLeft, which fires no scroll event when it
+  // leaves the column where it already was. Every other element is untouched.
+  function withScrollColumn(viewPx: number, run: () => void) {
+    const isColumn = (el: Element) => el.getAttribute("data-testid") === "tl-scroll"
+    const trackPx = (el: Element) => parseFloat((el.firstElementChild as HTMLElement | null)?.style.width ?? "") || 0
+    const rangeOf = (el: Element) => Math.max(viewPx, trackPx(el)) - viewPx
+    const left = new WeakMap<Element, number>()
+    const patches: Array<[object, string, PropertyDescriptor]> = []
+    const patch = (proto: object, key: string, make: (orig: PropertyDescriptor) => PropertyDescriptor) => {
+      const orig = Object.getOwnPropertyDescriptor(proto, key)!
+      patches.push([proto, key, orig])
+      Object.defineProperty(proto, key, { configurable: true, enumerable: orig.enumerable, ...make(orig) })
+    }
+    patch(HTMLElement.prototype, "clientWidth", (orig) => ({
+      get(this: HTMLElement) { return isColumn(this) ? viewPx : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollWidth", (orig) => ({
+      get(this: Element) { return isColumn(this) ? viewPx + rangeOf(this) : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollLeft", (orig) => ({
+      get(this: Element) { return isColumn(this) ? (left.get(this) ?? 0) : orig.get!.call(this) },
+      set(this: Element, v: number) {
+        if (isColumn(this)) left.set(this, Math.max(0, Math.min(v, rangeOf(this))))
+        else orig.set!.call(this, v)
+      },
+    }))
+    try { run() } finally {
+      for (const [proto, key, orig] of patches.reverse()) Object.defineProperty(proto, key, orig)
+    }
+  }
+
+  // The zoom buttons land their re-anchoring scroll in a rAF; queue and flush.
+  function withQueuedFrames(run: (flush: () => void) => void) {
+    const queued: FrameRequestCallback[] = []
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      queued.push(cb as FrameRequestCallback)
+      return queued.length
+    })
+    const flush = () => { act(() => { for (const cb of queued.splice(0)) cb(0) }) }
+    try { run(flush) } finally { raf.mockRestore() }
+  }
+
+  it("on a short Free timing lane, is one readable line at the view's left edge, at every zoom, and the ruler keeps its labels", () => {
+    setVideoDurationSec(LINKED, 635)
+    localStorage.removeItem("aquilla:timelineZoom:lv-ft-zoom")
+    const attach = vi.fn()
+    withScrollColumn(900, () => withQueuedFrames((flush) => {
+      render(
+        <TimelineEditor fileId="lv-ft-zoom" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" onRequestImportCaptions={attach} canImportCaptions
+          linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+      )
+      const column = screen.getByTestId("tl-scroll")
+      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      // The walk's file: an empty Free timing timeline is about two seconds,
+      // far shorter than the view, so the column cannot scroll at all.
+      expect(laneWidthPx()).toBeLessThan(200)
+
+      const check = (zoomStep: number) => {
+        const where = `after ${zoomStep} zoom-in(s)`
+        const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+        const css = getComputedStyle(prompt)
+        // Placed against the view's left edge by the browser, not from a
+        // remembered scroll offset: the same 10 px inset at every zoom.
+        expect(css.position, where).toBe("sticky")
+        expect(css.left, where).toBe("10px")
+        // As wide as its words on one line — never clipped to the short lane.
+        expect(css.width, where).toBe("max-content")
+        expect(css.overflow, where).not.toBe("hidden")
+        expect(prompt, where).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+        // The column never scrolled, and neither did the ruler's window: its
+        // labels start at 0:00 (they windowed out past the timeline's end).
+        expect(column.scrollLeft, where).toBe(0)
+        expect(screen.getByTestId("tl-ruler").textContent, where).toContain("0:00")
+      }
+
+      check(0)
+      for (let i = 1; i <= 3; i++) {
+        const before = laneWidthPx()
+        fireEvent.click(screen.getByLabelText("Zoom in"))
+        flush()
+        expect(laneWidthPx()).toBeGreaterThan(before)
+        check(i)
+      }
+      fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))
+      expect(attach).toHaveBeenCalledOnce()
+    }))
+  })
+
+  it("in a long lane, sits in the lane itself with a margin at each end, so scrolling never carries it past the lane's end", () => {
     setVideoDurationSec(LINKED, 635)
     render(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
-        timingMode="audioFirst" onRequestImportCaptions={() => {}} canImportCaptions
-        linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+        onRequestImportCaptions={() => {}} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
     const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
-    expect(prompt.style.right).toBe("10px")
-    expect(prompt.className).toMatch(/\bflex-wrap\b/)
-    expect(prompt.className).toMatch(/\boverflow-hidden\b/)
-    expect(prompt.className).not.toMatch(/(^|\s)whitespace-nowrap(\s|$)/)
-    expect(prompt).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+    // A sticky box stays within its containing block: the lane it is a direct
+    // child of, which in Original's timing is the whole film.
+    expect(prompt.parentElement).toHaveAttribute("data-testid", "tl-lane")
+    const css = getComputedStyle(prompt)
+    expect(css.position).toBe("sticky")
+    expect(css.marginLeft).toBe("10px")
+    expect(css.marginRight).toBe("10px")
   })
 
   it("is the statement alone for someone who cannot attach, and absent once captions are on the timeline", () => {

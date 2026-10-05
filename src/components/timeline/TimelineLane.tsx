@@ -73,7 +73,9 @@ export interface TimelineLaneProps {
   linkOverlay?: LaneLinkOverlay
   /** Sam's D3 (2026-10-05): drawn inside the lane, over everything, while it
    *  has no cells — the Source text lane of an empty linked video says "No
-   *  captions yet · Attach captions" here. The caller positions it. */
+   *  captions yet · Attach captions" here. The caller positions it; it is a
+   *  direct child of the lane's root, so the lane is its containing block
+   *  (that one is sticky, and stays within the lane it is in). */
   emptyPrompt?: ReactNode
 }
 

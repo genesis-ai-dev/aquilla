@@ -77,7 +77,7 @@ import {
   type TrackKind,
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
-import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 import {
   chipHeightPx,
   chipPadPx,
@@ -670,30 +670,48 @@ interface LaneLabelReorder {
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
 
+/** How far the lane prompt keeps from the visible left edge, and from the end
+ *  of a lane long enough to hold it. */
+const LANE_PROMPT_INSET_PX = 10
+
 /**
  * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
  * rows says what is missing, in the lane where the captions will appear, with
- * the way to add them right there. `leftPx` holds it at the visible left edge
- * as the timeline scrolls. Below the people who may attach captions it is the
- * statement alone.
+ * the way to add them right there. Below the people who may attach captions it
+ * is the statement alone.
+ *
+ * PLACED BY THE BROWSER, NOT BY A SCROLL OFFSET. It is `position: sticky` with
+ * a left inset, so it sits a few pixels in from the timeline's visible left
+ * edge however the column is scrolled, and its margins keep it inside a lane
+ * long enough to hold it: scrolled to a long lane's end, it stops short of
+ * that end rather than running past it.
+ *
+ * It is always one line and exactly as wide as its words. In Free timing an
+ * empty file's timeline is about two seconds, a lane of about 76 px at normal
+ * zoom, and the prompt simply runs past that lane's end. It was once held to
+ * the lane and clipped there ("No captior" over "· Attach c"), and once placed
+ * from the editor's remembered scroll offset, which a zoom on a timeline that
+ * cannot scroll pushed past the lane altogether (walk r3, 2026-10-05).
  */
-function LinkedVideoLanePrompt({ leftPx, onAttach }: { leftPx: number; onAttach?: () => void }) {
+function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
   const t = useT()
-  // Held inside the lane on the right as well: in Free timing an empty file's
-  // timeline is about two seconds wide, and a single unbroken line ran past
-  // the lane's end into blank space (walk r3, 2026-10-05). A lane too narrow
-  // for one line breaks it after "No captions yet".
   return (
     <div data-testid="tl-linked-video-lane-prompt"
-      className="pointer-events-none absolute inset-y-0 z-10 flex flex-wrap content-center items-center gap-x-1.5 overflow-hidden text-xs leading-4 text-muted-foreground"
-      style={{ left: `${leftPx + 10}px`, right: "10px" }}>
-      <span className="whitespace-nowrap">{t("editor.timeline.noCaptionsYet")}</span>
-      {onAttach && <span className="flex items-center gap-1.5 whitespace-nowrap">
+      className="pointer-events-none z-10 flex h-full items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
+      style={{
+        position: "sticky",
+        left: `${LANE_PROMPT_INSET_PX}px`,
+        marginLeft: `${LANE_PROMPT_INSET_PX}px`,
+        marginRight: `${LANE_PROMPT_INSET_PX}px`,
+        width: "max-content",
+      }}>
+      <span>{t("editor.timeline.noCaptionsYet")}</span>
+      {onAttach && <>
         <span aria-hidden>·</span>
         <Button variant="link" size="xs" className="pointer-events-auto h-auto px-0 text-xs" onClick={onAttach}>
           {t("importExport.captionTrack.attach")}
         </Button>
-      </span>}
+      </>}
     </div>
   )
 }
@@ -2552,9 +2570,16 @@ export function TimelineEditor({
     session: session ?? null,
   })
 
-  function scrollTrackTo(left: number) {
+  function scrollTrackTo(requested: number) {
     const el = scrollRef.current
     if (!el) return
+    // Only as far as the column can actually scroll. The browser clamps the
+    // write below on its own, but when the clamped offset is the one it was
+    // already at, nothing moves and no scroll event comes to correct the state
+    // — a zoom on a timeline shorter than the view remembered an offset the
+    // column never had, and the ruler's labels windowed out (see
+    // `clampScrollLeft`).
+    const left = clampScrollLeft(requested, el.scrollWidth, el.clientWidth)
     lastProgrammaticScrollAt.current = performance.now()
     el.scrollLeft = left
     // Belt and braces for the axis test in handleTrackScroll: the scroll event
@@ -3092,7 +3117,12 @@ export function TimelineEditor({
     // Stamp as programmatic: zoom re-anchoring must not read as a manual
     // scroll and disengage follow-playhead mid-glide.
     lastProgrammaticScrollAt.current = performance.now()
-    el.scrollLeft = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+    const wanted = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+    const left = clampScrollLeft(wanted, el.scrollWidth, el.clientWidth)
+    el.scrollLeft = left
+    // The glide step already put `wanted` in state. Past what the column can
+    // scroll, the DOM may not move at all, so no scroll event would correct it.
+    if (left !== wanted) setScrollLeft(left)
   }, [pxPerSec])
 
   // ── AQU-646 stage 5: dragging the playhead ────────────────────────────────
@@ -3507,7 +3537,7 @@ export function TimelineEditor({
             cells={subtitle}
             variant="subtitle"
             emptyPrompt={linkedVideoEmpty && linkedVideoEmpty.captionTrackCount === 0 ? (
-              <LinkedVideoLanePrompt leftPx={scrollLeft}
+              <LinkedVideoLanePrompt
                 onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
             ) : undefined}
             retimable={!audioFirst}

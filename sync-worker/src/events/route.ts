@@ -1372,7 +1372,13 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const p = rawEvent.payload as { editEventId?: unknown; targetLang?: unknown } | undefined
+          // The AUTHORIZED payload: an event may name its lane by `laneId`
+          // alone (AQU-1612), and authorize() fills in the tag. Off the wire
+          // such a vote read as a default-lane vote and was judged by that
+          // lane's editor instead of its own.
+          const p = authResult.event.event.payload as
+            | { editEventId?: unknown; targetLang?: unknown }
+            | undefined
           const lane = typeof p?.targetLang === 'string' ? p.targetLang : ''
           const editEventId = typeof p?.editEventId === 'string' ? p.editEventId : undefined
           // AQU-1571: the last editor was read BEFORE this request, so an edit

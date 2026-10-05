@@ -428,6 +428,31 @@ describe('cell.validate — self-validation against a hostile client (AQU-1571)'
     ])
   })
 
+  // AQU-1612 lets an event name its lane by `laneId` alone; the perimeter
+  // fills in the tag. Read off the wire, such a vote looked like a DEFAULT-lane
+  // vote and was judged by alice's default-lane edit, so bob's own Spanish
+  // went through.
+  it('judges a vote that names its lane only by laneId by THAT lane’s editor', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setProjectSettings(db, { allowSelfValidation: false, targetLanes: ['es'] })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-es', 'proj-v', 'target', 'Spanish', 'es', 'es', 2)`,
+    ).run()
+    await postEvent(db, makeCommitEvent('evt-bob-es-id', 'bob', 'hola', 'es'), await makeToken(400, 'bob'))
+
+    const vote: RawEvent<'cell.validate'> = {
+      ...makeValidateOf('evt-vote-es-id', 'bob', 'evt-bob-es-id'),
+      payload: { editEventId: 'evt-bob-es-id', laneId: 'lane-es' } as RawEvent<'cell.validate'>['payload'],
+    }
+    const own = await post(db, vote, await makeToken(400, 'bob'))
+    expect(own.rejected).toEqual([
+      { id: 'evt-vote-es-id', status: 403, reason: 'self-validation is not allowed on this project' },
+    ])
+    expect((await targetRow(db, 'es'))?.validated).toBe(0)
+  })
+
   // The "seen" test must not refuse the ordinary case on data that predates
   // the event log: a head the projection holds is an edit the server knows,
   // whether or not its event row exists.

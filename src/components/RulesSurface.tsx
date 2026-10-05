@@ -110,7 +110,9 @@ export function RulesSurface({
   const projectLanes = extraRegistryLanes(project.targetLanes, project.targetLanguage)
   const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
   const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
-  const defaultLaneLabel = defaultLaneRow?.name || project.targetLanguage || undefined
+  const defaultLaneLabel = defaultLaneRow
+    ? laneDisplayName(defaultLaneRow)
+    : project.targetLanguage || undefined
   // AQU-1592: a lane's label is its display name — the name when the user set
   // one, else the language it carries. `lane.name` alone is null on a lane that
   // only ever got a language.

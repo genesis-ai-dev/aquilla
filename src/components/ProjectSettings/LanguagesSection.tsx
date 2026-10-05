@@ -328,7 +328,7 @@ export function LanguagesSection({
                 <>
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-xs text-muted-foreground">
-                      {t("projectSettings.languages.archiveConfirm", { lane: defaultRow.name })}
+                      {t("projectSettings.languages.archiveConfirm", { lane: laneDisplayName(defaultRow) })}
                     </span>
                     {onLoadLaneLastChange && (
                       <LaneLastChangeNote laneId={defaultRow.id} load={onLoadLaneLastChange} />
@@ -363,7 +363,7 @@ export function LanguagesSection({
                     disabled={!canEdit || !canArchiveAnyLane}
                     data-testid={`archive-lane-${defaultRow.id}`}
                     aria-label={t("projectSettings.languages.archiveLaneAriaLabel", {
-                      lane: defaultRow.name,
+                      lane: laneDisplayName(defaultRow),
                     })}
                     onClick={() => {
                       setLaneActionError(null)

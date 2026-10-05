@@ -565,9 +565,9 @@ describe("LanguagesSection — the former default lane archives like any other (
   const DEFAULT_LANE: ProjectLaneView = {
     id: "lane-default",
     role: "target",
-    name: "French",
-    langCode: "fr",
-
+    language: "French",
+    name: null,
+    langCode: null,
     legacyTag: "",
     position: 0,
     archivedAt: null,
@@ -604,6 +604,8 @@ describe("LanguagesSection — the former default lane archives like any other (
     const { onSetLaneArchived } = renderLanes([DEFAULT_LANE, SPANISH])
     const button = screen.getByTestId("archive-lane-lane-default")
     expect(button.hasAttribute("disabled")).toBe(false)
+    // The row stores no name — the confirmation names the language.
+    expect(button.getAttribute("aria-label")).toMatch(/French/)
     fireEvent.click(button)
     fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
     await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-default", true))

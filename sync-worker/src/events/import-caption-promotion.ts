@@ -34,6 +34,7 @@ import {
   type PersistedEvent,
 } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { HIDDEN_FILE_ROLES } from '../../../db/shared/counted-files'
 import type { EventPayloads } from './types'
 
 interface PromotionArgs {
@@ -50,7 +51,9 @@ const refuse = (status: number, reason: string): Result => ({ ok: false, status,
 const ID = /^[A-Za-z0-9_-]{1,200}$/
 const TRACK_ID = /^[A-Za-z0-9_-]{1,64}$/
 const CAPTION_KINDS = new Set(['vtt', 'srt', 'sbv'])
-const HIDDEN_ROLES = new Set(['audio-cues', 'timeline-content'])
+// A hidden companion (cue sheet, caption-track content) can never be the
+// parent. The roles come from the one list every count reads (AQU-1626).
+const HIDDEN_ROLES: ReadonlySet<string> = new Set(HIDDEN_FILE_ROLES)
 /** Rows per multi-row INSERT. Cells bind ~24 values a row, so 750 rows stay
  *  far under postgres.js's 65,534-parameter ceiling. */
 const BULK_ROWS = 750

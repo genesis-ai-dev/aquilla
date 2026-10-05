@@ -1749,8 +1749,10 @@ export type PortfolioPageOpts = {
  *     statement wants: target cells still carrying an untouched machine
  *     draft, keyed by project. With it the read is those rows and nothing
  *     else. Without it the array still bounds the read to the listed
- *     projects' target cells through `idx_cells_lane_last_edit` (1.1s for
- *     the same caller), so this is safe to deploy before the migration lands.
+ *     projects' target cells through `idx_cells_lane_last_edit`, which for
+ *     the same caller is 255k pages instead of 2.28M: 1.0s when they are
+ *     cached and 23-29s when they are not. So the statement is correct
+ *     either side of the migration, but it is the index that makes it fast.
  *
  * The counted-files rule takes its set form for the reason given on
  * `inCountedFileSetSql`: this filters rows across many projects, and the

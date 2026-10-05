@@ -29,9 +29,10 @@
 -- query spells the same two literals, and Postgres uses a partial index only
 -- when the query implies its WHERE.
 --
--- Performance only: the counts are the same with or without it, and the query
--- is already bounded to the listed projects without it (1.1s for the same
--- caller), so the worker may deploy before or after this is applied.
+-- Performance only: the counts are the same with or without it, so the worker
+-- may deploy before or after this is applied. Until it is, the query is
+-- bounded to the listed projects' target cells but still has to read them:
+-- 255k pages for the same caller, 1.0s when cached and 23-29s when not.
 --
 -- Keep this file a SINGLE statement: CONCURRENTLY cannot run in a transaction
 -- block, and the migration runner sends each file as one query. Building it

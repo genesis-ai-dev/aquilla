@@ -34,6 +34,7 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  summarizeVisiblePortfolios,
   findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
@@ -290,40 +291,76 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
-/** Cap on an explicit orgIds list. All-orgs omits orgIds and uses memberships. */
+/**
+ * Cap on an explicit orgIds list. This is a request-size limit, not a cap on
+ * how many orgs an account may belong to. Omitted orgIds resolves every
+ * membership (AQU-756).
+ */
 export const PORTFOLIO_ORG_IDS_MAX = 500
 
+const portfolioOrgIdsField = z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional()
+
 const portfolioBatchBody = z.object({
-  orgIds: z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional(),
+  orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
+})
+
+const portfolioSummaryBody = z.object({
+  orgIds: portfolioOrgIdsField,
+})
+
+/**
+ * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
+ * for this org"). Omitted orgIds means every membership. An empty array
+ * still means none. Platform admins may name orgs they are not members of;
+ * everyone else must belong to each explicit id.
+ */
+async function resolvePortfolioOrgIds(
+  env: Env,
+  user: AuthUser,
+  orgIds: number[] | undefined,
+): Promise<{ orgIds: number[]; isAdmin: boolean } | { error: "not an org member" }> {
+  const fromMemberships = orgIds == null
+  const uniqueOrgIds = fromMemberships
+    ? (await listUserOrgs(env, user)).map((org) => org.id)
+    : [...new Set(orgIds)]
+  const isAdmin = isPlatformAdminEmail(env, user.email)
+  if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
+    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+    const allowed = await env.AQUILLA_PG.prepare(
+      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
+    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
+      return { error: "not an org member" }
+    }
+  }
+  return { orgIds: uniqueOrgIds, isAdmin }
+}
+
+/** POST /api/v2/orgs/portfolio/summary — overview totals, not the project list. */
+orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async (c) => {
+  const user = c.get("user")
+  const scope = await resolvePortfolioOrgIds(c.env, user, c.req.valid("json").orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const summary = await summarizeVisiblePortfolios(
+    c.env,
+    scope.orgIds,
+    { userId: user.id, isAdmin: scope.isAdmin },
+  )
+  return c.json({ ...summary.totals, orgs: summary.orgs })
 })
 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
   const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
-  // AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
-  // for this org"). Omitted orgIds means every membership, so all-orgs does
-  // not have to POST the whole id list. An empty array still means none.
-  const fromMemberships = orgIds == null
-  const uniqueOrgIds = fromMemberships
-    ? (await listUserOrgs(c.env, user)).map((org) => org.id)
-    : [...new Set(orgIds)]
+  const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const { orgIds: uniqueOrgIds, isAdmin } = scope
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
-
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  if (!isAdmin && !fromMemberships) {
-    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await c.env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
-    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
-      return c.json({ error: "not an org member" }, 403)
-    }
-  }
 
   const q = (qRaw ?? "").trim().toLowerCase()
   const pickerMode = limitNum != null || cursorRaw != null || q !== ""

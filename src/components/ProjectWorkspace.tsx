@@ -208,6 +208,7 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { enqueueTakeRemovals } from "@/lib/audio/take-actions"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -444,6 +445,7 @@ import {
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
+import { textValidationScope, textVoteGate } from "@/lib/review/text-validation-policy"
 import { useConcepts } from "@/hooks/useConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
@@ -466,6 +468,7 @@ import {
   batchValidateTelemetry,
   batchValidateToast,
   summarizeBatchValidate,
+  workspaceBatchValidateOptions,
   type BatchValidateSummary,
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -4830,6 +4833,9 @@ export function ProjectWorkspace() {
     // AQU-1391: org default for repetition auto-propagation (a project may
     // override it either way).
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
+    // Whether bulk text validation may sign off untouched AI drafts (Sam,
+    // 2026-10-01). Off unless the org opts in; both bulk paths read it.
+    allowBulkValidateAiDrafts: orgSettingsAllowBulkValidateAiDrafts,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -4839,6 +4845,13 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
+  // The project's own settings response carries the org's switch first: a
+  // member who is not in the org cannot read the org's settings (403), so the
+  // org read alone left the switch off for them whatever the org chose. That
+  // response is also the one re-read on focus and remote changes. The org read
+  // covers a server that predates the field.
+  const allowBulkValidateAiDrafts =
+    projectSettings?.orgAllowBulkValidateAiDrafts ?? orgSettingsAllowBulkValidateAiDrafts
 
   const { rules } = useRules(
     project ?? null,
@@ -6916,12 +6929,14 @@ export function ProjectWorkspace() {
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
-    const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
     const shownIds = new Set(order.slice(window.start, window.end))
     const start = window.start
     const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
+      // AQU-1571: role, scope and the project's text rules, as the editor row
+      // applies them; the click handler below asks the same question.
+      const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
         (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
       )
@@ -6955,7 +6970,8 @@ export function ProjectWorkspace() {
         validationStatus: cell.validationStatus,
         activeValidators: cell.activeValidators,
         validationHistory: cell.validationHistory,
-        canValidate: roleCanValidate && isInMemberScope(myScopes, cell.fileId, activeLane),
+        canValidate: vote.canValidate,
+        validationBlock: vote.block,
       }
     })
 
@@ -6978,6 +6994,7 @@ export function ProjectWorkspace() {
     cellStore,
     cellStoreVersion,
     cellsLoading,
+    currentUsername,
     effectiveHealthMap,
     examples,
     fileMeta.targetDirectionMode,
@@ -9387,15 +9404,16 @@ export function ProjectWorkspace() {
    */
   const batchValidateSummary = useCallback(() => summarizeBatchValidate(
     project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
-    {
+    // AQU-1571: the project's text rules, pinned by a unit test of the builder.
+    workspaceBatchValidateOptions({
+      project,
+      activeFileId,
       username: currentUsername,
       myScopes,
       activeLane,
-      cap: project?.completionSettings?.validationBatchSize,
-      canValidate: canPerform("cell.validate", project?.syncRole?.level ?? null),
-      hasTarget: Boolean(project?.id && activeFileId),
-    },
-  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+      allowBulkValidateAiDrafts,
+    }),
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane, allowBulkValidateAiDrafts])
 
   const actionCtx = useMemo(() => ({
     project: project!,
@@ -9521,6 +9539,7 @@ export function ProjectWorkspace() {
               editEventId: cell.targetEventId!,
               author: currentUsername,
               targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+              surface: "batch", // AQU-1572
             })
           }
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -9580,15 +9599,17 @@ export function ProjectWorkspace() {
         }
       }
       if (targets.length === 0) return
+      const projectId = project.id
       void (async () => {
         for (const target of targets) {
           await emitCellAudioValidate({
-            projectId: project.id,
+            projectId,
             fileId: target.fileId,
             cellId: target.cellId,
             audioId: target.audioId,
             ...(activeLane ? { targetLang: activeLane } : {}),
             author: currentUsername,
+            surface: "batch", // AQU-1572
           })
         }
         await refreshOutboxPending()
@@ -11233,7 +11254,7 @@ export function ProjectWorkspace() {
       //
       // The two maps are disjoint by cell id — one is this file's audio read,
       // the other the sibling's — so a clip is gathered once and only once.
-      const removals: Array<{ cellId: string; audioId: string; fileId: string }> = []
+      const removals: Array<{ cellId: string; audioId: string; fileId: string; slot: string }> = []
       if (doomedSlots.size > 0) {
         const sources: Array<[typeof timelineAudioByCellId, string | null]> = [
           [timelineAudioByCellId, activeFileId],
@@ -11244,7 +11265,7 @@ export function ProjectWorkspace() {
           for (const [cellId, entry] of map) {
             for (const [audioId, att] of Object.entries(entry.attachments)) {
               if (!doomedSlots.has(att.slot)) continue
-              removals.push({ cellId, audioId, fileId })
+              removals.push({ cellId, audioId, fileId, slot: att.slot })
             }
           }
         }
@@ -11325,19 +11346,13 @@ export function ProjectWorkspace() {
 
           // ── PHASE 2: the recordings, now that the row is really gone ──────
           if (removals.length > 0) {
-            await enqueueEvents(
-              removals.map((r) => ({
-                kind: "cell.audio.remove" as const,
-                projectId: project.id,
-                // The file the CELL lives in — not the active one. A take on a
-                // cue belongs to the sibling, and an event aimed at the wrong
-                // file projects onto nothing.
-                fileId: r.fileId,
-                cellId: r.cellId,
-                parentId: null,
-                author: currentUsername,
-                payload: { audioId: r.audioId },
-              })),
+            // Each removal aims at the file the CELL lives in — not the active
+            // one. A take on a cue belongs to the sibling, and an event aimed
+            // at the wrong file projects onto nothing. They leave the screen
+            // now (AQU-1495), not when the socket echoes them back.
+            const touched = await enqueueTakeRemovals(
+              removals.map((r) => ({ projectId: project.id, ...r })),
+              currentUsername,
             )
             await flushOutboxBatch({
               getTokenForFile: getTokenForProjectFile,
@@ -11352,6 +11367,7 @@ export function ProjectWorkspace() {
                 })
               },
             })
+            for (const fileId of touched) notifyAudioAttachmentsChanged(fileId)
           }
           refresh()
         } catch (e) {
@@ -11862,6 +11878,10 @@ export function ProjectWorkspace() {
       canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
       allowSelfValidation: project.allowSelfValidation,
       roleLevel: project.syncRole?.level ?? null,
+      scopeCanValidate: textValidationScope(project, {
+        roleLevel: project.syncRole?.level ?? null,
+        username: currentUsername,
+      }).canValidate,
     })) {
       try {
         await emitCellValidate({
@@ -11871,6 +11891,9 @@ export function ProjectWorkspace() {
           editEventId: eventId,
           author: currentUsername,
           targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
+          surface: "agent-pane",
         })
         // Only a validation that actually landed owes the repetitions anything.
         autoValidated = true
@@ -11898,6 +11921,11 @@ export function ProjectWorkspace() {
     if (!project?.id || !canPerform(action, project.syncRole?.level ?? null)) return false
     const cell = getActiveCell(cellId)
     if (!cell?.targetEventId || !isInMemberScope(myScopes, cell.fileId, activeLane)) return false
+    // AQU-1571: a vote the project's text rules refuse never leaves; the
+    // control is already greyed, this covers anything that calls past it.
+    if (validated && !textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane }).canValidate) {
+      return false
+    }
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     try {
       await emit({
@@ -11907,6 +11935,9 @@ export function ProjectWorkspace() {
         editEventId: cell.targetEventId,
         author: currentUsername,
         targetLang: activeLane,
+        // AQU-1572: a person clicking the agent pane's control; the agent
+        // proposed nothing here, so the source stays "ui".
+        surface: "agent-pane",
       })
       await handleCellCommitted(cell.id)
       return true
@@ -12867,7 +12898,10 @@ export function ProjectWorkspace() {
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
+                  allowBulkValidateAiDrafts={allowBulkValidateAiDrafts}
                   audioMode={lens === "audio"}
+                  orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
+                  mediaLayer={!!audioLens}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
                     const result = await generateCombinedVoice({
@@ -14437,6 +14471,7 @@ export function ProjectWorkspace() {
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
           description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
+          canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />

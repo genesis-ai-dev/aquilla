@@ -1200,6 +1200,7 @@ export function AudioRecordingModal({
       // Round 8c: the TTS take is born with its permanent name like any take.
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
+        surface: "recorder",
         label: nextTakeLabel(recordingTakes),
         // The WORDS come from the subtitle this line performs, and the VOICE
         // from that subtitle's cast assignment — neither of which the cue
@@ -1394,6 +1395,7 @@ export function AudioRecordingModal({
           // AQU-1572: the recorder's own save path — the heal re-attach above
           // passes no origin, so a take counts exactly once.
           audioOrigin: "record",
+          surface: "recorder",
           author: username,
         })
       } catch (emitErr) {
@@ -1460,6 +1462,9 @@ export function AudioRecordingModal({
           audioId: savedTakeId,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
+          // AQU-1572: the recorder's own vote for its fresh take, not a review.
+          auto: true,
+          surface: "recorder",
         }).catch((err) => {
           // Non-blocking, as for text: the take itself already landed.
           console.warn("[audio auto-validate] emit failed:", err)
@@ -1588,6 +1593,7 @@ export function AudioRecordingModal({
         // Sam, 2026-08-24: uploading is the other way audio gets onto an added
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
+        surface: "recorder",
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)

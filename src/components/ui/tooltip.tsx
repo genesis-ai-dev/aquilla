@@ -148,9 +148,22 @@ function AppTooltip({
     trigger
   )
 
+  // The key starts a fresh trigger whenever the child turns disabled or
+  // enabled. That swaps the element the tooltip hangs on (the stand-in span
+  // above, or the child itself), and Base UI attaches its hover listeners to
+  // the trigger element only once, when the trigger mounts: without the key
+  // they stayed on the element that was just removed, so hover never opened
+  // the tooltip again while focus still did. Seen on the selection bar's
+  // "Validate text" when the selection began on a line it cannot validate
+  // (2026-10-03). The child is remounted by the swap either way, so the key
+  // costs nothing extra.
   return (
     <Tooltip disabled={disabled}>
-      <TooltipTrigger render={triggerNode} delay={delay} />
+      <TooltipTrigger
+        key={childDisabled ? "disabled-child" : "child"}
+        render={triggerNode}
+        delay={delay}
+      />
       <TooltipContent side={side} align={align} className={className}>
         {content}
       </TooltipContent>

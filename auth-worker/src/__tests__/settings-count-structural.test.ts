@@ -266,3 +266,36 @@ describe("the settings response carries the org default", () => {
     expect(body.current?.orgCountStructuralCells).toBe(false)
   })
 })
+
+describe("the settings response carries the org's AI-draft switch", () => {
+  const getProjectSettings = async (jwt: string) =>
+    app.request("/api/v2/projects/p1/settings", { headers: authHeader(jwt) }, env)
+  const read = async (jwt: string) =>
+    ((await (await getProjectSettings(jwt)).json()) as { orgAllowBulkValidateAiDrafts: boolean | null })
+      .orgAllowBulkValidateAiDrafts
+
+  it("reaches a project member who is not in the org, who cannot read the org's settings", async () => {
+    await seedOrg()
+    await seedProject()
+    // cora is a project contributor and no org member: the org route refuses her.
+    const cora = await jwtFor("cora")
+    expect((await app.request("/api/v2/orgs/1/settings", { headers: authHeader(cora) }, env)).status).toBe(403)
+    expect(await read(cora)).toBe(false)
+    await patchOrg(await jwtFor("mara"), { allowBulkValidateAiDrafts: true })
+    expect(await read(cora)).toBe(true)
+  })
+
+  it("is null for a project with no organization", async () => {
+    await seedOrg()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('p1', 'Solo', NULL, 3)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1',3,700,3)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version) VALUES ('p1', '{}', 0)",
+    ).run()
+    expect(await read(await jwtFor("leo"))).toBeNull()
+  })
+})

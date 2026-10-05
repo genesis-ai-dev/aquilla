@@ -200,10 +200,11 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     expect(within(row).getByTestId("health-ribbon")).toBeInTheDocument()
     fireEvent.click(button)
     await waitFor(() => expect(data.onValidationChange).toHaveBeenCalledWith("c1", true))
-    expect(within(row).getByRole("button", { name: "Validated — MRK 1:1. Click to remove your validation." })).toHaveAttribute("aria-pressed", "true")
+    expect(within(row).getByRole("button", { name: "Validated by you, MRK 1:1. Click to see the list, where you can remove your validation." })).toHaveAttribute("aria-pressed", "true")
     expect(within(screen.getByRole("article", { name: "MRK 1:2" })).queryByRole("button", { name: /Click to validate/ })).not.toBeInTheDocument()
     view.rerender(<AgentDocumentContext workspace={{ ...data, cells: data.cells.map((cell) => ({ ...cell, canValidate: false })) }} />)
-    expect(within(row).getByRole("button", { name: "Validated — MRK 1:1. Click to remove your validation." })).toHaveAttribute("aria-disabled", "true")
+    // The pane can still validate, so the list keeps its "Remove your validation".
+    expect(within(row).getByRole("button", { name: "Validated by you, MRK 1:1. Click to see the list, where you can remove your validation." })).toHaveAttribute("aria-disabled", "true")
   })
 
   it("keeps draft/regenerate/setup actions and blocks anonymous, unavailable and busy generation", () => {

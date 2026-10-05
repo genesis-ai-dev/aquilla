@@ -6,6 +6,8 @@
  * that name). Row identity is `lane_id`. `target_lang` remains the legacy tag.
  */
 
+import type { AquillaDb } from '../../../db/shim/postgres'
+
 /**
  * Scalar subquery for a projected row's `lane_id` from (project, side, tag).
  *

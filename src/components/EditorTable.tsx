@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
+import { laneComboboxOptions } from "@/components/lane-options"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -131,7 +132,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { CellPresenceBadges } from "./CellPresenceBadges"
-import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
@@ -200,6 +200,7 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { closeRuleCard, openRuleCard, useOpenRuleId } from "@/lib/rules/open-rule-card"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
@@ -450,17 +451,19 @@ function areNumberArraysEqual(a: number[], b: number[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfRowRenders = rowRenders
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfDumpRowRenders = () => {
+  const perfHandles = window as typeof window & {
+    __perfRowRenders?: Map<string, number>
+    __perfDumpRowRenders?: () => void
+    __perfResetRowRenders?: () => void
+  }
+  perfHandles.__perfRowRenders = rowRenders
+  perfHandles.__perfDumpRowRenders = () => {
     const obj: Record<string, number> = {}
     for (const [k, v] of rowRenders) obj[k] = v
     // eslint-disable-next-line no-console
     console.table(obj)
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+  perfHandles.__perfResetRowRenders = () => rowRenders.clear()
 }
 
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
@@ -889,7 +892,7 @@ interface EditorTableProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
    *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1356,7 +1359,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // AQU-1591: and in THIS lane. A take belongs to the language it performs, so
+  // the rows show the active lane's dubs plus the shared programme audio — not
+  // whatever every other language has recorded on the same lines.
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } =
+    useFileAudioAttachments(project.id, audioFileId, activeLane)
   // Until the file's recordings have been read — and in a dubbing file, its
   // heard lines' too — an empty answer means "not read yet", and each row's
   // audio check shows a placeholder instead of claiming there is no audio.
@@ -2874,13 +2881,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={switchableLanes.map((lane) => ({
-                  value: lane,
-                  label: laneLabels?.[lane]
-                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
-                  archived: isLaneArchived(lane, archivedLanes),
-                  testId: lane,
-                }))}
+                options={laneComboboxOptions({
+                  lanes: switchableLanes,
+                  laneLabels,
+                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+                  archivedLanes,
+                })}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -3656,7 +3662,7 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -4081,7 +4087,7 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -5111,7 +5117,13 @@ function EditorRow({
     return () => clearTimeout(timer)
   }, [holdingRemoteDraft])
   const overlayDraftText = liveRemoteDraft ?? heldRemoteDraft?.text
-  const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  // AQU-1634: the rule card is one app-wide surface, so its open state lives in
+  // a shared store rather than per-row state — opening another row's underline
+  // replaces the open card instead of stacking a second one.
+  const openRuleId = useOpenRuleId(cell.id)
+  // Teardown (virtualisation, lane switch, file change) closes this row's card,
+  // matching the per-row lifetime the card had before the store.
+  useEffect(() => () => closeRuleCard(cell.id), [cell.id])
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
@@ -5489,7 +5501,7 @@ function EditorRow({
   )
 
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
     // (useCellsAuditStatsWithOverlay) reflects it on `cell.waivers` instantly
@@ -5514,7 +5526,7 @@ function EditorRow({
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     void emitCellUnwaive({
       projectId: project.id,
@@ -6658,8 +6670,8 @@ function EditorRow({
   // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
     if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -6752,8 +6764,14 @@ function EditorRow({
   // produces one violation surface.
   const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
-    setOpenRuleId(ruleId)
-  }, [])
+    openRuleCard(cell.id, ruleId)
+  }, [cell.id])
+
+  // Same card, opened from the cell's Issues tab instead of an inline blot.
+  const handleOpenRuleCard = useCallback(
+    (ruleId: string) => openRuleCard(cell.id, ruleId),
+    [cell.id],
+  )
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
   // rule explanation; mouse-out clears it. Snapshotting mirrors openInlineRule
@@ -7652,6 +7670,7 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={project.targetLanguage || undefined}
+                    smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -8446,7 +8465,7 @@ function EditorRow({
                   waivedInfractions={waivedInfractions}
                   ruleMap={ruleMap}
                   editable={editable}
-                  onOpenRule={setOpenRuleId}
+                  onOpenRule={handleOpenRuleCard}
                   onWaive={handleWaive}
                   onUnwaive={handleUnwaive}
                 />
@@ -8485,13 +8504,13 @@ function EditorRow({
           <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) setOpenRuleId(null)
+              if (!next) closeRuleCard(cell.id)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             onOpenRule={(ruleId) => {
-              setOpenRuleId(null)
+              closeRuleCard(cell.id)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}

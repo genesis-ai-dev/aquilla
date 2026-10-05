@@ -112,3 +112,33 @@ export const OMNIVOICE_VOICES_MIGRATED = "omnivoice voices migrated"
  * (`batchValidateTelemetry` in lib/review/batch-validate-summary.ts).
  */
 export const BATCH_VALIDATE_ATTEMPTED = "batch validate attempted"
+
+// ── Cell validation + audio actions (AQU-1572) ────────────────────────────
+
+/**
+ * A cell was validated. Unlike `FIRST_CELL_VALIDATE` (a once-per-session
+ * milestone) this fires on EVERY validation gesture, and carries `medium`
+ * (`text` | `audio`) so the review loop and the dubbing loop can be counted
+ * apart. Before this existed, a user toggling validation or working the Audio
+ * view left no trace at all — AQU-1571 had to be characterised by screenshot
+ * because PostHog had nothing to query.
+ */
+export const CELL_VALIDATED = "cell validated"
+
+/** Mirror of `CELL_VALIDATED` for the un-validate gesture. */
+export const CELL_UNVALIDATED = "cell unvalidated"
+
+/**
+ * A clip the user supplied was attached to a cell — an upload, a LinkMedia
+ * file, or a linked media URL. Only the *originating* gesture emits; the
+ * derived re-attaches (denoise, the transcription's timings write-back,
+ * diarization, the recorder's heal path) deliberately do not, or one clip
+ * would count several times.
+ */
+export const AUDIO_ATTACHED = "audio attached"
+
+/** A clip was synthesized for a cell (TTS / voice conversion). */
+export const AUDIO_GENERATED = "audio generated"
+
+/** A clip was recorded for a cell through the in-app recorder. */
+export const AUDIO_RECORDED = "audio recorded"

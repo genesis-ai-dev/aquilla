@@ -256,6 +256,8 @@ function toMatchedCell(
     incomingText: text,
     currentText,
     hasConflict: current.length > 0 && !alreadyThere,
+    // "" = unchainable (neither event id known yet). applyEBibleTargetImport
+    // rejects the whole apply rather than dropping the cell (AQU-1669).
     parentId: resolveTargetCommitParent({
       targetEventId: cell.targetEventId,
       sourceEventId: cell.sourceEventId,

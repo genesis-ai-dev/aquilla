@@ -359,10 +359,12 @@ async function readThreshold(
  * bar. An assignment pinned to a DIFFERENT lane still appears — the cells are
  * spoken for either way, and hiding the row would make the unit look
  * unassigned — which is why every row carries its own `targetLang` for the
- * caller to label. Audio has no lane at all (below).
+ * caller to label. Audio is measured in that same lane (AQU-1591, below).
  *
  * AQU-1609: `laneId` is `lanes.id`. The route resolves it, accepting a legacy
- * `?lane=` tag from an older client; nothing below compares tags.
+ * `?lane=` tag from an older client; nothing below takes a tag from the caller.
+ * The one tag comparison left is the audio join's, and it derives the tag from
+ * this id inside the statement (AQU-1591: the shared audio CTE groups by tag).
  */
 export async function getUnitAssignments(
   env: Env,
@@ -390,9 +392,11 @@ export async function getUnitAssignments(
     // so joining takes straight onto the cell rows would multiply every other
     // count by the number of takes.
     //
-    // cell_audio has NO target_lang column, so audio is lane-independent BY
-    // CONSTRUCTION — one recording is the recording, whichever text lane you
-    // are looking at. That is a schema fact, not a simplification here.
+    // AQU-1591: audio IS per lane now. `cell_audio.lane_id` arrived with
+    // migration 0135, the shared CTE groups by it, and the join below pins the
+    // takes to the unit's own lane — the one `a.target_lang` names. Until then
+    // this panel counted every language's recordings as this assignee's, so a
+    // line voiced in Swahili read as recorded on the French unit too.
     `WITH policy AS (
        -- AQU-1083. Whether chapter headings and section titles count as
        -- translatable content is a team setting: the project's answer, else its
@@ -454,7 +458,21 @@ export async function getUnitAssignments(
        LEFT JOIN cells t ON t.project_id = c.project_id AND t.file_id = c.file_id
                         AND t.cell_id = c.cell_id AND t.side = 'target'
                         AND t.lane_id = ?
+       -- AQU-1591: ...and in THIS unit's lane. The audio CTE returns one row
+       -- per (cell, lane); joining on the cell alone would hand a unit every
+       -- lane's takes, which is what it used to do.
+       --
+       -- The caller holds a lane ID (AQU-1609) and the shared CTE names a
+       -- take's lane by its TAG, so the id is turned into that tag here, by
+       -- the same lanes-row lookup audioLaneTagSql makes for the take — both
+       -- sides read the lane row as it is now, so a retagged lane still
+       -- matches itself. No row (an unknown id, or the '' an unresolvable tag
+       -- becomes) is NULL, which equals nothing: the unit reads no audio
+       -- rather than borrowing the default lane's, as its text join does.
        LEFT JOIN audio au ON au.cell_id = c.cell_id
+                         AND au.lane = (SELECT COALESCE(ul.legacy_tag, '') FROM lanes ul
+                                         WHERE ul.project_id = a.project_id
+                                           AND ul.id = ? AND ul.role = 'target')
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
          ON ln.project_id = a.project_id AND ln.id = a.lane_id
@@ -479,9 +497,10 @@ export async function getUnitAssignments(
   )
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane id on the target join, then
-    // the WHERE — and the section key last, only when the fragment above put a
-    // placeholder there. Adding a CTE ahead of another means inserting its
+    // audio thresholds in the SELECT list, the lane id on the target join, the
+    // same lane id on the audio join (AQU-1591), then the WHERE — and the
+    // section key last, only when the fragment above put a placeholder there.
+    // Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
     .bind(
       projectId,
@@ -489,6 +508,9 @@ export async function getUnitAssignments(
       fileId,
       validationCount,
       validationCountAudio,
+      laneId,
+      // AQU-1591: the audio join's lane, immediately after the target join's —
+      // statement order, which is the only order these binds have.
       laneId,
       projectId,
       fileId,
@@ -593,6 +615,13 @@ export interface MyAssignment {
   fileIds: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the resolved source cell ids, present ONLY for a 'cells' scope
+   * (the editor's current selection). A book or chapter scope leaves it absent
+   * — its extent is the whole file or the chapters `scopeLabel` names — so a
+   * reader branches on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
   /** Display name of that lane, when the row exists. */
@@ -636,6 +665,40 @@ async function fileIdsForAssignments(
     .all<{ assignment_id: string; file_id: string }>()
 
   for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
+}
+
+/**
+ * assignment_id → its resolved source cell ids (AQU-1628).
+ *
+ * Only called with the ids of 'cells'-scope assignments: for a book or chapter
+ * scope the extent is re-derivable (the whole file, or the chapters named in
+ * `scope_label`), while an explicit line set is not — the editor gutter cannot
+ * tell which lines are the person's without being told. Keeping the call to
+ * that scope means an inbox with no selection assignments pays nothing.
+ *
+ * Callers pass assignment ids they already selected, so this inherits their
+ * authorization exactly — it never widens what the caller may see.
+ */
+async function cellIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  if (assignmentIds.length === 0) return byAssignment
+  for (const id of assignmentIds) byAssignment.set(id, [])
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.cell_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; cell_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.cell_id)
   return byAssignment
 }
 
@@ -689,6 +752,10 @@ export async function getMyAssignments(
 
   const results = rows.results ?? []
   const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+  const cellIds = await cellIdsForAssignments(
+    env,
+    results.filter((r) => r.scope_kind === "cells").map((r) => r.assignment_id),
+  )
 
   return results.map((r) => ({
     assignmentId: r.assignment_id,
@@ -698,6 +765,7 @@ export async function getMyAssignments(
     fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    ...(cellIds.has(r.assignment_id) ? { cellIds: cellIds.get(r.assignment_id) ?? [] } : {}),
     targetLang: r.target_lang ?? "",
     laneName: r.lane_name,
     laneId: r.lane_id,

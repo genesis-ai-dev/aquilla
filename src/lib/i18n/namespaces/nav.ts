@@ -257,7 +257,7 @@ export const nav = defineNamespace({
     "nav.beta.title": "Heads up — we're in beta",
     "nav.beta.description":
       "Things might move around, break, or change without warning. That's the deal for now.",
-    "nav.beta.pointEvolving": "The UI is actively evolving",
+    "nav.beta.pointEvolving": "The UI is changing",
     "nav.beta.pointFeatures": "Features may appear or disappear",
     "nav.beta.pointFeedback": "Your feedback shapes what we build next",
     "nav.beta.joinDiscord": "Join our Discord",
@@ -383,7 +383,7 @@ export const nav = defineNamespace({
     "nav.outbox.allCaughtUpTitle": "You’re all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
-    "nav.outbox.footerPending": "Edits stay saved locally until they sync.",
+    "nav.outbox.footerPending": "Edits stay saved on this device until they sync.",
     "nav.outbox.footerSynced": "Local changes sync automatically.",
     "nav.outbox.statusPending": "Pending",
     "nav.outbox.statusRetrying": "Retrying",

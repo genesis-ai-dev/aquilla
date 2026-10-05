@@ -188,6 +188,8 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       durationMs,
       label,
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      // AQU-1572: the originating attach gesture — this is the one that counts.
+      audioOrigin: "attach",
       author: username,
     })
   } catch (emitErr) {

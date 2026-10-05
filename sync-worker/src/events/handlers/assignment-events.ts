@@ -7,9 +7,9 @@
 //
 // Each event writes the canonical events row (history/audit) and then mutates
 // the `assignments` / `assignment_cells` projection tables:
-//   - assignment.create  : INSERT the assignments row, resolve the book/chapter
-//                           scope into assignment_cells from the live `cells`
-//                           projection, then set cells_total.
+//   - assignment.create  : INSERT the assignments row, resolve the
+//                           book/chapter/cell scope into assignment_cells from
+//                           the live `cells` projection, then set cells_total.
 //   - assignment.reassign : UPDATE assignee_user_id.
 //   - assignment.unassign : set unassigned_at (soft close; row kept for audit).
 //
@@ -23,6 +23,10 @@ import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
 import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
 import type { DispatchResult } from './types'
+
+/** Cell ids per INSERT for a 'cells' scope — keeps one statement's parameter
+ *  count bounded when a manager selects a whole chapter by hand. */
+const CELL_SCOPE_CHUNK = 500
 
 export type AssignmentEventKind = Extract<
   EventKind,
@@ -89,13 +93,35 @@ export function handleAssignmentEvent(
     )
 
     // 2. Resolve each scope entry -> source cells from the live cells
-    //    projection. One INSERT...SELECT per entry. The cells projection
-    //    hard-deletes on *.cell.delete (no deleted_at column), so a plain
-    //    side='source' filter is the live set. Chapter scope narrows by
-    //    canonical_ref (e.g. "GEN 1" -> LIKE 'GEN 1:%', which excludes
-    //    "GEN 11:1" because the ':' anchors the chapter boundary).
+    //    projection. One INSERT...SELECT per entry, or per chunk for a
+    //    'cells' scope. The cells projection hard-deletes on *.cell.delete
+    //    (no deleted_at column), so a plain side='source' filter is the live
+    //    set. Chapter scope narrows by canonical_ref (e.g. "GEN 1" -> LIKE
+    //    'GEN 1:%', which excludes "GEN 11:1" because the ':' anchors the
+    //    chapter boundary).
     for (const entry of p.scope) {
-      if (entry.chapter) {
+      if (entry.cellIds) {
+        // AQU-1628: an explicit line set ('cells' scope — the editor's current
+        // selection). Resolved against the live cells projection like every
+        // other scope, so an id that no longer exists simply drops out and
+        // cells_total below counts what was actually assigned. Chunked because
+        // a selection can be larger than one statement's parameter budget.
+        for (let i = 0; i < entry.cellIds.length; i += CELL_SCOPE_CHUNK) {
+          const chunk = entry.cellIds.slice(i, i + CELL_SCOPE_CHUNK)
+          if (chunk.length === 0) continue
+          stmts.push(
+            db
+              .prepare(
+                `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+                 SELECT ?, file_id, cell_id FROM cells
+                 WHERE project_id = ? AND file_id = ? AND side = 'source'
+                   AND cell_id IN (${chunk.map(() => '?').join(', ')})
+                 ON CONFLICT DO NOTHING`,
+              )
+              .bind(p.assignmentId, event.projectId, entry.fileId, ...chunk),
+          )
+        }
+      } else if (entry.chapter) {
         stmts.push(
           db
             .prepare(

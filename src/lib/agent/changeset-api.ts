@@ -128,6 +128,11 @@ export interface ChangesetApproval {
   projectName: string | null
   status: ChangesetStatusName
   autonomyMode: string
+  /** AQU-1673: the credential that STAGED this plan. `SESSION_CREDENTIAL_ID`
+   *  means a signed-in human staged it from the app, so no agent will come
+   *  back to commit it — see `needsCommitOnApproval`. Absent on older
+   *  servers, which is treated as "an agent's", preserving prior behaviour. */
+  credentialId?: string
   /** Who the changeset is ROUTED to (COMMAND-REGISTRY-P1 §2.2). Absent on
    *  older servers, `null` when unassigned. Routing never resolves anything:
    *  an assigned changeset is still `staged` and still needs a human. */
@@ -340,6 +345,34 @@ export async function commitChangeset(
   return unwrapChangeset(
     (await res.json()) as ChangesetStatus | { changeset: ChangesetStatus },
   )
+}
+
+/** Sentinel `credential_id` the worker stores for a changeset staged from a
+ *  browser session rather than by a PAT-bearing agent. Mirrors sync-worker's
+ *  `SESSION_CREDENTIAL_ID` (external/session-routes.ts). */
+export const SESSION_CREDENTIAL_ID = "session"
+
+/**
+ * AQU-1673 — does approving this changeset also have to commit it?
+ *
+ * Approval and commit are two steps: `approveChangeset` only mints the
+ * one-time confirmation, and something then has to call `commitChangeset`.
+ * For an agent's plan that something is the agent, which polls `/wait` and
+ * commits once a human approves — so the approval surfaces deliberately do
+ * not commit, and must not, or they would race the agent.
+ *
+ * A SESSION-staged plan has no agent. "Import as proposals" stages one and
+ * walks away; if the approving surface does not commit it, the human sees
+ * "Approved", the plan stays `staged`, and the text they approved never
+ * reaches a cell. So for those, approving means applying.
+ *
+ * An older server omits `credentialId`; that reads as an agent's plan, which
+ * is the pre-AQU-1673 behaviour and never commits something twice.
+ */
+export function needsCommitOnApproval(
+  changeset: Pick<ChangesetApproval, "credentialId">,
+): boolean {
+  return changeset.credentialId === SESSION_CREDENTIAL_ID
 }
 
 /** One cell's proposed translation, as `prepareSessionChangeset` sends it.

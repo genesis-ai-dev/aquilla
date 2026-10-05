@@ -373,6 +373,9 @@ export const agent = defineNamespace({
     "agent.changeset.approveAgentChanges": "Approve agent changes",
     "agent.changeset.signInNotice": "Sign in to review and approve this changeset.",
     "agent.changeset.approvedFull": "Approved — return to your agent, it can now commit.",
+    // AQU-1673: shown instead of approvedFull when the approval also applied
+    // the changes, because no agent was waiting to commit them.
+    "agent.changeset.appliedFull": "Approved and applied — the changes are now in the file.",
     "agent.changeset.rejectedFull": "Rejected — the changeset was discarded.",
     "agent.changeset.loading": "Loading changeset…",
     "agent.changeset.backTo": "Back to {projectName}",
@@ -857,6 +860,15 @@ export const agent = defineNamespace({
           "Truncation notice under a sampled list of per-cell changes in a staged " +
           "changeset, stating how many further changes exist beyond the ones shown.",
         placeholders: { count: "How many additional changes are not shown; also selects the plural form." },
+      },
+      "agent.changeset.appliedFull": {
+        description:
+          "AQU-1673: confirmation on the /approve/:changesetId page when the " +
+          "approval ALSO committed the plan, which happens for a plan staged " +
+          "from the app itself (e.g. \"Import as proposals\") where no agent is " +
+          "waiting to commit it. Sibling of agent.changeset.approvedFull, which " +
+          "tells the user to return to their agent — this one must not, because " +
+          "there is no agent and the work is already done.",
       },
       "agent.changeset.importedFrom": {
         description:

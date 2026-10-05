@@ -200,6 +200,58 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(lanes.map((l) => l.lane)).toEqual(["swh", ""])
   })
 
+  it("AQU-1599: a registered lane borrows the '' row when the source lane has no progress row", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
+    ).bind(JSON.stringify({ targetLanes: ["swh"] })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('srcpa', 'pa', 'source', 'Source', NULL, 0),
+        ('deflane', 'pa', 'target', 'Bambara', '', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 'deflane', 45, 15, '{}', 1, 1500)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number }> }> }
+    const lanes = body.projects.find((p) => p.id === "pa")!.lanes
+    expect(lanes.find((l) => l.lane === "swh")).toMatchObject({ totalCells: 45, filledCells: 0 })
+    expect(lanes.find((l) => l.lane === "")).toMatchObject({ totalCells: 45, filledCells: 15 })
+  })
+
+  it("AQU-1599: a source-lane edit advances the project's lastEditAt", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 1000)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('srcpa', 'pa', 'source', 'Source', NULL, 0),
+        ('deflane', 'pa', 'target', 'Bambara', '', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', '', 'srcpa', 10, 0, '{}', 1, 9000),
+        ('pa','f1','file','', '', 'deflane', 10, 1, '{}', 1, 1000)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lastEditAt: number | null; lanes: Array<{ lane: string; lastEditAt: number | null }> }> }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lastEditAt).toBe(9000)
+    expect(pa.lanes.find((l) => l.lane === "")?.lastEditAt).toBe(1000)
+  })
+
   it("AQU-538: N=1 project surfaces a single '' lane row", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

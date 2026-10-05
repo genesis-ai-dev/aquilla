@@ -198,11 +198,13 @@ export async function computeProjectMetrics(
 
   const progressResult = await db
     .prepare(
-      // AQU-1599: TARGET lanes only. The projection also writes a row for the
-      // project's source lane — the lane-independent denominator — and the
-      // rollup below sums `total_count` over every row it is handed, so
-      // including it would add the source-cell count to the board's total a
-      // second time and leave the fill it reports against unchanged.
+      // AQU-1599: TARGET lanes only, and only lanes that are still active.
+      // The projection also writes a row for the project's source lane — the
+      // lane-independent denominator — and the rollup below sums `total_count`
+      // over every row it is handed, so including it would add the source-cell
+      // count to the board's total a second time. An archived lane's row is
+      // the same kind of extra: the board would count work nobody is still
+      // planning.
       `SELECT fsp.file_id AS file_id, fsp.total_count AS total_count,
               fsp.filled_count AS filled_count,
               fsp.validator_histogram AS validator_histogram,
@@ -212,6 +214,7 @@ export async function computeProjectMetrics(
          FROM file_section_progress fsp
          JOIN lanes l
            ON l.project_id = fsp.project_id AND l.id = fsp.lane_id AND l.role = 'target'
+          AND l.archived_at IS NULL
         WHERE fsp.project_id = ? AND fsp.scope = 'file'`,
     )
     .bind(projectId)

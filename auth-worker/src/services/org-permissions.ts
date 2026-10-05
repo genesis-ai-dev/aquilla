@@ -1217,10 +1217,17 @@ interface VisiblePortfolioText {
   targetLanguage: string | null
 }
 
+function laterEdit(a: number | null, b: number | null): number | null {
+  if (a == null || !Number.isFinite(a)) return b
+  if (b == null || !Number.isFinite(b)) return a
+  return Math.max(a, b)
+}
+
 function mapPortfolioRow(
   r: PortfolioDbRow,
   lanesByProject: Map<string, PortfolioLane[]>,
   visibleText?: VisiblePortfolioText,
+  sourceActivityAt: number | null = null,
 ): PortfolioRow {
   return {
     id: r.id,
@@ -1229,7 +1236,7 @@ function mapPortfolioRow(
     validatedCells: visibleText ? visibleText.validatedCells : r.validated_cells,
     filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
-    lastEditAt: visibleText ? visibleText.lastEditAt : r.last_edit_at,
+    lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1320,9 +1327,10 @@ async function fetchPortfolioLanes(
   env: Env,
   orgIds: number[],
   projectIds?: readonly string[],
-): Promise<Map<string, PortfolioLane[]>> {
+): Promise<{ lanes: Map<string, PortfolioLane[]>; sourceActivity: Map<string, number> }> {
   const byProject = new Map<string, PortfolioLane[]>()
-  if (orgIds.length === 0) return byProject
+  const sourceActivity = new Map<string, number>()
+  if (orgIds.length === 0) return { lanes: byProject, sourceActivity }
   const placeholders = orgIds.map(() => "?").join(", ")
   const projectFilter =
     projectIds != null && projectIds.length > 0
@@ -1434,6 +1442,13 @@ async function fetchPortfolioLanes(
         (sourceTotals.get(row.project_id) ?? 0)
           + Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
       )
+      // A source-cell edit stamps this row and no target lane. The project
+      // clock has to see it or a source-only session looks idle.
+      const sourceUpdated = row.updated_at == null ? null : Number(row.updated_at)
+      if (sourceUpdated != null && Number.isFinite(sourceUpdated)) {
+        const prev = sourceActivity.get(row.project_id)
+        if (prev == null || sourceUpdated > prev) sourceActivity.set(row.project_id, sourceUpdated)
+      }
       continue
     }
     let lanes = acc.get(row.project_id)
@@ -1458,10 +1473,10 @@ async function fetchPortfolioLanes(
   }
   // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
   // who just added a language must see its 0% chip immediately, not after the
-  // first translation lands. The denominator is borrowed from the SOURCE lane's
-  // rows (AQU-1599; source-cell count is lane-independent); no source-lane rows
-  // means the project has no progress rows at all, and the registered lane
-  // stays 0/0.
+  // first translation lands. The denominator is the source lane's cell count
+  // when that row exists, and otherwise the largest denominator a lane that
+  // does have a row already reports — rows projected before the source lane
+  // had one of its own.
   // AQU-1473: the primary language is the '' lane even when create also wrote
   // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
@@ -1548,7 +1563,7 @@ async function fetchPortfolioLanes(
       }),
     )
   }
-  return byProject
+  return { lanes: byProject, sourceActivity }
 }
 
 /** Parse the generated target_lanes projection defensively across PG adapters. */
@@ -1952,7 +1967,7 @@ export async function listOrgPortfolioPage(
   const hasMore = page != null && list.length > page.limit
   const pageRows = hasMore ? list.slice(0, page.limit) : list
   const last = pageRows[pageRows.length - 1]
-  const lanesByProject = await fetchPortfolioLanes(
+  const { lanes: lanesByProject, sourceActivity } = await fetchPortfolioLanes(
     env,
     uniqueOrgIds,
     page ? pageRows.map((row) => row.id) : undefined,
@@ -1964,7 +1979,7 @@ export async function listOrgPortfolioPage(
   const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
   return {
     projects: pageRows.map((row) => ({
-      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id)),
+      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id), sourceActivity.get(row.id) ?? null),
       orgId: row.org_id,
     })),
     nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,

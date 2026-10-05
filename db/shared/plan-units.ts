@@ -142,16 +142,16 @@ export interface PlanUnitRow {
  *
  * Binds, in order: projectId (units), lane, then whatever `extraScope` adds.
  *
- * LANE FALLBACK, and the asymmetry is deliberate. Totals, audio counts and
- * activity are lane-independent facts about the unit, so when the requested
- * lane has no projection row yet they fall back to the SOURCE lane's row (`pd`)
- * — which is where AQU-1599 put them, because they are facts about the source
- * text and not about whichever target lane happened to be created first.
- * Filled and validated counts do NOT fall back: a lane with no target rows is
- * genuinely 0% translated, and borrowing another lane's progress would claim
- * work that does not exist. When no projection row exists at all — a file
- * imported before the projection, or mid-backfill — total falls back to
- * files.cell_count, the same last resort the progress read uses.
+ * LANE FALLBACK, and the asymmetry is deliberate. Totals and activity are
+ * facts about the source text, so when the requested lane has no projection
+ * row yet they fall back to the SOURCE lane's row (`pd`) — which is where
+ * AQU-1599 put them. Audio counts fall back the same way, but a lane that
+ * has a row reports its own. Filled and validated counts do NOT fall back: a
+ * lane with no target rows is genuinely 0% translated, and borrowing another
+ * lane's progress would claim work that does not exist. When no projection
+ * row exists at all — a file imported before the projection, or mid-backfill
+ * — total falls back to files.cell_count, the same last resort the progress
+ * read uses.
  *
  * `pd` and `ps` used to be pinned to `target_lang = ''`. Two things broke that
  * pin: archiving the former default lane took the board's totals away with it,
@@ -205,27 +205,23 @@ export function readPlanUnitsSql(extraScope = ""): string {
             -- there would put the subtitle file's (always zero) takes back on
             -- the board wearing the cue sheet's denominator.
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_count, 0)
-                 ELSE COALESCE(pd.audio_count, 0) END AS audio_count,
+                 ELSE COALESCE(pl.audio_count, pd.audio_count, 0) END AS audio_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validated_count, 0)
-                 ELSE COALESCE(pd.audio_validated_count, 0) END AS audio_validated_count,
+                 ELSE COALESCE(pl.audio_validated_count, pd.audio_validated_count, 0) END AS audio_validated_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_count, 0)
-                 ELSE COALESCE(pd.structural_audio_count, 0) END AS structural_audio_count,
+                 ELSE COALESCE(pl.structural_audio_count, pd.structural_audio_count, 0) END AS structural_audio_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validated_count, 0)
-                 ELSE COALESCE(pd.structural_audio_validated_count, 0) END
+                 ELSE COALESCE(pl.structural_audio_validated_count, pd.structural_audio_validated_count, 0) END
               AS structural_audio_validated_count,
-            -- AQU-490. These are AUDIO columns, so they take the ps/pd shape of
-            -- the four above and NOT the pl that the text histogram beside
-            -- them uses. pl is the LANE row: right for text, wrong for audio,
-            -- because a recording is shared by every target language and a
-            -- dubbing project's takes live on the cue sheet rather than on the
-            -- unit's own file. Reaching for pl by reflex is the exact bug
-            -- AQU-1278 fixed for the counts -- a dubbed episode read zero
-            -- audio on the board while its cue sheet was fully recorded.
+            -- Audio counts come from the requested lane's row (pl). A lane
+            -- with no projection row yet falls back to the source-lane row
+            -- (pd). A cue sheet stays on ps: those takes live on the cue
+            -- file, and reading pl there is the zero-audio bug AQU-1278 fixed.
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validator_histogram, '{}'::jsonb)
-                 ELSE COALESCE(pd.audio_validator_histogram, '{}'::jsonb) END
+                 ELSE COALESCE(pl.audio_validator_histogram, pd.audio_validator_histogram, '{}'::jsonb) END
               AS audio_validator_histogram,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validator_histogram, '{}'::jsonb)
-                 ELSE COALESCE(pd.structural_audio_validator_histogram, '{}'::jsonb) END
+                 ELSE COALESCE(pl.structural_audio_validator_histogram, pd.structural_audio_validator_histogram, '{}'::jsonb) END
               AS structural_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
             -- audio against the text total, exactly as it always has.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { POSTHOG_EU_INGEST_HOST, resolvePosthogHost, shipLog } from "../posthog-logs"
+import { POSTHOG_EU_INGEST_HOST, resolvePosthogHost, shipErrorResponse, shipLog } from "../posthog-logs"
 
 // AQU-854: worker request/error logs go to PostHog EU Cloud. The region lives
 // in the ingest hostname, so an unset POSTHOG_HOST used to send every 4xx/5xx
@@ -67,5 +67,70 @@ describe("auth-worker PostHog ingest region (AQU-854)", () => {
     await shipLog({}, "identity", "error", "boom")
 
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// [Pen test] Auth & session mgmt (2026-10-05, OPS-42): credential-bearing URL
+// paths must not reach PostHog Logs. Eight routes carry a live invite or
+// access-link token as a path segment (D5), and the 4xx cases are the ordinary
+// ones — a mistyped PIN on /access-links/:token/redeem 401s while the link is
+// still live; a lapsed session on /invites/:token/accept 401s in authMiddleware
+// before the route reads the invite at all. Each of these assertions fails
+// against the pre-fix `shipErrorResponse`, which shipped `url.pathname` raw.
+// ---------------------------------------------------------------------------
+describe("auth-worker 4xx log shipping redacts path credentials (OPS-42)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  const TOKEN = "Zt7Jq2bX9yLm4Rn8Ks3Wd6Pv1Hc5Tg0Ub2Ae4Yi7Qo"
+  const env = { POSTHOG_KEY: "phc_test", POSTHOG_HOST: "https://eu.i.posthog.com" }
+
+  const shipped = async (path: string, status: number, body = '{"error":"nope"}') => {
+    const spy: ReturnType<typeof vi.fn> = vi.fn(() =>
+      Promise.resolve(new Response("{}", { status: 200 })),
+    )
+    vi.stubGlobal("fetch", spy)
+    await shipErrorResponse(
+      env,
+      "aquilla-identity",
+      new Request(`https://api.aquilla.app${path}`, { method: "POST" }),
+      new Response(body, { status }),
+    )
+    return (spy.mock.calls[0] as [string, RequestInit])[1].body as string
+  }
+
+  it("never ships an access-link token — the wrong-PIN 401 leaves the link live", async () => {
+    const body = await shipped(`/api/v2/access-links/${TOKEN}/redeem`, 401, '{"error":"Dead link"}')
+    expect(body).not.toContain(TOKEN)
+    expect(body).toContain("/api/v2/access-links/:token/redeem")
+  })
+
+  it("never ships an invite token on the 401 authMiddleware returns for a lapsed session", async () => {
+    const body = await shipped(`/api/v2/invites/${TOKEN}/accept`, 401, '{"error":"Token expired"}')
+    expect(body).not.toContain(TOKEN)
+  })
+
+  it.each([
+    `/api/v2/invites/${TOKEN}/preview`,
+    `/api/v2/orgs/invite-preview/${TOKEN}`,
+    `/api/v2/projects/invite-preview/${TOKEN}`,
+    `/api/v2/orgs/41/invites/${TOKEN}`,
+    `/api/v2/projects/d290f1ee-6c54-4b01-90e6-d701748f0851/invites/${TOKEN}`,
+  ])("never ships the credential in %s", async (path) => {
+    expect(await shipped(path, 404)).not.toContain(TOKEN)
+  })
+
+  it("still names the route and keeps the non-secret ids, so logs stay useful", async () => {
+    const body = await shipped(`/api/v2/orgs/41/invites/${TOKEN}`, 403)
+    expect(body).toContain("/api/v2/orgs/41/invites/:token")
+    expect(body).toContain('"http.status"')
+  })
+
+  it("leaves a path with no credential untouched", async () => {
+    const body = await shipped("/api/v1/ai/agent/run", 500, '{"error":"boom"}')
+    expect(body).toContain("/api/v1/ai/agent/run")
   })
 })

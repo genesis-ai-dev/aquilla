@@ -27,6 +27,20 @@ describe("VideoSoundSourcePicker", () => {
     expect(onChange).toHaveBeenCalledExactlyOnceWith("recording")
   })
 
+  // Walk r3 (2026-10-05): a 16rem menu cut "Uploaded recording (recording…"
+  // short with nothing to read the rest from.
+  it("shows the recording's whole name, wrapping a long one instead of cutting it off", async () => {
+    const name = "episode-104-final-mix-with-room-tone-and-effects-v3.wav"
+    render(<VideoSoundSourcePicker value="video" recordingName={name} onChange={() => {}} />)
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    const recording = await screen.findByTestId("video-sound-source-recording")
+    expect(recording).toHaveAttribute("title", `Uploaded recording (${name})`)
+    const label = screen.getByTestId("video-sound-source-recording-label")
+    expect(label).toHaveTextContent(`Uploaded recording (${name})`)
+    expect(label.className).not.toMatch(/\btruncate\b/)
+    expect(screen.getByTestId("video-sound-source-menu").className).not.toMatch(/\bw-64\b/)
+  })
+
   it("does not report re-picking the sound that is already on", async () => {
     const onChange = vi.fn()
     render(<VideoSoundSourcePicker value="recording" recordingName={null} onChange={onChange} />)

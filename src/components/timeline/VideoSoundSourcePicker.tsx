@@ -65,7 +65,10 @@ export function VideoSoundSourcePicker({ value, recordingName, onChange, onOpenC
       <PopoverContent
         align="end"
         side="top"
-        className="w-64 p-1"
+        // As wide as the recording's name needs, up to the window: a fixed
+        // 16rem cut even "recording.wav" off (walk r3, 2026-10-05). A name
+        // longer than that wraps rather than ending in an ellipsis.
+        className="w-max min-w-56 max-w-[min(26rem,calc(100vw-2rem))] p-1"
         data-testid="video-sound-source-menu"
       >
         <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
@@ -85,6 +88,7 @@ export function VideoSoundSourcePicker({ value, recordingName, onChange, onOpenC
                   setOpenState(false)
                   if (!checked) onChange(option.source)
                 }}
+                title={option.label}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
                   "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-none",
@@ -93,7 +97,10 @@ export function VideoSoundSourcePicker({ value, recordingName, onChange, onOpenC
                 <span className="flex size-4 shrink-0 items-center justify-center">
                   {checked && <Check className="size-4" aria-hidden />}
                 </span>
-                <span className={cn("flex-1 truncate", checked && "font-medium")}>{option.label}</span>
+                <span data-testid={`video-sound-source-${option.source}-label`}
+                  className={cn("min-w-0 flex-1 [overflow-wrap:anywhere]", checked && "font-medium")}>
+                  {option.label}
+                </span>
               </button>
             )
           })}

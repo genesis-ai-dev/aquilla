@@ -246,8 +246,13 @@ export default defineConfig(({ mode }) => ({
             // red by design until implemented, so they must not fail the default
             // suite.
             "parity/**",
-            // Owned by the "scripts-node" project below.
+            // Owned by the "scripts-node" project below. The .ts files here
+            // import node:url / node:path; the app project's browser polyfill
+            // makes fileURLToPath's dirname "." on Windows, so repo-root
+            // lookups walk up out of the checkout.
             "scripts/**/*.test.mjs",
+            "scripts/lib/e2e-lock.test.ts",
+            "scripts/lib/worktree-install-guard.test.ts",
           ],
         },
       },

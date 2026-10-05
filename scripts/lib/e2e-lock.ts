@@ -199,8 +199,7 @@ function tryCreate(lockPath: string, record: E2eLockRecord): boolean {
     try {
       renameSync(staging, lockPath)
     } catch (error) {
-      const code = errno(error)
-      if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOENT") return false
+      if (errno(error) === "ENOENT" || destinationTaken(error, lockPath)) return false
       throw error
     }
     return readRecord(lockPath)?.token === record.token
@@ -269,14 +268,22 @@ function restore(claim: string, lockPath: string): void {
   try {
     renameSync(claim, lockPath)
   } catch (error) {
-    const code = errno(error)
-    if (code === "ENOTEMPTY" || code === "EEXIST") {
+    if (destinationTaken(error, lockPath)) {
       rmSync(claim, { recursive: true, force: true })
       return
     }
-    if (code === "ENOENT") return
+    if (errno(error) === "ENOENT") return
     throw error
   }
+}
+
+/** Windows rename() of a directory onto one that already exists returns
+ *  EPERM, where macOS and Linux return EEXIST or ENOTEMPTY. That is a lost
+ *  race, not a permission failure. */
+function destinationTaken(error: unknown, destination: string): boolean {
+  const code = errno(error)
+  if (code === "ENOTEMPTY" || code === "EEXIST") return true
+  return code === "EPERM" && process.platform === "win32" && exists(destination)
 }
 
 function readRecord(lockPath: string): E2eLockRecord | null {

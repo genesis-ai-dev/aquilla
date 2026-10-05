@@ -171,6 +171,9 @@ export function TimelineLinkedVideoEmpty({
                   after an upload and offers the sound menu to switch. */}
               {t(isYouTube ? "editor.media.linkedVideoUploadHint" : "editor.media.linkedVideoUploadHintGeneric")}
             </p>
+            {isYouTube && (
+              <p className="mt-1 text-xs text-muted-foreground">{t("editor.media.linkedVideoStudioVideo")}</p>
+            )}
             <p className="mt-3 text-xs text-muted-foreground">{t("editor.media.dropHint")}</p>
             <Button className="mt-2" nativeButton={false} render={<label />}>
               {t("editor.media.choose")}
@@ -198,6 +201,10 @@ export function TimelineLinkedVideoEmpty({
               {t(isYouTube ? "editor.media.linkedVideoTitle" : "editor.media.linkedVideoTitleGeneric")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+            {/* Aquilla can't take a YouTube video's captions; its owner can. */}
+            {isYouTube && onAttachCaptions && !tracksLine && (
+              <p className="mt-1 text-xs text-muted-foreground">{t("editor.media.linkedVideoStudioCaptions")}</p>
+            )}
             {promoteButtons}
             {onAttachCaptions ? (
               <Button className="mt-3" variant={promotable.length > 0 ? "outline" : "default"} onClick={onAttachCaptions}>

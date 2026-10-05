@@ -243,6 +243,10 @@ export const editor = defineNamespace({
     // track that is already on the timeline can be turned into the rows.
     "editor.media.linkedVideoAttachHint":
       "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
+    // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, but
+    // its owner can download both from YouTube Studio, so the card says where.
+    "editor.media.linkedVideoStudioCaptions": "The video's owner can download its captions from YouTube Studio.",
+    "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
 
@@ -2838,6 +2842,21 @@ export const editor = defineNamespace({
           "button, 'Attach captions') turns its timed lines into this file's own " +
           "rows, which is what the translator then works on. VTT, SRT and SBV are " +
           "file formats; keep them as they are.",
+      },
+      "editor.media.linkedVideoStudioCaptions": {
+        description:
+          "Second line under that one, only for a YouTube video. Aquilla cannot read " +
+          "a YouTube video's captions itself, but whoever uploaded the video can " +
+          "download them as a caption file in YouTube Studio (YouTube's site for " +
+          "channel owners) and attach it here. 'YouTube Studio' is a product name; " +
+          "keep it as it is.",
+      },
+      "editor.media.linkedVideoStudioVideo": {
+        description:
+          "Line on the 'Use the original recording' step, only for a YouTube video. " +
+          "Whoever uploaded the video can download it as a video file in YouTube " +
+          "Studio, and that file can be uploaded on this step. 'YouTube Studio' is a " +
+          "product name; keep it as it is.",
       },
       "editor.media.useTrackAsRows": {
         description:

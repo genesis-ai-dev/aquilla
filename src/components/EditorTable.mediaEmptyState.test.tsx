@@ -360,6 +360,30 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()
   })
 
+  // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, so the
+  // card says where the video's owner can get each one.
+  it("tells a maintainer that YouTube Studio has the captions and the video file", async () => {
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
+      onAttachCaptions: () => {},
+    })
+    await screen.findByTestId("linked-video-empty")
+    expect(screen.getByText("The video's owner can download its captions from YouTube Studio.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    expect(screen.getByText("The video's owner can download the video file from YouTube Studio.")).toBeInTheDocument()
+  })
+
+  it("names YouTube Studio only for a YouTube video", async () => {
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: false, captionTracks: [] },
+      onAttachCaptions: () => {},
+    })
+    await screen.findByTestId("linked-video-empty")
+    expect(screen.queryByText(/YouTube Studio/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    expect(screen.queryByText(/YouTube Studio/)).toBeNull()
+  })
+
   // Sam, Oct 5: the Media view's Text pane gets the same card as the Text
   // view (it used to be one line pointing at the Source text lane).
   it("is the same card in the Media view's Text pane", async () => {

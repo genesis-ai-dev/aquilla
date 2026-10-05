@@ -25,7 +25,7 @@ export interface ExistingLaneIdentity {
   id: string
   /** AQU-1592: null on a lane that only carries a language. */
   name: string | null
-  /** AQU-1592: null on a row that predates migration 0129. */
+  /** AQU-1592: null on a row that predates migration 0136. */
   language?: string | null
   legacyTag: string | null
 }

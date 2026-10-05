@@ -48,7 +48,7 @@ async function realLaneDb(opts: TestDbOptions = {}): Promise<TestDb> {
 async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string, unknown>): Promise<void> {
   await db.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Host', 1), ($2, 'Donor', 1)`, [HOST, DONOR])
   await db.pg.query(
-    // AQU-1592: seeded in the post-0129 shape — the typed `language`, no stored
+    // AQU-1592: seeded in the post-0136 shape — the typed `language`, no stored
     // name and no stored code, both of which are derived on read.
     `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
        ($1, $2, 'source', 'English', NULL, NULL, NULL, 0),

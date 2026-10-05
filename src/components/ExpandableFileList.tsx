@@ -6,7 +6,13 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { groupByCorpus, isCustomCorpusLabel } from "@/lib/sidebar/group-by-corpus"
+import {
+  groupByCorpus,
+  isCustomCorpusLabel,
+  rememberCustomCorpusLabels,
+  renameRetainedCorpusLabel,
+  withRetainedCustomCorpuses,
+} from "@/lib/sidebar/group-by-corpus"
 import {
   hasPlacedFiles,
   planFileInsert,
@@ -198,11 +204,32 @@ export function ExpandableFileList({
     for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
   }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, projectId])
 
+  // A custom corpus stays after its last file leaves. The names live with the
+  // other sidebar chrome for this project (collapsed groups), because a corpus
+  // is not stored apart from the files that carry its name.
+  const retainedKey = `aquilla:sidebar:retained-corpuses:${projectId}`
+  const [retainedLabels, setRetainedLabels] = useState<string[]>(() => readRetainedCorpuses(retainedKey))
+  const [retainedKeySeen, setRetainedKeySeen] = useState(retainedKey)
+  const storedLabels = retainedKeySeen === retainedKey ? retainedLabels : readRetainedCorpuses(retainedKey)
+  if (retainedKeySeen !== retainedKey) setRetainedKeySeen(retainedKey)
+  const seenLabels = groupByCorpus(files)
+    .filter((group) => isCustomCorpusLabel(group.label, group.derived === true))
+    .map((group) => group.label)
+  const rememberedLabels = rememberCustomCorpusLabels(storedLabels, seenLabels)
+  if (rememberedLabels !== retainedLabels) setRetainedLabels(rememberedLabels)
+  useEffect(() => {
+    writeRetainedCorpuses(retainedKey, retainedLabels)
+  }, [retainedKey, retainedLabels])
+
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     const filtered = needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files
-    return groupByCorpus(filtered)
-  }, [files, filter])
+    const grouped = groupByCorpus(filtered)
+    // A filter hides a corpus that has no matching file. An empty folder is
+    // still there when the list is showing everything.
+    if (needle) return grouped
+    return withRetainedCustomCorpuses(grouped, retainedLabels)
+  }, [files, filter, retainedLabels])
 
   // AQU-1084: one-click jump to a Testament for full-Bible projects. Decided
   // with QA (2026-09-02): the control never hides or collapses anything on the
@@ -233,8 +260,10 @@ export function ExpandableFileList({
 
   const displayGroups = useMemo(() => {
     if (!transferPreview) return groups
-    return previewSidebarGroups(files, transferPreview, drag?.group ?? null)
-  }, [drag?.group, files, groups, transferPreview])
+    const pictured = previewSidebarGroups(files, transferPreview, drag?.group ?? null)
+    if (filter.trim()) return pictured
+    return withRetainedCustomCorpuses(pictured, retainedLabels)
+  }, [drag?.group, files, filter, groups, retainedLabels, transferPreview])
 
   function endDrag() {
     setDrag(null)
@@ -546,7 +575,15 @@ export function ExpandableFileList({
                           onBlur={(e) => {
                             const next = e.currentTarget.value.trim()
                             setEditingCorpus(null)
-                            if (next && next !== group.label) onRenameCorpus?.(group.label, next)
+                            if (next && next !== group.label) {
+                              setRetainedLabels((current) => {
+                                const renamed = renameRetainedCorpusLabel(current, group.label, next)
+                                if (renamed === current) return current
+                                writeRetainedCorpuses(retainedKey, renamed)
+                                return renamed
+                              })
+                              onRenameCorpus?.(group.label, next)
+                            }
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() }
@@ -744,4 +781,24 @@ function verticalSpan(
 ): { top: number; bottom: number } | null {
   if (!rect) return null
   return { top: rect.top, bottom: rect.bottom }
+}
+
+function readRetainedCorpuses(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((label): label is string => typeof label === "string" && label.trim() !== "")
+  } catch {
+    return []
+  }
+}
+
+function writeRetainedCorpuses(key: string, labels: readonly string[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(labels))
+  } catch {
+    // Quota is full. The folder still stays for this visit.
+  }
 }

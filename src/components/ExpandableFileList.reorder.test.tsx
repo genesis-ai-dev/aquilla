@@ -112,7 +112,8 @@ function layoutReorderTargets() {
       top += 40
     }
     const groupTop = start - 28
-    group.getBoundingClientRect = () => box(groupTop, top - groupTop)
+    const groupHeight = top - groupTop
+    group.getBoundingClientRect = () => box(groupTop, groupHeight)
     top += 16
   }
 }
@@ -158,6 +159,23 @@ function beginDrag(name: string) {
 function hoverDrag(name: string) {
   const point = center(slot(name))
   fireEvent.pointerMove(document, pointerInit(point.x, point.y))
+}
+
+function groupEl(label: string): HTMLElement {
+  const found = document.querySelector(`[data-reorder-group="${label}"]`)
+  if (!(found instanceof HTMLElement)) throw new Error(`no group "${label}"`)
+  return found
+}
+
+function hoverGroup(label: string) {
+  layoutReorderTargets()
+  const point = center(groupEl(label))
+  fireEvent.pointerMove(document, pointerInit(point.x, point.y))
+}
+
+function releaseOnGroup(label: string) {
+  const point = center(groupEl(label))
+  fireEvent.pointerUp(document, pointerInit(point.x, point.y, 0))
 }
 
 function releaseDrag(name: string) {
@@ -308,6 +326,51 @@ describe("a drop into another custom corpus", () => {
         0,
       ),
     )
+  })
+
+  it("keeps a corpus after its last file leaves, and takes a file dragged back onto it", () => {
+    const { rerender } = renderList([
+      file("Only", { corpusMarker: "Season 1", sortIndex: 0 }),
+      file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
+      file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
+    ])
+    rerender(
+      <I18nProvider>
+        <EditorScrollProvider>
+          <ExpandableFileList
+            projectId={PROJECT_ID}
+            files={[
+              file("Only", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP * 2 }),
+              file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
+              file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
+            ]}
+            activeFileId={null}
+            fileProgress={new Map()}
+            suggestionFileIds={new Set()}
+            validationCount={0}
+            getTokenForFile={async () => null}
+            onSelectFile={vi.fn()}
+            onRename={vi.fn()}
+            onMove={vi.fn()}
+            canReorderFiles
+            onReorderFiles={onReorderFiles}
+            onTransferFile={onTransferFile}
+          />
+        </EditorScrollProvider>
+      </I18nProvider>,
+    )
+    const season1 = document.querySelector('[data-reorder-group="Season 1"]')
+    expect(season1).not.toBeNull()
+    expect(within(season1 as HTMLElement).queryByRole("button", { name: "Only" })).toBeNull()
+    beginDrag("Pilot")
+    hoverGroup("Season 1")
+    releaseOnGroup("Season 1")
+    expect(onTransferFile).toHaveBeenCalledWith(
+      "pilot",
+      "Season 1",
+      planFileInsert([], "pilot", 0),
+    )
+    expect(onReorderFiles).not.toHaveBeenCalled()
   })
 
   it("lets the only file in a custom corpus be dragged into another one", () => {

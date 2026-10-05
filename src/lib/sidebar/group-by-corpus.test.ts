@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { groupByCorpus, isCustomCorpusLabel } from "./group-by-corpus"
+import {
+  groupByCorpus,
+  isCustomCorpusLabel,
+  rememberCustomCorpusLabels,
+  renameRetainedCorpusLabel,
+  withRetainedCustomCorpuses,
+} from "./group-by-corpus"
 
 function f(name: string, corpusMarker?: string) {
   return { id: name, name, type: "txt" as const, createdAt: "", cellCount: 0, corpusMarker }
@@ -12,6 +18,48 @@ describe("isCustomCorpusLabel", () => {
     expect(isCustomCorpusLabel("NT")).toBe(false)
     expect(isCustomCorpusLabel("Ungrouped")).toBe(false)
     expect(isCustomCorpusLabel("OT", true)).toBe(false)
+  })
+})
+
+describe("withRetainedCustomCorpuses", () => {
+  it("keeps an emptied custom corpus between the testaments and the groups that still have files", () => {
+    const groups = withRetainedCustomCorpuses(
+      [
+        { label: "OT", files: ["gen"] },
+        { label: "Season 2", files: ["pilot"] },
+        { label: "Ungrouped", files: ["notes"] },
+      ],
+      ["Season 1", "Season 2"],
+    )
+    expect(groups.map((group) => [group.label, group.files])).toEqual([
+      ["OT", ["gen"]],
+      ["Season 1", []],
+      ["Season 2", ["pilot"]],
+      ["Ungrouped", ["notes"]],
+    ])
+  })
+
+  it("does not retain testament folders, Ungrouped, or a blank name", () => {
+    const groups = [{ label: "Season 2", files: ["pilot"] }]
+    expect(withRetainedCustomCorpuses(groups, ["OT", "Ungrouped", "  "])).toBe(groups)
+  })
+
+  it("returns the same array when every remembered corpus still has a file", () => {
+    const groups = [{ label: "Season 1", files: ["only"] }]
+    expect(withRetainedCustomCorpuses(groups, ["Season 1"])).toBe(groups)
+  })
+
+  it("remembers a new custom name and ignores a repeat, including case", () => {
+    expect(rememberCustomCorpusLabels(["Season 1"], ["Season 2", "OT"])).toEqual(["Season 1", "Season 2"])
+    const current = ["Season 1", "Season 2"]
+    expect(rememberCustomCorpusLabels(current, ["season 2"])).toBe(current)
+  })
+
+  it("renames a remembered corpus without leaving the old name behind", () => {
+    expect(renameRetainedCorpusLabel(["Season 1", "Season 2"], "Season 1", "Season A")).toEqual([
+      "Season 2",
+      "Season A",
+    ])
   })
 })
 

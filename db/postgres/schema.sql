@@ -2289,7 +2289,7 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
 );
 CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
 
--- 0129 (AQU-1573): reference Bibles (Van Dyck Arabic, KJV) whose verses the
+-- 0131 (AQU-1573): reference Bibles (Van Dyck Arabic, KJV) whose verses the
 -- drafting prompt injects and the quote check compares against. Shared,
 -- public-domain text: no project_id, no RLS. org_id is reserved for partner
 -- uploads. Loaded by scripts/reference-bibles.ts (dev boot runs it).

@@ -6,7 +6,7 @@ the connection and execution contracts. They do not establish directory approval
 
 ## Before deployment
 
-- Apply migration `0129` before deploying consumers of `oauth_resource`.
+- Apply migration `0130` before deploying consumers of `oauth_resource`.
 - Confirm `MCP_OAUTH_ISSUER`, `AUTH_WORKER_URL` and `SYNC_WORKER_URL` agree
   with public identity and MCP URLs in each environment.
 - Deploy the support page from the companion marketing change.

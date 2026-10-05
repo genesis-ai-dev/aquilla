@@ -120,8 +120,8 @@ production deployment manifest.
 
 ## Testing it in ChatGPT
 
-1. Deploy to development after migrations `0124`, `0125` and `0129`.
-   Migration `0129` binds identifiable OAuth credentials and revokes unknown
+1. Deploy to development after migrations `0124`, `0125` and `0130`.
+   Migration `0130` binds identifiable OAuth credentials and revokes unknown
    organization-snapshot OAuth grants. Those users must reconnect. Existing
    device and manually created credentials remain unchanged.
 2. In ChatGPT, turn on Developer Mode (under Settings → Apps & Connectors →

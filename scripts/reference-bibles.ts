@@ -20,7 +20,7 @@
 // (+ NEON_PG_DB, NEON_PG_ROLE), the same as scripts/neon-backfill-progress.ts.
 //
 // PRODUCTION (and every PR-preview database): apply migration
-// 0129_reference_bibles.sql by hand like every other migration, then run
+// 0131_reference_bibles.sql by hand like every other migration, then run
 //   AQUILLA_DATABASE_URL=… npx tsx scripts/reference-bibles.ts load
 // It is safe to run again. Until it has run, the feature reports that no
 // reference Bibles are installed. See docs/reference-bibles.md.

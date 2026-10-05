@@ -41,7 +41,7 @@ different numbering (Luther 1912, Reina-Valera 1909) can add a mapping.
 
 ## Loading the texts
 
-The tables come from migration `0129_reference_bibles.sql`
+The tables come from migration `0131_reference_bibles.sql`
 (`reference_bible_versions`, `reference_bible_verses`). The loader is
 idempotent: a Bible whose stored hash matches the manifest is skipped with one
 query, a changed text is replaced in a single transaction, and a failed load

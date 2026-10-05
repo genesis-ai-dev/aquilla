@@ -1,4 +1,4 @@
--- Migration 0129 (AQU-1573): reference Bibles for non-Scripture projects.
+-- Migration 0131 (AQU-1573): reference Bibles for non-Scripture projects.
 --
 -- A sermon project (Living on the Edge: English sermons into Arabic) must copy
 -- every verse a source line cites from the Bible its readers know — Van Dyck

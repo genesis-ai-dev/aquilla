@@ -275,6 +275,38 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(JSON.parse(rows[0].settings).systemPrompt).toBeNull()
   })
 
+  // AQU-1471: the key an RTL project needs. It used to be `unknown settings key`,
+  // which left a 49-file Arabic project with no answer but 49 manual clicks.
+  it('accepts targetTextDirection: "rtl" and stores it', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'targetTextDirection', value: 'rtl' },
+      { key: 'sourceTextDirection', value: 'auto' },
+    ]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.targetTextDirection).toBe('rtl')
+    expect(stored.sourceTextDirection).toBe('auto')
+  })
+
+  it('rejects a direction value outside "ltr" | "rtl" | "auto", naming the key', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'targetTextDirection', value: 'right-to-left' },
+    ]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // Caught at shape validation from the key registry, so the offender is
+    // named in the per-command issue list rather than details.field.
+    expect(JSON.stringify(body.error.details)).toContain('targetTextDirection')
+    expect(JSON.stringify(body.error.details)).toContain('rtl')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('negative control: a valid single-key patch still stages, commits, and leaves other keys alone', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)

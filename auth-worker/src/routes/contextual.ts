@@ -33,6 +33,7 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { listRunTraces, makeTraceRecorder, TRACE_LIST_LIMIT } from "../lib/contextual/traces"
 import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
@@ -373,6 +374,8 @@ async function selfTickLoop(
   // per wave. Buffered so the ledger write never lands inside the model hot
   // path and skews the latency it is recording.
   const meter = makeCostMeter(env, db)
+  // Prompt/reply per call for the Team step inspector; flushed with the meter.
+  const traces = makeTraceRecorder(env, db, { runId, projectId })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -404,6 +407,7 @@ async function selfTickLoop(
           ok: u.ok,
           ...(u.tokensPerSecond !== undefined ? { tokensPerSecond: u.tokensPerSecond } : {}),
         }),
+      onTrace: (t) => traces.add(t),
     })
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
       const weight = Math.max(1, Math.min(
@@ -443,7 +447,7 @@ async function selfTickLoop(
         }
       }
       const result = await tick()
-      await meter.flush()
+      await Promise.all([meter.flush(), traces.flush()])
       if (!result.continueRun) return
       // The lease was released in tick()'s finally. Waiters poll at the
       // shorter retry interval, so a different file/isolate gets a chance to
@@ -1292,6 +1296,35 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
       draftCounts,
     }
   })
+})
+
+// GET /:projectId/contextual/runs/:runId/traces?spanId= — prompt and reply of
+// each model call (VIEWER), oldest first, for the Team step inspector. Rows
+// expire after 30 days, so an older run answers with an empty list.
+contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const runId = c.req.param("runId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+
+  const run = await getRun(c.env.AQUILLA_PG, runId)
+  if (!run || run.projectId !== projectId) {
+    const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
+    return c.json(body, status)
+  }
+  const spanId = c.req.query("spanId") || undefined
+  const limitRaw = c.req.query("limit")
+  const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
+  if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
+    const { body, status } = errorJson(
+      "validation_failed",
+      `limit must be an integer from 1 to ${TRACE_LIST_LIMIT}`,
+      400,
+    )
+    return c.json(body, status)
+  }
+  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  return c.json(result)
 })
 
 // GET /:projectId/contextual/runs/:runId/activity — durable inspector bundle

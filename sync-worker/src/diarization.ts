@@ -169,8 +169,8 @@ async function serveAudio(_request: Request, env: DiarizationEnv, url: URL): Pro
   const token = url.searchParams.get("t") ?? ""
   if (!jobId || !token) return new Response("missing jobId or token", { status: 400 })
   const job = await getJob(env, jobId)
-  // Constant-ish guard: unknown job or wrong/terminal token → 404 (don't leak).
-  if (!job || job.fetch_token !== token) return new Response("not found", { status: 404 })
+  // Unknown job or wrong/terminal token → 404 (don't leak); constant-time compare.
+  if (!job || !job.fetch_token || !constantTimeEqual(job.fetch_token, token)) return new Response("not found", { status: 404 })
 
   const key = audioObjectKey(env, job.project_id, job.file_id, job.audio_object)
   const obj = await env.SNAPSHOTS.get(key)

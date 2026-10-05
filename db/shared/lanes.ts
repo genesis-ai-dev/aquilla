@@ -9,6 +9,7 @@
 //   * source lane + default target lane (`legacy_tag = ''`) always exist
 //   * extra target lanes come from `targetLanes` and from data tags
 //   * INSERTs are idempotent (partial unique indexes from 0096)
+//   * a minted id that collides on uq_lanes_id is retried with a new id
 //   * a later named settings write may promote placeholder names, but never
 //     overwrites a human rename
 //
@@ -21,7 +22,8 @@ import {
   SOURCE_LANE_PLACEHOLDER,
   type ProjectLaneInputs,
 } from "../../src/lib/lanes/backfill-plan"
-import { laneNameProblem } from "../../src/lib/lanes/lane-name"
+import { planNewTargetLane, type ExistingLaneIdentity } from "../../src/lib/lanes/lane-create"
+import { laneNameProblem, type LaneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
@@ -102,6 +104,67 @@ export function parseSettingsJson(raw: unknown): Record<string, unknown> {
   return {}
 }
 
+/** `lanes.id` unique index (0132 / AQU-1606). Not the composite primary key. */
+const LANE_ID_UNIQUE_INDEX = "uq_lanes_id"
+
+const LANE_ID_INSERT_ATTEMPTS = 5
+
+function laneIdConstraintName(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined
+  const record = error as Record<string, unknown>
+  for (const key of ["constraint", "constraint_name"]) {
+    const value = record[key]
+    if (typeof value === "string" && value.length > 0) return value
+  }
+  const message = error instanceof Error
+    ? error.message
+    : typeof record.message === "string"
+      ? record.message
+      : ""
+  return message.match(/unique constraint "([^"]+)"/)?.[1]
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const record = error as { code?: unknown; message?: unknown }
+  if (record.code === "23505") return true
+  return typeof record.message === "string" && record.message.includes("duplicate key")
+}
+
+/**
+ * True when Postgres rejected the insert because `lanes.id` is already used
+ * on any project. PGlite reports `constraint`; postgres.js reports
+ * `constraint_name`. A primary-key clash inside one project is a different
+ * constraint and is not this.
+ */
+export function isLaneIdCollision(error: unknown): boolean {
+  const candidates = [error]
+  if (error && typeof error === "object" && "cause" in error) {
+    candidates.push((error as { cause?: unknown }).cause)
+  }
+  return candidates.some(
+    (candidate) =>
+      laneIdConstraintName(candidate) === LANE_ID_UNIQUE_INDEX && isUniqueViolation(candidate),
+  )
+}
+
+/**
+ * Run `run` again, up to {@link LANE_ID_INSERT_ATTEMPTS} times, when it fails
+ * because a freshly minted lane id is already taken. `run` must mint those
+ * ids itself: a failed attempt is one transaction and commits nothing, so
+ * repeating it does not insert a second row. Any other error is rethrown.
+ */
+export async function retryingLaneIdCollision<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= LANE_ID_INSERT_ATTEMPTS; attempt++) {
+    try {
+      return await run()
+    } catch (error) {
+      if (attempt === LANE_ID_INSERT_ATTEMPTS || !isLaneIdCollision(error)) throw error
+    }
+  }
+  throw new Error("lane id collision retries exhausted")
+}
+
 /** The shape {@link isDefaultLaneUnderAnotherName} needs of an existing lane row. */
 export type ExistingLaneShape = {
   role: string
@@ -152,7 +215,9 @@ export function isDefaultLaneUnderAnotherName(
 /**
  * Statements that create (or promote-from-placeholder) the project's lanes.
  * Callers that already have a batch should splice these in; otherwise use
- * {@link ensureProjectLanes}.
+ * {@link ensureProjectLanes}. Each call mints new ids — a batch that fails
+ * on {@link LANE_ID_UNIQUE_INDEX} has to call this again inside
+ * {@link retryingLaneIdCollision}.
  */
 export function ensureProjectLaneStmts(
   db: AquillaDb,
@@ -206,11 +271,13 @@ export async function ensureProjectLanes(
       .first<{ settings: unknown }>()
     settings = parseSettingsJson(row?.settings)
   }
-  const stmts = ensureProjectLaneStmts(db, projectId, {
-    settings,
-    dataTargetTags: opts?.dataTargetTags,
+  await retryingLaneIdCollision(async () => {
+    const stmts = ensureProjectLaneStmts(db, projectId, {
+      settings,
+      dataTargetTags: opts?.dataTargetTags,
+    })
+    if (stmts.length > 0) await db.batch(stmts)
   })
-  if (stmts.length > 0) await db.batch(stmts)
 }
 
 export interface ProjectLaneRecord {
@@ -302,6 +369,10 @@ export async function renameTargetLane(
 /**
  * Insert one target lane the planner already approved. Position follows the
  * rows already on the project so the switcher order is stable.
+ *
+ * The id is the caller's. A collision on uq_lanes_id throws;
+ * {@link createTargetLane} mints a new id and replans, because that id may
+ * also be the legacy tag.
  */
 export async function insertTargetLane(
   db: AquillaDb,
@@ -317,6 +388,58 @@ export async function insertTargetLane(
     )
     .bind(lane.id, projectId, lane.name, lane.langCode, lane.legacyTag, position)
     .run()
+}
+
+/**
+ * Mint a target lane and insert it. A global id collision mints again and
+ * replans, so when the legacy tag is the id itself both stay in step.
+ * A name the planner refuses is returned as-is and is not retried.
+ */
+export async function createTargetLane(
+  db: AquillaDb,
+  projectId: string,
+  input: {
+    name: string
+    language: string
+    targetLanguage: string | null
+    existing: readonly ExistingLaneIdentity[]
+  },
+): Promise<
+  | { ok: true; laneId: string; name: string; legacyTag: string; langCode: string | null }
+  | { ok: false; problem: LaneNameProblem }
+> {
+  const outcome = await retryingLaneIdCollision(async () => {
+    const laneId = newLaneId()
+    const plan = planNewTargetLane({
+      laneId,
+      name: input.name,
+      language: input.language,
+      targetLanguage: input.targetLanguage,
+      existing: input.existing,
+    })
+    if (!plan.ok) return { inserted: false as const, problem: plan.problem }
+    await insertTargetLane(db, projectId, {
+      id: laneId,
+      name: plan.name,
+      langCode: plan.langCode,
+      legacyTag: plan.legacyTag,
+    })
+    return {
+      inserted: true as const,
+      laneId,
+      name: plan.name,
+      legacyTag: plan.legacyTag,
+      langCode: plan.langCode,
+    }
+  })
+  if (!outcome.inserted) return { ok: false, problem: outcome.problem }
+  return {
+    ok: true,
+    laneId: outcome.laneId,
+    name: outcome.name,
+    legacyTag: outcome.legacyTag,
+    langCode: outcome.langCode,
+  }
 }
 
 /**
@@ -349,11 +472,21 @@ export function ensureTargetLaneStmt(
 export type ArchiveLaneResult =
   | { status: "ok"; lane: ProjectLaneRecord }
   | { status: "not_found" }
-  | { status: "default_lane" }
+  | { status: "last_lane" }
 
 /**
- * Soft-archive a target lane (`archived_at`). The default lane (`legacy_tag`
- * '') stays; its cells are the project's primary target language.
+ * Soft-archive a target lane (`archived_at`).
+ *
+ * AQU-1600: the former default lane (`legacy_tag` '') is an ordinary lane and
+ * archives like any other. Its row — and its `legacy_tag ''` — stay forever,
+ * so historical events still replay through it; only `archived_at` moves.
+ *
+ * The one refusal left is `last_lane`: a project must keep at least one
+ * non-archived target lane, so archiving the last active one is rejected
+ * rather than leaving a project nobody can translate in. The row's
+ * `archived_at` is the only input to that count — the legacy
+ * `settings.archivedLanes` mirror is a list of TAGS and cannot name the
+ * former default lane (its tag is ''), so it is not consulted here.
  */
 export async function setTargetLaneArchived(
   db: AquillaDb,
@@ -364,7 +497,18 @@ export async function setTargetLaneArchived(
   const lanes = await listProjectLanes(db, projectId)
   const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
   if (!current) return { status: "not_found" }
-  if (current.legacyTag === "") return { status: "default_lane" }
+  const currentlyActive = current.archivedAt == null || current.archivedAt === ""
+  // Only a change that actually removes the last ACTIVE lane is refused;
+  // re-archiving an already-archived lane changes no count and stays a no-op.
+  if (archived && currentlyActive) {
+    const stillActive = lanes.some(
+      (lane) =>
+        lane.role === "target" &&
+        lane.id !== laneId &&
+        (lane.archivedAt == null || lane.archivedAt === ""),
+    )
+    if (!stillActive) return { status: "last_lane" }
+  }
   const archivedAt = archived ? new Date().toISOString() : null
   await db
     .prepare(

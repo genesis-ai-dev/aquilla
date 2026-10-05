@@ -585,7 +585,7 @@ export const terminology = defineNamespace({
     "terminology.match.optionsLabel": "Matching options",
     "terminology.match.foldMarks": "Ignore vowel marks and accents",
     "terminology.match.affixes": "Allow prefixes and suffixes",
-    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.caseSensitive": "Match case",
     "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
     "terminology.match.addFormLabel": "Add form",
     "terminology.match.addFormPlaceholder": "Another spelling of this term…",

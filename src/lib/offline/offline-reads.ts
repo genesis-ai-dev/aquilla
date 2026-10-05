@@ -52,6 +52,10 @@ export interface ReadOfflineFileCellsOptions {
 interface OfflineCellsRow {
   cellId: string
   side: "source" | "target"
+  /** AQU-1614: the lane's legacy tag — what every lane-aware read filters on
+   *  (`laneOf` in useCells.ts) — and its `lanes.id` when the server sent one. */
+  targetLang: string
+  laneId: string | null
   value: string | null
   valueHtml: string | null
   eventId: string | null
@@ -66,6 +70,11 @@ function toCellRow(row: OfflineCellsRow): CellRow {
   return {
     cellId: row.cellId,
     side: row.side,
+    // AQU-1614: the lane is part of the row, so an offline read serves every
+    // lane the local copy holds and the caller filters to the active one —
+    // byte-identical to the pre-lane behaviour on a single-lane project.
+    targetLang: row.targetLang,
+    laneId: row.laneId,
     // The server's `value`/`eventId` are non-nullable on `CellRow`; the local
     // column allows null (a cell synced before it ever got a value/event).
     // `""` is the same "nothing yet" sentinel useCells.ts's own synthetic

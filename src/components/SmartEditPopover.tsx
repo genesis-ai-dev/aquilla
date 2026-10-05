@@ -17,6 +17,9 @@ const HARMONIZER_REASONS = [
   "harmonizer.sentence.brokenCase",
   "harmonizer.sentence.brokenOff",
   "harmonizer.sentence.runOn",
+  "harmonizer.connective.reason",
+  "harmonizer.connective.inference",
+  "harmonizer.connective.contrast",
 ] as const
 type HarmonizerReason = (typeof HARMONIZER_REASONS)[number]
 function isHarmonizerReason(key: string): key is HarmonizerReason {

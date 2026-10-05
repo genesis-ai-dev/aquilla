@@ -64,6 +64,12 @@ describe("generateCombinedVoice routing", () => {
     expect(synthCellTts).toHaveBeenCalledTimes(1)
     expect(synthForCell).not.toHaveBeenCalled()
     expect(emitAttach).toHaveBeenCalledTimes(2)
+    // AQU-1572: one shared clip, one `audio generated` per line it landed on.
+    const attaches = (emitAttach.mock.calls as unknown as Array<[Record<string, unknown>]>).map(([a]) => a)
+    expect(attaches.map((a) => [a.cellId, a.audioOrigin, a.surface])).toEqual([
+      ["c1", "generate", "voice-together"],
+      ["c2", "generate", "voice-together"],
+    ])
   })
 
   it("plain client synth uploads compressed AND the lossless WAV sibling; the attach stays compressed", async () => {

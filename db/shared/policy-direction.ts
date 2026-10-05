@@ -37,13 +37,19 @@ export const POLICY_DIRECTION_TABLE: readonly { key: string; restrictiveDirectio
   { key: 'contributeToGlobalTm', restrictiveDirection: 'true → false (unset reads as true)' },
   { key: 'agentAuthorship', restrictiveDirection: '→ "none" (null clears it, which loosens)' },
   { key: 'allowSelfValidation', restrictiveDirection: 'true → false (unset reads as true)' },
+  // AQU-1571: the audio twins of the three text validation keys (AQU-490). They
+  // were registered as settings keys but never listed here, so an agent could
+  // loosen who validates recordings while the text side was guarded.
+  { key: 'allowSelfValidationAudio', restrictiveDirection: 'true → false (unset reads as true)' },
   { key: 'agentMemoryAutonomy', restrictiveDirection: '"agent-low-risk" → "human" (unset reads as "human")' },
   { key: 'validationCount', restrictiveDirection: 'a higher integer (unset reads as 1)' },
   { key: 'validationCountAudio', restrictiveDirection: 'a higher integer (unset reads as 1)' },
   { key: 'validationRoleFloor', restrictiveDirection: 'a higher rung: reviewer < project_lead < maintainer (unset reads as reviewer)' },
+  { key: 'validationRoleFloorAudio', restrictiveDirection: 'a higher rung: reviewer < project_lead < maintainer (unset reads as reviewer)' },
   { key: 'harmonize_min_role', restrictiveDirection: 'a higher rung: project_lead < maintainer (unset reads as project_lead)' },
   { key: 'cellEditingFloor', restrictiveDirection: 'a higher rung: commenter < reviewer < contributor < project_lead < maintainer < "none" (unset reads as "none" — nobody)' },
   { key: 'validationNamedUsers', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
+  { key: 'validationNamedUsersAudio', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
 ]
 
 // ── Per-key rules ────────────────────────────────────────────────────────────
@@ -63,7 +69,8 @@ interface PolicyRule {
 
 /** Booleans where `false` is the restrictive value and unset means `true`:
  *  `contributeToGlobalTm` (TM contribution defaults on) and
- *  `allowSelfValidation` (src/lib/review/auto-validation.ts and
+ *  `allowSelfValidation` / `allowSelfValidationAudio` (src/lib/review/
+ *  auto-validation.ts, src/lib/audio/audio-validation-permissions.ts and
  *  sync-worker/src/events/route.ts treat only `=== false` as off). */
 const falseIsTighter: PolicyRule = {
   defaultValue: true,
@@ -95,14 +102,17 @@ const countRule: PolicyRule = {
 const RULES: Readonly<Record<string, PolicyRule>> = {
   contributeToGlobalTm: falseIsTighter,
   allowSelfValidation: falseIsTighter,
+  allowSelfValidationAudio: falseIsTighter,
   // db/shared/agent-memory.ts readAgentMemoryAutonomy: anything but
   // "agent-low-risk" reads as "human".
   agentMemoryAutonomy: ladder(['agent-low-risk', 'human'], 'human'),
   validationCount: countRule,
   validationCountAudio: countRule,
   // sync-worker/src/events/route.ts FLOOR_MAP: no floor stored ⇒ no role check
-  // beyond the static reviewer floor on cell.validate.
+  // beyond the static reviewer floor on cell.validate (and, for the audio key,
+  // on cell.audio.validate).
   validationRoleFloor: ladder(['reviewer', 'project_lead', 'maintainer'], 'reviewer'),
+  validationRoleFloorAudio: ladder(['reviewer', 'project_lead', 'maintainer'], 'reviewer'),
   // sync-worker/src/events/route.ts: project_lead by default, configurable up
   // to maintainer.
   harmonize_min_role: ladder(['project_lead', 'maintainer'], 'project_lead'),
@@ -128,13 +138,16 @@ function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((s) => typeof s === 'string')
 }
 
-/** `validationNamedUsers` is a validator allowlist (sync-worker/src/events/
- *  route.ts: a non-empty list refuses `cell.validate` from anyone not on it;
- *  an empty or absent list refuses nobody). It has no single rank, so it is
- *  compared as sets: the write tightens when it admits no one the current
- *  list does not already admit. */
-function namedUsersDirection(current: unknown, proposed: unknown): PolicyDirectionVerdict {
-  const key = 'validationNamedUsers'
+/** The validator allowlists: `validationNamedUsers` for `cell.validate` and its
+ *  audio twin `validationNamedUsersAudio` for `cell.audio.validate` (AQU-1571).
+ *  Both read the same way in sync-worker/src/events/route.ts. */
+const NAMED_USERS_KEYS: ReadonlySet<string> = new Set(['validationNamedUsers', 'validationNamedUsersAudio'])
+
+/** A validator allowlist (sync-worker/src/events/route.ts: a non-empty list
+ *  refuses a validate from anyone not on it; an empty or absent list refuses
+ *  nobody). It has no single rank, so it is compared as sets: the write
+ *  tightens when it admits no one the current list does not already admit. */
+function namedUsersDirection(key: string, current: unknown, proposed: unknown): PolicyDirectionVerdict {
   const cur = isStringArray(current) ? current : []
   if (proposed !== null && !isStringArray(proposed)) {
     return { key, direction: 'invalid', current, proposed, reason: `${key} expects string[]` }
@@ -172,7 +185,7 @@ export function policyWriteDirection(
   current: unknown,
   proposed: unknown,
 ): PolicyDirectionVerdict {
-  if (key === 'validationNamedUsers') return namedUsersDirection(current, proposed)
+  if (NAMED_USERS_KEYS.has(key)) return namedUsersDirection(key, current, proposed)
   const rule = key === 'agentAuthorship' ? agentAuthorshipRule : RULES[key]
   if (!rule) {
     return { key, direction: 'invalid', current, proposed, reason: `${key} is not a policy key` }

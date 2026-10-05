@@ -1,5 +1,7 @@
 import posthog from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
+import { resolveAppEnv } from "@/lib/analytics-env"
+import { installResizeObserverNoiseGuard } from "@/lib/analytics-noise"
 import { redactCaptureEvent } from "@/lib/analytics-redaction"
 import { resolvePosthogHost } from "@/lib/posthog-host"
 
@@ -9,6 +11,11 @@ const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
 if (typeof window !== "undefined" && KEY) {
+  // AQU-1572: ahead of init, so the benign ResizeObserver message never reaches
+  // the exception rate limiter that real errors share. The `$exception` noise
+  // filter itself runs inside `redactCaptureEvent` below; this guard is the
+  // part a `before_send` hook cannot do (see analytics-noise.ts).
+  installResizeObserverNoiseGuard(window)
   posthog.init(KEY, {
     api_host: HOST,
     persistence: "localStorage+cookie",
@@ -16,6 +23,10 @@ if (typeof window !== "undefined" && KEY) {
     autocapture: false,
     // Surface unhandled errors / rejections as $exception events so failures
     // that never reach an explicit captureException call are still queryable.
+    // AQU-1572: this wraps window.onerror and window.onunhandledrejection
+    // itself, so it is the only window-level capture on the web — the
+    // ErrorBoundary listeners no longer report there (see ErrorBoundary.tsx
+    // for the desktop shell, where this cannot load).
     capture_exceptions: true,
     // OPS-29 (docs/OPSEC-REVIEW-2026-09-14.md): the last hook before an event
     // leaves the browser. `/join/:token`, `/join-org/:token`, `/link/:token`,
@@ -23,7 +34,8 @@ if (typeof window !== "undefined" && KEY) {
     // credential in the URL, and PostHog attaches `$current_url`/`$pathname` to
     // every event (plus the replay's own rrweb `href` and the `$initial_*`
     // person properties). Redact by route position and query-parameter name so
-    // no capture site has to remember to do it.
+    // no capture site has to remember to do it. AQU-1572's `$exception` noise
+    // filter composes inside it (analytics-noise.ts).
     before_send: redactCaptureEvent,
     disable_session_recording: !isAnalyticsEnabled(),
     session_recording: {
@@ -48,6 +60,12 @@ if (typeof window !== "undefined" && KEY) {
     },
     opt_out_capturing_by_default: !isAnalyticsEnabled(),
   })
+
+  // AQU-1572: one project key serves every build, so stamp each event with the
+  // deployment it came from — production / dev / preview / local / desktop —
+  // for dashboards to split on. `posthog.reset()` clears super-properties, so
+  // logout registers it again (useFrontierSession.ts).
+  posthog.register({ app_env: resolveAppEnv(window.location) })
 
   onAnalyticsConsentChange((enabled) => {
     if (enabled) {

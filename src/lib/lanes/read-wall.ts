@@ -51,7 +51,8 @@ export function visibleLaneTags(input: {
 
 export interface LaneIdentity {
   id: string
-  name: string
+  /** Stored display override. Null when the lane only has a language (AQU-1592). */
+  name: string | null
   /** `''` is the default target lane. Null is treated the same. */
   legacyTag: string | null
 }
@@ -93,7 +94,8 @@ export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds
   const kept = new Set<string>()
   for (const lane of lanes) {
     if (!grantedIds.has(lane.id)) continue
-    if (lane.name.trim() !== "") kept.add(lane.name)
+    const name = (lane.name ?? "").trim()
+    if (name !== "") kept.add(name)
     const legacy = lane.legacyTag ?? ""
     if (legacy !== "") kept.add(legacy)
   }

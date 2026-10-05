@@ -10,6 +10,8 @@ import type { CellPrecondition } from './preconditions'
  *  (the compiled events are routed back through handleEventsWriteRequest). */
 export type ExternalEnv = EventsRouteEnv & {
   /** AQU-730 read wall. Unset locally and in e2e. */
+  /** Request-local trusted MCP delegation factory, never a network header. */
+  mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
   LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string

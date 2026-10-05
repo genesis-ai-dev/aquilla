@@ -1359,6 +1359,7 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
     org_id       TEXT,
     org_ids      JSONB,
+    oauth_resource TEXT,
     project_id   TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ,

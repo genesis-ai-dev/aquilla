@@ -24,7 +24,7 @@ import { loadLaneGrants } from "../../../db/shared/lane-visibility"
 import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
-import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 
@@ -52,11 +52,7 @@ export async function authenticateCredential(
     }
   }
 
-  const credential = await validateApiCredential(
-    env.AQUILLA_PG as AquillaDb,
-    token,
-    request.headers.get("CF-Connecting-IP"),
-  )
+  const credential = await validateApiCredentialRequest(env.AQUILLA_PG as AquillaDb, request)
   if (!credential) {
     // Collapses invalid/revoked/expired into one generic message — the code
     // (permission_denied) is what callers branch on, not the message text.

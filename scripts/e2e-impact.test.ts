@@ -7,6 +7,7 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/agent/agent-connection.smoke.spec.ts",
   "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
@@ -90,6 +91,13 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/projects/project-settings.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("selects browser authorization for plugin package, credential and OAuth changes", () => {
+    for (const file of ["plugins/aquilla/.codex-plugin/plugin.json", "sync-worker/src/external/mcp-chatgpt.ts",
+      "db/shared/api-credentials.ts", "db/postgres/migrations/0129_mcp_oauth_resource.sql"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain("e2e/specs/agent/agent-connection.smoke.spec.ts")
+    }
   })
 
   it("maps sync-worker changes to the collaboration boundary", () => {

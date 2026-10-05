@@ -93,6 +93,7 @@ import {
   renameProjectLane,
   setProjectLaneArchived,
   fetchLaneLastChange,
+  settingsEditorName,
   type LaneLastChangeResult,
 } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -128,7 +129,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -356,6 +357,15 @@ const BLOB_BACKED_KEYS = [
   "termMatching",
 ] as const satisfies readonly (keyof Baseline)[]
 type BlobBackedKey = (typeof BLOB_BACKED_KEYS)[number]
+
+/** The provenance line under the project name. The settings response names
+ *  the saver only by id, so without a username it gives the date alone rather
+ *  than "Last edited by undefined" (walk 10-02). */
+function lastEditedLine(name: string | null, date: string, t: TFunction): string {
+  return name
+    ? t("projectSettings.shared.lastEdited", { name, date })
+    : t("projectSettings.shared.lastEditedOn", { date })
+}
 
 function sameSetting(a: unknown, b: unknown): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b)
@@ -735,13 +745,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Seed once when the project first loads. We intentionally don't reseed on
   // every `project` identity change — background sync writes to IDB shouldn't
   // wipe the user's in-progress edits. After save/discard we reseed manually.
+  //
+  // `project` here has NO shared settings (`includeSettings: false` above), so
+  // when this page's own settings GET has already landed, seed from the record
+  // with the blob overlaid. Otherwise the shared-settings effect below settles
+  // the shared fields once the GET lands.
   useEffect(() => {
     if (!project || seededRef.current) return
-    const b = buildBaseline(project)
+    const b = buildBaseline(
+      sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
+    )
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
-  }, [project, applyBaseline])
+  }, [project, applyBaseline, sharedSettingsFetched, sharedSettingsBlob])
 
   // Settings that live ONLY in the shared settings blob never reach `project`
   // on this page: it passes `includeSettings: false` to `useProject` (it owns
@@ -1149,7 +1166,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           toast.add({
             type: "warning",
             title: t("projectSettings.save.conflictToast", {
-              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
+              username: settingsEditorName(out.latest.updatedBy) ?? t("projectSettings.save.conflictFallbackUsername"),
             }),
           })
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
@@ -1634,8 +1651,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
+                // "icon", not "icon-sm": the group lines its halves up, so the
+                // arrow must be as tall as "Save changes" beside it.
                 <Button
-                  size="icon-sm"
+                  size="icon"
                   disabled={saving}
                   aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
                 >
@@ -1846,11 +1865,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
-                  sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
-                    ? t("projectSettings.shared.lastEdited", {
-                        name: sharedUpdatedBy.username,
-                        date: new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-                      })
+                  sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
+                    ? lastEditedLine(
+                        settingsEditorName(sharedUpdatedBy),
+                        new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+                        t,
+                      )
                     : t("projectSettings.shared.nameHint")
                 }
                 control={

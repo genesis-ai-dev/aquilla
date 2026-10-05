@@ -224,7 +224,8 @@ interface TranslationRun {
   file: File | null
   fileId: string
   key: string
-  autoPicked: boolean
+  /** True when the person took the held upload's suggested file. */
+  suggested: boolean
   /** Where it started, for telemetry: the translation screen, the source
    *  path's check, or the review's "Import into X instead". */
   entry: TranslationEntry
@@ -394,7 +395,6 @@ export function ImportDialog({
   // same file chosen and the same upload held.
   const [intent, setIntent] = useState<ImportIntent>("source")
   const [translationFileId, setTranslationFileId] = useState<string | null>(null)
-  const [translationTouched, setTranslationTouched] = useState(false)
   const [heldTranslationFile, setHeldTranslationFile] = useState<File | null>(null)
   const [translationRun, setTranslationRun] = useState<TranslationRun | null>(null)
   const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
@@ -429,7 +429,6 @@ export function ImportDialog({
       const openFileId = translation?.activeFileId ?? null
       setIntent(sourceDisabledReason !== null && translation ? "translation" : "source")
       setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
-      setTranslationTouched(false)
       setHeldTranslationFile(null)
       setTranslationRun(null)
       setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
@@ -710,19 +709,19 @@ export function ImportDialog({
   function startTranslation(
     file: File,
     fileId: string,
-    { autoPicked }: TranslationStartOptions,
+    { suggested }: TranslationStartOptions,
     entry: TranslationEntry = "translation",
   ) {
     if (!translation) return
     setHeldTranslationFile(null)
-    beginTranslationRun({ way: "file", file, fileId, autoPicked, entry })
+    beginTranslationRun({ way: "file", file, fileId, suggested, entry })
   }
 
   // AQU-1365: eBible or a paired spreadsheet into the chosen file. A held
   // upload stays held: Back from either lands on the chooser as it was left.
   function startOtherWay(way: TranslationOtherWay) {
     if (!translation || translationFileId === null) return
-    beginTranslationRun({ way, file: null, fileId: translationFileId, autoPicked: false, entry: "translation" })
+    beginTranslationRun({ way, file: null, fileId: translationFileId, suggested: false, entry: "translation" })
   }
 
   function beginTranslationRun(run: Omit<TranslationRun, "key">) {
@@ -736,7 +735,7 @@ export function ImportDialog({
     posthog.capture(IMPORT_STARTED, {
       import_type: TRANSLATION_IMPORT_TYPE[run.way],
       entry: run.entry,
-      auto_picked: run.autoPicked,
+      suggested: run.suggested,
       project_id: projectId,
     })
     if (translation.activeFileId !== fileId) {
@@ -826,8 +825,7 @@ export function ImportDialog({
         if (layout.kind !== "sameBook" || !flaggedFile) return
         setTranslationCheck(null)
         setIntent("translation")
-        setTranslationTouched(true)
-        startTranslation(flaggedFile, layout.book.file.id, { autoPicked: false }, "translation-check")
+        startTranslation(flaggedFile, layout.book.file.id, { suggested: false }, "translation-check")
         return
       case "choose-file":
         if (!flaggedFile) return
@@ -838,9 +836,9 @@ export function ImportDialog({
         // Nothing chosen yet. The picker would otherwise start on the open
         // file with Continue live, and a quick Continue sent the upload into
         // whatever file happened to be open: the one thing this screen exists
-        // to stop. The person names the file, or the upload's own book does.
+        // to stop. The person names the file, or takes the one the held box
+        // offers for the upload's book.
         setTranslationFileId(null)
-        setTranslationTouched(false)
         setHeldTranslationFile(flaggedFile)
         setScreen("landing")
         return
@@ -1046,10 +1044,8 @@ export function ImportDialog({
               value={translationFileId}
               onValueChange={(fileId) => {
                 setTranslationFileId(fileId)
-                setTranslationTouched(true)
                 setTranslationNotice(null)
               }}
-              touched={translationTouched}
               languageLabel={translation.languageLabel}
               heldFile={heldTranslationFile}
               onHeldFileChange={setHeldTranslationFile}
@@ -1563,15 +1559,14 @@ export function ImportDialog({
               fileForBook={translationFileForBook}
               onUseFile={(fileId) => {
                 if (!translationRun.file) return
-                setTranslationTouched(true)
-                startTranslation(translationRun.file, fileId, { autoPicked: false }, "review-switch")
+                startTranslation(translationRun.file, fileId, { suggested: false }, "review-switch")
               }}
               onBackChange={setTranslationBack}
               onImported={(committedCount) => {
                 posthog.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target",
                   entry: translationRun.entry,
-                  auto_picked: translationRun.autoPicked,
+                  suggested: translationRun.suggested,
                   file_count: committedCount,
                   project_id: projectId,
                 })

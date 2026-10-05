@@ -7,12 +7,14 @@
  * Choosing is the dialog's state, not this screen's, so Back from the review
  * lands here with the same file chosen and the same upload held.
  *
- * A dropped USFM file names its book on its `\id` line. While the person has
- * not chosen a file themselves, that book picks the file (see
- * `pickTranslationDestination`). With nothing chosen and nothing picked, the
- * upload is held until a file is chosen, and only Continue starts it: a held
- * file never starts on its own, so what happens next is always the person's
- * click.
+ * The import follows the person, never the upload (Sam, PR 3 pass: "We should
+ * be following the user while informing them, not leading them."). With a
+ * file chosen, a drop starts on that file, and the review says when the
+ * upload is for another book, with a link to that book's file. With nothing
+ * chosen, the upload is held, whatever its format. The held box says which
+ * book the upload is for and offers the one file holding it as a button
+ * ("Import into Jonah"); otherwise the picker and Continue start it. Nothing
+ * opens, matches or starts until one of those is clicked.
  *
  * Below the drop zone, "Other ways to bring in a translation" offers the two
  * importers that only ever fill a file's translation: eBible (matched by verse)
@@ -30,19 +32,18 @@
  * to load, a drop waits on the dialog's opening gate like any other file.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ArrowLeftRight, ChevronDown, FileText, Library, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox"
 import { FileTargetLanePicker } from "@/components/import/FileTargetLanePicker"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
   FILE_TARGET_ACCEPT,
   isFileTargetFileName,
-  isUsfmFileName,
-  pickTranslationDestination,
-  usfmBookIds,
+  suggestTranslationDestination,
+  uploadBookIds,
   type TranslationDestination,
 } from "@/lib/import/translation-destination"
 
@@ -51,8 +52,9 @@ import {
 export type TranslationOtherWay = "ebible" | "paired"
 
 export interface TranslationStartOptions {
-  /** True when the upload's own book chose the file, not the person. */
-  autoPicked: boolean
+  /** True when the person took the held upload's suggested file (the one
+   *  file holding the upload's book) rather than choosing one in the picker. */
+  suggested: boolean
 }
 
 interface TranslationChooserProps {
@@ -60,10 +62,8 @@ interface TranslationChooserProps {
   files: readonly TranslationDestination[]
   /** The chosen file, or null. */
   value: string | null
-  /** The person chose a file (this counts as their choice for auto-pick). */
+  /** The person chose a file in the picker. */
   onValueChange: (fileId: string) => void
-  /** True once the person has chosen a file in this dialog. */
-  touched: boolean
   /** Name of the language the translation is in, when known. */
   languageLabel: string | null
   /** An upload waiting for a file to be chosen (or for Continue). */
@@ -99,7 +99,6 @@ export function TranslationChooser({
   files,
   value,
   onValueChange,
-  touched,
   languageLabel,
   heldFile,
   onHeldFileChange,
@@ -126,7 +125,38 @@ export function TranslationChooser({
     </p>
   )
 
-  async function receive(list: File[]) {
+  // The books the held upload names, read once per upload. Null while that
+  // read is in flight, so the box doesn't say one thing and then another.
+  const [heldBooks, setHeldBooks] = useState<{ file: File; bookIds: string[] } | null>(null)
+  useEffect(() => {
+    if (!heldFile) return
+    let current = true
+    void uploadBookIds(heldFile).then((bookIds) => {
+      if (current) setHeldBooks({ file: heldFile, bookIds })
+    })
+    return () => {
+      current = false
+    }
+  }, [heldFile])
+  const heldBookIds = heldFile && heldBooks?.file === heldFile ? heldBooks.bookIds : null
+  const suggestion = heldBookIds ? suggestTranslationDestination(files, heldBookIds) : null
+  // The file the upload's book is in, offered as a button unless it is the
+  // file already chosen (Continue does that).
+  const offer = suggestion?.kind === "file" && suggestion.file.id !== chosen?.id ? suggestion.file : null
+  const bookName = suggestion ? getBookName(suggestion.bookCode) ?? suggestion.bookCode : ""
+  const heldNote = !heldFile || heldBookIds === null
+    ? null
+    : offer
+      ? t("importExport.translation.heldForBook", { book: bookName })
+      : chosen
+        ? null
+        : suggestion?.kind === "several"
+          ? t("importExport.translation.heldSeveralForBook", { book: bookName })
+          : suggestion?.kind === "none"
+            ? t("importExport.translation.heldNoFileForBook", { book: bookName })
+            : t("importExport.translation.heldNeedsFile", { fileName: heldFile.name })
+
+  function receive(list: File[]) {
     setError(null)
     if (list.length === 0) return
     if (list.length > 1) {
@@ -138,15 +168,10 @@ export function TranslationChooser({
       setError(t("importExport.fileTarget.unsupportedFileType"))
       return
     }
-    const bookIds = isUsfmFileName(file.name)
-      ? usfmBookIds(decodeImportText(await file.arrayBuffer(), file.name))
-      : []
-    const pick = pickTranslationDestination({ files, current: value, touched, uploadBookIds: bookIds })
-    if (pick) {
-      onStart(file, pick.id, { autoPicked: pick.autoPicked })
-    } else {
-      onHeldFileChange(file)
-    }
+    // The chosen file, whatever the upload's book: the review says when it is
+    // for another book and offers that book's file.
+    if (chosen) onStart(file, chosen.id, { suggested: false })
+    else onHeldFileChange(file)
   }
 
   if (files.length === 0) {
@@ -221,7 +246,7 @@ export function TranslationChooser({
         onDrop={(e) => {
           e.preventDefault()
           setDragOver(false)
-          void receive(Array.from(e.dataTransfer.files))
+          receive(Array.from(e.dataTransfer.files))
         }}
       >
         <div className="flex flex-wrap items-center justify-center gap-1.5 text-sm text-muted-foreground">
@@ -238,7 +263,7 @@ export function TranslationChooser({
                 const picked = Array.from(e.target.files ?? [])
                 // Clear so choosing the same file again still fires a change.
                 e.target.value = ""
-                void receive(picked)
+                receive(picked)
               }}
             />
           </label>
@@ -255,18 +280,28 @@ export function TranslationChooser({
               {t("importExport.translation.removeHeld")}
             </Button>
           </div>
-          {!chosen && (
-            <p className="text-xs text-muted-foreground">
-              {t("importExport.translation.heldNeedsFile", { fileName: heldFile.name })}
-            </p>
-          )}
-          <div className="flex justify-end">
+          {heldNote && <p className="text-xs text-muted-foreground">{heldNote}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            {offer && (
+              <Button
+                type="button"
+                size="sm"
+                // Leads while nothing is chosen; once the person picks another
+                // file, Continue (their choice) leads and this stays on offer.
+                variant={chosen ? "outline" : "default"}
+                data-testid="translation-held-suggestion"
+                onClick={() => onStart(heldFile, offer.id, { suggested: true })}
+              >
+                {t("importExport.translation.heldImportInto", { fileName: offer.name })}
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
+              variant={offer && !chosen ? "outline" : "default"}
               disabled={!chosen}
               onClick={() => {
-                if (chosen) onStart(heldFile, chosen.id, { autoPicked: false })
+                if (chosen) onStart(heldFile, chosen.id, { suggested: false })
               }}
             >
               {t("importExport.translation.continue")}

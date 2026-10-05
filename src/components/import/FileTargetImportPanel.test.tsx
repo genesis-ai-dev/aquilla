@@ -920,8 +920,8 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     expect(screen.getByText("This file is for Exodus 1; the open file is Genesis 1.")).toHaveClass("text-amber-600")
   })
 
-  // AQU-1365: the person chose this file themselves (auto-pick never
-  // overrides that), so going to the right one is offered, not done.
+  // AQU-1365: the import stays on the file the person chose (it never moves
+  // by itself), so going to the right one is offered, not done.
   it("offers the file that holds the other book, when exactly one does", async () => {
     const onUseFile = vi.fn()
     const fileForBook = vi.fn((book: string) => (book === "EXO" ? { id: "file-exo", name: "Exodus" } : undefined))

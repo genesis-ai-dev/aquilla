@@ -994,8 +994,8 @@ export function FileTargetImportPanel({
   if (step === "review" && matchResult) {
     const { matched, orphans, uncovered, timebase, looseFit, elsewhere, skippedCues = 0 } = matchResult
     // AQU-1365: a file for one other book that exactly one project file
-    // holds can go there instead. The person picked this file themselves
-    // (auto-pick never overrides a choice), so it is offered, not done.
+    // holds can go there instead. The import follows the file the person
+    // chose and never moves by itself, so it is offered, not done.
     const elsewhereBooks = elsewhere ? [...new Set(elsewhere.incoming.map((span) => span.bookCode))] : []
     const otherFile = elsewhereBooks.length === 1 && onUseFile ? fileForBook?.(elsewhereBooks[0]) : undefined
     const switchTo = otherFile && otherFile.id !== cells[0]?.fileId ? otherFile : undefined

@@ -238,7 +238,12 @@ describe("AQU-1365: Is this a translation?", () => {
     )
     await answer("Choose the file it translates")
     expect(await screen.findByTestId("translation-chooser")).toBeInTheDocument()
-    expect(screen.getByTestId("translation-held-file")).toHaveTextContent("GEN1-tatar.usfm")
+    const held = screen.getByTestId("translation-held-file")
+    expect(held).toHaveTextContent("GEN1-tatar.usfm")
+    // No file here holds Genesis, so the held box says so and offers none.
+    expect(await within(held).findByText(
+      "This file is for Genesis, but no file here is for Genesis. Choose the file it translates.",
+    )).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
     // The open file is NOT chosen for them: a quick Continue must not send the
     // upload into whatever file happened to be open.

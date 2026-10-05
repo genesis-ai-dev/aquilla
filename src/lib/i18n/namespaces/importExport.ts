@@ -1283,6 +1283,12 @@ export const importExport = defineNamespace({
     "importExport.translation.fillsLanguage": "It fills the empty lines of the {language} translation. You check every match before anything is saved.",
     "importExport.translation.fillsNoLanguage": "It fills the empty lines of the file's translation. You check every match before anything is saved.",
     "importExport.translation.heldNeedsFile": "Choose the file that {fileName} translates.",
+    // AQU-1365 (PR 3 pass): a held upload names its book and offers that
+    // book's file; it never moves the import by itself.
+    "importExport.translation.heldForBook": "This file is for {book}.",
+    "importExport.translation.heldImportInto": "Import into {fileName}",
+    "importExport.translation.heldSeveralForBook": "This file is for {book}, and more than one file here is for {book}. Choose the one it translates.",
+    "importExport.translation.heldNoFileForBook": "This file is for {book}, but no file here is for {book}. Choose the file it translates.",
     "importExport.translation.removeHeld": "Remove",
     "importExport.translation.continue": "Continue",
     "importExport.translation.oneFileAtATime": "Add one file at a time.",
@@ -3904,6 +3910,34 @@ export const importExport = defineNamespace({
           "Shown on the Import dialog's translation screen after the user dropped a file before choosing which project file it belongs to. The upload waits until a file is chosen.",
         placeholders: {
           fileName: "Name of the uploaded file, e.g. 'JON-tatar.csv'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldForBook": {
+        description:
+          "Shown on the Import dialog's translation screen under a dropped file that is waiting for its destination, when the file names a Bible book that exactly one project file holds. A button offering that file follows it. Short sentence.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldImportInto": {
+        description:
+          "Button under a dropped file waiting on the Import dialog's translation screen: start importing it as the translation of the one project file that holds its book. Nothing happens until it is clicked. Imperative.",
+        placeholders: {
+          fileName: "Display name of the project file that holds the upload's book, e.g. 'Jonah' or 'JON-source.usfm'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldSeveralForBook": {
+        description:
+          "Shown under a dropped file waiting on the Import dialog's translation screen when two or more project files hold the Bible book the file is for, so none is offered and the user picks one in the file picker above. Two short sentences.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldNoFileForBook": {
+        description:
+          "Shown under a dropped file waiting on the Import dialog's translation screen when no project file holds the Bible book the file is for, so none is offered and the user picks one in the file picker above. Two short sentences.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Genesis'. Do not translate the substituted value.",
         },
       },
       "importExport.translation.removeHeld": {

@@ -40852,7 +40852,11 @@
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
     "projectSettings.validation.audioGroup": "8e111d8446334a31",
-    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0",
+    "importExport.translation.heldForBook": "228ffaaef00b38b4",
+    "importExport.translation.heldImportInto": "b0a9f1cbf58262a5",
+    "importExport.translation.heldSeveralForBook": "7e53a84f8770b932",
+    "importExport.translation.heldNoFileForBook": "6c1dbb79fd30377c"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -47515,7 +47519,11 @@
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
     "projectSettings.validation.audioGroup": "8e111d8446334a31",
-    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0",
+    "importExport.translation.heldForBook": "228ffaaef00b38b4",
+    "importExport.translation.heldImportInto": "b0a9f1cbf58262a5",
+    "importExport.translation.heldSeveralForBook": "7e53a84f8770b932",
+    "importExport.translation.heldNoFileForBook": "6c1dbb79fd30377c"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -54089,6 +54097,10 @@
     "editor.selection.validatePartialSkips": "d07f466e76badcc1",
     "projectSettings.validation.textGroup": "ac65019018918a51",
     "projectSettings.validation.audioGroup": "8e111d8446334a31",
-    "editor.selection.validatePartialRows": "ce82f38632ed19e0"
+    "editor.selection.validatePartialRows": "ce82f38632ed19e0",
+    "importExport.translation.heldForBook": "228ffaaef00b38b4",
+    "importExport.translation.heldImportInto": "b0a9f1cbf58262a5",
+    "importExport.translation.heldSeveralForBook": "7e53a84f8770b932",
+    "importExport.translation.heldNoFileForBook": "6c1dbb79fd30377c"
   }
 }

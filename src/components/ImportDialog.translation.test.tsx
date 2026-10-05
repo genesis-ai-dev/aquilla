@@ -10,7 +10,11 @@
  *  - The review matches against the lines it is handed when it mounts, so a
  *    translation for another file must wait until that file is open and fully
  *    loaded. Starting early matches against the wrong file's lines.
- *  - A USFM file's own book may choose the file only while the person hasn't.
+ *  - The import follows the person, never the upload (Sam's PR 3 ruling):
+ *    with a file open or picked, a drop for another book stays put and the
+ *    review offers the right file; with none, the upload is held, says which
+ *    book it is for, and offers the one file holding it. Nothing opens or
+ *    starts until a click says so.
  *  - Roles: a Contributor imports a translation (the old three-dot entry had
  *    no gate), but not new source text.
  *  - The importers that only fill a translation (eBible into the target
@@ -77,6 +81,8 @@ const FILES = [
 ]
 
 const JON_USFM = "\\id JON Siberian Tatar (test)\n\\c 1\n\\v 1 Йона бер\n\\v 2 Йона ике\n"
+const JON_CSV = "Reference,Translation\nJON 1:1,Йона бер\nJON 1:2,Йона ике\n"
+const EPISODE_VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nБер\n"
 const RUT_USFM = "\\id RUT\n\\c 1\n\\v 1 Руфь бер\n\\v 2 Руфь ике\n"
 
 function host(overrides: Partial<TranslationImportHost> = {}): TranslationImportHost {
@@ -272,12 +278,21 @@ describe("AQU-1365: importing a translation", () => {
     })
   })
 
-  it("lets a USFM file's book choose the file while the person hasn't", async () => {
+  // Sam's PR 3 pass: the editor used to move to Ruth by itself here.
+  it("stays on the open file when the upload is for another book, and offers that book's file", async () => {
     const { translation } = renderDialog()
     await chooseTranslation()
     await dropFiles([usfm(RUT_USFM, "RUT-tatar.usfm")])
-    expect(translation.openFile).toHaveBeenCalledWith("ruth")
-    expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(translation.openFile).not.toHaveBeenCalled()
+    expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+    const note = screen.getByText(/This file is for Ruth 1/)
+    expect(note).toHaveTextContent("This file is for Ruth 1; the open file is Jonah 1. Import into Ruth instead")
+    expect(note).toHaveClass("text-amber-600")
+    expect(within(note).getByRole("button", { name: "Import into Ruth instead" })).toBeInTheDocument()
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
+      import_type: "file-target", entry: "translation", suggested: false,
+    }))
   })
 
   it("keeps the person's own choice over the file's book", async () => {
@@ -303,7 +318,7 @@ describe("AQU-1365: importing a translation", () => {
     expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
     expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
-      import_type: "file-target", entry: "review-switch", auto_picked: false,
+      import_type: "file-target", entry: "review-switch", suggested: false,
     }))
     rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS })
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
@@ -314,17 +329,18 @@ describe("AQU-1365: importing a translation", () => {
   it("holds an upload until a file is chosen, and starts it only on Continue", async () => {
     const { translation } = renderDialog({ translation: host({ activeFileId: null, activeFileCells: [] }) })
     await chooseTranslation()
-    await dropFiles([new File(["Reference,Translation\nJON 1:1,a\n"], "JON-tatar.csv")])
+    await dropFiles([new File([EPISODE_VTT], "episode-tatar.vtt")])
     const held = await screen.findByTestId("translation-held-file")
-    expect(held).toHaveTextContent("JON-tatar.csv")
-    expect(held).toHaveTextContent("Choose the file that JON-tatar.csv translates.")
+    expect(held).toHaveTextContent("episode-tatar.vtt")
+    expect(await within(held).findByText("Choose the file that episode-tatar.vtt translates.")).toBeInTheDocument()
     expect(within(held).getByRole("button", { name: "Continue" })).toBeDisabled()
+    expect(within(held).queryByTestId("translation-held-suggestion")).not.toBeInTheDocument()
 
-    await pickFile("Jonah")
+    await pickFile("Episode 1")
     expect(translation.openFile).not.toHaveBeenCalled()
     fireEvent.click(within(screen.getByTestId("translation-held-file")).getByRole("button", { name: "Continue" }))
-    expect(translation.openFile).toHaveBeenCalledWith("jonah")
-    expect(await screen.findByText("Opening Jonah…")).toBeInTheDocument()
+    expect(translation.openFile).toHaveBeenCalledWith("episode")
+    expect(await screen.findByText("Opening Episode 1…")).toBeInTheDocument()
   })
 
   it("asks for one file at a time", async () => {
@@ -373,7 +389,7 @@ describe("AQU-1365: importing a translation", () => {
     expect(ctx).toMatchObject({ projectId: "proj-1365", targetLang: "tt", getToken: baseProps.getToken })
     expect(translation.applyOptimisticTargetEdits).toHaveBeenCalled()
     expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
-      import_type: "file-target", entry: "translation", auto_picked: false, file_count: 2,
+      import_type: "file-target", entry: "translation", suggested: false, file_count: 2,
     }))
   })
 
@@ -403,6 +419,112 @@ describe("AQU-1365: importing a translation", () => {
     await chooseTranslation()
     await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+  })
+})
+
+describe("AQU-1365: an upload held while no file is chosen", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const noFileOpen = () => host({ activeFileId: null, activeFileCells: [] })
+
+  /** Nothing has opened, matched or started: no file opened, no review, no
+   *  "Opening…", and no import started. */
+  function expectNothingStarted(translation: TranslationImportHost) {
+    expect(translation.openFile).not.toHaveBeenCalled()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Opening /)).not.toBeInTheDocument()
+    expect(posthog.capture).not.toHaveBeenCalledWith(IMPORT_STARTED, expect.anything())
+    expect(screen.getByTestId("translation-chooser")).toBeInTheDocument()
+  }
+
+  it("holds a USFM file that names its book, and offers that book's file without starting it", async () => {
+    const { translation } = renderDialog({ translation: noFileOpen() })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    const held = await screen.findByTestId("translation-held-file")
+    expect(await within(held).findByText("This file is for Jonah.")).toBeInTheDocument()
+    const suggestion = within(held).getByRole("button", { name: "Import into Jonah" })
+    expect(within(held).getByRole("button", { name: "Continue" })).toBeDisabled()
+    expect(within(screen.getByTestId("translation-chooser")).getByRole("combobox", { name: "Which file does it translate?" }))
+      .toHaveTextContent("Choose a file")
+    expectNothingStarted(translation)
+
+    fireEvent.click(suggestion)
+    expect(translation.openFile).toHaveBeenCalledWith("jonah")
+    expect(await screen.findByText("Opening Jonah…")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
+      import_type: "file-target", entry: "translation", suggested: true,
+    }))
+  })
+
+  it("offers the book's file for a spreadsheet, read from its reference column", async () => {
+    const { translation } = renderDialog({ translation: noFileOpen() })
+    await chooseTranslation()
+    await dropFiles([new File([JON_CSV], "JON-tatar.csv")])
+    const held = await screen.findByTestId("translation-held-file")
+    expect(await within(held).findByText("This file is for Jonah.")).toBeInTheDocument()
+    expect(within(held).getByRole("button", { name: "Import into Jonah" })).toBeInTheDocument()
+    expectNothingStarted(translation)
+  })
+
+  it("offers no file when two files hold the book, and says so", async () => {
+    const { translation } = renderDialog({
+      translation: host({
+        activeFileId: null,
+        activeFileCells: [],
+        files: [...FILES, { id: "jonah-2", name: "Jonah (old)", bookCode: "JON", type: "usfm" }],
+      }),
+    })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    const held = await screen.findByTestId("translation-held-file")
+    expect(await within(held).findByText(
+      "This file is for Jonah, and more than one file here is for Jonah. Choose the one it translates.",
+    )).toBeInTheDocument()
+    expect(within(held).queryByTestId("translation-held-suggestion")).not.toBeInTheDocument()
+    expect(within(held).getByRole("button", { name: "Continue" })).toBeDisabled()
+    expectNothingStarted(translation)
+  })
+
+  it("offers no file when no file holds the book, and says so", async () => {
+    const { translation } = renderDialog({ translation: noFileOpen() })
+    await chooseTranslation()
+    await dropFiles([usfm("\\id GEN\n\\c 1\n\\v 1 Башта\n", "GEN1-tatar.usfm")])
+    const held = await screen.findByTestId("translation-held-file")
+    expect(await within(held).findByText(
+      "This file is for Genesis, but no file here is for Genesis. Choose the file it translates.",
+    )).toBeInTheDocument()
+    expect(within(held).queryByTestId("translation-held-suggestion")).not.toBeInTheDocument()
+    expectNothingStarted(translation)
+  })
+
+  it("follows the file the person picks instead, keeping the book's file on offer", async () => {
+    const { translation } = renderDialog({ translation: noFileOpen() })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    await within(await screen.findByTestId("translation-held-file")).findByText("This file is for Jonah.")
+    await pickFile("Ruth")
+    expectNothingStarted(translation)
+    const held = screen.getByTestId("translation-held-file")
+    expect(within(held).getByText("This file is for Jonah.")).toBeInTheDocument()
+    expect(within(held).getByRole("button", { name: "Import into Jonah" })).toBeInTheDocument()
+    fireEvent.click(within(held).getByRole("button", { name: "Continue" }))
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
+  })
+
+  it("stops offering a file once the person picks that same file", async () => {
+    const { translation } = renderDialog({ translation: noFileOpen() })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    await within(await screen.findByTestId("translation-held-file")).findByText("This file is for Jonah.")
+    await pickFile("Jonah")
+    const held = screen.getByTestId("translation-held-file")
+    expect(within(held).queryByTestId("translation-held-suggestion")).not.toBeInTheDocument()
+    expect(held).not.toHaveTextContent("This file is for")
+    expectNothingStarted(translation)
+    expect(within(held).getByRole("button", { name: "Continue" })).toBeEnabled()
   })
 })
 
@@ -460,7 +582,7 @@ describe("AQU-1365: the translation-only importers live under A translation", ()
     expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Import a translation into Ruth" })).toBeInTheDocument()
     expect(posthog.capture).toHaveBeenCalledWith(IMPORT_STARTED, expect.objectContaining({
-      import_type: "ebible", entry: "translation", auto_picked: false,
+      import_type: "ebible", entry: "translation", suggested: false,
     }))
 
     rerenderWith({ activeFileId: "ruth", activeFileCells: RUTH_CELLS })

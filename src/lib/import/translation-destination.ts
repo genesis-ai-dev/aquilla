@@ -2,14 +2,18 @@
  * AQU-1365: which project file a translation import goes into.
  *
  * The Import dialog's "A translation" path asks "Which file does it
- * translate?" with the open file preselected. A dropped USFM file names its
- * own book on its `\id` line, so when the person has not picked a file
- * themselves and exactly one project file holds that book, the import goes
- * there instead (the way Codex's eBible import picks the book). A choice the
- * person made is never overridden: the review's wrong-book sentence covers
- * that case.
+ * translate?" with the open file preselected, and the import goes where the
+ * person says. An upload's own book never moves it: Sam's ruling on the PR 3
+ * pass was "we should be following the user while informing them, not
+ * leading them". The review says when an upload is for another book and
+ * offers that book's file ("Import into Ruth instead"), and an upload held
+ * while no file is chosen offers the file its book is in
+ * (`suggestTranslationDestination`), one click away but never taken for them.
  */
 
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { parseCsvRows, parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
+import { parseVerseReference } from "@/lib/scripture-reference"
 import { fileBookCode, type GroupableFile } from "@/lib/sidebar/group-by-corpus"
 
 /** A project file the translation can go into. */
@@ -58,31 +62,95 @@ export function filesForBook<T extends TranslationDestination>(files: readonly T
   return files.filter((file) => fileBookCode(file)?.toUpperCase() === wanted)
 }
 
+/** A reference cell is short ("1 Thessalonians 12:34-35"); a longer cell is
+ *  text, and is not run through the reference parser. */
+const MAX_REFERENCE_LENGTH = 40
+
+/** A column is a reference column when at least this share of its filled
+ *  cells read as verse references, so a translation that happens to quote
+ *  "John 3:16" doesn't name a book. */
+const REFERENCE_COLUMN_SHARE = 0.5
+
 /**
- * Where a dropped file goes, or null when nothing is chosen yet (the dialog
- * then holds the file until the person picks one).
- *
- * The upload's book moves the destination only when all of these hold: the
- * person has not touched the picker, the upload names exactly one book, and
- * exactly one project file holds it. Two `\id` lines, or a book two files
- * share (a pilot's two Jonahs), pick nothing.
+ * The books a spreadsheet's reference column names, in order of first
+ * appearance, or none when no column reads as references. The column is found
+ * by its contents, not its header: the one with the most cells that read as
+ * verse references (`GEN 1:1`, `Genesis 1:1`, `gen 1.1`), provided they are
+ * at least half of its filled cells.
  */
-export function pickTranslationDestination(input: {
-  files: readonly TranslationDestination[]
-  /** The destination chosen so far (the open file, or the person's pick). */
-  current: string | null
-  /** True once the person has chosen a file in this dialog. */
-  touched: boolean
-  /** `usfmBookIds` of the upload; empty for anything but USFM. */
-  uploadBookIds: readonly string[]
-}): { id: string; autoPicked: boolean } | null {
-  const { files, current, touched, uploadBookIds } = input
-  const known = current !== null && files.some((file) => file.id === current) ? current : null
-  if (!touched && uploadBookIds.length === 1) {
-    const matches = filesForBook(files, uploadBookIds[0])
-    if (matches.length === 1) {
-      return { id: matches[0].id, autoPicked: matches[0].id !== known }
+export function sheetBookIds(rows: readonly (readonly string[])[]): string[] {
+  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0)
+  let best: string[] = []
+  let bestCount = 0
+  for (let col = 0; col < width; col++) {
+    let filled = 0
+    let refs = 0
+    const books: string[] = []
+    for (const row of rows) {
+      const value = row[col]?.trim()
+      if (!value) continue
+      filled++
+      if (value.length > MAX_REFERENCE_LENGTH) continue
+      const verse = parseVerseReference(value)
+      if (!verse) continue
+      refs++
+      if (!books.includes(verse.bookCode)) books.push(verse.bookCode)
+    }
+    if (refs > bestCount && refs >= REFERENCE_COLUMN_SHARE * filled) {
+      best = books
+      bestCount = refs
     }
   }
-  return known === null ? null : { id: known, autoPicked: false }
+  return best
+}
+
+function extensionOf(fileName: string): string {
+  const dot = fileName.lastIndexOf(".")
+  return dot >= 0 ? fileName.slice(dot + 1).toLowerCase() : ""
+}
+
+/**
+ * The books an upload for the translation review names: a USFM file's `\id`
+ * lines, or a spreadsheet's reference column (every sheet of a workbook).
+ * Subtitles name no book. A file that can't be read names none either: the
+ * review reports what is wrong with it once the person starts it.
+ */
+export async function uploadBookIds(file: File): Promise<string[]> {
+  const ext = extensionOf(file.name)
+  try {
+    if (USFM_EXTENSIONS.has(ext)) return usfmBookIds(decodeImportText(await file.arrayBuffer(), file.name))
+    if (ext === "csv" || ext === "tsv") {
+      return sheetBookIds(parseCsvRows(decodeImportText(await file.arrayBuffer(), file.name)))
+    }
+    if (ext === "xlsx") {
+      const sheets = await parseXlsxToSheets(await file.arrayBuffer())
+      return [...new Set(sheets.flatMap((sheet) => sheetBookIds(sheet.rows)))]
+    }
+  } catch {
+    return []
+  }
+  return []
+}
+
+/**
+ * What the dialog can say about where a held upload goes, from the books it
+ * names. Only `file` offers a destination: one book, held by exactly one
+ * project file. Two files of one book (a pilot's two Jonahs) or none are said
+ * as such and leave the choice to the picker. An upload naming no book, or
+ * several, gets null: there is nothing to say.
+ */
+export type TranslationSuggestion =
+  | { kind: "file"; bookCode: string; file: TranslationDestination }
+  | { kind: "several"; bookCode: string }
+  | { kind: "none"; bookCode: string }
+
+export function suggestTranslationDestination(
+  files: readonly TranslationDestination[],
+  uploadBookIds: readonly string[],
+): TranslationSuggestion | null {
+  if (uploadBookIds.length !== 1) return null
+  const bookCode = uploadBookIds[0].toUpperCase()
+  const matches = filesForBook(files, bookCode)
+  if (matches.length === 1) return { kind: "file", bookCode, file: matches[0] }
+  return { kind: matches.length === 0 ? "none" : "several", bookCode }
 }

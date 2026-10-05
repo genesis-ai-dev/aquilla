@@ -1,13 +1,17 @@
-// AQU-1365: where a dropped translation goes. WHY: the open file is the
-// default, a USFM file's own book may move it there only while the person has
-// not chosen, and an ambiguous book (two \id lines, two files of one book)
-// must never pick silently.
+// AQU-1365: where a dropped translation goes. WHY: the import follows the
+// person (Sam's PR 3 ruling), so an upload's book never moves it; it only
+// lets a held upload name its book and offer the one file that holds it. An
+// ambiguous book (two \id lines, two files of one book, none) must offer
+// nothing, and a spreadsheet's book is read from its reference column, never
+// from a translation that happens to quote a verse.
 import { describe, expect, it } from "vitest"
 import { fileBookCode } from "@/lib/sidebar/group-by-corpus"
 import {
   filesForBook,
   isUsfmFileName,
-  pickTranslationDestination,
+  sheetBookIds,
+  suggestTranslationDestination,
+  uploadBookIds,
   usfmBookIds,
   type TranslationDestination,
 } from "./translation-destination"
@@ -59,50 +63,63 @@ describe("filesForBook / fileBookCode", () => {
   })
 })
 
-describe("pickTranslationDestination", () => {
-  it("moves to the upload's book while the person has not chosen", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "jonah", touched: false, uploadBookIds: ["RUT"] }))
-      .toEqual({ id: "ruth", autoPicked: true })
+describe("sheetBookIds", () => {
+  it("reads the book from the reference column, past its header, however it is spelled", () => {
+    const rows = [["Reference", "Translation"], ["JON 1:1", "a"], ["Jonah 1:2", "b"], ["jon 1.3", "c"]]
+    expect(sheetBookIds(rows)).toEqual(["JON"])
   })
 
-  it("keeps the person's own choice", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "jonah", touched: true, uploadBookIds: ["RUT"] }))
-      .toEqual({ id: "jonah", autoPicked: false })
+  it("finds the reference column wherever it sits", () => {
+    expect(sheetBookIds([["source", "target", "ref"], ["s", "t", "RUT 1:1"], ["s", "t", "RUT 1:2"]])).toEqual(["RUT"])
   })
 
-  it("does not call it a switch when the open file already is that book", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "jonah", touched: false, uploadBookIds: ["JON"] }))
-      .toEqual({ id: "jonah", autoPicked: false })
+  it("names every book a sheet holding two covers, in order", () => {
+    expect(sheetBookIds([["RUT 4:22", "a"], ["JON 1:1", "b"]])).toEqual(["RUT", "JON"])
   })
 
-  it("picks nothing new when two files share the book", () => {
+  it("does not read a book off a translation that quotes a verse", () => {
+    const rows = [["Translation"], ["As John 3:16 says"], ["Something else"], ["More text"]]
+    expect(sheetBookIds(rows)).toEqual([])
+  })
+
+  it("finds nothing in a sheet without references", () => {
+    expect(sheetBookIds([["target"], ["Uno"], ["Dos"]])).toEqual([])
+    expect(sheetBookIds([])).toEqual([])
+  })
+})
+
+describe("uploadBookIds", () => {
+  it("reads a USFM file's \\id line", async () => {
+    expect(await uploadBookIds(new File(["\\id JON\n\\c 1\n\\v 1 a\n"], "JON-tatar.usfm"))).toEqual(["JON"])
+  })
+
+  it("reads a CSV or TSV file's reference column", async () => {
+    expect(await uploadBookIds(new File(["Reference,Translation\nJON 1:1,a\nJON 1:2,b\n"], "JON-tatar.csv"))).toEqual(["JON"])
+    expect(await uploadBookIds(new File(["ref\ttext\nRUT 1:1\ta\n"], "ruth.tsv"))).toEqual(["RUT"])
+  })
+
+  it("finds no book in subtitles, or in a workbook it can't read", async () => {
+    expect(await uploadBookIds(new File(["WEBVTT\n\n00:00.000 --> 00:01.000\nJON 1:1\n"], "ep.vtt"))).toEqual([])
+    expect(await uploadBookIds(new File(["not a zip"], "broken.xlsx"))).toEqual([])
+  })
+})
+
+describe("suggestTranslationDestination", () => {
+  it("offers the one file that holds the upload's book", () => {
+    expect(suggestTranslationDestination(FILES, ["rut"])).toEqual({ kind: "file", bookCode: "RUT", file: RUTH })
+  })
+
+  it("offers nothing, and says so, when two files share the book", () => {
     const secondJonah = { ...JONAH, id: "jonah-2", name: "Jonah (2)" }
-    expect(pickTranslationDestination({ files: [...FILES, secondJonah], current: "ruth", touched: false, uploadBookIds: ["JON"] }))
-      .toEqual({ id: "ruth", autoPicked: false })
-    expect(pickTranslationDestination({ files: [...FILES, secondJonah], current: null, touched: false, uploadBookIds: ["JON"] }))
-      .toBeNull()
+    expect(suggestTranslationDestination([...FILES, secondJonah], ["JON"])).toEqual({ kind: "several", bookCode: "JON" })
   })
 
-  it("picks nothing new for a file holding two books", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "ep1", touched: false, uploadBookIds: ["RUT", "JON"] }))
-      .toEqual({ id: "ep1", autoPicked: false })
+  it("offers nothing, and says so, when no file holds the book", () => {
+    expect(suggestTranslationDestination(FILES, ["GEN"])).toEqual({ kind: "none", bookCode: "GEN" })
   })
 
-  it("keeps the current file when no project file has the book", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "jonah", touched: false, uploadBookIds: ["GEN"] }))
-      .toEqual({ id: "jonah", autoPicked: false })
-  })
-
-  it("picks the book's file when nothing was chosen yet", () => {
-    expect(pickTranslationDestination({ files: FILES, current: null, touched: false, uploadBookIds: ["RUT"] }))
-      .toEqual({ id: "ruth", autoPicked: true })
-  })
-
-  it("holds the upload when nothing is chosen and the book does not decide", () => {
-    expect(pickTranslationDestination({ files: FILES, current: null, touched: false, uploadBookIds: [] })).toBeNull()
-  })
-
-  it("ignores a current file that is no longer in the project", () => {
-    expect(pickTranslationDestination({ files: FILES, current: "gone", touched: true, uploadBookIds: [] })).toBeNull()
+  it("says nothing for an upload naming no book, or more than one", () => {
+    expect(suggestTranslationDestination(FILES, [])).toBeNull()
+    expect(suggestTranslationDestination(FILES, ["RUT", "JON"])).toBeNull()
   })
 })

@@ -949,7 +949,7 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   } catch (err) {
     // Unique-index race: someone else created the active run between our
     // check and insert — report theirs.
-    // The insert can also be rejected by a PRE-0129 `contextual_runs_active`,
+    // The insert can also be rejected by a PRE-0139 `contextual_runs_active`,
     // which is keyed on the tag: a lane with no legacy tag then collides with
     // the former default lane's run even though their lane ids differ. Look
     // the racing run up by whichever column that index is keyed on, so the
@@ -1637,7 +1637,7 @@ export async function insertDrafts(
   // AQU-1610: lane identity comes off the owning run's lane_id, never its tag.
   const laneId = owner.laneId
   const laneTag = owner.targetLang
-  // The live-proposal index is keyed on lane_id after migration 0129 and on
+  // The live-proposal index is keyed on lane_id after migration 0139 and on
   // the tag before it, and this statement has to name whichever exists.
   const liveKey = await liveLaneKey(db, "contextual_drafts_live")
   const liveValue = liveKey === "lane_id" ? laneId : laneTag
@@ -1657,8 +1657,8 @@ export async function insertDrafts(
         .prepare(
           // AQU-1610: lane_id is bound from the owning run; the conflict
         // target is whichever column the live-proposal index is keyed on
-        // (lane_id after migration 0129, the tag before it). `lane_id` is
-        // re-set on conflict so that in the pre-0129 world, where the losing
+        // (lane_id after migration 0139, the tag before it). `lane_id` is
+        // re-set on conflict so that in the pre-0139 world, where the losing
         // row may belong to a sibling lane, the row ends up owned by the
         // writer whose text it now carries.
         `INSERT INTO contextual_drafts

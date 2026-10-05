@@ -1,4 +1,4 @@
--- 0129_contextual_lane_id_indexes.sql — AQU-1610
+-- 0139_contextual_lane_id_indexes.sql — AQU-1610
 --
 -- The contextual pipeline's three uniqueness rules and its newest-run-per-lane
 -- index still spelled "lane" as `target_lang`, the legacy tag. Row identity is

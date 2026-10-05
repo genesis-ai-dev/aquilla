@@ -3,7 +3,6 @@ import { subscriptionFromStripeObject } from "../lib/billing/apply"
 import {
   FIELD_PLAN,
   checkWordAllowance,
-  countDistinctTargetLanes,
   countWords,
   creditsToWords,
   enterpriseCycleCredits,
@@ -53,7 +52,7 @@ describe("agent credits (APW is internal)", () => {
     expect(creditsToWords(1_000)).toBe(100_000)
   })
 
-  it("gives Explore 100 credits/cycle, Field 1,000, Enterprise 769 per language", () => {
+  it("gives Explore 100 credits/cycle, Field 1,000, Enterprise 769 per target lane", () => {
     expect(normalizeBillingPlan("none")).toBe("explore")
     expect(periodAllowanceCredits({ plan: "explore", addonPacks: 0, languageCount: 1 })).toBe(100)
     expect(periodAllowanceCredits({ plan: "field", addonPacks: 1, languageCount: 1 })).toBe(2_000)
@@ -70,30 +69,6 @@ describe("agent credits (APW is internal)", () => {
         includedCreditsOverride: 50,
       }),
     ).toBe(50)
-  })
-
-  it("counts distinct active target-language lanes", () => {
-    expect(
-      countDistinctTargetLanes([
-        { targetLanguage: "fr", targetLanes: ["es"], archivedLanes: ["es"] },
-        { targetLanguage: "fr", targetLanes: ["pt"] },
-      ]),
-    ).toBe(2)
-  })
-
-  it("does not double-count when the primary appears in both targetLanguage and targetLanes", () => {
-    // AQU-1240 slice 1: the complete registry lists the primary in targetLanes
-    // as well as targetLanguage. Billing must stay invoice-neutral via Set-dedupe.
-    expect(
-      countDistinctTargetLanes([
-        { targetLanguage: "French", targetLanes: ["French", "es"] },
-      ]),
-    ).toBe(2)
-    expect(
-      countDistinctTargetLanes([
-        { targetLanguage: "fr", targetLanes: ["FR", "es"] },
-      ]),
-    ).toBe(2)
   })
 })
 

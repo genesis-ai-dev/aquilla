@@ -274,6 +274,8 @@ describe("recoverInterruptedDownloads", () => {
         fileId: `${projectId}-f`,
         cellId: "c1",
         side: "target",
+        targetLang: "",
+        laneId: null,
         value: "partial",
         valueHtml: null,
         eventId: "e1",

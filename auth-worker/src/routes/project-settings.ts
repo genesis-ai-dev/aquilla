@@ -63,13 +63,11 @@ import {
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
 import {
-  insertTargetLane,
+  createTargetLane,
   readLaneLastChange,
   renameTargetLane,
   setTargetLaneArchived,
 } from "../../../db/shared/lanes"
-import { planNewTargetLane } from "../../../src/lib/lanes/lane-create"
-import { newLaneId } from "../../../src/lib/lanes/lane-id"
 import {
   filterSettingsToVisibleLanes,
   type LaneIdentity,
@@ -522,40 +520,33 @@ projectSettings.post(
     const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     const targetLanguage =
       typeof current.settings.targetLanguage === "string" ? current.settings.targetLanguage : null
-    const laneId = newLaneId()
-    const plan = planNewTargetLane({
-      laneId,
-      name: body.name,
-      language: body.language,
-      targetLanguage,
-      existing: (current.lanes ?? []).map((lane) => ({
-        id: lane.id,
-        name: lane.name,
-        legacyTag: lane.legacyTag,
-      })),
-    })
-    if (!plan.ok) {
-      const status = plan.problem === "duplicate" ? 409 : 400
-      const error = plan.problem === "duplicate" ? "duplicate_name" : plan.problem
-      return c.json({ error }, status)
-    }
+    let created: Awaited<ReturnType<typeof createTargetLane>>
     try {
-      await insertTargetLane(c.env.AQUILLA_PG, projectId, {
-        id: laneId,
-        name: plan.name,
-        langCode: plan.langCode,
-        legacyTag: plan.legacyTag,
+      created = await createTargetLane(c.env.AQUILLA_PG, projectId, {
+        name: body.name,
+        language: body.language,
+        targetLanguage,
+        existing: (current.lanes ?? []).map((lane) => ({
+          id: lane.id,
+          name: lane.name,
+          legacyTag: lane.legacyTag,
+        })),
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       return c.json({ error: `write failed: ${message}` }, 500)
+    }
+    if (!created.ok) {
+      const status = created.problem === "duplicate" ? 409 : 400
+      const error = created.problem === "duplicate" ? "duplicate_name" : created.problem
+      return c.json({ error }, status)
     }
     const synced = await mergeSettingsArray(
       c.env.AQUILLA_PG,
       projectId,
       user.id,
       "targetLanes",
-      plan.legacyTag,
+      created.legacyTag,
       true,
     )
     if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
@@ -567,7 +558,7 @@ projectSettings.post(
     } catch {
       void notifyPromise
     }
-    const lane = fresh.lanes?.find((row) => row.id === laneId) ?? null
+    const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
     return c.json({ lane }, 201)
   },
 )
@@ -642,18 +633,28 @@ projectSettings.post(
     const archived = c.req.valid("json").archived
     const result = await setTargetLaneArchived(c.env.AQUILLA_PG, projectId, laneId, archived)
     if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
-    if (result.status === "default_lane") return c.json({ error: "default_lane" }, 400)
+    // AQU-1600: the former default lane archives like any other lane. The only
+    // refusal left is the last active one — a project must keep at least one
+    // non-archived target lane.
+    if (result.status === "last_lane") return c.json({ error: "last_lane" }, 400)
     const tag = result.lane.legacyTag ?? ""
-    const synced = await mergeSettingsArray(
-      c.env.AQUILLA_PG,
-      projectId,
-      user.id,
-      "archivedLanes",
-      tag,
-      archived,
-    )
-    if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
-    if (synced === "error") return c.json({ error: "write failed" }, 500)
+    // The legacy `settings.archivedLanes` mirror holds TAGS, and the former
+    // default lane's tag is '' — which that array cannot name (every reader
+    // filters the empty string out). Its `lanes.archived_at` row is the only
+    // record of its archived state, so skip the mirror rather than push a ''
+    // entry no reader would honour.
+    if (tag !== "") {
+      const synced = await mergeSettingsArray(
+        c.env.AQUILLA_PG,
+        projectId,
+        user.id,
+        "archivedLanes",
+        tag,
+        archived,
+      )
+      if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
+      if (synced === "error") return c.json({ error: "write failed" }, 500)
+    }
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
     try {

@@ -199,6 +199,8 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
       queued.validationEventId = await emitCellValidate({
         projectId, fileId: run.fileId, cellId: draft.cellId,
         editEventId: queued.eventId, author: session.username, targetLang: lane,
+        // AQU-1572: the agent applying its own draft review, not a person.
+        source: "agent",
       })
       onQueued({ ...queued })
     }

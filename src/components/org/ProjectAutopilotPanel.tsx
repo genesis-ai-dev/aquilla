@@ -57,9 +57,16 @@ interface ProjectAutopilotPanelProps {
    * as it was: one static lane pill, no chooser.
    */
   lanes?: readonly string[]
-  /** Human label for the default (`''`) lane — the project's target language.
-   *  Non-default lanes label themselves with their own tag. */
+  /** Human label for the default (`''`) lane — the project's target language. */
   defaultLaneLabel?: string
+  /**
+   * AQU-1586: lane tag → the language that lane's ROW names. A non-default
+   * lane used to label itself with its own tag, but a tag is the event key and
+   * `planNewTargetLane` sets it to the opaque lane id whenever the language is
+   * already taken by a sibling — so the chooser offered "a3f09c1e". Absent
+   * entries fall back to the tag, which is all a pre-AQU-1418 server gives.
+   */
+  laneLabels?: Readonly<Record<string, string>>
 }
 
 type PanelState =
@@ -426,6 +433,7 @@ export function ProjectAutopilotPanel({
   canStart,
   lanes: laneProp,
   defaultLaneLabel = "",
+  laneLabels,
 }: ProjectAutopilotPanelProps) {
   const { locale, t } = useI18n()
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
@@ -455,8 +463,11 @@ export function ProjectAutopilotPanel({
   const lane = lanes.includes(laneChoice) ? laneChoice : ""
 
   const laneLabel = useCallback(
-    (value: string) => value || defaultLaneLabel || t("autopilot.lane.projectDefault"),
-    [defaultLaneLabel, t],
+    (value: string) =>
+      value
+        ? laneLabels?.[value] || value
+        : laneLabels?.[""] || defaultLaneLabel || t("autopilot.lane.projectDefault"),
+    [defaultLaneLabel, laneLabels, t],
   )
 
   const load = useCallback(async () => {

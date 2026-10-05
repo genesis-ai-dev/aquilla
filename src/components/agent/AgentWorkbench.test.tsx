@@ -26,6 +26,15 @@ vi.mock("@/lib/agent/agent-mode", async () => {
   return { ...actual, fetchAgentMode: vi.fn(async () => null), patchAgentMode: vi.fn() }
 })
 
+// AQU-1653: the toolbar's chat menu lists this user's saved chats on mount.
+// These tests are about the review loop, not chat history — keep that read
+// on-machine (runsFromTurns stays real; nothing here depends on it).
+vi.mock("@/lib/agent/session-history", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent/session-history")>()),
+  listAgentSessions: vi.fn(async () => []),
+  fetchAgentSession: vi.fn(),
+}))
+
 vi.mock("./AgentDockView", async () => {
   const { agentSessionStore: storeOf } = await import("@/lib/agent/session-store")
   const { proposalsOf } = await import("@/lib/agent/run-state")
@@ -441,7 +450,13 @@ describe("AgentWorkbench review loop", () => {
     }
   })
 
-  it("confirms chat reset without undoing or deleting already-applied events", async () => {
+  // AQU-1653: this used to be "confirms chat reset…" — the menu item was
+  // destructive, so a confirmation dialog stood between it and the user. The
+  // chat is now saved server-side and reopenable from the same menu, so "New
+  // chat" fires directly. The invariant that mattered is unchanged and is what
+  // this still asserts: starting a new chat clears the CONVERSATION (session
+  // id, runs, review decisions) and touches nothing that was already applied.
+  it("starts a new chat without undoing or deleting already-applied events", async () => {
     await primeSessionWithDraftRun()
     const props = workbenchProps()
     const onApplied = vi.fn<NonNullable<AgentWorkbenchProps["agent"]["onApplied"]>>()
@@ -460,22 +475,16 @@ describe("AgentWorkbench review loop", () => {
     const eventCount = await outboxRecordCountAllOwners()
     expect(before.decided.size).toBe(2)
 
+    // Opening the menu alone changes nothing — only the item does.
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    let dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    expect(await screen.findByRole("menuitem", { name: /New chat/ })).toBeInTheDocument()
     expect(store.getState().sessionId).toBe(before.sessionId)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
     expect(store.getState().runs).toEqual(before.runs)
     expect(store.getState().decided).toEqual(before.decided)
 
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reset chat" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
-    await waitFor(() => expect(screen.getByRole("button", { name: "Chat options" })).toHaveFocus())
-    expect(store.getState().sessionId).not.toBe(before.sessionId)
+    fireEvent.click(screen.getByRole("menuitem", { name: /New chat/ }))
+    await waitFor(() => expect(store.getState().sessionId).not.toBe(before.sessionId))
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(store.getState().runs).toEqual([])
     expect(store.getState().decided.size).toBe(0)
     expect(await getOutboxRecords(appliedIds)).toEqual(appliedRecords)
@@ -483,20 +492,23 @@ describe("AgentWorkbench review loop", () => {
     expect(screen.getByRole("tab", { name: "Review drafts" })).toHaveAttribute("aria-selected", "true")
   })
 
-  it.each(["project", "account"])("dismisses reset confirmation when its %s changes", async (scope) => {
+  // AQU-1653: with the confirmation gone, the hazard this guards is the one
+  // that was always underneath it — a chat action surviving the menu's remount
+  // key and landing on a DIFFERENT project's or user's conversation. The menu
+  // is keyed on (projectId, author); an open menu must not outlive either.
+  it.each(["project", "account"])("leaves the previous chat untouched when its %s changes", async (scope) => {
     await primeSessionWithDraftRun()
     const props = workbenchProps()
     const view = render(<AgentWorkbench {...props} />)
     const before = agentSessionStore(PROJECT, "alice").getState()
     fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    expect(await screen.findByRole("alertdialog", { name: "Reset chat?" })).toBeInTheDocument()
+    expect(await screen.findByRole("menuitem", { name: /New chat/ })).toBeInTheDocument()
 
     const next = workbenchProps()
     if (scope === "project") next.agent.projectId = `${PROJECT}-other`
     else next.agent.author = "bob"
     view.rerender(<AgentWorkbench {...next} />)
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: /New chat/ })).not.toBeInTheDocument())
     expect(agentSessionStore(PROJECT, "alice").getState().sessionId).toBe(before.sessionId)
     expect(agentSessionStore(PROJECT, "alice").getState().runs).toEqual(before.runs)
   })

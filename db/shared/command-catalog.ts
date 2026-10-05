@@ -86,12 +86,13 @@ Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### PlanImport
-Params: \`{ fileName, fileType, artifactId?, manifest?, cells: [{ content, canonicalRef?, … }] }\`.
+Params: \`{ fileName, fileType, artifactId?, manifest?, sourceTextDirection?, targetTextDirection?, cells: [{ content, canonicalRef?, … }] }\`.
 Sole command in its changeset; cap 5000 cells. Compiles to \`file.create\` + N \`source.cell.create\`.
 Gotchas:
 - Prefer parsing an uploaded artifact server-side (artifact parse endpoint / preview_import) and staging from its results, so the original is preserved for round-trip export.
 - Cells may carry per-lane \`variants\` for multi-language imports.
-- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.`,
+- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.
+- \`sourceTextDirection\` / \`targetTextDirection\` (\`"ltr"\`/\`"rtl"\`) stamp THIS ONE FILE and are for the exception only. For a whole RTL project set the project-level \`targetTextDirection\` with PatchSettings instead (AQU-1471) — an absent override resolves to that setting, then to the language, on every read.`,
   },
   {
     kind: 'CreateProject',
@@ -187,6 +188,7 @@ Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
+- RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,
   },
   {
@@ -240,7 +242,7 @@ The server expands it into a fixed step order and chains the version guards ITSE
 2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
 3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
 4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
-5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
+5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage?, sourceTextDirection?, targetTextDirection? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
 6. The verification receipt (below).
 Gotchas:
 - The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
@@ -248,6 +250,7 @@ Gotchas:
 - Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
 - Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
 - Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
+- Text direction (AQU-1471): put \`targetTextDirection: "rtl"\` in the plan's \`settings\` block for an RTL project — the receipt's \`importTextDirection\` then reports the direction the plan's files will actually render in, resolved against the settings this plan LEAVES BEHIND (per-import override → the setting → the language). A per-import \`sourceTextDirection\`/\`targetTextDirection\` is for the odd file that runs against the project.
 - Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
 - Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
 - Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, briefDetails, policyKeysNotApplied }\`. \`briefReachesCopilot\` is a FRESHNESS claim, not an emptiness one: with a \`brief\` block it is true only if the L1 summary was re-rendered inside this commit AND the real prompt-preview run on the first source cell of the first created file carries it. If it is false, \`briefDetails.reason\` says why and the brief is NOT reaching the AI — run RegenerateBriefSummary. \`briefDetails.truncated\` means the summary hit the 1600-char cap and dropped some committed sections; it can accompany a \`true\`.
@@ -344,7 +347,7 @@ Allowed kinds:
 - Back-translation (400+): \`cell.backtranslation.set\` \`{ btText, btHtml?, polished? }\` — needs fileId + cellId.
 - Staleness (400+): \`target.cell.repin\` \`{}\` — needs fileId + cellId.
 - File lifecycle (500+): \`file.rename\` \`{ name }\` · \`file.delete\` \`{}\` · \`file.restore\` \`{}\` — need fileId.
-- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters', scope: [{ fileId, chapter? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
+- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters'|'cells', scope: [{ fileId, chapter?, cellIds? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` — \`cellIds\` (exactly those source lines) is required for \`'cells'\` and rejected otherwise · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
 - Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, match?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive?, match? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId. \`match\` is \`{ forms?: string[], excludedForms?: string[], affixes?: boolean, foldMarks?: boolean }\` — see the terminology gotcha below.
 
 Not here: target text (use SetTranslation), source edits, cell structure (split/merge/insert/delete), audio (use LinkMedia), imports (use PlanImport), reorders/retimes, membership, and project lifecycle. Rules and Living Memory are not event-sourced at all — rules go through PatchSettings, memory through the agent-memory API — so they cannot be emitted here.

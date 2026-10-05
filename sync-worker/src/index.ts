@@ -97,6 +97,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
@@ -581,11 +582,11 @@ export default {
     try {
       response = await worker.fetch(request, env, ctx)
     } catch (err) {
-      const url = new URL(request.url)
+      const path = redactLogPath(new URL(request.url).pathname)
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${path}`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
@@ -594,14 +595,17 @@ export default {
     }
     const durationMs = Date.now() - startedAt
     if (durationMs >= SLOW_REQUEST_MS) {
-      const url = new URL(request.url)
+      // OPS-42: `redactLogPath`, not `url.pathname` — [slow-request] fires on
+      // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+      // access-link redeem that merely ran slowly would log a live token.
+      const path = redactLogPath(new URL(request.url).pathname)
       console.warn(
-        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+        `[slow-request] ${request.method} ${path} took ${durationMs}ms (status ${response.status})`,
       )
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${path} (${durationMs}ms)`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.status": response.status,
           "http.duration_ms": durationMs,
         }),

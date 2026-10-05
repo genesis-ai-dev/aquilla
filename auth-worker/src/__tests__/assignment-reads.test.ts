@@ -218,6 +218,36 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     expect(byId["as-bob"]).toBeUndefined()
   })
 
+  // AQU-1628: a selection-scoped assignment's extent cannot be re-derived from
+  // scope_label, so the inbox hands the editor gutter its cell ids. Any other
+  // scope leaves the field absent — the gutter reads scope_kind, and an empty
+  // list there would be indistinguishable from "covers nothing".
+  it("returns cellIds for a 'cells' scope and omits them for every other scope", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('as-anna-sel', 'pa', 2, 'cells', '2 verse(s)', 2, 1, 1300, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna-sel', 'f1', 'c1'), ('as-anna-sel', 'f1', 'c2')",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; scopeKind: string; cellIds?: string[] }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna-sel"].scopeKind).toBe("cells")
+    expect(byId["as-anna-sel"].cellIds).toEqual(["c1", "c2"])
+    // The book-scope row in the same inbox stays as it was.
+    expect(byId["as-anna"].cellIds).toBeUndefined()
+  })
+
   it("403s a user with no access to the project", async () => {
     await seedOrgWithAssignments()
     const res = await app.request(

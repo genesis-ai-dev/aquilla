@@ -141,6 +141,77 @@ describe("media import preview", () => {
     ] }))
   })
 
+  // Walk r3 (2026-10-05): the caret sat at 0, so " (edited)" typed after the
+  // wording landed in front of it.
+  it("opens a line with the caret at the end of its wording, or where the wording was clicked", () => {
+    const cues = extractSrtStrings("1\n00:00:00,000 --> 00:00:01,000\nThe boat left at dawn.\n\n" +
+      "2\n00:00:01,000 --> 00:00:02,000\nSecond")
+    render(<MediaImportPreviewDialog mediaName="clip.mp3"
+      sources={[{ id: "captions", label: "clip.srt", source: { cues } }]}
+      onConfirm={() => {}} onCancel={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Edit caption 1" }))
+    const first = screen.getByRole("textbox", { name: "Caption 1 wording" }) as HTMLTextAreaElement
+    expect(first).toHaveFocus()
+    expect([first.selectionStart, first.selectionEnd]).toEqual([22, 22])
+
+    // A click on the wording puts the caret where it landed.
+    const wording = screen.getByText("Second")
+    const doc = document as unknown as { caretRangeFromPoint?: unknown }
+    const original = doc.caretRangeFromPoint
+    doc.caretRangeFromPoint = () => ({ startContainer: wording.firstChild, startOffset: 3 })
+    try {
+      fireEvent.click(wording, { clientX: 40, clientY: 10 })
+    } finally {
+      doc.caretRangeFromPoint = original
+    }
+    const second = screen.getByRole("textbox", { name: "Caption 2 wording" }) as HTMLTextAreaElement
+    expect(second).toHaveFocus()
+    expect([second.selectionStart, second.selectionEnd]).toEqual([3, 3])
+  })
+
+  // Walk r3 (2026-10-05): Escape on an open line closed the whole review and
+  // threw every edit away.
+  it("closes only the open line on Escape, and keeps the review open once anything changed", () => {
+    const onCancel = vi.fn()
+    const onConfirm = vi.fn()
+    const cues = extractSrtStrings("1\n00:00:00,000 --> 00:00:01,000\nFirst\n\n" +
+      "2\n00:00:01,000 --> 00:00:02,000\nSecond")
+    render(<MediaImportPreviewDialog mediaName="clip.mp3"
+      sources={[{ id: "captions", label: "clip.srt", source: { cues } }]}
+      onConfirm={onConfirm} onCancel={onCancel} />)
+    fireEvent.click(screen.getByRole("button", { name: "Edit caption 1" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Caption 1 wording" }), { target: { value: "First, edited" } })
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Caption 1 wording" }), { key: "Escape" })
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.queryAllByRole("textbox")).toHaveLength(0)
+    expect(screen.getByRole("button", { name: "Edit caption 1" })).toHaveFocus()
+
+    // Nothing open, but an edit is held: Escape leaves the review alone.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Edit caption 1" }), { key: "Escape" })
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue import" }))
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ cues: [
+      expect.objectContaining({ original: "First, edited" }),
+      expect.objectContaining({ original: "Second" }),
+    ] }))
+    // Cancel still discards on purpose.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it("still closes on Escape when nothing has been changed", () => {
+    const onCancel = vi.fn()
+    render(<MediaImportPreviewDialog mediaName="clip.mp3"
+      sources={[{ id: "captions", label: "clip.srt", source: {
+        cues: extractSrtStrings("1\n00:00:00,000 --> 00:00:01,000\nFirst"),
+      } }]}
+      onConfirm={() => {}} onCancel={onCancel} />)
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
   it("renders hundreds of captions as plain lines", () => {
     const vtt = "WEBVTT\n\n" + Array.from({ length: 300 }, (_, i) =>
       `00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000 --> ` +

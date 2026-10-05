@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Pencil, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -52,6 +52,20 @@ const finite = (value: number | undefined): value is number =>
 /** `0:01 – 0:04`, or `–` for a side that has no usable time yet. */
 function cueRange(cue: Cue): string {
   return `${finite(cue.start) ? fmtCueClock(cue.start) : "–"} – ${finite(cue.end) ? fmtCueClock(cue.end) : "–"}`
+}
+
+/** Where in `within`'s text a click at (x, y) landed, when the browser can say.
+ *  The wording span holds the caption's text as its only child, so the offset
+ *  in that text node is the offset in the wording. */
+function caretOffsetAt(x: number, y: number, within: HTMLElement): number | null {
+  const doc = within.ownerDocument as Document & {
+    caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null
+    caretRangeFromPoint?(x: number, y: number): Range | null
+  }
+  const position = doc.caretPositionFromPoint?.(x, y)
+  if (position) return within.contains(position.offsetNode) ? position.offset : null
+  const range = doc.caretRangeFromPoint?.(x, y)
+  return range && within.contains(range.startContainer) ? range.startOffset : null
 }
 
 /**
@@ -109,9 +123,24 @@ export function MediaImportPreviewDialog({
     setEditing(open => open === null || open < index ? open : open === index ? null : open - 1)
   }, [editCues])
   const toggleEdit = useCallback((index: number | null) => setEditing(index), [])
+  // Any change to any source's captions. The review can hold minutes of work
+  // on a long file, and Escape or a click outside the dialog is too easy to
+  // do by accident to throw that away: once something has changed, only
+  // Cancel or the X close it.
+  const changed = Object.keys(edits).length > 0
 
   return (
-    <Dialog open onOpenChange={open => { if (!open) onCancel() }}>
+    <Dialog open onOpenChange={(open, details) => {
+      if (open) return
+      const reason = details?.reason
+      // Escape with a line open closes that line, as Enter and Done do.
+      if (reason === "escape-key" && editing !== null) {
+        setEditing(null)
+        return
+      }
+      if (changed && (reason === "escape-key" || reason === "outside-press")) return
+      onCancel()
+    }}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{title ?? t("importExport.mediaPreview.title", { name: mediaName })}</DialogTitle>
@@ -188,6 +217,24 @@ const CueLine = memo(function CueLine({
   const t = useT()
   const number = index + 1
   const confidence = cue.metadata?.alignmentConfidence
+  // Where the caret goes when the line opens: where the wording was clicked,
+  // or the end of the wording (the pencil, or a browser that cannot say).
+  const [caret, setCaret] = useState<number | null>(null)
+  // Closing the line removes the field that had focus. Hand focus to the
+  // line's pencil so the keyboard stays in the list rather than falling to
+  // the page.
+  const pencilRef = useRef<HTMLButtonElement>(null)
+  const wasEditing = useRef(editing)
+  useEffect(() => {
+    const closed = wasEditing.current && !editing
+    wasEditing.current = editing
+    if (!closed) return
+    const active = document.activeElement
+    // Focus that fell to the page, or that the dialog took back to itself.
+    if (!active || active === document.body || !active.isConnected || active.getAttribute("role") === "dialog") {
+      pencilRef.current?.focus()
+    }
+  }, [editing])
   return (
     <li data-testid="media-preview-row" data-invalid={issue ? true : undefined}
       className={cn(
@@ -203,7 +250,10 @@ const CueLine = memo(function CueLine({
         </span>
         {editing ? <span className="min-w-0 flex-1" /> : (
           // A click anywhere on the wording opens the line, as the pencil does.
-          <span className="min-w-0 flex-1 cursor-text truncate" onClick={() => onToggleEdit(index)}>
+          <span className="min-w-0 flex-1 cursor-text truncate" onClick={event => {
+            setCaret(caretOffsetAt(event.clientX, event.clientY, event.currentTarget))
+            onToggleEdit(index)
+          }}>
             {cue.original.trim() ? cue.original
               : <em className="text-muted-foreground">{t("importExport.mediaPreview.noWording")}</em>}
           </span>
@@ -211,8 +261,11 @@ const CueLine = memo(function CueLine({
         {typeof confidence === "number" && <Badge variant="secondary">
           {t("importExport.mediaPreview.confidence", { percent: Math.round(confidence * 100) })}
         </Badge>}
-        <Button variant="ghost" size="icon-xs" aria-label={t("importExport.mediaPreview.edit", { number })}
-          aria-expanded={editing} onClick={() => onToggleEdit(editing ? null : index)}>
+        <Button ref={pencilRef} variant="ghost" size="icon-xs" aria-label={t("importExport.mediaPreview.edit", { number })}
+          aria-expanded={editing} onClick={() => {
+            setCaret(null)
+            onToggleEdit(editing ? null : index)
+          }}>
           <Pencil />
         </Button>
         <Button variant="ghost" size="icon-xs" aria-label={t("importExport.mediaPreview.remove", { number })}
@@ -220,7 +273,7 @@ const CueLine = memo(function CueLine({
           <X />
         </Button>
       </div>
-      {editing && <CueEditor index={index} cue={cue} invalid={Boolean(issue)}
+      {editing && <CueEditor index={index} cue={cue} invalid={Boolean(issue)} caret={caret}
         onUpdate={onUpdate} onDone={() => onToggleEdit(null)} />}
       {issue && <p role="alert" className="ms-9 mt-0.5 text-xs text-destructive">{issue}</p>}
     </li>
@@ -234,10 +287,13 @@ const CueLine = memo(function CueLine({
  * silently rounded. Anything unreadable leaves the cue without that time, so
  * the line is flagged and the import stays disabled until it is fixed.
  */
-function CueEditor({ index, cue, invalid, onUpdate, onDone }: {
+function CueEditor({ index, cue, invalid, caret, onUpdate, onDone }: {
   index: number
   cue: Cue
   invalid: boolean
+  /** Where the caret starts in the wording; the end when null. Typing added
+   *  to a caption belongs after its words, not in front of them. */
+  caret: number | null
   onUpdate(index: number, patch: CuePatch): void
   onDone(): void
 }) {
@@ -245,6 +301,16 @@ function CueEditor({ index, cue, invalid, onUpdate, onDone }: {
   const number = index + 1
   const [start, setStart] = useState(() => finite(cue.start) ? fmtDragTime(cue.start) : "")
   const [end, setEnd] = useState(() => finite(cue.end) ? fmtDragTime(cue.end) : "")
+  const wordingRef = useRef<HTMLTextAreaElement>(null)
+  // Once, when the line opens. Plain autoFocus would leave the caret at 0.
+  const initialCaret = useRef(caret)
+  useEffect(() => {
+    const field = wordingRef.current
+    if (!field) return
+    const at = Math.min(initialCaret.current ?? field.value.length, field.value.length)
+    field.focus()
+    field.setSelectionRange(at, at)
+  }, [])
   const time = (
     side: "start" | "end",
     value: string,
@@ -271,7 +337,7 @@ function CueEditor({ index, cue, invalid, onUpdate, onDone }: {
   )
   return (
     <div className="ms-9 mt-1.5 flex flex-col gap-2 pe-1">
-      <Textarea id={`media-preview-${index}-text`} autoFocus value={cue.original} rows={2}
+      <Textarea ref={wordingRef} id={`media-preview-${index}-text`} value={cue.original} rows={2}
         aria-label={t("importExport.mediaPreview.wording", { number })} aria-invalid={invalid}
         onChange={event => onUpdate(index, { original: event.target.value })} />
       <div className="flex flex-wrap items-end gap-2">

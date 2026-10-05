@@ -360,7 +360,9 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()
   })
 
-  it("is one line in the Media view's Text pane, pointing at the Source text lane", async () => {
+  // Sam, Oct 5: the Media view's Text pane gets the same card as the Text
+  // view (it used to be one line pointing at the Source text lane).
+  it("is the same card in the Media view's Text pane", async () => {
     renderTable({
       linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
       onAttachCaptions: () => {},
@@ -368,19 +370,17 @@ describe("EditorTable — empty time-ordered file", () => {
     })
     const card = await screen.findByTestId("linked-video-empty")
     expect(card).toHaveAttribute("data-placement", "media")
-    expect(card).toHaveTextContent(
-      "No rows yet. Attach captions on the timeline's Source text lane, and they become this file's rows.",
-    )
-    // The prompt itself is on the lane, so it is not repeated here.
-    expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
-    expect(screen.queryByText("Linked to a YouTube video")).toBeNull()
+    expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
+    expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
+      "Attach captions", "or use the original recording",
+    ])
     expect(screen.queryByText("Choose media file")).toBeNull()
     expect(screen.queryByTestId("table-column-headers")).toBeNull()
     // The timeline has no upload of its own, so the recording stays reachable.
-    fireEvent.click(screen.getByRole("button", { name: "Add the original recording" }))
+    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
     expect(screen.getByText("Choose media file")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Back to captions" }))
-    expect(screen.getByTestId("linked-video-empty")).toHaveAttribute("data-placement", "media")
+    expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()
   })
 
   it("tells someone below maintainer, in the Media view, who will attach the captions", async () => {

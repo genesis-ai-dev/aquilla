@@ -229,10 +229,6 @@ export const editor = defineNamespace({
     "editor.media.linkedVideoAddRecording": "Add the original recording",
     "editor.media.linkedVideoRecordingTitle": "Use the original recording",
     "editor.media.linkedVideoBackToCaptions": "Back to captions",
-    // Sam's D3 (2026-10-05): in the Media view the prompt lives on the
-    // timeline's Source text lane, so the Text pane only points at it.
-    "editor.media.linkedVideoMediaHint":
-      "No rows yet. Attach captions on the timeline's Source text lane, and they become this file's rows.",
     // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
     // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
@@ -2820,13 +2816,6 @@ export const editor = defineNamespace({
           "Link at the bottom of that second step that goes back to the first " +
           "one, where captions are attached.",
         maxLength: 32,
-      },
-      "editor.media.linkedVideoMediaHint": {
-        description:
-          "The one line shown in the Media view's Text pane on a linked video with " +
-          "no rows, for someone who may attach captions. The prompt itself sits " +
-          "on the timeline's 'Source text' lane (it must match that lane's name as " +
-          "the timeline shows it); this line points there.",
       },
       "editor.media.linkedVideoUploadHint": {
         description:

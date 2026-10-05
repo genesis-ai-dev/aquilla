@@ -28,8 +28,9 @@
 // for a maintainer it would be a second button competing with the action the
 // card exists for, and the view switcher is one row up anyway.
 //
-// Sam's D3: in the Media view the prompt lives on the timeline's Source text
-// lane, so there (placement "media") this is one line pointing at it.
+// Sam's D3 put the prompt on the timeline's Source text lane and left the
+// Media view's Text pane one line pointing at it. On Oct 5 he asked for the
+// same card there too, so both views draw it; the lane keeps its own prompt.
 
 import { useState } from "react"
 import { Clapperboard } from "lucide-react"
@@ -49,8 +50,9 @@ interface TimelineLinkedVideoEmptyProps {
   /** Caption tracks already on this file's timeline. Non-empty ⇒ the file has
    *  captions, so the copy names them instead of claiming it has none. */
   captionTracks: readonly LinkedVideoCaptionTrack[]
-  /** "text" (the default): the Text view's card. "media": under the Media
-   *  view's timeline, where the prompt is on the Source text lane. */
+  /** Which view the card is in: "text" (the default), or "media" for the
+   *  Text pane under the Media view's timeline. The card is the same in both;
+   *  this only marks it. */
   placement?: "text" | "media"
   /** Upload the original recording as this file's media. Absent ⇒ read-only. */
   onAttachFile?: (file: File) => Promise<void>
@@ -126,27 +128,6 @@ export function TimelineLinkedVideoEmpty({
       )}
     </div>
   )
-
-  // The Media view: one line pointing at the Source text lane, and the same
-  // quiet way to the recording step (the timeline has no upload of its own).
-  // Once on that step, the card below draws it exactly as the Text view does.
-  if (placement === "media" && !(recordingStep && onAttachFile)) {
-    return (
-      <div className="mx-auto w-full max-w-md px-4 py-8 text-center" data-testid="linked-video-empty"
-        data-placement="media">
-        <p className="text-xs text-muted-foreground">
-          {tracksLine ?? t(onAttachCaptions ? "editor.media.linkedVideoMediaHint" : "editor.media.linkedVideoNoCaptions")}
-        </p>
-        {promoteButtons}
-        {onAttachFile && (
-          <Button variant="link" size="sm" className={cn("mt-1", QUIET_LINK)}
-            onClick={() => { setRecordingStep(true); setError(null) }}>
-            {t("editor.media.linkedVideoAddRecording")}
-          </Button>
-        )}
-      </div>
-    )
-  }
 
   // Only someone who can attach is told that attaching makes rows; everyone
   // else keeps the sentence that says what will happen.

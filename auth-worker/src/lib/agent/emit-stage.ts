@@ -22,7 +22,7 @@
 // writer.
 
 import { AliasMap } from "./compress"
-import { resolveLaneIdOrTag } from "../../../../db/shared/lane-ref"
+import { resolveLaneIdOrTag, type ResolvedLane } from "../../../../db/shared/lane-ref"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
@@ -133,12 +133,6 @@ interface CellRow {
   canonical_ref: string | null
 }
 
-/** The active lane's id for a stage context (AQU-1610). `ctx.lane` may be
- *  spelled either way; the id is what the cell queries key on. */
-async function laneIdOf(db: AquillaDb, ctx: EmitStageContext): Promise<string | null> {
-  return (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId
-}
-
 async function fetchCellPair(
   db: AquillaDb,
   projectId: string,
@@ -193,7 +187,9 @@ async function stageOne(
    * `stageEvents` and threaded in — `undefined` when the batch contains no
    * kind that needs it, so an ordinary drafting emit never reads settings.
    */
-  cellEditingFloor?: number | null,
+  cellEditingFloor: number | null | undefined,
+  /** Resolved once per batch. `laneId` keys cell reads; `targetLang` is the legacy tag. */
+  lane: ResolvedLane,
 ): Promise<Verdict> {
   if (typeof raw !== "object" || raw === null || typeof raw.kind !== "string") {
     return { kind: "rejected", reason: "each event needs a string `kind`" }
@@ -295,7 +291,7 @@ async function stageOne(
       if (typeof anchor !== "string") {
         return { kind: "rejected", reason: "anchorCellId must be a string or null" }
       }
-      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, await laneIdOf(db, ctx))
+      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, lane.laneId)
       if (!anchorPair.source && !anchorPair.target) {
         return {
           kind: "rejected",
@@ -307,7 +303,7 @@ async function stageOne(
     }
 
     if (cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, await laneIdOf(db, ctx))
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, lane.laneId)
       const occupied = kind === "source.cell.create" ? pair.source : pair.target
       if (occupied) {
         const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
@@ -333,7 +329,7 @@ async function stageOne(
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }
     if (fileId && cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, await laneIdOf(db, ctx))
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, lane.laneId)
       display.canonicalRef =
         pair.target?.canonical_ref ?? pair.source?.canonical_ref ?? undefined
 
@@ -366,9 +362,12 @@ async function stageOne(
         // Provenance injection (AQU-292): machine-drafted, attributable to the run.
         payload.ai_suggestion = true
         payload.agent_run_id = ctx.runId
-        // AQU-1447: the lane rides on payload.targetLang; absent = default lane.
+        // The lane is resolved once for the batch. `laneId` is the row;
+        // `targetLang` is its legacy tag (absent when that tag is '').
         // The run's lane always wins over anything the model wrote.
-        if (ctx.lane) payload.targetLang = ctx.lane
+        if (lane.laneId) payload.laneId = lane.laneId
+        else delete payload.laneId
+        if (lane.targetLang) payload.targetLang = lane.targetLang
         else delete payload.targetLang
         payload.sourceEventId = pair.source?.event_id ?? null
         sourceValue = pair.source?.value
@@ -485,13 +484,14 @@ export async function stageEvents(
     (r) => typeof (r as RawEmitEvent)?.kind === "string" && isCellEditingKind((r as RawEmitEvent).kind as string),
   )
   const cellEditingFloor = anyCellEditing ? await loadCellEditingFloor(db, ctx.projectId) : undefined
+  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
 
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
     let verdict: Verdict
     try {
-      verdict = await stageOne(db, raw, ctx, cellEditingFloor)
+      verdict = await stageOne(db, raw, ctx, cellEditingFloor, lane)
     } catch (err) {
       verdict = { kind: "rejected", reason: `stage error: ${err instanceof Error ? err.message : String(err)}` }
     }

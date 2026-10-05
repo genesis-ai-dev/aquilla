@@ -48,6 +48,35 @@ export interface StagedEvent {
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
 
+/**
+ * AQU-1670: what one staging call did, in counts and milliseconds.
+ *
+ * The 522s that motivated this surfaced only as generic handled `$exception`s
+ * from the SPA bundle, so there was no way to see that staging duration
+ * tracked cell count — the one fact that would have named the cause. This is
+ * the explicit signal. Counts and timings only: nothing a user or the model
+ * wrote is in here.
+ */
+export interface StageOutcome {
+  runId: string
+  projectId: string
+  /** Events the model asked to stage. */
+  requested: number
+  staged: number
+  rejected: number
+  stale: number
+  /** Wall-clock duration of the whole staging call. */
+  durationMs: number
+  /** Distinct cells the batched prefetch covered. */
+  cellsPrefetched: number
+  /** Per-cell reads the prefetch did not cover. Zero on the normal path — a
+   *  non-zero value is the regression this issue existed to remove. */
+  fallbackQueries: number
+  status: "staged" | "nothing_staged" | "prefetch_failed"
+}
+
+export type StageOutcomeSink = (outcome: StageOutcome) => void
+
 export interface EmitStageContext {
   runId: string
   projectId: string
@@ -58,6 +87,9 @@ export interface EmitStageContext {
   /** Active lane ('' = default lane). Required for proper lane scoping. */
   lane: string
   aliases: AliasMap
+  /** AQU-1670: optional telemetry sink for the stage-outcome event. Never
+   *  awaited and never load-bearing — a throwing sink cannot fail a batch. */
+  onStageOutcome?: StageOutcomeSink
 }
 
 interface RawEmitEvent {
@@ -130,15 +162,34 @@ interface CellRow {
   canonical_ref: string | null
 }
 
+/** The live source/target rows for one cell, as seen from the run's lane. */
+interface CellPair {
+  source: CellRow | null
+  target: CellRow | null
+}
+
+function pairKey(fileId: string, cellId: string): string {
+  return `${fileId}\u0000${cellId}`
+}
+
+/** Split one cell's rows by side. AQU-1447: the target row is the ACTIVE
+ *  lane's, never another lane's head; source rows always live at
+ *  target_lang = '' (see selectCellPairs). Both SQL shapes below already
+ *  filter to those two rows, so this only has to pick them apart. */
+function splitPair(rows: readonly CellRow[]): CellPair {
+  return {
+    source: rows.find((r) => r.side === "source") ?? null,
+    target: rows.find((r) => r.side === "target") ?? null,
+  }
+}
+
 async function fetchCellPair(
   db: AquillaDb,
   projectId: string,
   fileId: string,
   cellId: string,
   lane: string,
-): Promise<{ source: CellRow | null; target: CellRow | null }> {
-  // AQU-1447: the target row is the ACTIVE lane's, never another lane's head.
-  // Source rows always live at target_lang = '' (see selectCellPairs).
+): Promise<CellPair> {
   const { results } = await db
     .prepare(
       `SELECT side, event_id, value, canonical_ref FROM cells
@@ -147,9 +198,143 @@ async function fetchCellPair(
     )
     .bind(projectId, fileId, cellId, lane)
     .all<CellRow>()
-  return {
-    source: results.find((r) => r.side === "source") ?? null,
-    target: results.find((r) => r.side === "target") ?? null,
+  return splitPair(results ?? [])
+}
+
+// ── Batched cell reads (AQU-1670) ───────────────────────────────────────────
+//
+// `stageOne` used to issue its own `fetchCellPair` round-trip per event, so a
+// 28-cell proposal cost 28 SEQUENTIAL Hyperdrive→Neon round-trips and a
+// 100-cell one cost 100. Staging duration therefore scaled with cell count,
+// and a whole-file proposal ran past Cloudflare's origin timeout (522) —
+// discarding every cell the model had just paid to draft, with retries
+// failing identically because the cost was structural rather than transient.
+//
+// The reads are independent and lane-uniform, so they collapse into ONE
+// statement for the whole batch: the same shape sync-worker's
+// `resolveCellStates` already uses for the external changeset path. Staging is
+// now flat in cell count instead of linear in it.
+
+/** Cells per prefetch statement. The 28-cell repro and the 100-cell
+ *  acceptance case are each a single query; a pathological batch chunks rather
+ *  than building a statement with tens of thousands of placeholders. */
+const PREFETCH_CHUNK = 250
+
+/** Transient-failure budget for the prefetch. The whole batch now rides on
+ *  this one read, so a single hiccup must not discard a proposal the model
+ *  already paid to produce — retry it before giving up (AQU-1670). */
+const PREFETCH_ATTEMPTS = 3
+const PREFETCH_BACKOFF_MS = [100, 300]
+
+async function fetchCellPairChunk(
+  db: AquillaDb,
+  projectId: string,
+  lane: string,
+  cells: readonly { fileId: string; cellId: string }[],
+): Promise<Map<string, CellPair>> {
+  const placeholders = cells.map(() => "(?, ?)").join(", ")
+  const binds: unknown[] = [projectId, lane]
+  for (const c of cells) binds.push(c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT file_id, cell_id, side, event_id, value, canonical_ref FROM cells
+       WHERE project_id = ?
+         AND ((side = 'source' AND target_lang = '') OR (side = 'target' AND target_lang = ?))
+         AND (file_id, cell_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<CellRow & { file_id: string; cell_id: string }>()
+
+  const rowsByCell = new Map<string, CellRow[]>()
+  for (const row of results ?? []) {
+    const key = pairKey(row.file_id, row.cell_id)
+    const list = rowsByCell.get(key)
+    if (list) list.push(row)
+    else rowsByCell.set(key, [row])
+  }
+
+  // Every REQUESTED cell gets an entry, present in the projection or not:
+  // "prefetched and absent" must be distinguishable from "never prefetched",
+  // or a cell that genuinely does not exist (the common `target.cell.create`
+  // collision check) would fall back to its own query every time.
+  const pairs = new Map<string, CellPair>()
+  for (const c of cells) {
+    const key = pairKey(c.fileId, c.cellId)
+    pairs.set(key, splitPair(rowsByCell.get(key) ?? []))
+  }
+  return pairs
+}
+
+/** One batched read for every cell the batch names, with a bounded retry.
+ *  `failed` means the read could not be made at all; the reader below then
+ *  degrades to per-cell queries rather than failing the batch outright. */
+async function prefetchCellPairs(
+  db: AquillaDb,
+  projectId: string,
+  lane: string,
+  cells: readonly { fileId: string; cellId: string }[],
+): Promise<{ pairs: Map<string, CellPair>; failed: boolean }> {
+  const pairs = new Map<string, CellPair>()
+  if (cells.length === 0) return { pairs, failed: false }
+
+  for (let i = 0; i < cells.length; i += PREFETCH_CHUNK) {
+    const chunk = cells.slice(i, i + PREFETCH_CHUNK)
+    let lastErr: unknown
+    let ok = false
+    for (let attempt = 0; attempt < PREFETCH_ATTEMPTS; attempt++) {
+      try {
+        for (const [key, pair] of await fetchCellPairChunk(db, projectId, lane, chunk)) {
+          pairs.set(key, pair)
+        }
+        ok = true
+        break
+      } catch (err) {
+        lastErr = err
+        const wait = PREFETCH_BACKOFF_MS[attempt]
+        if (wait !== undefined) await new Promise((resolve) => setTimeout(resolve, wait))
+      }
+    }
+    if (!ok) {
+      console.error(
+        "[emit-stage] cell prefetch failed after retries:",
+        lastErr instanceof Error ? lastErr.name : "unknown",
+      )
+      return { pairs, failed: true }
+    }
+  }
+  return { pairs, failed: false }
+}
+
+/**
+ * Serves cell pairs to `stageOne`: from the batch prefetch, with a single-cell
+ * query as the fallback for anything the prefetch did not cover — an id the
+ * static pre-pass could not resolve, or a prefetch that failed outright. Both
+ * are memoized, so no cell is ever read twice in one batch.
+ */
+class CellPairReader {
+  /** Cells the batched prefetch covered. */
+  readonly prefetched: number
+  /** Per-cell queries the prefetch did not cover. Zero on the normal path. */
+  fallbackQueries = 0
+
+  constructor(
+    private readonly db: AquillaDb,
+    private readonly projectId: string,
+    private readonly lane: string,
+    private readonly pairs: Map<string, CellPair>,
+  ) {
+    this.prefetched = pairs.size
+  }
+
+  async load(fileId: string, cellId: string): Promise<CellPair> {
+    const key = pairKey(fileId, cellId)
+    const hit = this.pairs.get(key)
+    if (hit) return hit
+    this.fallbackQueries++
+    const pair = await fetchCellPair(this.db, this.projectId, fileId, cellId, this.lane)
+    this.pairs.set(key, pair)
+    return pair
   }
 }
 
@@ -175,7 +360,8 @@ async function loadCellEditingFloor(db: AquillaDb, projectId: string): Promise<n
 }
 
 async function stageOne(
-  db: AquillaDb,
+  /** AQU-1670: batch-prefetched cell reads; see CellPairReader. */
+  pairs: CellPairReader,
   raw: RawEmitEvent,
   ctx: EmitStageContext,
   /**
@@ -285,7 +471,7 @@ async function stageOne(
       if (typeof anchor !== "string") {
         return { kind: "rejected", reason: "anchorCellId must be a string or null" }
       }
-      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor, ctx.lane)
+      const anchorPair = await pairs.load(fileId, anchor)
       if (!anchorPair.source && !anchorPair.target) {
         return {
           kind: "rejected",
@@ -297,7 +483,7 @@ async function stageOne(
     }
 
     if (cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
+      const pair = await pairs.load(fileId, cellId)
       const occupied = kind === "source.cell.create" ? pair.source : pair.target
       if (occupied) {
         const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
@@ -323,7 +509,7 @@ async function stageOne(
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }
     if (fileId && cellId) {
-      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId, ctx.lane)
+      const pair = await pairs.load(fileId, cellId)
       display.canonicalRef =
         pair.target?.canonical_ref ?? pair.source?.canonical_ref ?? undefined
 
@@ -426,6 +612,55 @@ async function resolveFileNames(
   return names
 }
 
+/**
+ * AQU-1670: every (fileId, cellId) the batch could need, resolved statically.
+ * Alias and `:var` resolution is pure, so this costs nothing but lets the
+ * whole batch be read in one query.
+ *
+ * Unresolvable or absent ids are skipped rather than reported: `stageOne`
+ * re-resolves each event and owns the real verdict, and the reader falls back
+ * to a single query for anything missed here. So this pass is allowed to be
+ * incomplete — missing a cell costs one fallback query, never a wrong answer,
+ * and naming a cell the batch turns out not to need costs one extra row.
+ */
+function collectBatchCells(
+  rawEvents: readonly unknown[],
+  ctx: EmitStageContext,
+): { fileId: string; cellId: string }[] {
+  const seen = new Set<string>()
+  const cells: { fileId: string; cellId: string }[] = []
+
+  const add = (fileId: string, cellId: unknown) => {
+    if (typeof cellId !== "string" || cellId.length === 0) return
+    const resolved = resolveRef(cellId, ctx)
+    if (!resolved.ok) return
+    const key = pairKey(fileId, resolved.value)
+    if (seen.has(key)) return
+    seen.add(key)
+    cells.push({ fileId, cellId: resolved.value })
+  }
+
+  for (const rawEvent of rawEvents) {
+    const raw = rawEvent as RawEmitEvent
+    if (typeof raw !== "object" || raw === null || typeof raw.kind !== "string") continue
+    // stageOne only ever reads cells under an explicit fileId; without one the
+    // event is rejected before it touches the database.
+    if (typeof raw.fileId !== "string" || raw.fileId.length === 0) continue
+    const file = resolveRef(raw.fileId, ctx)
+    if (!file.ok) continue
+    add(file.value, raw.cellId)
+    if (CELL_CREATE_KINDS.has(raw.kind)) {
+      // A create also reads the row it anchors after (AQU-890).
+      const payload =
+        raw.payload && typeof raw.payload === "object"
+          ? (raw.payload as Record<string, unknown>)
+          : {}
+      add(file.value, payload.anchorCellId)
+    }
+  }
+  return cells
+}
+
 function summarize(events: StagedEvent[]): string {
   const byKind = new Map<string, StagedEvent[]>()
   for (const e of events) {
@@ -458,8 +693,11 @@ export async function stageEvents(
   rawEvents: unknown[],
   ctx: EmitStageContext,
 ): Promise<EmitStageResult> {
+  const startedAt = Date.now()
   const staged: StagedEvent[] = []
   const lines: string[] = ["i|kind|ref|verdict"]
+  let rejected = 0
+  let stale = 0
 
   // Deterministic lint on staged drafts: load the project's enabled rules once
   // per emit so the MODEL sees violations and can redraft before the user does.
@@ -476,12 +714,23 @@ export async function stageEvents(
   )
   const cellEditingFloor = anyCellEditing ? await loadCellEditingFloor(db, ctx.projectId) : undefined
 
+  // AQU-1670: ONE read for every cell the batch names, BEFORE the per-event
+  // loop. This is what keeps staging flat in cell count instead of one
+  // round-trip per proposed cell — see the batched-reads block above.
+  const prefetch = await prefetchCellPairs(
+    db,
+    ctx.projectId,
+    ctx.lane,
+    collectBatchCells(rawEvents, ctx),
+  )
+  const pairs = new CellPairReader(db, ctx.projectId, ctx.lane, prefetch.pairs)
+
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
     let verdict: Verdict
     try {
-      verdict = await stageOne(db, raw, ctx, cellEditingFloor)
+      verdict = await stageOne(pairs, raw, ctx, cellEditingFloor)
     } catch (err) {
       verdict = { kind: "rejected", reason: `stage error: ${err instanceof Error ? err.message : String(err)}` }
     }
@@ -501,6 +750,8 @@ export async function stageEvents(
         }
       }
     } else {
+      if (verdict.kind === "stale") stale++
+      else rejected++
       lines.push(`${i + 1}|${kind}|∅|${verdict.kind}: ${verdict.reason}`)
     }
   }
@@ -542,6 +793,32 @@ export async function stageEvents(
           summary: summarize(staged),
         }
       : null
+
+  // AQU-1670: report the outcome before returning, so a staging path that
+  // starts scaling with cell count again is visible in PostHog rather than
+  // only in a partner's 522.
+  if (ctx.onStageOutcome) {
+    try {
+      ctx.onStageOutcome({
+        runId: ctx.runId,
+        projectId: ctx.projectId,
+        requested: rawEvents.length,
+        staged: staged.length,
+        rejected,
+        stale,
+        durationMs: Date.now() - startedAt,
+        cellsPrefetched: pairs.prefetched,
+        fallbackQueries: pairs.fallbackQueries,
+        status: prefetch.failed
+          ? "prefetch_failed"
+          : staged.length > 0
+            ? "staged"
+            : "nothing_staged",
+      })
+    } catch {
+      /* telemetry must never break a staged batch */
+    }
+  }
 
   return { proposal, modelVerdictBlock: lines.join("\n") }
 }

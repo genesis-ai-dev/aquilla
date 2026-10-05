@@ -6,10 +6,11 @@
 // says otherwise, which is a different question and was reading as an odd one
 // out. Sam's call, 2026-09-05.
 //
-// One setting today. The page exists because the category is real, not because
-// it is full — a project-level control that offers "use the organization
-// default" needs somewhere honest for that default to live.
+// The page exists because the category is real, not because it is full — a
+// project-level control that offers "use the organization default" needs
+// somewhere honest for that default to live.
 
+import { BulkValidateAiDraftsSection } from "@/components/settings/BulkValidateAiDraftsSection"
 import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
 import { SettingsGroup } from "@/components/ui/page"
@@ -38,6 +39,10 @@ export function OrgSettingsProjectDefaults() {
         {/* AQU-1391 — same card, same MAINTAINER gate, same reason: it shapes
             what a project's editor does, not who may reach it. */}
         <RepetitionPropagationSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* Sam, 2026-10-01 — same card and gate: it changes what a bulk
+            validate covers in every project, not who may validate. Unlike the
+            two above it has no project override. */}
+        <BulkValidateAiDraftsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

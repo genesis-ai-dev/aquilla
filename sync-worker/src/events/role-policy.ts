@@ -114,6 +114,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.link.set': ROLE.PROJECT_LEAD,
   // AQU-508: approving/withdrawing approval of a cell's audio is a review
   // action — reviewer(300)+, mirroring the text-side cell.validate gate.
+  //
+  // AQU-1571: THIS IS ONLY THE FLOOR, for both validate pairs. The project's
+  // policy — role floor, named validators, self-validation (against the take's
+  // recorder for audio, the cell's last editor for text) — and the maintainer
+  // bar on removing somebody else's vote are enforced on top of it in
+  // events/route.ts, on every write path. An audit that reads this table alone
+  // will conclude they are client-side only; one did.
   'cell.audio.validate': ROLE.REVIEWER,
   'cell.audio.unvalidate': ROLE.REVIEWER,
 

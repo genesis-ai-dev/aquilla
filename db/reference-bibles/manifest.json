@@ -1,0 +1,44 @@
+[
+  {
+    "id": "arb-vandyck",
+    "name": "Van Dyck",
+    "fullName": "Smith & Van Dyck Arabic Bible (1865)",
+    "languageCode": "ar",
+    "languageName": "Arabic",
+    "direction": "rtl",
+    "versification": "eng",
+    "printing": "vowelled (full tashkeel), as published by eBible.org",
+    "license": "Public domain",
+    "file": "arb-vandyck.tsv.gz",
+    "source": {
+      "provider": "eBible.org",
+      "ebibleId": "arb-vd",
+      "url": "https://ebible.org/Scriptures/arb-vd_usfm.zip",
+      "buildDate": "2026-08-07",
+      "zipSha256": "e4a2ab9491b2ac2ff799bb2a80ec9322203a7c36e78210b4506df84308c54948"
+    },
+    "verseCount": 31104,
+    "contentSha256": "a6a489c686003ad0b7d901bbc28478d2eddc44a42e61473d8f3290386befb1ee"
+  },
+  {
+    "id": "eng-kjv",
+    "name": "King James Version",
+    "fullName": "King James Version (1769 standard text)",
+    "languageCode": "en",
+    "languageName": "English",
+    "direction": "ltr",
+    "versification": "eng",
+    "printing": "1769 text without the Apocrypha; Strong's tags and italic brackets removed, supplied words kept",
+    "license": "Public domain",
+    "file": "eng-kjv.tsv.gz",
+    "source": {
+      "provider": "eBible.org",
+      "ebibleId": "eng-kjv2006",
+      "url": "https://ebible.org/Scriptures/eng-kjv2006_usfm.zip",
+      "buildDate": "2026-09-25",
+      "zipSha256": "311bc503438e98ce64f70a85932e144911ab486743391e43398cf65e39052218"
+    },
+    "verseCount": 31102,
+    "contentSha256": "d6fdac0b27b5cf5164f4fedebe9e177f632b0cf5d42b9bdd0abfa46ca4afc3da"
+  }
+]

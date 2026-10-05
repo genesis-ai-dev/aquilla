@@ -8,7 +8,8 @@
 // semantics are mirrored from src/lib/terminology/match.ts (inflectional `*`
 // → \p{L}*, letter-class lookaround word boundaries, case-insensitive
 // Unicode) — keep the two in lockstep. Builtin/algorithmic checks need the
-// full lqa registry and stay client-side for now.
+// full lqa registry and stay client-side for now, except the reference Bible
+// quote check (AQU-1573), which staging runs from reference-lint.ts.
 
 export interface LintRule {
   id: string

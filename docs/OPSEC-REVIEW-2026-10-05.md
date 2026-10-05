@@ -339,6 +339,13 @@ the floor that minted it; nothing gains scope.
   as pre-existing are gone — commit `3f04ccdf` ("Test databases run parameterless
   SQL over the simple protocol, as production does", AQU-1635) fixed them on `dev`
   since. There is now nothing red in this package.
+* Root `app` suite (`npx vitest run --project app`): **1568 files, 17682 passing,
+  23 skipped, 6 failures — all in `src/components/import/ScriptAlignmentDialog.test.tsx`
+  and all pre-existing.** That file arrived with AQU-1480 (`a103c139`, `172d367d`),
+  which is already on `dev`; this change touches nothing under `src/` and nothing
+  in `src/` imports any changed module (`db/shared/api-credentials`,
+  `shared/log-path-redaction`, either `posthog-logs.ts`), so the two are disjoint.
+  Noted rather than fixed — it is not auth/session work, and `dev` owns it.
 * `npx eslint` clean on every changed file. `npx tsc --noEmit` reports no error in
   any changed file — in `auth-worker` the only remaining output is the
   `partyserver` `TS2307`s from `sync-worker`, whose package is not installed in

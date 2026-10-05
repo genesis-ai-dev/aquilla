@@ -5,11 +5,9 @@ import {
   type BillingPlan,
   type BillingStatus,
   type ResolvedFieldPlan,
-  type TargetLaneProject,
   type WordBlockReason,
   FIELD_PLAN,
   checkWordAllowance,
-  countDistinctTargetLanes,
   periodAllowanceCredits,
   periodAllowanceWords,
   periodDaysBetween,
@@ -210,19 +208,6 @@ export async function resetWordUsage(db: AquillaDb, orgId: number, since?: strin
   }
 }
 
-function parseLaneList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string")
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
 export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Promise<OrgBillingOverrides> {
   const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
   try {
@@ -288,19 +273,11 @@ export async function writeOrgBillingOverrides(
 }
 
 /**
- * AQU-1071: the active-language counts the org dashboard and the platform-admin
- * tenants table show. One query for every org asked about, so a multi-org view
- * does not fan out into a query per row.
+ * Target-lane counts for the org dashboard and the tenants table. One query
+ * for every org asked about. `combined` is the sum of `byOrg`.
  *
- * "Active" excludes both ways a partner can stand a language down (AQU-1070):
- * archived projects (`archived_at`) and paused ones (`is_active = false`, the
- * lifecycle toggle). A paused lane is one nobody is working, so billing it
- * would leave partners with no way to drop out of a band short of archiving.
- * Lane-level archival is applied per project by `countDistinctTargetLanes`.
- *
- * `byOrg` is per-org; `combined` de-duplicates across the whole set, because a
- * language two orgs both translate into is one language, not two — an all-orgs
- * tile that summed `byOrg` would over-report it.
+ * A project with zero `lanes` rows counts as one target lane when
+ * `target_language` is non-empty. Once any lane row exists, settings are ignored.
  */
 export interface OrgTargetLaneCounts {
   byOrg: Map<number, number>
@@ -319,43 +296,45 @@ export async function countTargetLanesByOrg(
     const { results } = await db
       .prepare(
         `SELECT p.org_id AS org_id,
-                ps.target_language,
-                ps.target_lanes,
-                (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
-           FROM project_settings ps
-           JOIN projects p ON p.id = ps.project_id
+                COALESCE(SUM(
+                  CASE
+                    WHEN COALESCE(lc.lane_rows, 0) > 0 THEN COALESCE(lc.active_targets, 0)
+                    WHEN NULLIF(BTRIM(ps.target_language), '') IS NOT NULL THEN 1
+                    ELSE 0
+                  END
+                ), 0) AS lane_count
+           FROM projects p
+           LEFT JOIN project_settings ps ON ps.project_id = p.id
+           LEFT JOIN (
+             SELECT l.project_id,
+                    COUNT(*)::int AS lane_rows,
+                    COUNT(*) FILTER (WHERE l.role = 'target' AND l.archived_at IS NULL)::int AS active_targets
+               FROM lanes l
+               JOIN projects lp ON lp.id = l.project_id
+              WHERE lp.org_id IN (${placeholders})
+              GROUP BY l.project_id
+           ) lc ON lc.project_id = p.id
           WHERE p.org_id IN (${placeholders})
             AND p.archived_at IS NULL
-            AND COALESCE(p.is_active, TRUE)`,
+            AND COALESCE(p.is_active, TRUE)
+          GROUP BY p.org_id`,
       )
-      .bind(...unique)
-      .all<{
-        org_id: number
-        target_language: string | null
-        target_lanes: unknown
-        archived_lanes: unknown
-      }>()
-    const byOrgProjects = new Map<number, TargetLaneProject[]>()
-    const all: TargetLaneProject[] = []
+      .bind(...unique, ...unique)
+      .all<{ org_id: number; lane_count: number | string }>()
+    const counted = new Map<number, number>()
     for (const row of results ?? []) {
-      const project: TargetLaneProject = {
-        targetLanguage: row.target_language,
-        targetLanes: parseLaneList(row.target_lanes),
-        archivedLanes: parseLaneList(row.archived_lanes),
-      }
-      const orgId = Number(row.org_id)
-      const list = byOrgProjects.get(orgId)
-      if (list) list.push(project)
-      else byOrgProjects.set(orgId, [project])
-      all.push(project)
+      counted.set(Number(row.org_id), Number(row.lane_count) || 0)
     }
     const byOrg = new Map<number, number>()
     // Every org asked about gets an answer, including the ones with no projects
     // — an absent entry would read as "unknown" at the call site, not as zero.
+    let combined = 0
     for (const orgId of unique) {
-      byOrg.set(orgId, countDistinctTargetLanes(byOrgProjects.get(orgId) ?? []))
+      const n = counted.get(orgId) ?? 0
+      byOrg.set(orgId, n)
+      combined += n
     }
-    return { byOrg, combined: countDistinctTargetLanes(all) }
+    return { byOrg, combined }
   } catch (err) {
     if (isMissingTableError(err)) return empty
     console.error("[billing] countTargetLanesByOrg error:", err)
@@ -385,14 +364,14 @@ export async function readWordSnapshot(
 ): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
-  const [wordsUsed, trailingYearWords, overrides, autoLanguageCount] = await Promise.all([
+  const [wordsUsed, trailingYearWords, overrides, autoLaneCount] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
     sumWordsSince(db, orgId, nDaysAgoUtc(364)),
     readOrgBillingOverrides(db, orgId),
     countOrgTargetLanes(db, orgId),
   ])
   const wordsPerCredit = catalog?.wordsPerCredit ?? 100
-  const languageCount = overrides.billedLanguageCount ?? autoLanguageCount
+  const languageCount = overrides.billedLanguageCount ?? autoLaneCount
   const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords
   const addonWords = catalog?.addonWords ?? FIELD_PLAN.addonWords
   const allowanceWords = periodAllowanceWords({

@@ -20,7 +20,7 @@ not a micro-spec farm.
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
-| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; OAuth is MCP-bound while device tokens retain REST access; revocation blocks access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
 | Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |

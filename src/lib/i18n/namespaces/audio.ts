@@ -308,7 +308,7 @@ export const audio = defineNamespace({
       "Recording at full WAV quality — about three times the file size. Click to record " +
       "compressed instead.",
     "audio.recordingModal.formatCompressedTooltip":
-      "Recording compressed — much smaller files, slightly less detail. Click to record at " +
+      "Recording compressed — much smaller files, a little less detail. Click to record at " +
       "full WAV quality.",
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":

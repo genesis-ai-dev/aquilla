@@ -23,10 +23,16 @@ import { StaffLanePopover } from "./StaffLanePopover"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
-function renderPopover(orgId: number | null = 1) {
+function renderPopover(orgId: number | null = 1, laneId?: string) {
   return render(
     <MemoryRouter>
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={orgId} />
+      <StaffLanePopover
+        projectId="proj-1"
+        lane="es"
+        laneId={laneId}
+        laneLabel="Spanish"
+        orgId={orgId}
+      />
     </MemoryRouter>,
   )
 }
@@ -216,6 +222,28 @@ describe("StaffLanePopover", () => {
       ]),
     )
     expect(scopes).toHaveLength(3)
+  })
+
+  // AQU-1607: a lane scope is a lane id, so staffing a lane whose id the row
+  // knows writes that id — the lane's language cannot say which of two
+  // same-language lanes was staffed.
+  it("writes the lane's id when the caller passes one, replacing a tag row for it", async () => {
+    mockFetchMemberScopes.mockResolvedValue([
+      { kind: "lane", value: "es" },
+      { kind: "lane", value: "fr" },
+    ])
+
+    renderPopover(1, "ln-es")
+    openPopover()
+    pickMaria()
+    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+
+    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+    const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
+    expect(scopes).toEqual([
+      { kind: "lane", value: "fr" },
+      { kind: "lane", value: "ln-es" },
+    ])
   })
 
   it("skips the membership POST when the person already holds >= the picked role", async () => {

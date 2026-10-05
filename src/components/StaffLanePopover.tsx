@@ -53,6 +53,13 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 export interface StaffLanePopoverProps {
   projectId: string
   lane: string
+  /**
+   * AQU-1607: the lane's id (`lanes.id`), which is what a lane scope stores.
+   * Pass it wherever the caller's row has it — a project can hold two lanes
+   * of one language, and only the id says which one is being staffed. Absent,
+   * the server resolves `lane` and refuses a tag that fits two lanes.
+   */
+  laneId?: string | null
   laneLabel: string
   orgId: number | null
   trigger?: ReactNode
@@ -91,6 +98,7 @@ const ROSTER_BLOCKED_KEY = {
 export function StaffLanePopover({
   projectId,
   lane,
+  laneId,
   laneLabel,
   orgId,
   trigger,
@@ -171,9 +179,12 @@ export function StaffLanePopover({
   }
 
   function mergeLaneScope(existing: MemberScope[]): MemberScope[] {
+    // AQU-1607: write the lane id when we have it, and drop a row that named
+    // this same lane the old way so the member ends up with one scope for it.
+    const value = laneId || lane
     return [
-      ...existing.filter((s) => !(s.kind === "lane" && s.value === lane)),
-      { kind: "lane", value: lane },
+      ...existing.filter((s) => !(s.kind === "lane" && (s.value === value || s.value === lane))),
+      { kind: "lane", value },
     ]
   }
 

@@ -17,13 +17,21 @@
 // This module is the single, pure, unit-tested source of the active/archived
 // split so those surfaces stay consistent.
 
-/** Case-insensitive membership test against the archived-lane set. The default
- *  lane (`''`) is never archivable, so it always reports false. */
+/**
+ * Case-insensitive membership test against the archived-lane set.
+ *
+ * AQU-1600: the former default lane (tag `''`) is an ordinary lane and can be
+ * archived, so the empty tag is matched like any other rather than reporting
+ * false out of hand. That only ever answers true for a caller whose set was
+ * derived from the lane ROWS (`lanes.archived_at`) — the legacy
+ * `settings.archivedLanes` blob is a list of non-empty tags and never names
+ * the `''` lane.
+ */
 export function isLaneArchived(
   lane: string,
   archivedLanes: readonly string[] | undefined,
 ): boolean {
-  if (!lane || !archivedLanes || archivedLanes.length === 0) return false
+  if (!archivedLanes || archivedLanes.length === 0) return false
   const lower = lane.toLowerCase()
   return archivedLanes.some((l) => l.toLowerCase() === lower)
 }

@@ -103,6 +103,8 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  // AQU-1573: a quoted Scripture verse must match the lane's reference Bible.
+  | "reference-quote"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -176,7 +178,7 @@ export interface RuleWaiver {
  * compose a localized sentence itself — it returns a reason CODE instead,
  * and a render-time helper (`formatInfractionReason` /
  * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
- * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the eleven
  * algorithmic checks; the other three are the user-authored rule shapes.
  */
 export type RuleInfractionReason =
@@ -199,6 +201,14 @@ export interface RuleInfraction {
    * `t()`, only interpolated as a variable.
    * `source-requires-target`: `sourceCount` and `targetCount` (instance
    * counts as decimal strings).
+   * `builtin:reference-quote` (AQU-1573): `kind` ("differs" | "missing" |
+   * "both" | "dropped"), `refs` (the cited references' reader labels,
+   * joined; for "both" the changed quotes, with `missingRefs` the ones not
+   * taken from the Bible; for "dropped" the references the translation
+   * leaves out, with `count`), `version` (the reference Bible's name; absent
+   * on a lane with no Bible, where only "dropped" can fire), and, next to a
+   * quote finding, `droppedRefs` + `droppedCount` for references left out —
+   * none of them translatable text.
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable
@@ -747,6 +757,10 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1573: the Bible each target language quotes verses from (lane tag →
+   *  reference Bible id, "" = default lane; or the one-item array form). Synced
+   *  via ProjectWideSettings. Resolve with referenceBibleForLane. */
+  referenceBibleVersions?: Record<string, string> | string[]
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

@@ -33,6 +33,9 @@
 //     draft call will add a footnote instruction block.
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
+// The reference-verses block (AQU-1573) is NOT a departure: it is built from
+// the project settings and the shared verse store, the same inputs the editor
+// reads through /api/v2/reference-bibles.
 //
 // The system prompt resolves top-level `settings.systemPrompt` first (the key
 // PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
@@ -52,9 +55,12 @@ import {
   loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { loadReferencePassagesForSources } from "../../../db/shared/reference-bible"
+import type { ReferencePassage } from "../../../src/lib/reference-bible/types"
 import {
   buildBriefBlock,
   buildPrompt,
+  buildReferenceVersesBlock,
   buildRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_SYSTEM_PROMPT,
@@ -214,6 +220,16 @@ export interface PromptPreviewBody {
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
+    /** AQU-1573: the verses this cell cites, from the lane's reference Bible,
+     *  and the MUST-copy block they become in the system prompt. Null when the
+     *  lane has no reference Bible; `block` is "" when the source cites none
+     *  (or the Bible is not installed — see the warnings). */
+    referenceVerses: {
+      versionId: string
+      versionName: string | null
+      block: string
+      passages: ReferencePassage[]
+    } | null
   }
   /** What the draft call would be made WITH (project configuration; a
    *  per-device provider override in user Settings is invisible here). */
@@ -433,6 +449,23 @@ export async function buildPromptPreview(
     { source: sourceText },
   ])
 
+  // ── AQU-1573: cited verses from the lane's reference Bible ──────────────
+  // Same lookup and the same block builder as the agent's draft tool and the
+  // editor (useReferenceBible), so what this shows is what the model gets.
+  // Independent of bibleResourcesEnabled (the Aquifer feature).
+  const referenceFound = await loadReferencePassagesForSources(db, {
+    settings,
+    lane: targetLang,
+    sources: [sourceText],
+  })
+  const referenceBlock = referenceFound?.version
+    ? buildReferenceVersesBlock({
+        versionName: referenceFound.version.name,
+        languageName: referenceFound.version.languageName,
+        passages: referenceFound.passages,
+      })
+    : ""
+
   const messages = buildPrompt({
     sourceLanguage,
     targetLanguage,
@@ -444,9 +477,27 @@ export async function buildPromptPreview(
     exampleFormat,
     briefSummary,
     precedingContext,
+    ...(referenceBlock ? { referenceBlock } : {}),
   })
 
   const warnings: { code: string; message: string }[] = []
+  if (referenceFound?.missingVersionId) {
+    warnings.push({
+      code: "reference_bible_not_installed",
+      message:
+        `this lane's reference Bible "${referenceFound.missingVersionId}" is not installed on this server, ` +
+        "so no verses are added to the prompt — list the installed ones with list_reference_bibles " +
+        "(GET /api/v1/external/reference-bibles)",
+    })
+  }
+  if (referenceFound?.version && referenceFound.unresolved.length > 0) {
+    warnings.push({
+      code: "reference_not_found",
+      message:
+        `the source cites ${referenceFound.unresolved.join(", ")}, which ${referenceFound.version.name} ` +
+        "does not have — the draft translates it without a verse to copy",
+    })
+  }
   if (!sourceText.trim()) {
     warnings.push({
       code: "empty_source",
@@ -484,6 +535,14 @@ export async function buildPromptPreview(
         injectedTerms,
         examples,
         precedingContext,
+        referenceVerses: referenceFound
+          ? {
+              versionId: referenceFound.version?.id ?? referenceFound.missingVersionId ?? "",
+              versionName: referenceFound.version?.name ?? null,
+              block: referenceBlock,
+              passages: referenceFound.passages,
+            }
+          : null,
       },
       generation: {
         provider:

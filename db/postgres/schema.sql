@@ -2285,6 +2285,38 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
 );
 CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
 
+-- 0129 (AQU-1573): reference Bibles (Van Dyck Arabic, KJV) whose verses the
+-- drafting prompt injects and the quote check compares against. Shared,
+-- public-domain text: no project_id, no RLS. org_id is reserved for partner
+-- uploads. Loaded by scripts/reference-bibles.ts (dev boot runs it).
+CREATE TABLE IF NOT EXISTS reference_bible_versions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  language_name TEXT NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'ltr' CHECK (direction IN ('ltr', 'rtl')),
+  versification TEXT NOT NULL DEFAULT 'eng',
+  printing TEXT,
+  license TEXT NOT NULL,
+  source TEXT NOT NULL,
+  org_id BIGINT,
+  verse_count INTEGER NOT NULL DEFAULT 0,
+  content_sha256 TEXT,
+  loaded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reference_bible_verses (
+  version_id TEXT NOT NULL REFERENCES reference_bible_versions(id) ON DELETE CASCADE,
+  book TEXT NOT NULL,
+  chapter INTEGER NOT NULL CHECK (chapter > 0),
+  verse INTEGER NOT NULL CHECK (verse > 0),
+  text TEXT NOT NULL,
+  PRIMARY KEY (version_id, book, chapter, verse)
+);
+
 -- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because
 -- `cells` and the other content tables are defined ABOVE `lanes`; a fresh

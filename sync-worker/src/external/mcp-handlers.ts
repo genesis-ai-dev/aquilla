@@ -31,6 +31,7 @@ import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
+import { listReferenceBibles } from '../../../db/shared/reference-bible'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
@@ -434,6 +435,13 @@ async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<M
   // Shared with REST GET /api/v1/external/orgs (orgs-list.ts) — AQU-1236.
   const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred)
   return ok({ orgs })
+}
+
+async function listReferenceBiblesTool(env: ExternalEnv): Promise<McpToolResult> {
+  if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  // AQU-1573: shared with REST GET /api/v1/external/reference-bibles.
+  const versions = await listReferenceBibles(env.AQUILLA_PG)
+  return ok({ versions })
 }
 
 async function listProjects(
@@ -1363,6 +1371,8 @@ export async function callTool(
       return listOrgs(env, cred)
     case 'list_projects':
       return listProjects(env, cred, args)
+    case 'list_reference_bibles':
+      return listReferenceBiblesTool(env)
     case 'get_project': {
       const projectId = str(args, 'projectId')
       if (!projectId) return fail('validation_failed', 'projectId is required')

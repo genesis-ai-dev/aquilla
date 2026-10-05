@@ -14,6 +14,7 @@ import {
 import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
 import { ImportDialogBackButton } from "@/components/import/ImportDialogBackButton"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED, IMPORT_FAILED } from "@/lib/event-names"
@@ -25,6 +26,13 @@ export interface FileTargetImportDialogProps {
   username: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** AQU-1631: lanes the import may fill. Fewer than two hides the picker. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** Moves the destination lane — and with it the editor's open lane, which is
+   *  where the cells the import matches against come from. */
+  onTargetLangChange?: (lane: string) => void
+  /** True while the chosen lane's cells are loading. */
+  laneCellsLoading?: boolean
   fileName: string
   /** The open file's cells, in display order. */
   cells: FileTargetCellRef[]
@@ -45,6 +53,9 @@ export function FileTargetImportDialog({
   projectId,
   username,
   targetLang,
+  laneOptions,
+  onTargetLangChange,
+  laneCellsLoading,
   fileName,
   cells,
   getToken,
@@ -89,6 +100,9 @@ export function FileTargetImportDialog({
             projectId={projectId}
             username={username}
             targetLang={targetLang}
+            laneOptions={laneOptions}
+            onTargetLangChange={onTargetLangChange}
+            laneCellsLoading={laneCellsLoading}
             fileName={fileName}
             cells={cells}
             getToken={getToken}

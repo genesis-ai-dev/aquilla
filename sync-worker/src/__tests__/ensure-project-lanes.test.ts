@@ -2,12 +2,14 @@
 // rows a new project needs, promotes placeholder names when languages arrive,
 // and never overwrites a human rename.
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createProjectShared, updateProjectSettingsShared } from "../../../db/shared/projects"
 import {
+  createTargetLane,
   ensureProjectLanes,
   ensureProjectLaneStmts,
   insertTargetLane,
+  isLaneIdCollision,
   isDefaultLaneUnderAnotherName,
   listProjectLanes,
   renameTargetLane,
@@ -18,6 +20,16 @@ import {
   SOURCE_LANE_PLACEHOLDER,
 } from "../../../src/lib/lanes/backfill-plan"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+
+const laneIdQueue = vi.hoisted(() => [] as string[])
+
+vi.mock("../../../src/lib/lanes/lane-id", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/lib/lanes/lane-id")>()
+  return {
+    ...actual,
+    newLaneId: () => laneIdQueue.shift() ?? actual.newLaneId(),
+  }
+})
 
 const PROJECT = "proj-ensure-lanes"
 
@@ -38,6 +50,7 @@ async function lanes(t: TestDb) {
 
 let t: TestDb
 beforeEach(async () => {
+  laneIdQueue.length = 0
   if (!t) t = await makeTestDb()
   else await t.reset()
 })
@@ -115,7 +128,7 @@ describe("ensureProjectLanes", () => {
     expect(await lanes(t)).toHaveLength(2)
   })
 
-  it("assigns 8-hex ids that are per-project unique and stable on re-run", async () => {
+  it("assigns 8-hex ids that stay put on re-run, and rejects the same id in another project", async () => {
     await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
     const first = await t.pg.query<{ id: string; role: string }>(
       `SELECT id, role FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
@@ -128,19 +141,13 @@ describe("ensureProjectLanes", () => {
 
     const sharedId = first.rows[0]!.id
     const otherProject = "proj-ensure-lanes-other"
-    await t.pg.query(
-      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-       VALUES ($1, $2, 'source', 'Source', NULL, NULL, 0)`,
-      [sharedId, otherProject],
-    )
-    const both = await t.pg.query<{ project_id: string; id: string }>(
-      `SELECT project_id, id FROM lanes WHERE id = $1 ORDER BY project_id`,
-      [sharedId],
-    )
-    expect(both.rows).toEqual([
-      { project_id: PROJECT, id: sharedId },
-      { project_id: otherProject, id: sharedId },
-    ])
+    await expect(
+      t.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ($1, $2, 'source', 'Source', NULL, NULL, 0)`,
+        [sharedId, otherProject],
+      ),
+    ).rejects.toMatchObject({ code: "23505", constraint: "uq_lanes_id" })
 
     await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
     const again = await t.pg.query<{ id: string }>(
@@ -148,6 +155,103 @@ describe("ensureProjectLanes", () => {
       [PROJECT],
     )
     expect(again.rows.map((r) => r.id)).toEqual(first.rows.map((r) => r.id))
+  })
+
+  it("retries a lane id that another project already has", async () => {
+    const taken = "aabbccdd"
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ($1, 'proj-a', 'source', 'Source', NULL, NULL, 0)`,
+      [taken],
+    )
+    laneIdQueue.push(taken)
+    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    expect(laneIdQueue).not.toContain(taken)
+
+    const rows = await t.pg.query<{ id: string; project_id: string }>(
+      `SELECT project_id, id FROM lanes ORDER BY project_id, id`,
+    )
+    const ours = rows.rows.filter((row) => row.project_id === PROJECT)
+    expect(ours).toHaveLength(2)
+    for (const row of ours) {
+      expect(row.id).not.toBe(taken)
+      expect(row.id).toMatch(/^[0-9a-f]{8}$/)
+    }
+    expect(rows.rows.filter((row) => row.id === taken)).toEqual([
+      { project_id: "proj-a", id: taken },
+    ])
+  })
+
+  it("keeps existing ids when a re-run mints an id this project already has", async () => {
+    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    const before = await t.pg.query<{ id: string }>(
+      `SELECT id FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
+      [PROJECT],
+    )
+    laneIdQueue.push(before.rows[0]!.id)
+    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    const after = await t.pg.query<{ id: string }>(
+      `SELECT id FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
+      [PROJECT],
+    )
+    expect(after.rows.map((row) => row.id)).toEqual(before.rows.map((row) => row.id))
+    expect(await lanes(t)).toHaveLength(2)
+  })
+})
+
+describe("isLaneIdCollision", () => {
+  it("matches the unique index on either driver error shape", () => {
+    expect(isLaneIdCollision({ code: "23505", constraint: "uq_lanes_id" })).toBe(true)
+    expect(isLaneIdCollision({ code: "23505", constraint_name: "uq_lanes_id" })).toBe(true)
+    expect(isLaneIdCollision({
+      message: 'duplicate key value violates unique constraint "uq_lanes_id"',
+    })).toBe(true)
+    expect(isLaneIdCollision({
+      cause: { code: "23505", constraint_name: "uq_lanes_id" },
+    })).toBe(true)
+    expect(isLaneIdCollision({ code: "23505", constraint: "lanes_pkey" })).toBe(false)
+    expect(isLaneIdCollision({ code: "23505", constraint: "uq_lanes_project_source" })).toBe(false)
+    expect(isLaneIdCollision({ code: "23503", constraint: "uq_lanes_id" })).toBe(false)
+  })
+})
+
+describe("createTargetLane", () => {
+  it("retries a colliding id and uses the new id as the legacy tag", async () => {
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: { targetLanguage: "Spanish", targetLanes: ["Yoruba"] },
+    })
+    const taken = "aabbccdd"
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ($1, 'proj-a', 'source', 'Source', NULL, NULL, 0)`,
+      [taken],
+    )
+    laneIdQueue.push(taken)
+    const existing = await listProjectLanes(t.db, PROJECT)
+    const created = await createTargetLane(t.db, PROJECT, {
+      name: "Yoruba Team",
+      language: "Yoruba",
+      targetLanguage: "Spanish",
+      existing: existing.map((lane) => ({
+        id: lane.id,
+        name: lane.name,
+        legacyTag: lane.legacyTag,
+      })),
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.laneId).not.toBe(taken)
+    expect(created.legacyTag).toBe(created.laneId)
+    const row = await t.pg.query<{ id: string; legacy_tag: string }>(
+      `SELECT id, legacy_tag FROM lanes WHERE project_id = $1 AND name = 'Yoruba Team'`,
+      [PROJECT],
+    )
+    expect(row.rows).toEqual([{ id: created.laneId, legacy_tag: created.laneId }])
+    const owners = await t.pg.query<{ project_id: string }>(
+      `SELECT project_id FROM lanes WHERE id = $1`,
+      [taken],
+    )
+    expect(owners.rows).toEqual([{ project_id: "proj-a" }])
   })
 })
 
@@ -164,6 +268,34 @@ describe("createProjectShared seeds lanes atomically", () => {
     expect((await lanes(t)).map((r) => r.name).sort()).toEqual(
       [BLANK_LANE_PLACEHOLDER, SOURCE_LANE_PLACEHOLDER].sort(),
     )
+  })
+
+  it("retries a colliding lane id without inserting the project twice", async () => {
+    const taken = "aabbccdd"
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ($1, 'proj-a', 'source', 'Source', NULL, NULL, 0)`,
+      [taken],
+    )
+    laneIdQueue.push(taken)
+    const { inserted } = await createProjectShared(t.db, {
+      projectId: PROJECT,
+      name: "P",
+      orgId: null,
+      createdBy: 1,
+    })
+    expect(inserted).toBe(true)
+    const projects = await t.pg.query<{ id: string }>(
+      `SELECT id FROM projects WHERE id = $1`,
+      [PROJECT],
+    )
+    expect(projects.rows).toEqual([{ id: PROJECT }])
+    const created = await t.pg.query<{ id: string }>(
+      `SELECT id FROM lanes WHERE project_id = $1`,
+      [PROJECT],
+    )
+    expect(created.rows.length).toBeGreaterThan(0)
+    expect(created.rows.map((row) => row.id)).not.toContain(taken)
   })
 
   it("names lanes from settingsSeed", async () => {
@@ -224,14 +356,27 @@ describe("rename and archive a target lane", () => {
     expect(duplicate.status).toBe("duplicate")
   })
 
-  it("archives an extra lane and refuses the default lane", async () => {
+  // AQU-1600: the former default lane is ordinary. It archives like any other
+  // lane; the only refusal left is the project's LAST active target lane.
+  it("archives the former default lane like any other, and refuses the last active one", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
       settings: { targetLanguage: "Spanish", targetLanes: ["French"] },
     })
     const rows = await listProjectLanes(t.db, PROJECT)
     const french = rows.find((lane) => lane.legacyTag === "French")!
     const blank = rows.find((lane) => lane.legacyTag === "")!
-    expect((await setTargetLaneArchived(t.db, PROJECT, blank.id, true)).status).toBe("default_lane")
+    // The former default lane archives, and keeps its legacy tag so old
+    // events still replay through it.
+    const blankArchived = await setTargetLaneArchived(t.db, PROJECT, blank.id, true)
+    expect(blankArchived.status).toBe("ok")
+    if (blankArchived.status === "ok") {
+      expect(blankArchived.lane.archivedAt).toBeTruthy()
+      expect(blankArchived.lane.legacyTag).toBe("")
+    }
+    // French is now the only active target lane, so archiving it is refused.
+    expect((await setTargetLaneArchived(t.db, PROJECT, french.id, true)).status).toBe("last_lane")
+    // Restore the former default lane and French archives again.
+    expect((await setTargetLaneArchived(t.db, PROJECT, blank.id, false)).status).toBe("ok")
     const archived = await setTargetLaneArchived(t.db, PROJECT, french.id, true)
     expect(archived.status).toBe("ok")
     if (archived.status === "ok") expect(archived.lane.archivedAt).toBeTruthy()

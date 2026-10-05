@@ -383,4 +383,20 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
   it("yields [] for a scope naming no lane the project has — nothing to move to", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("Spansih")], lanes)).toEqual([])
   })
+
+  // AQU-1607: a lane scope is a lane id, which the lane rows turn back into
+  // the tag the switcher is written in.
+  it("resolves a lane id scope through the project's lane rows", () => {
+    const laneRows = [
+      { id: "ln-main", name: "German", legacyTag: "" },
+      { id: "ln-es", name: "Spanish", legacyTag: "es" },
+      { id: "ln-de", name: "Low German", legacyTag: "de" },
+    ]
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-es")], lanes, laneRows)).toEqual(["es"])
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-main")], lanes, laneRows)).toEqual([""])
+    // A tag-valued scope the backfill has not converted still resolves.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de")], lanes, laneRows)).toEqual(["de"])
+    // A lane that is gone offers nothing to switch to.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-gone")], lanes, laneRows)).toEqual([])
+  })
 })

@@ -8,12 +8,24 @@
 
 import { ROLE } from './role-policy'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
+import type { LaneIdentity } from '../../../src/lib/lanes/read-wall'
 
 type Scope = { kind: 'lane' | 'file'; value: string }
 
-function coveredBy(scopes: ReadonlyArray<Scope>, lane: string, fileIds: ReadonlyArray<string>): boolean {
+/**
+ * AQU-1607: `lanes` are the project's target lanes, so a scope holding a
+ * lane id is read as that lane. An empty list falls back to comparing the
+ * stored value to the tag, which is what a scope meant before lane ids.
+ */
+function coveredBy(
+  scopes: ReadonlyArray<Scope>,
+  lane: string,
+  fileIds: ReadonlyArray<string>,
+  lanes: readonly LaneIdentity[],
+): boolean {
   const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
-  if (laneScopes.length > 0 && !laneScopes.includes(lane)) return false
+  if (laneScopes.length > 0 && !laneScopeAdmitsTag(laneScopes, lanes, lane)) return false
   const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
   if (fileScopes.length > 0 && !fileIds.every((id) => fileScopes.includes(id))) return false
   return true
@@ -34,6 +46,8 @@ export async function isEligibleLaneAssignee(
   assigneeUserId: number,
   lane: string,
   fileIds: ReadonlyArray<string>,
+  /** AQU-1607: the project's target lanes — see `coveredBy`. */
+  lanes: readonly LaneIdentity[] = [],
 ): Promise<boolean> {
   try {
     const [role, scopes] = await Promise.all([
@@ -44,7 +58,7 @@ export async function isEligibleLaneAssignee(
         .all<Scope>(),
     ])
     if (!role || role.level < ROLE.CONTRIBUTOR) return false
-    return coveredBy(scopes.results ?? [], lane, fileIds)
+    return coveredBy(scopes.results ?? [], lane, fileIds, lanes)
   } catch (err) {
     console.warn(`[lane-delegate] assignee check failed for project=${projectId}; refusing:`, err)
     return false
@@ -63,6 +77,8 @@ export async function isOwnLaneAssignment(
   assignmentId: string,
   callerUserId: number,
   callerScopes: ReadonlyArray<Scope>,
+  /** AQU-1607: the project's target lanes — see `coveredBy`. */
+  lanes: readonly LaneIdentity[] = [],
 ): Promise<boolean> {
   try {
     const row = await db
@@ -76,13 +92,13 @@ export async function isOwnLaneAssignment(
     // The caller must hold the lane — a coordinator moved off Spanish loses
     // the Spanish assignments they handed out along with the lane.
     const laneScopes = callerScopes.filter((s) => s.kind === 'lane').map((s) => s.value)
-    if (!laneScopes.includes(row.target_lang ?? '')) return false
+    if (!laneScopeAdmitsTag(laneScopes, lanes, row.target_lang ?? '')) return false
     if (!callerScopes.some((s) => s.kind === 'file')) return true
     const files = await db
       .prepare('SELECT DISTINCT file_id FROM assignment_cells WHERE assignment_id = ?')
       .bind(assignmentId)
       .all<{ file_id: string }>()
-    return coveredBy(callerScopes, row.target_lang ?? '', (files.results ?? []).map((f) => f.file_id))
+    return coveredBy(callerScopes, row.target_lang ?? '', (files.results ?? []).map((f) => f.file_id), lanes)
   } catch (err) {
     console.warn(`[lane-delegate] assignment lookup failed for ${assignmentId}; refusing:`, err)
     return false

@@ -10,7 +10,8 @@ import { env } from "cloudflare:test"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { validateApiCredential } from "../../../db/shared/api-credentials"
+import { OAUTH_ORG_ALLOWLIST_FLOOR, validateApiCredential } from "../../../db/shared/api-credentials"
+import { ROLE } from "../types"
 
 import { listOrgsForCredential } from "../../../sync-worker/src/external/orgs-list"
 import { listProjectsForCredential } from "../../../sync-worker/src/external/projects-list"
@@ -144,8 +145,8 @@ describe("consent → token → Agent API credential", () => {
     const token = (await response.json()) as { access_token: string; token_type: string; scope: string; expires_in?: number }
     expect(token).toMatchObject({ token_type: "Bearer", scope: "act" })
     expect(token.expires_in).toBeUndefined()
-    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token))
-      .toMatchObject({ userId: "1", mode: "act", projectId: null, orgId: null, orgIds: ["10"] })
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token, undefined, RESOURCE))
+      .toMatchObject({ userId: "1", mode: "act", projectId: null, orgId: null, orgIds: ["10"], oauthResource: RESOURCE })
     const credential = await env.AQUILLA_PG.prepare("SELECT id, name, expires_at FROM api_credentials").first<{ id: string; name: string; expires_at: null }>()
     expect(credential).toMatchObject({ name: "ChatGPT", expires_at: null })
 
@@ -155,15 +156,15 @@ describe("consent → token → Agent API credential", () => {
 
     const revoked = await app.request(`/api/v2/credentials/${credential!.id}`, { method: "DELETE", headers: authHeader(jwt) }, oauthEnv)
     expect(revoked.status).toBe(200)
-    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token)).toBeNull()
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token, undefined, RESOURCE)).toBeNull()
   })
 
   it("treats a replayed code as a leak: refuses it and revokes the first credential", async () => {
     const jwt = await seed(); const { code } = await approveFor(jwt)
     const first = (await (await redeem(tokenFields(code))).json()) as { access_token: string }
-    expect(await validateApiCredential(env.AQUILLA_PG, first.access_token)).not.toBeNull()
+    expect(await validateApiCredential(env.AQUILLA_PG, first.access_token, undefined, RESOURCE)).not.toBeNull()
     expect(await (await redeem(tokenFields(code))).json()).toEqual({ error: "invalid_grant" })
-    expect(await validateApiCredential(env.AQUILLA_PG, first.access_token)).toBeNull()
+    expect(await validateApiCredential(env.AQUILLA_PG, first.access_token, undefined, RESOURCE)).toBeNull()
   })
 
   it("concurrent redemption mints at most one credential", async () => {
@@ -268,6 +269,9 @@ describe("untrusted clients", () => {
       [{ code_challenge_method: "plain" }, "invalid_request"],
       [{ response_type: "token" }, "unsupported_response_type"],
       [{ resource: "https://elsewhere.example/api/v1/external/mcp" }, "invalid_target"],
+      [{ resource: "http://api.aquilla.app/sync/api/v1/external/mcp" }, "invalid_target"],
+      [{ resource: "https://api.aquilla.app:8443/sync/api/v1/external/mcp" }, "invalid_target"],
+      [{ resource: "https://api.aquilla.app/other/api/v1/external/mcp" }, "invalid_target"],
     ] as const) {
       const response = await consent("request", await authorizeParams(overrides), jwt)
       expect(response.status).toBe(400)
@@ -335,7 +339,7 @@ describe("OAuth organization grants across real consumers (AQU-1529)", () => {
 
   it("passes the minted allowlist through discovery, read and write gates", async () => {
     const { jwt, token } = await multiOrgGrant()
-    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
     expect(cred.orgIds).toEqual(["10", "11"])
     expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10", "11"])
     expect((await listProjectsForCredential(env.AQUILLA_PG, cred)).map((project) => project.id).sort()).toEqual(["beta", "p"])
@@ -353,7 +357,7 @@ describe("OAuth organization grants across real consumers (AQU-1529)", () => {
     const { token } = await multiOrgGrant()
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (13, 'Future', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by, org_id) VALUES ('future', 'Future project', 1, 13)").run()
-    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
     expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10", "11"])
     await expect(assertCredentialScope(env.AQUILLA_PG, cred, "future")).rejects.toMatchObject({ code: "scope_denied" })
   })
@@ -362,11 +366,44 @@ describe("OAuth organization grants across real consumers (AQU-1529)", () => {
     const { token } = await multiOrgGrant()
     await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('beta', 1, 600)").run()
     await env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = 11 AND user_id = 1").run()
-    const cred = (await validateApiCredential(env.AQUILLA_PG, token))!
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
     expect(cred.orgIds).toEqual(["10"])
     expect((await scopeCredentialToProject(env, cred, "beta")).ok).toBe(false)
     await expect(assertCredentialScope(env.AQUILLA_PG, cred, "beta")).rejects.toMatchObject({ code: "scope_denied" })
     expect((await listProjectsForCredential(env.AQUILLA_PG, cred)).map((project) => project.id)).toEqual(["p"])
+  })
+
+  // [Pen test] Auth & session mgmt (2026-10-05, OPS-43). The test above covers
+  // the approver *leaving* the org. Demotion is the commoner case and was the
+  // uncovered one: the re-filter's floor was VIEWER (100) while consent and
+  // the mint-time re-check both require MAINTAINER (600), so of the three
+  // places the grant floor is applied, the only one that runs after the token
+  // exists was the one a demotion could not narrow.
+  it("drops an org the approver no longer maintains, not only one they left (OPS-43)", async () => {
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET role_level = 100 WHERE org_id = 11 AND user_id = 1",
+    ).run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
+    expect(cred.orgIds).toEqual(["10"])
+    expect((await listOrgsForCredential(env.AQUILLA_PG, cred)).map((org) => org.id)).toEqual(["10"])
+    expect((await scopeCredentialToProject(env, cred, "beta")).ok).toBe(false)
+    await expect(assertCredentialScope(env.AQUILLA_PG, cred, "beta"))
+      .rejects.toMatchObject({ code: "scope_denied" })
+  })
+
+  it("keeps an org whose owner the approver still is, at any org_members level (OPS-43)", async () => {
+    // Org 10 is alice's own; the owner arm must not be narrowed by the floor.
+    const { token } = await multiOrgGrant()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET role_level = 100 WHERE org_id = 11 AND user_id = 1",
+    ).run()
+    const cred = (await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE))!
+    expect((await scopeCredentialToProject(env, cred, "p")).ok).toBe(true)
+  })
+
+  it("re-filters at the same floor the consent screen and the mint enforce (OPS-43)", () => {
+    expect(OAUTH_ORG_ALLOWLIST_FLOOR).toBe(ROLE.MAINTAINER)
   })
 
   it("does not mint a partially widened grant when one selected org is unauthorized", async () => {
@@ -374,5 +411,21 @@ describe("OAuth organization grants across real consumers (AQU-1529)", () => {
     const response = await consent("decision", { ...(await authorizeParams()), approve: true, org_ids: ["10", "999"] }, jwt)
     expect(response.status).toBe(403)
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM mcp_oauth_codes").first()).toEqual({ n: 0 })
+  })
+})
+
+describe("OAuth audience", () => {
+  it("binds an omitted resource to the configured MCP endpoint and rejects replay", async () => {
+    const jwt = await seed()
+    const { code } = await approveFor(jwt, { resource: undefined })
+    const fields = tokenFields(code)
+    delete (fields as Partial<typeof fields>).resource
+    const response = await redeem(fields)
+    expect(response.status).toBe(200)
+    const { access_token } = await response.json() as { access_token: string }
+    expect(await validateApiCredential(env.AQUILLA_PG, access_token)).toBeNull()
+    expect(await validateApiCredential(env.AQUILLA_PG, access_token, undefined, RESOURCE + "/other")).toBeNull()
+    expect(await validateApiCredential(env.AQUILLA_PG, access_token, undefined, RESOURCE))
+      .toMatchObject({ oauthResource: RESOURCE, mode: "act" })
   })
 })

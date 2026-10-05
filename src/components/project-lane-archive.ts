@@ -17,20 +17,26 @@
 // This module is the single, pure, unit-tested source of the active/archived
 // split so those surfaces stay consistent.
 
-import { sameLanguageTag } from "@/lib/language-normalize"
-
-/** Membership test against the archived-lane set, through the one language
- *  normalizer (AQU-1597) so an entry of "Spanish" archives the lane tagged
- *  "spanish" — and so the client agrees with the server, which resolves the
- *  same set the same way. A regional lane ("fr-CA") stays distinct from its
- *  base language. The default lane (`''`) is never archivable, so it always
- *  reports false. */
+/**
+ * Case-insensitive membership test against the archived-lane set.
+ *
+ * AQU-1600: the former default lane (tag `''`) is an ordinary lane and can be
+ * archived, so the empty tag is matched like any other rather than reporting
+ * false out of hand. That only ever answers true for a caller whose set was
+ * derived from the lane ROWS (`lanes.archived_at`) — the legacy
+ * `settings.archivedLanes` blob is a list of non-empty tags and never names
+ * the `''` lane.
+ *
+ * Non-empty tags match the same way as `listed()` in `archived-lane.ts`:
+ * case-insensitive, and a different spelling of the same language does not.
+ */
 export function isLaneArchived(
   lane: string,
   archivedLanes: readonly string[] | undefined,
 ): boolean {
-  if (!lane || !archivedLanes || archivedLanes.length === 0) return false
-  return archivedLanes.some((l) => sameLanguageTag(l, lane))
+  if (!archivedLanes || archivedLanes.length === 0) return false
+  const lower = lane.toLowerCase()
+  return archivedLanes.some((l) => l.toLowerCase() === lower)
 }
 
 /** The lanes a surface should show by default: registered lanes minus the

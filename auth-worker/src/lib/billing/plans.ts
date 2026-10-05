@@ -1,8 +1,6 @@
 // Field Plan pricing — mirrored from src/lib/billing/plans.ts.
 // Keep the two copies in lockstep (same pattern as credits.ts).
 
-import { languageTagKey } from "../../../../db/shared/language-normalize"
-
 export const WORDS_PER_CREDIT_DEFAULT = 100
 export const CYCLES_PER_YEAR = 13
 
@@ -92,33 +90,6 @@ export function periodAllowanceCredits(args: {
   const included = args.fieldCreditsPerCycle ?? TIER_CREDITS.field.creditsPerCycle
   const addon = args.fieldAddonCredits ?? TIER_CREDITS.field.creditsPerCycle
   return included + Math.max(0, Math.floor(args.addonPacks)) * addon + extra
-}
-
-export interface TargetLaneProject {
-  targetLanguage?: string | null
-  targetLanes?: readonly string[] | null
-  archivedLanes?: readonly string[] | null
-}
-
-/** AQU-1597: "Spanish", "spanish" and "es" are one language, so they are one
- *  billable lane. The shared normalizer is the only thing that decides this. */
-function normalizeLaneTag(raw: string | null | undefined): string {
-  return languageTagKey(raw)
-}
-
-export function countDistinctTargetLanes(projects: readonly TargetLaneProject[]): number {
-  const tags = new Set<string>()
-  for (const project of projects) {
-    const archived = new Set((project.archivedLanes ?? []).map(normalizeLaneTag).filter(Boolean))
-    const primary = normalizeLaneTag(project.targetLanguage)
-    if (primary) tags.add(primary)
-    for (const lane of project.targetLanes ?? []) {
-      const tag = normalizeLaneTag(lane)
-      if (!tag || archived.has(tag)) continue
-      tags.add(tag)
-    }
-  }
-  return tags.size
 }
 
 export function fieldAllowanceWords(

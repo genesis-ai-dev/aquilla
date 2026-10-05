@@ -29,7 +29,13 @@ export function fallbackInworldCatalog(): InworldCatalogVoice[] {
 
 /**
  * Default target language + extra active lanes, in display order.
- * Archived extra lanes are omitted (the default lane cannot be archived).
+ *
+ * Archived EXTRA lanes are omitted. This reads the legacy
+ * `settings.archivedLanes` tag list, which cannot name the former default lane
+ * (its tag is the empty string), so since AQU-1600 made that lane archivable
+ * its language is still offered here even when the lane is archived. Fixing
+ * that means reading the lane ROWS, which is the per-lane audio work
+ * (AQU-1591 / AQU-1615), not this helper.
  */
 export function projectTargetLaneLanguages(project: {
   targetLanguage?: string

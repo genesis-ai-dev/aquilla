@@ -64,7 +64,7 @@ import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
 import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
@@ -94,11 +94,6 @@ function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
       legacyTag: lane.legacyTag,
       archivedAt: lane.archivedAt,
     }))
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
 // [Pen test] API security & data exposure (2026-08-20): the external Agent
@@ -135,7 +130,7 @@ export async function handlePrepare(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   const identifier = `credential:${cred.credentialId}`

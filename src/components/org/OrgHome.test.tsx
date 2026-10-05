@@ -682,21 +682,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
   })
 
-  // AQU-1071: the enterprise billing band is "how many active target languages
-  // does this org have", and it was only readable on the platform-admin Billing
-  // tab. The tile shows the same server-side count, so a partner can see their
-  // own band — and see when they cross one — without asking us.
-  it("shows the org's active-language count in the rollup strip", async () => {
+  // AQU-1071: the enterprise billing band is how many active target lanes this
+  // org has. The tile shows the server-side count.
+  it("shows the org's active-lane count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
-    const label = screen.getAllByText("Active languages").find((el) => !el.closest("nav"))!
+    const label = screen.getAllByText("Active lanes").find((el) => !el.closest("nav"))!
     const tile = label.parentElement?.parentElement
-    if (!tile) throw new Error("languages tile root not found")
-    // The server's count, NOT a client-side tally of the lane chips: two projects
-    // translating into the same language are one language, and an archived lane is
-    // none, so the tile must not be re-derived from the rows on screen.
+    if (!tile) throw new Error("lanes tile root not found")
     expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
-    expect(within(tile).getByText("Distinct target lanes")).toBeInTheDocument()
+    expect(within(tile).getByText("Target lanes")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

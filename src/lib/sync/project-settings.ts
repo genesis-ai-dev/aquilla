@@ -13,6 +13,7 @@ import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
+import type { DirectionMode } from "@/lib/text-direction"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,6 +50,20 @@ export type CellEditingTier =
 export interface ProjectWideSettings {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * AQU-1471: the project's DEFAULT text direction per side — the answer to
+   * "this project's target language is right-to-left", asked once instead of
+   * once per file.
+   *
+   * "auto", and an ABSENT key, mean "take it from the language"
+   * (`languageDefaultDirection`), which is what every project did before these
+   * keys existed. A per-file direction still wins over this, and nothing copies
+   * this onto the file rows: resolution happens on every read
+   * (db/shared/text-direction.ts states the order), so switching
+   * `targetLanguage` to Arabic moves every file that has no override with it.
+   */
+  sourceTextDirection?: DirectionMode
+  targetTextDirection?: DirectionMode
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties

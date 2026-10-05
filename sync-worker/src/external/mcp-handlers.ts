@@ -1011,7 +1011,7 @@ async function runParseArtifact(
   if (!artifactId) return fail('validation_failed', 'artifactId is required')
 
   const body: Record<string, unknown> = { stage }
-  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId'] as const) {
+  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'sourceTextDirection', 'targetTextDirection', 'changesetId'] as const) {
     const v = str(args, key)
     if (v) body[key] = v
   }

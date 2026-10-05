@@ -134,6 +134,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
 import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
 import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 import {
   CLOSED_IMPORT_FILE_GATE,
@@ -192,6 +193,14 @@ export interface TranslationImportHost {
   /** Every target language of the project (one per lane), for telling a
    *  translation from a source upload. */
   targetLanguages: TranslationTargetLanguage[]
+  /** AQU-1631: the lanes a translation import may fill (the ones the editor's
+   *  switcher offers this caller), labelled as the switcher labels them. Fewer
+   *  than two, or absent, and there is no language to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** AQU-1631: moves the editor to another lane. The dialog's `targetLang`
+   *  follows it, and that lane is the one the import commits into: its review
+   *  reads current translations and commit parents from the open lane's lines. */
+  onLaneChange?: (lane: string) => void
 }
 
 /** AQU-1365: one of the project's target lanes, as the translation check sees it. */
@@ -1047,6 +1056,9 @@ export function ImportDialog({
               onStart={startTranslation}
               notice={translationNotice}
               onOtherWay={startOtherWay}
+              laneOptions={translation.laneOptions}
+              lane={targetLang ?? ""}
+              onLaneChange={translation.onLaneChange}
             />
           </div>
         )}

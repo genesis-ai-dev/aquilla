@@ -19,12 +19,22 @@
  * and a paired source + translation spreadsheet. Both read the chosen file's
  * lines, so they wait for a file to be chosen and go through the same opening
  * as a dropped file.
+ *
+ * AQU-1631: on a project with more than one target language, "Fill which
+ * language" chooses the lane the translation goes into, defaulted to the lane
+ * open in the editor. Choosing one moves the editor's lane with it (the host
+ * points `onLaneChange` at the editor's own lane setter), because the review
+ * reads each line's current translation and commit parent from the OPEN lane's
+ * cells: the lane filled and the lane read have to be the same one. A switch
+ * re-derives the open file's lines from rows already loaded; when it does have
+ * to load, a drop waits on the dialog's opening gate like any other file.
  */
 
 import { useState } from "react"
 import { ArrowLeftRight, ChevronDown, FileText, Library, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox"
+import { FileTargetLanePicker } from "@/components/import/FileTargetLanePicker"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
@@ -66,6 +76,13 @@ interface TranslationChooserProps {
   /** Starts one of the other ways into the chosen file. Absent, the section
    *  is not shown. */
   onOtherWay?: (way: TranslationOtherWay) => void
+  /** AQU-1631: the lanes this import may fill, in registry order. Fewer than
+   *  two (or absent) hides the language picker: there is nothing to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** The lane the import fills: the editor's open lane. */
+  lane?: string
+  /** Moves the editor to another lane, which is what the import then fills. */
+  onLaneChange?: (lane: string) => void
 }
 
 const OTHER_WAYS: {
@@ -89,12 +106,25 @@ export function TranslationChooser({
   onStart,
   notice,
   onOtherWay,
+  laneOptions,
+  lane = "",
+  onLaneChange,
 }: TranslationChooserProps) {
   const t = useT()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const chosen = value !== null ? files.find((file) => file.id === value) ?? null : null
   const options: LaneComboboxOption[] = files.map((file) => ({ value: file.id, label: file.name }))
+  // AQU-1631: the picker hides itself below two lanes, so the same test
+  // decides where the sentence naming the language goes.
+  const showLanePicker = Boolean(laneOptions && onLaneChange && laneOptions.length >= 2)
+  const fillsSentence = (
+    <p className="text-xs leading-relaxed text-muted-foreground">
+      {languageLabel
+        ? t("importExport.translation.fillsLanguage", { language: languageLabel })
+        : t("importExport.translation.fillsNoLanguage")}
+    </p>
+  )
 
   async function receive(list: File[]) {
     setError(null)
@@ -153,12 +183,27 @@ export function TranslationChooser({
             </Button>
           }
         />
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {languageLabel
-            ? t("importExport.translation.fillsLanguage", { language: languageLabel })
-            : t("importExport.translation.fillsNoLanguage")}
-        </p>
+        {!showLanePicker && fillsSentence}
       </div>
+
+      {/* AQU-1631: which language it fills, after which file. The sentence
+          naming that language follows the picker, so it reads as its result. */}
+      {showLanePicker && laneOptions && onLaneChange && (
+        <div className="space-y-1.5">
+          <FileTargetLanePicker
+            options={laneOptions}
+            value={lane}
+            onValueChange={(next) => {
+              if (next === lane) return
+              setError(null)
+              onLaneChange(next)
+            }}
+            size="default"
+            triggerClassName="sm:w-72"
+          />
+          {fillsSentence}
+        </div>
+      )}
 
       {notice && <p className="text-xs text-amber-700 dark:text-amber-400">{notice}</p>}
 

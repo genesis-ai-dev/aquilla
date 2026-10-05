@@ -31,6 +31,8 @@ import {
   updateSceneBrief,
   type SceneBriefStatus,
 } from "../../../db/shared/scene-briefs"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
+import { isRegisteredLaneId } from "../lib/contextual/project-context"
 
 const sceneBriefs = new Hono<AuthHonoEnv>()
 
@@ -62,7 +64,7 @@ async function requireRole(
   c: Context<AuthHonoEnv>,
   projectId: string,
   floor: number,
-): Promise<{ ok: true } | { ok: false; res: Response }> {
+): Promise<{ ok: true; level: number } | { ok: false; res: Response }> {
   const user = c.get("user")
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role || role.level < floor) {
@@ -73,7 +75,7 @@ async function requireRole(
     )
     return { ok: false, res: c.json(body, status) }
   }
-  return { ok: true }
+  return { ok: true, level: role.level }
 }
 
 const STATUSES: SceneBriefStatus[] = ["proposed", "approved", "rejected", "archived"]
@@ -138,6 +140,32 @@ sceneBriefs.post(
 
     const user = c.get("user")
     const body = c.req.valid("json")
+    const laneIdParam = (body.laneId ?? "").trim()
+    const laneTag = (body.targetLang ?? "").trim()
+    if (laneIdParam && !(await isRegisteredLaneId(c.env.AQUILLA_PG, projectId, laneIdParam))) {
+      const { body: err, status } = errorJson(
+        "validation_failed",
+        "That target-language lane is not registered on this project.",
+        400,
+      )
+      return c.json(err, status)
+    }
+    const laneVisible = await callerMayReadLane(
+      c.env.AQUILLA_PG,
+      c.env.LANE_READ_WALL,
+      projectId,
+      user.id,
+      gate.level,
+      laneIdParam ? { laneId: laneIdParam } : { targetLang: laneTag },
+    )
+    if (!laneVisible) {
+      const { body: err, status } = errorJson(
+        "permission_denied",
+        "you do not have access to that lane",
+        403,
+      )
+      return c.json(err, status)
+    }
     const runId = c.req.header(AGENT_RUN_HEADER)
     const result = await proposeSceneBrief(c.env.AQUILLA_PG, {
       projectId,

@@ -9,6 +9,7 @@ import {
   filterSettingsToVisibleLanes,
   labelsForGrantedLanes,
   laneReadWallEnabled,
+  lanesForRequestedTag,
   visibleLaneTags,
   type LaneGrant,
   type LaneIdentity,
@@ -130,4 +131,29 @@ export async function echoableLaneLabels(
   const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
   if (visible === null) return null
   return labelsForGrantedLanes(lanes, visible)
+}
+
+/**
+ * Whether this caller may see the lane a request named.
+ *
+ * Same rule as sync-worker's `canReadRequestedLane`: the wall flag off, or a
+ * Maintainer, sees every lane. Below that, a lane id must be one of the
+ * granted ids. A legacy tag must name exactly one target lane, and that
+ * lane's id must be granted — a tag that matches two lanes matches neither.
+ */
+export async function callerMayReadLane(
+  db: AquillaDb,
+  flag: string | undefined,
+  projectId: string,
+  userId: number,
+  role: number,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<boolean> {
+  const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
+  if (visible === null) return true
+  const laneId = (ref.laneId ?? "").trim()
+  if (laneId) return visible.has(laneId)
+  const matches = lanesForRequestedTag(lanes, ref.targetLang ?? "")
+  if (matches.length !== 1) return false
+  return visible.has(matches[0]!.id)
 }

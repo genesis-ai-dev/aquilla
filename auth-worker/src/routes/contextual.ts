@@ -93,6 +93,7 @@ import {
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
 import { isRegisteredLaneId, isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
 import { resolveLane, type LaneRef } from "../../../db/shared/lane-ref"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
@@ -858,6 +859,8 @@ contextual.post(
       )
       return c.json(err, status)
     }
+    const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+    if (laneDenied) return laneDenied
 
     // Minimum steering context (AQU-827). Checked before the budget/credit
     // guards because it is a precondition, not a spend decision: a project
@@ -1072,6 +1075,44 @@ contextual.post(
  * last body per URL and replays it. `no-store` keeps the browser's own HTTP
  * cache out of the loop so the conditional round-trip is explicit.
  */
+/** 400 when a lane id is not a target lane; 403 when the read wall hides it. */
+async function laneAccessResponse(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  roleLevel: number,
+  lane: LaneRef,
+): Promise<Response | null> {
+  if (lane.laneId) {
+    const resolved = await resolveLane(c.env.AQUILLA_PG, projectId, lane)
+    if (!resolved.laneId) {
+      const { body, status } = errorJson(
+        "validation_failed",
+        "That lane is not a target lane on this project.",
+        400,
+      )
+      return c.json(body, status)
+    }
+  }
+  const user = c.get("user")
+  const allowed = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    projectId,
+    user.id,
+    roleLevel,
+    lane,
+  )
+  if (!allowed) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      "you do not have access to that lane",
+      403,
+    )
+    return c.json(body, status)
+  }
+  return null
+}
+
 /**
  * The lane a request is about (AQU-1610). `?laneId=` is the lane's identity
  * and wins; `?targetLang=` is the legacy tag older clients still send, and
@@ -1152,6 +1193,8 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
   // The rollup itself spans every lane; readiness advises about ONE, so it
   // reads the lane the caller asked about (AQU-1610).
   const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
   return cachedPollJson(c, projectId, `overview?lane=${laneCacheKey(lane)}`, async () => {
     const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
 
@@ -1270,6 +1313,8 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
     })
   }
   const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
   return cachedPollJson(c, projectId, `runs?fileId=${fileId}&lane=${laneCacheKey(lane)}`, async () => {
     const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, lane)
     const latest = active
@@ -1704,12 +1749,15 @@ contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", `unknown status "${statusParam}"`, 400)
     return c.json(body, status)
   }
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
   const drafts = await listDrafts(
     c.env.AQUILLA_PG,
     projectId,
     fileId,
     statusParam as "proposed" | "applied" | "rejected" | "superseded" | undefined,
-    laneFromQuery(c),
+    lane,
   )
   return c.json({ drafts })
 })

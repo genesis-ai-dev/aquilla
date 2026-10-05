@@ -8,8 +8,8 @@
 import { useState } from "react"
 import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -243,9 +243,16 @@ export function RuleSuggestFromEditsDialog({
           </div>
         )}
 
+        {/* Kept mounted across the loading → review handoff so the bar can
+            finish after the suggestions are already on screen. The stage
+            flips as soon as the model returns; nothing here waits on the graphic. */}
+        <FillsTwiceIndicator
+          pending={stage === "loading"}
+          label={t("rules.suggestFromEdits.miningLabel")}
+          className="mx-auto w-48"
+        />
         {stage === "loading" && (
           <div className="flex flex-col items-center gap-2 py-6">
-            <Spinner className="size-6 text-primary" />
             <p className="text-sm text-muted-foreground">{t("rules.suggestFromEdits.miningLabel")}</p>
           </div>
         )}

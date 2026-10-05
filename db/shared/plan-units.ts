@@ -21,19 +21,25 @@
 // canonical_ref: the projection already decided which files are Scripture and
 // which books they hold, and asking twice invites the two answers to differ.
 
+import { countedFileSql } from "./counted-files"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 import { laneIndependentProgressSql, targetLaneIdSql } from "./lane-sql"
 
 /**
  * Which files can hold plan units.
  *
- * Tombstoned files are out. So are audio-cue siblings: that role marks the
- * hidden companion file the audio workflow creates, which never appears in a
- * file list and is not something anyone plans. Every other live file is a
- * legitimate unit — `kind` is not a usable discriminator here because it falls
- * back through `role` and then to 'codex'.
+ * Tombstoned files are out. So are the hidden companion files — the cue sheet
+ * the audio workflow records against, a linked video's caption track — which
+ * never appear in a file list and are not something anyone plans. Every other
+ * live file is a legitimate unit; `kind` is not a usable discriminator here
+ * because it falls back through `role` and then to 'codex'.
+ *
+ * AQU-1626 moved the rule itself to db/shared/counted-files.ts, where every
+ * other surface that measures work now reads it from. This alias stays because
+ * the name reads better at the two call sites below, not because the plan board
+ * has a definition of its own.
  */
-export const PLAN_UNIT_FILE_PREDICATE = `f.deleted_at IS NULL AND COALESCE(f.role, '') NOT IN ('audio-cues', 'timeline-content')`
+export const PLAN_UNIT_FILE_PREDICATE = countedFileSql('f')
 
 /**
  * One row per planning unit, as a subquery.

@@ -104,6 +104,7 @@ import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
@@ -114,6 +115,7 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
+import { pruneExpiredTraces } from "./lib/contextual/traces"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
@@ -127,6 +129,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 
 const app = new Hono<HonoEnv>()
 
@@ -198,11 +201,12 @@ app.use("*", async (c, next) => {
   try {
     await next()
   } catch (err) {
+    const path = redactLogPath(c.req.path)
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${path}`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.duration_ms": Date.now() - startedAt,
         "error.message": err instanceof Error ? err.message : String(err),
       }),
@@ -211,14 +215,18 @@ app.use("*", async (c, next) => {
   }
   const durationMs = Date.now() - startedAt
   if (durationMs >= SLOW_REQUEST_MS) {
+    // OPS-42: `redactLogPath`, not `c.req.path` — [slow-request] fires on
+    // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+    // access-link redeem that merely ran slowly would log a live token.
+    const path = redactLogPath(c.req.path)
     console.warn(
-      `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+      `[slow-request] ${c.req.method} ${path} took ${durationMs}ms (status ${c.res.status})`,
     )
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${path} (${durationMs}ms)`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.status": c.res.status,
         "http.duration_ms": durationMs,
       }),
@@ -317,6 +325,11 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Team chat history — the caller's own past agent conversations, listed and
+// reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
+// read-only, and scoped to (project, user) so it never surfaces another
+// member's chats.
+app.route("/api/v2/projects", agentSessionRoutes)
 // Knowledge base — project + org document upload/extract/index/read/search
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
@@ -525,6 +538,8 @@ const scheduled = async (
     // revoked_tokens hygiene lives here now, off the request path (it used to
     // be a random 2%-of-logouts DELETE). Non-throwing.
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
+    // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
+    await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.

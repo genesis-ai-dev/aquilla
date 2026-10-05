@@ -45,6 +45,8 @@ import {
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneChipLabel } from "./project-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
@@ -383,6 +385,13 @@ export function ProjectOverview() {
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm, roleLevel } = useProject(id)
   useNavHistoryTitle(project?.name)
+  // AQU-1586: the target lane ROWS — the only place a lane's language is
+  // recorded. A lane's `legacy_tag` is its event key and can be the opaque
+  // lane id, so nothing on this page may label a lane with it.
+  const targetLaneRows = useMemo(
+    () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+    [project?.lanes],
+  )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
@@ -449,6 +458,10 @@ export function ProjectOverview() {
       ),
     ]
   }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
+  // AQU-1586: names for the lanes offered above — the autopilot chooser used
+  // to print each non-default lane's tag, which is the opaque lane id whenever
+  // a sibling already holds the language string.
+  const autopilotLaneLabels = useMemo(() => laneLabelsByTag(targetLaneRows), [targetLaneRows])
   // AQU-656: originals live on `file_source_blobs`, not the plan. The files
   // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
   // PM download gallery is this compact list — only files that have a blob.
@@ -1086,9 +1099,12 @@ export function ProjectOverview() {
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
   // Labeled exactly as the lane tabs label it: the project's target language
-  // for the default lane, the lane tag itself for any other. Derived here
-  // rather than read off `selectedLane`, which is declared further down.
-  const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
+  // for the default lane, the lane row's own name for any other (AQU-1586 —
+  // never the tag, which can be the lane id). Derived here rather than read
+  // off `selectedLane`, which is declared further down.
+  const planLanguageLabel = selectedLaneTag
+    ? laneLabelForTag(selectedLaneTag, targetLaneRows)
+    : project?.targetLanguage || null
   /**
    * How many target languages this project carries: its declared extra lanes
    * plus the default one, which is a real language and always exists (AQU-728).
@@ -1263,10 +1279,17 @@ export function ProjectOverview() {
   const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
   const showLaneTabs = activeProjectLanes.length > 1
   const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
+  // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
+  // key and can be the opaque lane id, which read as gibberish on a PM's tabs.
   const laneTabOptions = [
     { label: t("org.orgHome.statusFilter.all"), value: LANE_TAB_ALL },
     ...activeProjectLanes.map((l) => ({
-      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
       value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
     })),
   ]
@@ -1283,7 +1306,13 @@ export function ProjectOverview() {
   const planLaneOptions = useMemo(
     () => projectLanes.filter((l) => l.archived !== true).map((l) => ({
       tag: l.lane,
-      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+      // AQU-1586: the row's name, never the tag (which can be the lane id).
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
     })),
     [projectLanes, project?.targetLanguage, t],
   )
@@ -2093,6 +2122,7 @@ export function ProjectOverview() {
                   canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
                   lanes={autopilotLanes}
                   defaultLaneLabel={project?.targetLanguage ?? ""}
+                  laneLabels={autopilotLaneLabels}
                 />
               )}
 

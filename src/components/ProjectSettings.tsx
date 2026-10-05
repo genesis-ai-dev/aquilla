@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -57,6 +57,7 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import {
   DEFAULT_APPROVED_EXAMPLE_COUNT,
@@ -269,6 +270,8 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
 
@@ -324,8 +327,42 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    smartQuotes: project.smartQuotes ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
+}
+
+/** Baseline fields whose stored value lives only in the shared settings blob.
+ *  Each is written to the blob on Save, so each must be read back from it. */
+const BLOB_BACKED_KEYS = [
+  "sourceLanguage",
+  "targetLanguage",
+  "validationCount",
+  "validationCountAudio",
+  "validationRoleFloor",
+  "validationNamedUsers",
+  "allowSelfValidation",
+  "validationRoleFloorAudio",
+  "validationNamedUsersAudio",
+  "allowSelfValidationAudio",
+  "cellEditingFloor",
+  "allowTrackEditing",
+  "timingLocked",
+  "harmonize_min_role",
+  "bibleResourcesEnabled",
+  "precedingTargetCells",
+  "importExcludeFrontMatter",
+  "smartQuotes",
+  "termMatching",
+] as const satisfies readonly (keyof Baseline)[]
+type BlobBackedKey = (typeof BLOB_BACKED_KEYS)[number]
+
+function sameSetting(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+function adoptKey<K extends BlobBackedKey>(target: Baseline, source: Baseline, key: K) {
+  target[key] = source[key]
 }
 
 function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined): boolean {
@@ -615,6 +652,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  const [smartQuotes, setSmartQuotes] = useState(false)
   // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
   const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
@@ -678,6 +716,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setSmartQuotes(b.smartQuotes)
     setTermMatching(b.termMatching)
   }, [])
 
@@ -692,64 +731,64 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     seededRef.current = true
   }, [project, applyBaseline])
 
-  // AQU-460 display-race fix: `project.bibleResourcesEnabled` hydrates in two
-  // async phases — `useProject`'s minimal record resolves first WITHOUT the
-  // field (undefined), then its own `useProjectSettings` GET fills it in. If
-  // the baseline seed above (which runs on first non-null `project`) lands
-  // during that undefined window, it locks in `undefined`, and the Switch
-  // paints `resolveBibleResourcesEnabled(undefined, hasScriptureFiles)` —
-  // wrongly `true` for a scripture project whose server value is really
-  // `false`. Once THIS component's own settings hook confirms a fetch has
-  // resolved (`sharedSettingsFetched`), re-sync the seeded value to whatever
-  // `project.bibleResourcesEnabled` now holds — but only if the user hasn't
-  // already touched the switch (don't clobber an in-progress edit), and only
-  // once (matches the "seed once" contract above).
-  const bibleResourcesResyncedRef = useRef(false)
+  // Settings that live ONLY in the shared settings blob never reach `project`
+  // on this page: it passes `includeSettings: false` to `useProject` (it owns
+  // the editable settings hook above, and a second overlay request would be a
+  // duplicate GET), so `project` is `minimalProjectRecord` and the seed above
+  // shows each of these at its default. A saved value then read back wrong
+  // after every reload — languages blank (AQU-1115), Bible resources on for a
+  // project that turned them off (AQU-460), switches off that the server has
+  // on — and a user could "re-enable" something already enabled.
+  //
+  // Once this page's own settings GET has resolved, rebuild the baseline
+  // through the same overlay the rest of the app reads with, and adopt it for
+  // these keys. Once only, matching the "seed once" contract above. A field the
+  // user has already moved off the (stale) seed keeps their edit; the baseline
+  // still moves, so settling to the server value never reads as an edit.
+  // `hasFetched` fails closed (stays false on a failed GET), so a settings
+  // outage leaves the seeded values rather than blanking anything.
+  const blobResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
-    if (bibleResourcesResyncedRef.current) return
-    bibleResourcesResyncedRef.current = true
-    if (project.bibleResourcesEnabled === baseline.bibleResourcesEnabled) return
-    setBaseline((prev) => (prev ? { ...prev, bibleResourcesEnabled: project.bibleResourcesEnabled } : prev))
-    // Only overwrite the draft value if the user hasn't diverged from the
-    // (possibly-stale) baseline yet — otherwise we'd stomp an in-progress toggle.
-    setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
-  }, [project, baseline, sharedSettingsFetched])
-
-  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
-  // project that has both set. Same two-phase shape as the AQU-460 race above,
-  // but worse: this page passes `includeSettings: false` to `useProject` (it
-  // owns the editable settings hook below, and a second overlay request would
-  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
-  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
-  // ONLY in the shared settings blob and never reach `project` at all. The
-  // baseline seed therefore didn't just *race* the real values, it could never
-  // see them, so the fields stayed blank forever. (The Languages card below
-  // looked right because it reads `sharedSettingsBlob` directly — that
-  // discrepancy is exactly what the bug report describes.)
-  //
-  // Once this page's own settings GET has resolved, re-sync both fields from
-  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
-  // settings outage leaves the previous behavior rather than blanking anything.
-  const languagesResyncedRef = useRef(false)
-  useEffect(() => {
-    if (!baseline || !sharedSettingsFetched) return
-    if (languagesResyncedRef.current) return
-    languagesResyncedRef.current = true
-    // Absent stays absent — a project with a genuinely empty language must show
-    // an empty field, never an invented default. A free-text label that isn't
-    // in the language catalog rides through verbatim.
-    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
-    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
-    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
-    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
-    // Only adopt the hydrated value where the user hasn't already typed over the
-    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
-    // the true server value must also not read as a user edit, which is why the
-    // baseline moves with it.
-    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
-    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
-  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+    if (blobResyncedRef.current) return
+    blobResyncedRef.current = true
+    if (!sharedSettingsBlob) return
+    const hydrated = buildBaseline(overlaySettings(project, sharedSettingsBlob))
+    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
+    if (changed.length === 0) return
+    const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+      sourceLanguage: setSourceLanguage,
+      targetLanguage: setTargetLanguage,
+      validationCount: setValidationCount,
+      validationCountAudio: setValidationCountAudio,
+      validationRoleFloor: setValidationRoleFloor,
+      validationNamedUsers: setValidationNamedUsers,
+      allowSelfValidation: setAllowSelfValidation,
+      validationRoleFloorAudio: setValidationRoleFloorAudio,
+      validationNamedUsersAudio: setValidationNamedUsersAudio,
+      allowSelfValidationAudio: setAllowSelfValidationAudio,
+      cellEditingFloor: setCellEditingFloor,
+      allowTrackEditing: setAllowTrackEditing,
+      timingLocked: setTimingLocked,
+      harmonize_min_role: setHarmonizeMinRole,
+      bibleResourcesEnabled: setBibleResourcesEnabled,
+      precedingTargetCells: setPrecedingTargetCells,
+      importExcludeFrontMatter: setImportExcludeFrontMatter,
+      smartQuotes: setSmartQuotes,
+      termMatching: setTermMatching,
+    }
+    setBaseline((prev) => {
+      if (!prev) return prev
+      const next = { ...prev }
+      for (const key of changed) adoptKey(next, hydrated, key)
+      return next
+    })
+    const adoptDraft = <K extends BlobBackedKey>(key: K) => {
+      const setter = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
+      setter((prev) => (sameSetting(prev, baseline[key]) ? hydrated[key] : prev))
+    }
+    for (const key of changed) adoptDraft(key)
+  }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 
@@ -849,6 +888,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
       importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      smartQuotes !== baseline.smartQuotes ||
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
@@ -862,7 +902,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter, termMatching,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -1081,6 +1121,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -1165,6 +1206,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        smartQuotes,
         termMatching,
       }
       setBaseline(newBaseline)
@@ -1217,7 +1259,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1280,7 +1322,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
@@ -1850,6 +1892,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              <SettingsRow
+                label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
+                description={t("projectSettings.info.smartQuotesDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      id="smart-quotes"
+                      checked={smartQuotes}
+                      onCheckedChange={(checked) => setSmartQuotes(checked)}
+                      disabled={!canEditShared}
+                      aria-label={t("projectSettings.info.smartQuotesLabel")}
                     />
                   </DisabledFieldTooltip>
                 }

@@ -555,9 +555,11 @@ function validatePayload(
       if (p.assignmentId !== undefined && !isNonEmptyString(p.assignmentId)) {
         return bad('assignmentId must be a non-empty string when present')
       }
-      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters') return bad("scopeKind must be 'books' or 'chapters'")
+      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters' && p.scopeKind !== 'cells') {
+        return bad("scopeKind must be 'books', 'chapters' or 'cells'")
+      }
       if (!Array.isArray(p.scope) || p.scope.length === 0) return bad('scope must be a non-empty array')
-      const scope: { fileId: string; chapter?: string }[] = []
+      const scope: { fileId: string; chapter?: string; cellIds?: string[] }[] = []
       for (const [entryIndex, rawEntry] of p.scope.entries()) {
         if (!isPlainObject(rawEntry) || !isNonEmptyString(rawEntry.fileId)) {
           return bad(`scope[${entryIndex}].fileId must be a non-empty string`)
@@ -565,9 +567,29 @@ function validatePayload(
         if (rawEntry.chapter !== undefined && !isNonEmptyString(rawEntry.chapter)) {
           return bad(`scope[${entryIndex}].chapter must be a non-empty string when present`)
         }
+        // AQU-1628: 'cells' means exactly these source lines. An empty or
+        // absent list is rejected rather than widened to the whole file —
+        // silently assigning everything is the bug this scope exists to fix.
+        let cellIds: string[] | undefined
+        if (rawEntry.cellIds !== undefined) {
+          if (!Array.isArray(rawEntry.cellIds) || rawEntry.cellIds.length === 0) {
+            return bad(`scope[${entryIndex}].cellIds must be a non-empty array of cell ids when present`)
+          }
+          if (!rawEntry.cellIds.every((id) => isNonEmptyString(id))) {
+            return bad(`scope[${entryIndex}].cellIds must contain only non-empty strings`)
+          }
+          cellIds = rawEntry.cellIds as string[]
+        }
+        if (p.scopeKind === 'cells' && cellIds === undefined) {
+          return bad(`scope[${entryIndex}].cellIds is required for scopeKind 'cells'`)
+        }
+        if (p.scopeKind !== 'cells' && cellIds !== undefined) {
+          return bad(`scope[${entryIndex}].cellIds is only valid for scopeKind 'cells'`)
+        }
         scope.push({
           fileId: rawEntry.fileId,
           ...(rawEntry.chapter !== undefined ? { chapter: rawEntry.chapter as string } : {}),
+          ...(cellIds !== undefined ? { cellIds } : {}),
         })
       }
       if (!isNonEmptyString(p.scopeLabel)) return bad('scopeLabel must be a non-empty string')

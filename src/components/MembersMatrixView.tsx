@@ -25,13 +25,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import {
+  fetchMemberScopeView,
+  laneScopeLabel,
+  type MemberScope,
+  type MemberScopeView,
+} from "@/lib/sync/member-scopes"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /** projectId → scopes, for one member. */
-type MemberScopeMap = Map<string, MemberScope[]>
+// AQU-1607: per project, the member's scopes AND the lane names their lane
+// ids stand for — a chip would otherwise print a lane id.
+type MemberScopeMap = Map<string, MemberScopeView>
 
 /**
  * Members × projects scan view, with inline cell editing.
@@ -91,7 +98,11 @@ export function MembersMatrixView() {
       loadedRef.current.add(userId)
       void Promise.all(
         projectIds.map(
-          async (pid) => [pid, (await fetchMemberScopes(jwt, pid, userId)) ?? []] as const,
+          async (pid) =>
+            [
+              pid,
+              (await fetchMemberScopeView(jwt, pid, userId)) ?? { scopes: [], laneNames: {} },
+            ] as const,
         ),
       ).then((entries) => {
         setScopesByMember((prev) => {
@@ -104,11 +115,22 @@ export function MembersMatrixView() {
     [jwt],
   )
 
-  const handleScopesSaved = useCallback((userId: number, projectId: string, saved: MemberScope[]) => {
+  const handleScopesSaved = useCallback((
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => {
     setScopesByMember((prev) => {
       const next = new Map(prev)
       const perProject = new Map(next.get(userId) ?? [])
-      perProject.set(projectId, saved)
+      // AQU-1607: the save's own lane names win — a lane granted by this save
+      // is absent from the names loaded on hover, so reusing those printed
+      // the lane's id in the chip.
+      perProject.set(projectId, {
+        scopes: saved,
+        laneNames: { ...(perProject.get(projectId)?.laneNames ?? {}), ...laneNames },
+      })
       next.set(userId, perProject)
       return next
     })
@@ -287,7 +309,12 @@ const MatrixRow = memo(function MatrixRow({
   jwt: string | null
   memberScopes: MemberScopeMap | undefined
   onHoverRow: (userId: number, projectIds: string[]) => void
-  onScopesSaved: (userId: number, projectId: string, saved: MemberScope[]) => void
+  onScopesSaved: (
+    userId: number,
+    projectId: string,
+    saved: MemberScope[],
+    laneNames: Record<string, string>,
+  ) => void
 }) {
   const { t } = useI18n()
   function handleMemberClick() {
@@ -351,8 +378,13 @@ const MatrixRow = memo(function MatrixRow({
                   projectId={p.id}
                   userId={member.userId}
                   username={member.username}
-                  onSaved={(saved) => onScopesSaved(member.userId, p.id, saved)}
-                  trigger={<LaneScopeChips scopes={scopesForCell} />}
+                  onSaved={(saved, laneNames) => onScopesSaved(member.userId, p.id, saved, laneNames)}
+                  trigger={
+                    <LaneScopeChips
+                      scopes={scopesForCell?.scopes}
+                      laneNames={scopesForCell?.laneNames}
+                    />
+                  }
                 />
               ) : null
             }
@@ -368,7 +400,14 @@ const MatrixRow = memo(function MatrixRow({
  * array (or a project the row-hover fetch hasn't resolved yet) renders a
  * plain "scopes" affordance so there's still something to click.
  */
-function LaneScopeChips({ scopes }: { scopes: MemberScope[] | undefined }) {
+function LaneScopeChips({
+  scopes,
+  laneNames,
+}: {
+  scopes: MemberScope[] | undefined
+  /** AQU-1607: lane id → lane name, so a chip reads as a lane, not an id. */
+  laneNames: Record<string, string> | undefined
+}) {
   const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane")
   const fileScopes = (scopes ?? []).filter((s) => s.kind === "file")
 
@@ -383,7 +422,7 @@ function LaneScopeChips({ scopes }: { scopes: MemberScope[] | undefined }) {
           key={`lane:${s.value}`}
           className="rounded bg-indigo-500/15 px-1 text-indigo-700 dark:text-indigo-300"
         >
-          {s.value || "default"}
+          {laneScopeLabel(s.value, laneNames) || "default"}
         </span>
       ))}
       {fileScopes.map((s) => (

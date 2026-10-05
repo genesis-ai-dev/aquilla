@@ -128,6 +128,68 @@ describe('assignment.create — book scope', () => {
   })
 })
 
+describe('assignment.create — cells scope (AQU-1628)', () => {
+  it('resolves exactly the named source cells, not the whole file', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-sel',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-2', 'g-2-1'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    const result = handleAssignmentEvent(db, authed, 2000, 1)
+    await db.batch(result.stmts)
+
+    const t = await snapshot()
+    const cells = t.assignment_cells.filter((c) => c.assignment_id === 'as-sel')
+    // g-1-1 is in the file but was NOT selected; the file-exo cell and the
+    // same-cell target row are excluded as in every other scope.
+    expect(cells.map((c) => c.cell_id).sort()).toEqual(['g-1-2', 'g-2-1'])
+    const row = t.assignments.find((a) => a.assignment_id === 'as-sel')
+    expect(row!.scope_kind).toBe('cells')
+    expect(row!.cells_total).toBe(2)
+  })
+
+  it('counts only the ids that still exist, so cells_total matches what was assigned', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-gone',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-1', 'deleted-since'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const t = await snapshot()
+    expect(
+      t.assignment_cells.filter((c) => c.assignment_id === 'as-gone').map((c) => c.cell_id),
+    ).toEqual(['g-1-1'])
+    expect(t.assignments.find((a) => a.assignment_id === 'as-gone')!.cells_total).toBe(1)
+  })
+
+  it('ignores a cell id from another file, since the entry names its own file', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-xfile',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-1', 'e-1-1'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const t = await snapshot()
+    expect(
+      t.assignment_cells.filter((c) => c.assignment_id === 'as-xfile').map((c) => c.cell_id),
+    ).toEqual(['g-1-1'])
+  })
+})
+
 describe('assignment.create — lane (AQU-538 §3.5)', () => {
   it('writes targetLang to assignments.target_lang', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })

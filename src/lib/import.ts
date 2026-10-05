@@ -227,7 +227,9 @@ export function matchEBibleToSourceCells(
     const currentText = cell.translated ?? ""
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
-    // string only when neither is available (rare legacy cells with no event id).
+    // string only when neither is available (rare legacy cells with no event id,
+    // or a lane whose cells have not finished loading). "" means "unchainable"
+    // and applyEBibleTargetImport refuses to apply such a cell (AQU-1669).
     const parentId = resolveTargetCommitParent({
       targetEventId: cell.targetEventId,
       sourceEventId: cell.sourceEventId,
@@ -297,7 +299,10 @@ export async function prepareEBibleTargetImport(
  * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
  *
  * parentId handling: each MatchedCell already carries the correct AD-2 parentId
- * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ * (targetEventId ?? sourceEventId), so commits are always properly chained. A
+ * selected cell that resolved to neither (parentId "") cannot be chained at
+ * all, and AQU-1669 is what dropping those quietly cost: this throws instead,
+ * so the caller can roll its optimistic patch back and show the failure.
  */
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
@@ -320,17 +325,36 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
+  // AQU-1669: a selected cell whose AD-2 parent never resolved (parentId "" —
+  // no targetEventId and no sourceEventId) used to be dropped right here, with
+  // the drop folded into `committedCount`. When that silently emptied the whole
+  // batch the caller still reported success: the artifact upload below was
+  // skipped (`groups.length > 0` was false), no commit was enqueued, and the
+  // dialog closed over an optimistic patch nobody ever undid — the translations
+  // sat in the editor looking saved and were gone on reopen, with no warning.
+  // A cell the user explicitly selected is never safe to drop quietly, so fail
+  // the whole apply loudly instead and let handleApply roll the patch back.
+  const unchainable = toCommit.filter((cell) => !cell.parentId)
+  if (unchainable.length > 0) {
+    throw new Error(
+      t("importExport.errors.unchainableTargetCells", {
+        count: unchainable.length,
+        total: toCommit.length,
+      }),
+    )
+  }
+
   const groups = [...byFile].map(([fileId, cells]) => ({
     fileId,
-    commits: cells
-      .filter((cell) => cell.parentId)
-      .map((cell) => ({
-        id: uuidv7(),
-        cellId: cell.cellId,
-        parentId: cell.parentId!,
-        value: cell.incomingText,
-      })),
+    commits: cells.map((cell) => ({
+      id: uuidv7(),
+      cellId: cell.cellId,
+      parentId: cell.parentId,
+      value: cell.incomingText,
+    })),
   })).filter((group) => group.commits.length > 0)
+  // Every selected cell is chainable by the guard above, so this is exactly the
+  // count the user approved — never a quietly reduced one (AQU-1669).
   const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
   // Preserve the exact target-side input before queuing any edits. One

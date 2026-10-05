@@ -1,7 +1,7 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
-import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
+import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import {
@@ -1806,18 +1806,23 @@ async function visiblePortfolioText(
     (orgRoles.results ?? []).map((row) => [Number(row.org_id), Number(row.role_level)]),
   )
 
-  // resolveProjectRole reads user.id and user.email. Platform admins are
-  // already handled by viewer.isAdmin, so an empty email cannot match the
-  // allowlist and widen this caller.
+  // Role resolution reads user.id and user.email. Platform admins are already
+  // handled by viewer.isAdmin, so an empty email cannot match the allowlist
+  // and widen this caller.
   const user = { id: viewer.userId, email: "" } as AuthUser
-  const restricted: PortfolioDbRow[] = []
-  await Promise.all(rows.map(async (row) => {
-    if ((orgLevel.get(Number(row.org_id)) ?? 0) >= READ_WALL_MAINTAINER) return
-    if (Number(row.created_by) === viewer.userId) return
-    const role = await resolveProjectRole(env, user, row.id)
-    if (role != null && role.level >= READ_WALL_MAINTAINER) return
-    restricted.push(row)
-  }))
+  // One set-based resolve for the page. This used to be resolveProjectRole per
+  // row: four statements a project, seven under ACCESS_GRANTS_RESOLVER=shadow,
+  // which came to 1,085 for one dev caller's 155 projects below the wall.
+  const unsettled = rows.filter(
+    (row) =>
+      (orgLevel.get(Number(row.org_id)) ?? 0) < READ_WALL_MAINTAINER &&
+      Number(row.created_by) !== viewer.userId,
+  )
+  const roles = await resolveProjectRoles(env, user, unsettled.map((row) => row.id))
+  const restricted = unsettled.filter((row) => {
+    const role = roles.get(row.id)
+    return !(role != null && role.level >= READ_WALL_MAINTAINER)
+  })
   if (restricted.length === 0) return null
 
   const projectIds = restricted.map((row) => row.id)
@@ -1829,7 +1834,7 @@ async function visiblePortfolioText(
 
   const overrides = new Map<string, VisiblePortfolioText>()
   for (const row of restricted) {
-    const role = await resolveProjectRole(env, user, row.id)
+    const role = roles.get(row.id)
     const visible = visibleLaneTags({
       enabled: true,
       role: role?.level ?? 0,

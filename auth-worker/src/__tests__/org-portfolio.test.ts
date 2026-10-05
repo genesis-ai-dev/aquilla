@@ -1110,4 +1110,73 @@ describe("AQU-1421 portfolio lane visibility", () => {
       targetLanguage: "Spanish",
     })
   })
+
+  // The wall asks one question per project: is this caller a Maintainer on it,
+  // by any grant path? That is resolveProjectRole's question, and the page now
+  // gets it answered for every project at once, so each path is walked here
+  // through the dashboard itself.
+  it("lifts the wall for a Maintainer role on the project whichever path grants it, and for nothing lower", async () => {
+    await seedSplitProject()
+    env.LANE_READ_WALL = "1"
+    try {
+      const lanes = async () => (await rowFor(2)).lanes.map((lane) => lane.lane).sort()
+      expect(await lanes()).toEqual(["es"])
+
+      // A team attached at Contributor changes nothing: still below the wall.
+      await sql("INSERT INTO groups (id, org_id, name, created_by) VALUES (1, 1, 'Translators', 1)")
+      await sql("INSERT INTO group_members (group_id, user_id, added_by) VALUES (1, 2, 1)")
+      await sql("INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (1, 'pa', 400, 1)")
+      expect(await lanes()).toEqual(["es"])
+
+      // The same team at Maintainer wins over the direct Contributor row
+      // (AD-12 max-wins), and the SQL totals come back with the lanes.
+      await sql("UPDATE group_project_grants SET role_level = 600 WHERE group_id = 1 AND project_id = 'pa'")
+      expect(await lanes()).toEqual(["", "es"])
+      expect(await rowFor(2)).toMatchObject({ totalCells: 80, aiDraftedCells: 5, targetLanguage: "Spanish" })
+
+      // And a direct Maintainer row does it with the team back at Contributor.
+      await sql("UPDATE group_project_grants SET role_level = 400 WHERE group_id = 1 AND project_id = 'pa'")
+      expect(await lanes()).toEqual(["es"])
+      await sql("UPDATE project_members SET role_level = 600 WHERE project_id = 'pa' AND user_id = 2")
+      expect(await lanes()).toEqual(["", "es"])
+    } finally {
+      env.LANE_READ_WALL = undefined
+    }
+  })
+
+  // 2026-10-05: a caller with 155 projects below the wall cost 1,085 role
+  // statements on this one request, four per project plus three more under
+  // ACCESS_GRANTS_RESOLVER=shadow. Nothing on this path may grow with the page.
+  it.each([undefined, "shadow", "on"])(
+    "issues as many statements for four walled projects as for one (ACCESS_GRANTS_RESOLVER=%s)",
+    async (resolver) => {
+      await seedSplitProject()
+      const walled = async () => {
+        const statements: string[] = []
+        const db = {
+          prepare(query: string) {
+            statements.push(query)
+            return env.AQUILLA_PG.prepare(query)
+          },
+        }
+        const rows = await getOrgPortfolios(
+          { ...env, AQUILLA_PG: db, LANE_READ_WALL: "1", ACCESS_GRANTS_RESOLVER: resolver } as unknown as Env,
+          [1],
+          { userId: 2, isAdmin: false },
+        )
+        return { rows, statements }
+      }
+
+      const one = await walled()
+      await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Bislama', 1, 1), ('pc', 'Hiri Motu', 1, 1), ('pd', 'Kuanua', 1, 1)")
+      await sql("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('pb', 2, 400), ('pc', 2, 400), ('pd', 2, 400)")
+      const four = await walled()
+
+      expect(one.rows.map((row) => row.id)).toEqual(["pa"])
+      expect(four.rows.map((row) => row.id).sort()).toEqual(["pa", "pb", "pc", "pd"])
+      // Every one of them is below the wall, so every one of them was resolved.
+      expect(four.rows.find((row) => row.id === "pa")!.lanes.map((lane) => lane.lane)).toEqual(["es"])
+      expect(four.statements).toHaveLength(one.statements.length)
+    },
+  )
 })

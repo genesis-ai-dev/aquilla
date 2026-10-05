@@ -1,4 +1,4 @@
--- Migration 0131 (AQU-1656): ai_interventions — an audit trail for what the AI
+-- Migration 0134 (AQU-1656): ai_interventions — an audit trail for what the AI
 -- did to a cell, and why.
 --
 -- A committed AI draft already carries `ai_draft` provenance (model, example
@@ -25,7 +25,7 @@
 --
 -- NOT applied automatically to live Neon branches. Apply by hand:
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0131_ai_interventions.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0134_ai_interventions.sql
 
 CREATE TABLE IF NOT EXISTS ai_interventions (
   id text PRIMARY KEY,

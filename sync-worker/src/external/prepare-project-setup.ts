@@ -20,8 +20,6 @@ import {
 } from './commands-membership'
 import {
   previewSettingValue,
-  referenceBibleOpProblem,
-  REFERENCE_BIBLE_SETTINGS_KEY,
   resolveLanguageEditMinRole,
   resolveTermbaseEditMinRole,
   LANGUAGE_SETTINGS_KEYS,
@@ -153,6 +151,20 @@ export async function prepareProjectSetup(
     if (problem) return fieldError('validation_failed', `settings.${op.key}`, problem)
   }
 
+  const current = await loadProjectSettings(db, urlProjectId)
+  const loosening = loosensPolicy(ops.policy, current.settings)
+  if (loosening.length > 0) {
+    return fieldError(
+      'permission_denied',
+      `settings.${loosening[0].key}`,
+      'policy settings keys are writable in the restrictive direction only',
+      {
+        policyKeys: ops.policy.map((op) => op.key),
+        loosening: loosening.map(({ key, current: c, proposed, reason }) => ({ key, current: c, proposed, reason })),
+      },
+    )
+  }
+
   // ── brief sections ───────────────────────────────────────────────────────
   for (const sectionId of Object.keys(cmd.brief?.parameters ?? {})) {
     if (!isBriefFieldId(sectionId)) {
@@ -171,32 +183,6 @@ export async function prepareProjectSetup(
     return errorResponse('permission_denied', 'insufficient project role to stage this project setup', {
       requiredRole,
     })
-  }
-
-  // Checks that read the project's live settings come AFTER the role floor:
-  // their errors echo lane names, the target language and current policy
-  // values, which a caller without the role must not learn (review
-  // 2026-10-02; PatchSettings orders it the same way).
-  const current = await loadProjectSettings(db, urlProjectId)
-
-  // AQU-1573: the shape passed above; the Bible must be installed and each lane
-  // key a lane of the project as this plan leaves it.
-  const referenceProblem = await referenceBibleOpProblem(db, [...ops.plain, ...ops.policy], current.settings)
-  if (referenceProblem) {
-    return fieldError('validation_failed', `settings.${REFERENCE_BIBLE_SETTINGS_KEY}`, referenceProblem)
-  }
-
-  const loosening = loosensPolicy(ops.policy, current.settings)
-  if (loosening.length > 0) {
-    return fieldError(
-      'permission_denied',
-      `settings.${loosening[0].key}`,
-      'policy settings keys are writable in the restrictive direction only',
-      {
-        policyKeys: ops.policy.map((op) => op.key),
-        loosening: loosening.map(({ key, current: c, proposed, reason }) => ({ key, current: c, proposed, reason })),
-      },
-    )
   }
 
   const warnings: ChangesetWarning[] = []

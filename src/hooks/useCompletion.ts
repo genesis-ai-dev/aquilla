@@ -250,10 +250,6 @@ export function useCompletion(
   /** Style-rule instructions in force for one cell, resolved from the
    *  applicability graph (AQU-934). Omitted → no style block is injected. */
   styleInstructionsFor?: (cell: CellData) => string[],
-  /** AQU-1573: the reference-verses block for the cells one call drafts (the
-   *  verses their sources cite, from the lane's reference Bible), or undefined
-   *  when there is none. Omitted → no block. A failure drafts without it. */
-  referenceBlockFor?: (cells: CellData[]) => Promise<string | undefined>,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -302,18 +298,6 @@ export function useCompletion(
     () => typeof allCells === "function" ? allCells() : allCells ?? [],
     [allCells],
   )
-  // AQU-1573: the cited verses never block a draft. A lookup that fails (the
-  // server is unreachable, the Bible was removed) drafts without the block,
-  // exactly as a project with no reference Bible would.
-  const referenceBlock = useCallback(async (cells: CellData[]): Promise<string | undefined> => {
-    if (!referenceBlockFor || cells.length === 0) return undefined
-    try {
-      return (await referenceBlockFor(cells)) || undefined
-    } catch (err) {
-      console.warn("[useCompletion] reference verses lookup failed:", err)
-      return undefined
-    }
-  }, [referenceBlockFor])
   const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
     const sourceText = effectiveSourceText(cell)
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
@@ -430,7 +414,6 @@ export function useCompletion(
           ? buildFootnoteInstruction(prepared.footnoteCount)
           : undefined)
 
-      const cellReferenceBlock = await referenceBlock([cell])
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -442,7 +425,6 @@ export function useCompletion(
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
         precedingContext,
-        ...(cellReferenceBlock && { referenceBlock: cellReferenceBlock }),
         ...(systemAddendum && { systemAddendum }),
         ...(!idmlAddendum && prepared.footnoteCount > 0 && {
           preSourceBlock: prepared.footnoteBlock,
@@ -563,7 +545,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, referenceBlock])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -751,7 +733,6 @@ export function useCompletion(
             ...chunk.map((cell) => ({ source: effectiveSourceText(cell) })),
           ],
         )
-        const chunkReferenceBlock = await referenceBlock(chunk)
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -767,7 +748,6 @@ export function useCompletion(
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
           precedingContext,
-          ...(chunkReferenceBlock && { referenceBlock: chunkReferenceBlock }),
           systemAddendum: idmlCompletionSystemAddendum(chunk),
         })
 
@@ -1022,7 +1002,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, referenceBlock])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1099,9 +1079,7 @@ export function useCompletion(
         ],
       )
 
-      // 3. Build the paragraph prompt. Cited verses come from the cells being
-      // drafted only: a validated (locked) cell is never re-translated.
-      const paragraphReferenceBlock = await referenceBlock(draftCells)
+      // 3. Build the paragraph prompt.
       const messages = buildParagraphPrompt({
         sourceLanguage,
         targetLanguage,
@@ -1135,7 +1113,6 @@ export function useCompletion(
           groupIds[groupIds.length - 1],
           draftContext.precedingTargetCells,
         ),
-        ...(paragraphReferenceBlock && { referenceBlock: paragraphReferenceBlock }),
         systemAddendum: idmlCompletionSystemAddendum(draftCells),
       })
 
@@ -1259,7 +1236,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(lk(c.id), msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, referenceBlock])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

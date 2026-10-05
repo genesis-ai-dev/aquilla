@@ -46,14 +46,6 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
-    "rules.infraction.builtin.referenceQuoteDiffers":
-      "The quote of {refs} does not match {version} word for word",
-    "rules.infraction.builtin.referenceQuoteMissing":
-      "The source quotes {refs}, but the translation does not use the {version} wording",
-    "rules.infraction.builtin.referenceDropped": plural({
-      one: "The source cites {refs}, but the translation leaves out the reference",
-      other: "The source cites {refs}, but the translation leaves out the references",
-    }),
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -89,9 +81,6 @@ export const rules = defineNamespace({
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
-    "rules.builtin.referenceQuote.name": "Reference Bible quotes",
-    "rules.builtin.referenceQuote.description":
-      "A verse the source quotes with its reference must match the language's reference Bible word for word. Vowel marks and punctuation are ignored, and a partial quote is fine. The translation must also keep each reference's chapter and verse numbers.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -136,7 +125,6 @@ export const rules = defineNamespace({
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
-    "rules.checkDrawer.rowLabel": "Row {number}",
     "rules.checkDrawer.scopeRules": plural({ one: "{count} rule", other: "{count} rules" }),
     "rules.checkDrawer.scopeTerms": plural({ one: "{count} term", other: "{count} terms" }),
     "rules.checkDrawer.termHeadline.noneApproved": plural(
@@ -486,33 +474,6 @@ export const rules = defineNamespace({
           targetCount: "How many required renderings appear in the translation.",
         },
       },
-      "rules.infraction.builtin.referenceQuoteDiffers": {
-        description:
-          "Reference Bible quotes check finding (AQU-1573), shown under the check's name in the editor and the Check file drawer: the translation quotes a Bible verse the source cites, but changes, adds or drops words inside the quote. A warning, not an error.",
-        placeholders: {
-          refs: "The cited verse reference(s) as written for readers, e.g. 'Isaiah 40:25' or 'Romans 8:28, John 3:16' — never translated.",
-          version: "The reference Bible's short name, e.g. 'Van Dyck' or 'King James Version' — never translated.",
-        },
-      },
-      "rules.infraction.builtin.referenceQuoteMissing": {
-        description:
-          "Reference Bible quotes check finding (AQU-1573): the source visibly quotes a Bible verse (in quotation marks, or with the reference in brackets after it), but the translation does not use that Bible's wording at all — it was probably translated fresh instead of copied. A warning, not an error.",
-        placeholders: {
-          refs: "The cited verse reference(s) as written for readers, e.g. 'Psalm 23:1' — never translated.",
-          version: "The reference Bible's short name, e.g. 'Van Dyck' — never translated.",
-        },
-      },
-      "rules.infraction.builtin.referenceDropped": {
-        description:
-          "Reference Bible quotes check finding (AQU-1573), shown under the check's name in the editor and the Check file drawer: the source cites a Bible verse by chapter and verse (e.g. 'Isaiah 40:25'), but the translation does not contain those numbers, so the reference was lost. The book name may be translated; only the numbers have to stay. Fires with or without a reference Bible. A warning, not an error.",
-        placeholders: {
-          refs: "The cited verse reference(s) as written for readers, e.g. 'Isaiah 40:25' or 'Isaiah 40:25, John 3:16' — never translated. The plural form follows how many references are listed.",
-        },
-      },
-      "rules.builtin.referenceQuote.description": {
-        description:
-          "Description of the built-in 'Reference Bible quotes' check (AQU-1573), shown under its name in the built-in checks list. 'Reference Bible' is the Bible chosen per language in Project settings; vowel marks means Arabic/Hebrew diacritics. The last sentence means the chapter and verse numbers of a cited reference (e.g. '40:25') must still appear in the translation.",
-      },
       "rules.infraction.builtin.placeholderIntegrity": {
         description:
           "Placeholder-integrity check finding, shown under a rule/check name that's rendered separately. Names the specific placeholder token(s) (e.g. {name}, %s) missing from the translation, singular or plural depending on how many.",
@@ -591,11 +552,6 @@ export const rules = defineNamespace({
         description:
           "Small caption under a rule-violation cell reference, quoting the exact text that matched. The quoted text itself is raw cell content, never translated.",
         placeholders: { text: "The matched span's raw text — never translated." },
-      },
-      "rules.checkDrawer.rowLabel": {
-        description:
-          "Title of a finding card in the Check file drawer for a row that has no verse reference or cue time (a paragraph of a Markdown or Word document, such as a sermon). {number} is the row number shown in the editor's left margin.",
-        placeholders: { number: "The row's number in the editor, as digits." },
       },
       "rules.checkDrawer.scopeRules": {
         description: "Second segment of the 'what was checked' scope summary.",

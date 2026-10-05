@@ -24,7 +24,6 @@
 import { AliasMap } from "./compress"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft } from "./lint"
-import { referenceQuoteLintLines, type StagedQuoteDraft } from "./reference-lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
@@ -469,9 +468,6 @@ export async function stageEvents(
   )
   const lintRules = anyCommit ? await loadLintRules(db, ctx.projectId) : []
   const lintLines: string[] = []
-  // AQU-1573: staged drafts for the reference Bible quote check, which needs
-  // one verse lookup for the whole batch after the loop.
-  const quoteDrafts: StagedQuoteDraft[] = []
 
   // Same once-per-emit discipline as the lint rules above: only read settings
   // when the batch actually contains a kind that needs the answer.
@@ -492,13 +488,6 @@ export async function stageEvents(
     if (verdict.kind === "staged") {
       staged.push(verdict.event)
       lines.push(`${i + 1}|${kind}|${verdict.event.display.canonicalRef ?? "∅"}|staged`)
-      if (kind === "target.cell.commit") {
-        quoteDrafts.push({
-          ref: verdict.event.display.canonicalRef ?? `#${i + 1}`,
-          source: verdict.sourceValue ?? "",
-          draft: typeof verdict.event.payload.value === "string" ? verdict.event.payload.value : "",
-        })
-      }
       if (kind === "target.cell.commit" && lintRules.length > 0) {
         const hits = lintDraft(
           lintRules,
@@ -514,12 +503,6 @@ export async function stageEvents(
     } else {
       lines.push(`${i + 1}|${kind}|∅|${verdict.kind}: ${verdict.reason}`)
     }
-  }
-
-  if (quoteDrafts.length > 0) {
-    lintLines.push(
-      ...(await referenceQuoteLintLines(db, { projectId: ctx.projectId, lane: ctx.lane, drafts: quoteDrafts })),
-    )
   }
 
   if (lintLines.length > 0) {

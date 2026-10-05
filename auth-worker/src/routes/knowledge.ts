@@ -8,7 +8,8 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
-import { extractTextFromDocx, extractTextFromPdf } from "./parse-document"
+import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
+import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
 import {
   createDoc,
@@ -75,7 +76,14 @@ function kbContentTypeForExtension(fileName: string): string {
 
 type ExtractResult =
   | { ok: true; text: string }
-  | { ok: false; code: ErrorCode; message: string; status: ContentfulStatusCode }
+  | {
+      ok: false
+      code: ErrorCode
+      message: string
+      status: ContentfulStatusCode
+      /** Inflated size of word/document.xml, when the failure was about it. */
+      documentXmlBytes?: number
+    }
 
 function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
   const ext = kbExtension(fileName)
@@ -93,7 +101,23 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
     }
     try {
       text = ext === ".docx" ? extractTextFromDocx(bytes) : extractTextFromPdf(bytes)
-    } catch {
+    } catch (err) {
+      // AQU-1499: this used to be a bare `catch` returning a flat "could not
+      // extract text", so an uploader whose file failed for a knowable,
+      // fixable reason had nothing to act on and no way to tell a bad file
+      // from a bad parser. DocumentExtractionError messages are authored in
+      // parse-document.ts for exactly this — they name no internals and are
+      // passed through verbatim. Anything else still reports generically.
+      if (err instanceof DocumentExtractionError) {
+        return {
+          ok: false,
+          code: "validation_failed",
+          message: `could not extract text: ${err.message}`,
+          status: 422,
+          ...(err.documentXmlBytes !== undefined ? { documentXmlBytes: err.documentXmlBytes } : {}),
+        }
+      }
+      console.error("[knowledge] text extraction failed:", err)
       return { ok: false, code: "validation_failed", message: "could not extract text", status: 422 }
     }
   } else {
@@ -109,6 +133,19 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
     }
   }
   return { ok: true, text: text.slice(0, MAX_KB_TEXT_CHARS) }
+}
+
+/** Fire-and-forget a background task off c.executionCtx.waitUntil when there
+ *  is one. Hono throws on `c.executionCtx` when the request was made without a
+ *  real ExecutionContext (the vitest harness calls app.fetch directly), so fall
+ *  back to letting the promise settle on its own — same pattern as
+ *  `runIndexing` below and the middleware in index.ts. */
+function runInBackground(c: Context<AuthHonoEnv>, task: Promise<void>): void {
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
 }
 
 /** Fire the indexing job off c.executionCtx.waitUntil when available; in the
@@ -172,6 +209,21 @@ async function handleUpload(
 
   const extracted = extractText(fileName, bytes)
   if (!extracted.ok) {
+    // AQU-1499: count the rejections. Partners hit this on their first
+    // knowledge-base upload and work around it privately (re-saving the file),
+    // so without a queryable record of its own the failure stays invisible to
+    // us — the generic 4xx log the global middleware already ships cannot be
+    // counted by reason or by document.xml size.
+    runInBackground(
+      c,
+      shipLog(c.env, "aquilla-identity", "warn", `kb-extract-failed: ${extracted.code}`, {
+        "kb.extension": kbExtension(fileName) ?? "unknown",
+        "kb.size_bytes": bytes.byteLength,
+        "kb.document_xml_bytes": extracted.documentXmlBytes,
+        "kb.reason": extracted.message,
+        "http.status": extracted.status,
+      }),
+    )
     const { body, status } = errorJson(extracted.code, extracted.message, extracted.status)
     return c.json(body, status)
   }

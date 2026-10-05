@@ -283,6 +283,43 @@ describe("untrusted clients", () => {
 })
 
 
+describe("pinned client documents on local stacks (AQU-1641)", () => {
+  const EVIL = "https://evil.example/cb"
+  const withPins = (pins: object[], local: boolean) => Object.assign(Object.create(oauthEnv) as typeof env, {
+    MCP_OAUTH_PINNED_CLIENTS: JSON.stringify(pins),
+    WRANGLER_LOCAL: local ? "1" : "0",
+  })
+  const request = (body: object, jwt: string, e: typeof env) => app.request("/api/v2/mcp-oauth/request", {
+    method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
+  }, e)
+
+  it("serves the pinned document instead of fetching the client id", async () => {
+    const jwt = await seed()
+    const pinned = withPins([{ client_id: CLIENT_ID, client_name: "Pinned ChatGPT", redirect_uris: [REDIRECT] }], true)
+    const response = await request(await authorizeParams(), jwt, pinned)
+    expect(response.status).toBe(200)
+    expect(((await response.json()) as { clientName: string }).clientName).toBe("Pinned ChatGPT")
+    expect(fetchSpy.mock.calls.map(([input]) => String(input))).not.toContain(CLIENT_ID)
+  })
+
+  it("still validates a pinned document", async () => {
+    const jwt = await seed()
+    const pinned = withPins([{ client_id: CLIENT_ID, redirect_uris: ["http://evil.example/cb"] }], true)
+    const response = await request(await authorizeParams(), jwt, pinned)
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_client")
+  })
+
+  it("is ignored outside WRANGLER_LOCAL", async () => {
+    const jwt = await seed()
+    const pinned = withPins([{ client_id: CLIENT_ID, redirect_uris: [EVIL] }], false)
+    const response = await request(await authorizeParams({ redirect_uri: EVIL }), jwt, pinned)
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_request")
+    expect(fetchSpy.mock.calls.map(([input]) => String(input))).toContain(CLIENT_ID)
+  })
+})
+
 describe("OAuth organization grants across real consumers (AQU-1529)", () => {
   async function multiOrgGrant() {
     const jwt = await seed()

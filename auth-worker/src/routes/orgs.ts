@@ -34,6 +34,7 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
   clampTeamDirectoryLimit,
@@ -151,13 +152,19 @@ type OrgListItem = {
   name: string | null
   role: { level: number; name: string }
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace (findPersonalOrg). */
+  personal?: boolean
 }
 
-function toMemberItem(o: { id: number; name: string | null; role: number }): OrgListItem {
+function toMemberItem(
+  o: { id: number; name: string | null; role: number },
+  personalId: number | null,
+): OrgListItem {
   return {
     id: o.id,
     name: o.name,
     role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+    ...(Number(o.id) === personalId ? { personal: true } : {}),
   }
 }
 
@@ -182,10 +189,12 @@ orgs.get("/", async (c) => {
   const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
 
   const list = await listUserOrgs(c.env, user)
+  const personal = await findPersonalOrg(c.env, user.id)
+  const personalId = personal ? Number(personal.id) : null
   const memberships = q
     ? list.filter((o) => (o.name ?? "").toLowerCase().includes(q))
     : list
-  const memberItems = memberships.map(toMemberItem)
+  const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
   if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
     return c.json({ orgs: memberItems, nextCursor: null })
@@ -370,14 +379,12 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  // AQU-1071: the active-language count rides along with the rollup the org
+  // AQU-1071: the active-lane count rides along with the rollup the org
   // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same rule billing bills on (distinct active target-language tags;
-  // archived lanes, archived projects and — AQU-1070 — paused projects
-  // excluded), and deliberately org-wide
-  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
-  // a partner reading a smaller figure than their invoice is the confusion this
-  // ticket exists to remove, and a bare count names no project, so it discloses
+  // is the same count billing bills on, and deliberately org-wide rather than
+  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
+  // reading a smaller figure than their invoice is the confusion this ticket
+  // exists to remove, and a bare count names no project, so it discloses
   // nothing the visibility rule guards.
   const [{ projects, nextCursor }, laneCounts] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),

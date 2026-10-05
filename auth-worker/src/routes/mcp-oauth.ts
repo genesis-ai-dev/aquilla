@@ -27,7 +27,7 @@ import { ROLE, type AuthUser } from "../types"
 import { mintApiToken, sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
 import { scopeLevel } from "./agent-connect"
-import { resolveClient, type ResolvedClient } from "../lib/mcp-oauth/client-metadata"
+import { pinnedClientFetcher, resolveClient, type Fetcher, type ResolvedClient } from "../lib/mcp-oauth/client-metadata"
 
 type Bindings = AuthHonoEnv["Bindings"]
 type Mode = "ask" | "act"
@@ -106,8 +106,14 @@ type Validated =
   | { kind: "redirect_error"; error: string; error_description: string; redirect: string }
   | { kind: "ok"; client: ResolvedClient; params: AuthorizeParams; mode: Mode; resource: string | null }
 
-async function validateAuthorize(params: AuthorizeParams, issuer: string, resource: string): Promise<Validated> {
-  const resolved = await resolveClient(params.client_id)
+function clientFetcher(env: Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_CLIENTS">): Fetcher {
+  return env.WRANGLER_LOCAL === "1" && env.MCP_OAUTH_PINNED_CLIENTS
+    ? pinnedClientFetcher(env.MCP_OAUTH_PINNED_CLIENTS)
+    : fetch
+}
+
+async function validateAuthorize(params: AuthorizeParams, issuer: string, resource: string, fetcher: Fetcher): Promise<Validated> {
+  const resolved = await resolveClient(params.client_id, fetcher)
   if (!resolved.ok) return { kind: "fatal", error: resolved.error, error_description: resolved.description }
   if (!resolved.client.redirectUris.includes(params.redirect_uri)) {
     return { kind: "fatal", error: "invalid_request", error_description: "redirect_uri is not registered for this client" }
@@ -281,7 +287,8 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
     return c.json({ error: "slow_down" }, 429)
   }
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_request", ident, true)
-  const v = await validateAuthorize(parsed.data, issuerFor(c.env, c.req.url), oauthResourceFor(c.env, issuerFor(c.env, c.req.url)))
+  const issuer = issuerFor(c.env, c.req.url)
+  const v = await validateAuthorize(parsed.data, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)
@@ -314,7 +321,7 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_decision", ident, true)
   const issuer = issuerFor(c.env, c.req.url)
   // Re-validate from scratch: the browser is not trusted to carry a verdict.
-  const v = await validateAuthorize(input, issuer, oauthResourceFor(c.env, issuer))
+  const v = await validateAuthorize(input, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)

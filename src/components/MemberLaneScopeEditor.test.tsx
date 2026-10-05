@@ -10,7 +10,10 @@ import { fireEvent, render, screen } from "@testing-library/react"
 
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(),
-  putMemberScopes: vi.fn(async (_jwt: string, _p: string, _u: number, scopes: unknown) => scopes),
+  putMemberScopes: vi.fn(async (_jwt: string, _p: string, _u: number, scopes: unknown) => ({
+    scopes,
+    laneNames: {},
+  })),
 }))
 vi.mock("@/lib/sync/project-settings", () => ({ fetchProjectSettings: vi.fn() }))
 
@@ -71,5 +74,62 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     fireEvent.click(screen.getByRole("button", { name: "Edit carol's lane scopes on this project" }))
     expect(await screen.findByPlaceholderText("Lane code (e.g. es)")).toBeInTheDocument()
     expect(screen.queryByText("Languages they can work in")).toBeNull()
+  })
+})
+
+/**
+ * AQU-1607: a lane scope is a lane id. The checkboxes are the project's lane
+ * ROWS, so two lanes of the same language are two boxes and ticking one
+ * scopes the member to that lane alone.
+ */
+describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const withLanes = () =>
+    ({
+      version: 1,
+      updatedAt: "",
+      updatedBy: null,
+      settings: { targetLanguage: "Spanish", targetLanes: ["Spanish (Mexico)"] },
+      lanes: [
+        { id: "ln-src", role: "source", name: "Greek", langCode: "el", legacyTag: null, position: 0, archivedAt: null },
+        { id: "ln-main", role: "target", name: "Spanish", langCode: "es", legacyTag: "", position: 1, archivedAt: null },
+        { id: "ln-mx", role: "target", name: "Spanish (Mexico)", langCode: "es", legacyTag: "es-MX", position: 2, archivedAt: null },
+        { id: "ln-old", role: "target", name: "Tagalog", langCode: "tl", legacyTag: "tl", position: 3, archivedAt: "2026-09-01T00:00:00Z" },
+      ],
+    }) as never
+
+  it("offers one box per live target lane and saves the lane's id", async () => {
+    vi.mocked(fetchMemberScopes).mockResolvedValue([])
+    vi.mocked(fetchProjectSettings).mockResolvedValue(withLanes())
+    const onSaved = await openEditor()
+    // The source lane and the archived lane are not offered.
+    expect(screen.queryByLabelText("Lane Greek")).toBeNull()
+    expect(screen.queryByLabelText("Lane Tagalog")).toBeNull()
+
+    fireEvent.click(screen.getByText("Spanish (Mexico)"))
+    fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "ln-mx" }])
+  })
+
+  it("ticks a scope that still holds a legacy tag against its lane, and saves the id", async () => {
+    vi.mocked(fetchMemberScopes).mockResolvedValue([{ kind: "lane", value: "es-MX" }])
+    vi.mocked(fetchProjectSettings).mockResolvedValue(withLanes())
+    const onSaved = await openEditor()
+    expect(screen.getByLabelText("Lane Spanish (Mexico)")).toBeChecked()
+    expect(screen.getByLabelText("Lane Spanish")).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "ln-mx" }])
+  })
+
+  it("ticks the former default lane's '' scope against that lane", async () => {
+    vi.mocked(fetchMemberScopes).mockResolvedValue([{ kind: "lane", value: "" }])
+    vi.mocked(fetchProjectSettings).mockResolvedValue(withLanes())
+    await openEditor()
+    expect(screen.getByLabelText("Lane Spanish")).toBeChecked()
+    expect(screen.getByLabelText("Lane Spanish (Mexico)")).not.toBeChecked()
   })
 })

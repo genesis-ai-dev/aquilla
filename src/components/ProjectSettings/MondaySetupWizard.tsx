@@ -49,6 +49,8 @@ import {
   type MondayBoardLink,
   type MondayBoardStructure,
 } from "@/lib/monday/api"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { openExternal } from "@/lib/open-external"
 import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
 import { MondayMappingRows } from "./MondayMappingEditor"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -204,6 +206,9 @@ export function MondaySetupWizard({
       )
       if (popup && !popup.closed) {
         popup.location.href = url
+      } else if (isTauriRuntime()) {
+        // The desktop WebView has no popups; use the system browser.
+        await openExternal(url)
       } else {
         window.location.assign(url)
         return

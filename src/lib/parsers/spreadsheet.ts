@@ -284,6 +284,7 @@ export interface ColumnMapping {
  */
 import type { TranslatableString } from "./types"
 import { v4 as uuid } from "uuid"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export interface MappedRow {
   id: string
@@ -554,7 +555,10 @@ export function matchPairedRowsToSourceCells(
     }
     matchedRefs.add(row.ref)
     const currentText = cell.translated ?? ""
-    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    const parentId = resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? ""
     matched.push({
       cellId: cell.cellId,
       fileId: cell.fileId,

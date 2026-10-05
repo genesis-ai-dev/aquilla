@@ -58,6 +58,7 @@ import {
   getKnowledgeDocumentContent,
   getKnowledgeDocumentOriginal,
   isKnowledgeIndexStalled,
+  KnowledgeBaseApiError,
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
   uploadKnowledgeDocument,
@@ -178,8 +179,18 @@ export function KnowledgeBaseSurface({
       const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
       toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })
-    } catch {
-      toast.add({ type: "error", priority: "high", title: t("knowledgeBase.uploadError", { name: file.name }) })
+    } catch (err) {
+      // AQU-1499: show the server's reason when it sent one. "Try again" is
+      // actively misleading for a rejection that no retry can clear (a .docx
+      // whose word/document.xml is too bloated to read) — the reason names the
+      // fix, so the uploader is not left guessing.
+      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage : undefined
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: t("knowledgeBase.uploadError", { name: file.name }),
+        ...(reason ? { description: reason } : {}),
+      })
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""

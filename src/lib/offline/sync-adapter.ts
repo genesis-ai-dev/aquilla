@@ -45,9 +45,9 @@ import {
 } from "@/lib/sync/ws-reconciler"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
-import { cellRowId, events, tables, type schema } from "./schema"
+import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
-import { catchUpProject, isLocalLaneRow, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
+import { catchUpProject, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
 
 /** Matches buildProjectAwareMinter's signature (src/lib/sync/cqrs-bridge.ts) —
  *  callers typically pass that function directly. */
@@ -148,10 +148,26 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
 
   function applyRows(frame: Extract<ProjectWsServerMessage, { t: "event.applied" }>): void {
     if (!frame.file || !frame.rows) return
+    // AQU-1614: every lane's row lands — the local row key carries the lane,
+    // so a second language no longer overwrites the default lane's row.
     for (const row of frame.rows) {
-      if (!isLocalLaneRow(row)) continue
       store.commit(events.cellSynced(toCellSyncedArgs(projectId, frame.file, row)))
     }
+  }
+
+  /**
+   * AQU-1614: the local lane key of the target row a queued write belongs to.
+   * The queued payload carries the lane TAG, so prefer the lane key of the
+   * local row already standing in that lane (which may be keyed by `lanes.id`
+   * once AQU-1616's backfill has run) and fall back to the tag key.
+   */
+  function queuedTargetLaneKey(fileId: string, cellId: string, payload: unknown): string {
+    const tag = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+    const targetLang = typeof tag === "string" ? tag : ""
+    const existing = store.query(
+      tables.cells.select().where({ projectId, fileId, cellId, side: "target", targetLang }).first(),
+    )
+    return existing?.laneKey ?? localLaneKey(null, targetLang)
   }
 
   /** Dequeue a locally queued write once the server has resolved it (accepted
@@ -172,7 +188,15 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       if (!queued) return
       store.commit(events.eventDequeued({ id: msg.id }))
       if (queued.fileId && queued.cellId) {
-        markConflict(cellRowId(projectId, queued.fileId, queued.cellId, "target"))
+        markConflict(
+          cellRowId(
+            projectId,
+            queued.fileId,
+            queued.cellId,
+            "target",
+            queuedTargetLaneKey(queued.fileId, queued.cellId, queued.payload),
+          ),
+        )
       }
     }
   }
@@ -295,7 +319,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         store.commit(events.eventDequeued({ id }))
         const row = rowById.get(id)
         if (row?.fileId && row.cellId) {
-          markConflict(cellRowId(projectId, row.fileId, row.cellId, "target"))
+          markConflict(
+            cellRowId(projectId, row.fileId, row.cellId, "target", queuedTargetLaneKey(row.fileId, row.cellId, row.payload)),
+          )
         }
         continue
       }

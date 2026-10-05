@@ -406,7 +406,7 @@ export function buildParagraphPrompt(options: {
   // gives real discourse flow — connectives and participant reference that follow what was
   // actually said in the target language. Falls back to source before anything is committed. (D4)
   /** Preceding committed target context (discourse window left side). */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Following source context (discourse window right side) — source only, no committed target. */
   followingSource?: { source: string }[]
 }): ChatMessage[] {
@@ -485,7 +485,7 @@ export function buildParagraphPrompt(options: {
   if (options.precedingContext?.length) {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
-        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\nTranslation: ${stripTrailingBareMarkers(ctx.target)}\n\n`
+        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
       } else if (ctx.source.trim()) {
         // D4 source-fallback: no committed target yet — surface the preceding
         // source as discourse context WITHOUT a Source/Translation pair the model

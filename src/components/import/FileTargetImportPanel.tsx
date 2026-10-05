@@ -50,12 +50,25 @@ import {
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
+import { FileTargetLanePicker } from "./FileTargetLanePicker"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 
 export interface FileTargetImportPanelProps {
   projectId: string
   username: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** AQU-1631: lanes this import may be sent to, in registry order. Fewer than
+   *  two (or absent) hides the picker — there is nothing to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** Switches the destination lane. The host points this at the editor's own
+   *  lane setter: the review step's current translations, conflict ticks and
+   *  AD-2 commit parents all come from the OPEN lane's cells, so the chosen
+   *  lane and the loaded cells must be the same one. */
+  onTargetLangChange?: (lane: string) => void
+  /** True while the chosen lane's cells are still loading — the file picker
+   *  waits, so a match never runs against the previous lane's event heads. */
+  laneCellsLoading?: boolean
   /** Display name of the open file — shown so the user knows the import scope. */
   fileName: string
   /** The open file's cells, in display order. */
@@ -427,6 +440,9 @@ export function FileTargetImportPanel({
   projectId,
   username,
   targetLang,
+  laneOptions,
+  onTargetLangChange,
+  laneCellsLoading = false,
   fileName,
   cells,
   getToken,
@@ -745,24 +761,50 @@ export function FileTargetImportPanel({
             {t("importExport.fileTarget.description")}
           </p>
         </div>
+        {/* AQU-1631: the destination language is a choice, not whatever the
+            editor had open. Picked before the file so a wrong lane costs a
+            click rather than an import; see FileTargetLanePicker for why the
+            choice moves the editor's lane with it. */}
+        {laneOptions && onTargetLangChange && (
+          <FileTargetLanePicker
+            options={laneOptions}
+            value={targetLang ?? ""}
+            onValueChange={(lane) => {
+              if (lane === (targetLang ?? "")) return
+              setError(null)
+              onTargetLangChange(lane)
+            }}
+            loading={laneCellsLoading}
+          />
+        )}
         <div
           className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted p-8 gap-3"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault()
+            // The chosen lane's cells are what the incoming rows match
+            // against; until they land a drop would align to the lane the
+            // user just switched away from.
+            if (laneCellsLoading) return
             const file = e.dataTransfer.files[0]
             if (file) handleFile(file)
           }}
         >
           <p className="text-sm text-muted-foreground">{t("importExport.fileTarget.dropZoneHint")}</p>
           <label>
-            <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors",
+                laneCellsLoading ? "pointer-events-none opacity-50" : "hover:bg-accent",
+              )}
+            >
               {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
               accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
               className="sr-only"
+              disabled={laneCellsLoading}
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) handleFile(file)

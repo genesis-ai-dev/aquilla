@@ -34,6 +34,8 @@ export const agent = defineNamespace({
     "agent.dock.attachFileAriaLabel": "Attach file",
     "agent.dock.attachFileTitle": "Attach a file for the agent",
     "agent.dock.removeAttachmentAriaLabel": "Remove {fileName}",
+    "agent.dock.copyChat": "Copy chat",
+    "agent.dock.copiedChat": "Copied",
 
     // ── Rename-suggestions banner (SuggestionBanner) — unrelated feature
     //    (Bible-book / episode file naming), keyed here because this agent
@@ -248,11 +250,15 @@ export const agent = defineNamespace({
 
     // ── Shared chat management (AgentChatOptions) ───────────────────────
     "agent.chatOptions.label": "Chat options",
-    "agent.chatOptions.resetItem": "Reset chat…",
-    "agent.chatOptions.resetTitle": "Reset chat?",
-    "agent.chatOptions.resetDescription":
-      "Clears the messages, chat proposals, and Undo controls shared by {teamChat} and {chat} in this browser. Stops any current chat response and clears queued messages. Project task activity, files, and applied translations are unchanged.",
-    "agent.chatOptions.resetConfirm": "Reset chat",
+    "agent.chatOptions.newChat": "New chat",
+    "agent.chatOptions.newChatDescription":
+      "Starts a fresh conversation. This one is saved — reopen it under Previous chats. A reopened chat shows the messages, not the proposal cards from the run that produced them.",
+    "agent.chatOptions.previousHeading": "Previous chats",
+    "agent.chatOptions.previousLoading": "Loading your chats…",
+    "agent.chatOptions.previousFailed": "Couldn't load your chats.",
+    "agent.chatOptions.previousEmpty": "No previous chats",
+    "agent.chatOptions.untitledChat": "Untitled chat",
+    "agent.chatOptions.openChat": "{title} — open now",
 
     // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
     // The agent's autonomy is a dial, not an on/off: two independent loops
@@ -359,7 +365,7 @@ export const agent = defineNamespace({
     "agent.changeset.loading": "Loading changeset…",
     "agent.changeset.backTo": "Back to {projectName}",
     "agent.changeset.notStagedNotice":
-      "This changeset is currently {status} and can no longer be approved.",
+      "This changeset is {status} and can no longer be approved.",
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",
@@ -540,6 +546,8 @@ export const agent = defineNamespace({
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
     "agent.validation.roleCannotValidate": "Your role can't validate in this project",
+    "agent.validation.selfValidationBlocked":
+      "Not applicable — this project doesn't allow validating your own edit",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -688,6 +696,17 @@ export const agent = defineNamespace({
           "file attachment chip from the composer before sending, naming the file " +
           "being removed.",
         placeholders: { fileName: "Display name of the attached file being removed." },
+      },
+      "agent.dock.copyChat": {
+        description:
+          "Tooltip and accessible name for the small icon button at the top-right of the " +
+          "agent conversation that copies the whole conversation (the user's messages and " +
+          "the agent's replies) to the clipboard as plain text.",
+      },
+      "agent.dock.copiedChat": {
+        description:
+          "Brief confirmation shown in the same tooltip/accessible name for about a second " +
+          "after agent.dock.copyChat succeeds: the conversation is now on the clipboard.",
       },
       "agent.rename.bannerSuffix": {
         description:
@@ -1252,21 +1271,30 @@ export const agent = defineNamespace({
       "agent.chatOptions.label": {
         description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
       },
-      "agent.chatOptions.resetItem": {
-        description: "Menu action that opens confirmation before resetting the shared chat session; it does not create a separate conversation in the task list.",
+      "agent.chatOptions.newChat": {
+        description: "Menu action that starts a fresh conversation. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
       },
-      "agent.chatOptions.resetTitle": {
-        description: "Confirmation title for discarding the current browser's shared chat session.",
+      "agent.chatOptions.newChatDescription": {
+        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Do not soften the second half — it is the one thing that does not come back.",
       },
-      "agent.chatOptions.resetDescription": {
-        description: "Explains the actual reset scope: browser-local chat and review state are cleared, chat streaming/queue stop, and project activity and applied translations are preserved.",
-        placeholders: {
-          teamChat: "The already-localized name of the pinned Team chat conversation.",
-          chat: "The already-localized name of the Chat tab.",
-        },
+      "agent.chatOptions.previousHeading": {
+        description: "Inert heading above the list of the signed-in user's own past chats on this project.",
       },
-      "agent.chatOptions.resetConfirm": {
-        description: "Destructive confirmation button; the existing reset runs only after this is activated.",
+      "agent.chatOptions.previousLoading": {
+        description: "Placeholder row while the user's chat list is being fetched.",
+      },
+      "agent.chatOptions.previousFailed": {
+        description: "Placeholder row when the chat list could not be fetched. States the failure rather than implying the user has no chats.",
+      },
+      "agent.chatOptions.previousEmpty": {
+        description: "Placeholder row when this user has no earlier chats on the project.",
+      },
+      "agent.chatOptions.untitledChat": {
+        description: "Name for a saved chat with no first user message to take a title from.",
+      },
+      "agent.chatOptions.openChat": {
+        description: "Label for the chat already on screen, listed so the user can see where they are but not re-openable onto itself.",
+        placeholders: { title: "The chat's own title, or the localized Untitled chat placeholder." },
       },
       "agent.team.openQuestionAriaLabel": {
         description:
@@ -1294,6 +1322,14 @@ export const agent = defineNamespace({
         description:
           "Tooltip on a disabled per-row Validate button in the validation queue " +
           "when the signed-in user's project role is below the validation floor.",
+      },
+      "agent.validation.selfValidationBlocked": {
+        description:
+          "Shown in place of the per-row Validate button when the project has " +
+          "\"Allow self-validation\" off and the signed-in user is the line's last " +
+          "editor, so the server would refuse the validation. States that the " +
+          "prepared validation does not apply to this reader and why, rather than " +
+          "offering a button that fails.",
       },
       "agent.team.inspector.resize": {
         description:

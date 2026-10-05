@@ -34,3 +34,23 @@ export function extraRegistryLanes(
     return trimmed.length > 0 && !isPrimaryRegistryLane(trimmed, targetLanguage)
   })
 }
+
+/**
+ * AQU-1532: the lane tag a write should carry. The primary language is the
+ * default lane (`legacy_tag ''`), so a lane id that names it ("bla" or "BLA"
+ * when `targetLanguage` is "bla") resolves to `''`. A regional lane beside the
+ * primary ("fr-CA" next to "French") keeps its own tag. `undefined` stays
+ * `undefined`, so a caller can still tell "no lane named" from "default lane".
+ */
+export function canonicalLaneId(laneId: string, targetLanguage: string | null | undefined): string
+export function canonicalLaneId(
+  laneId: string | undefined,
+  targetLanguage: string | null | undefined,
+): string | undefined
+export function canonicalLaneId(
+  laneId: string | undefined,
+  targetLanguage: string | null | undefined,
+): string | undefined {
+  if (laneId === undefined) return undefined
+  return isPrimaryRegistryLane(laneId, targetLanguage) ? "" : laneId
+}

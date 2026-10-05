@@ -356,7 +356,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'single targetLanguage) — existing single-language callers need no changes.',
       workflow: [
         '1. Register the lanes once: get_project_settings for the live version, then patch_settings { ops: [{ key: "targetLanes", value: ["es", "pt"] }], ifMatchVersion } — a field-scoped write, so the rest of the settings blob is untouched.',
-        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
+        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed. The project\'s primary targetLanguage IS the default lane: omitting laneId and passing the primary (any spelling) both write the default row. A regional lane beside the primary (fr-CA in a French project) is its own lane and must be registered.',
         '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
         '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
       ],

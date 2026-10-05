@@ -206,6 +206,9 @@ export interface Env {
    *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
    *  names as the authorization server. Falls back to the request origin. */
   MCP_OAUTH_ISSUER?: string
+  /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
+   *  client metadata documents served instead of fetching their client_id. */
+  MCP_OAUTH_PINNED_CLIENTS?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may

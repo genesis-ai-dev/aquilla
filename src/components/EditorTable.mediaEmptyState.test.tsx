@@ -345,12 +345,17 @@ describe("EditorTable — empty time-ordered file", () => {
     ])
     expect(screen.getByRole("button", { name: "Attach captions" })).toHaveAttribute("data-variant", "default")
     expect(screen.getByRole("button", { name: "or use the original recording" })).toHaveAttribute("data-variant", "link")
+    // Quiet grey text says nothing about being clickable, so the link keeps a
+    // dashed underline at rest, not just on hover (Sam, Oct 5).
+    expect(screen.getByRole("button", { name: "or use the original recording" }).className)
+      .toMatch(/(^|\s)underline(\s|$).*decoration-dashed|decoration-dashed.*(^|\s)underline(\s|$)/)
     // The recording's explanation waits on its own step...
     expect(screen.queryByText(/same timing as the video/)).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
     expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
     // ...and the way back is right there.
+    expect(screen.getByRole("button", { name: "Back to captions" }).className).toMatch(/decoration-dashed/)
     fireEvent.click(screen.getByRole("button", { name: "Back to captions" }))
     expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()
   })

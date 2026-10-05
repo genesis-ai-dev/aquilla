@@ -63,6 +63,11 @@ interface TimelineLinkedVideoEmptyProps {
   onUseCaptionTrackAsRows?: (trackId: string) => void
 }
 
+
+/** The empty state's secondary actions are quiet grey text, so they carry a
+ *  dashed underline all the time: without it nothing says they can be clicked
+ *  (Sam, Oct 5 — "it is not otherwise clear that it is clickable"). */
+const QUIET_LINK = "text-muted-foreground underline decoration-dashed underline-offset-4 hover:decoration-solid"
 export function TimelineLinkedVideoEmpty({
   isYouTube,
   captionTracks,
@@ -134,7 +139,7 @@ export function TimelineLinkedVideoEmpty({
         </p>
         {promoteButtons}
         {onAttachFile && (
-          <Button variant="link" size="sm" className="mt-1 text-muted-foreground"
+          <Button variant="link" size="sm" className={cn("mt-1", QUIET_LINK)}
             onClick={() => { setRecordingStep(true); setError(null) }}>
             {t("editor.media.linkedVideoAddRecording")}
           </Button>
@@ -200,7 +205,7 @@ export function TimelineLinkedVideoEmpty({
                 }}
               />
             </Button>
-            <Button variant="link" size="sm" className="mt-2 text-muted-foreground"
+            <Button variant="link" size="sm" className={cn("mt-2", QUIET_LINK)}
               onClick={() => { setRecordingStep(false); setError(null) }}>
               {t("editor.media.linkedVideoBackToCaptions")}
             </Button>
@@ -223,7 +228,7 @@ export function TimelineLinkedVideoEmpty({
               </Button>
             ) : null}
             {onAttachFile && (
-              <Button variant="link" size="sm" className="mt-1 text-muted-foreground"
+              <Button variant="link" size="sm" className={cn("mt-1", QUIET_LINK)}
                 onClick={() => { setRecordingStep(true); setError(null) }}>
                 {t(captionAction || onOpenMediaView ? "editor.media.linkedVideoUseRecording" : "editor.media.linkedVideoAddRecording")}
               </Button>

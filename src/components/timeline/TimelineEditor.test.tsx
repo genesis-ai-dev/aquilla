@@ -4508,3 +4508,72 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     expect(screen.queryByText("Use as this file's rows")).toBeNull()
   })
 })
+
+// Sam's D3 (2026-10-05): on a linked video with no rows each prompt is said
+// once, where it belongs — on the timeline, not repeated in the Text pane.
+describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
+  const LINKED = "https://www.youtube.com/watch?v=aqbHRKZ1bVs"
+  const linkedTracks = () =>
+    deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false })
+  beforeEach(() => resetVideoDurationsForTests())
+
+  it("the Source text lane says there are no captions, with Attach captions inline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const attach = vi.fn()
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        onRequestImportCaptions={attach} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    expect(prompt.closest('[data-variant="subtitle"]')).toBeTruthy()
+    expect(prompt).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Attach captions" }))
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("is the statement alone for someone who cannot attach, and absent once captions are on the timeline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const { rerender } = render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.getByTestId("tl-linked-video-lane-prompt")).toHaveTextContent("No captions yet")
+    expect(within(screen.getByTestId("tl-linked-video-lane-prompt")).queryByRole("button")).toBeNull()
+    rerender(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 1 }} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+  })
+
+  it("the dashed Source audio placeholder is the video's own sound, with no raw time range", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const lane = screen.getByTestId("tl-source-regions")
+    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(lane.textContent).not.toContain("10:35.0")
+  })
+
+  it("draws no placeholder in Free timing, where the video is hidden and silent", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
+    expect(screen.queryByText("The video's own sound")).toBeNull()
+  })
+
+  it("leaves every other file's placeholder and Source text lane as they were", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+    expect(screen.queryByTestId("tl-source-gap-label")).toBeNull()
+    expect(screen.getByTestId("tl-source-regions").textContent).toContain("0:00.0–10:35.0")
+  })
+})

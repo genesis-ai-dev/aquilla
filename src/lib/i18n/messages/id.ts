@@ -489,7 +489,6 @@ export const id: Catalog = {
   "editor.media.linkedVideoNoCaptions": "Belum ada takarir di video ini. Setelah pengelola melampirkannya, takarir itu menjadi baris file ini.",
   "editor.media.linkedVideoCaptionsOn": "Teksnya ada di lini masa tampilan Media, pada {tracks}.",
   "editor.media.openMediaView": "Buka tampilan Media",
-  "editor.media.linkedVideoUpload": "Punya rekaman aslinya? Seret dan lepas audio atau video di sini, atau",
   "editor.media.linkedVideoUploadHint": "Rekaman harus berjalan dengan pewaktuan yang sama seperti video. Segmennya menjadi baris file ini. Video tetap diputar dengan suaranya sendiri; untuk mendengar rekaman, pilih rekaman itu di menu suara pada video.",
   "editor.media.linkedVideoUploadHintGeneric": "Rekaman harus berjalan dengan pewaktuan yang sama seperti video yang ditautkan. Segmennya menjadi baris file ini.",
   "editor.media.linkedVideoAttachHint": "Belum ada takarir di video ini. Lampirkan file takarir (VTT, SRT, atau SBV) dan takarirnya menjadi baris file ini, siap diterjemahkan.",

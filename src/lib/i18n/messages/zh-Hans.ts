@@ -497,7 +497,6 @@ export const zh_Hans: Catalog = {
   "editor.media.linkedVideoNoCaptions": "此视频还没有字幕。字幕轨道需在媒体视图的时间轴上添加。",
   "editor.media.linkedVideoCaptionsOn": "其字幕位于媒体视图的时间轴上，轨道为：{tracks}。",
   "editor.media.openMediaView": "打开媒体视图",
-  "editor.media.linkedVideoUpload": "有原始录音吗？将音频或视频拖放到此处，或",
   "editor.media.linkedVideoUploadHint": "录音的时间轴必须与链接的视频一致——其分段将成为此文件的行。",
   "editor.footnotes.label": "注脚",
   "editor.footnotes.trayRegion": "可见范围内的注脚",

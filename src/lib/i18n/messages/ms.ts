@@ -495,7 +495,6 @@ export const ms: Catalog = {
   "editor.media.linkedVideoNoCaptions": "Belum ada sari kata pada video ini. Trek sari kata ditambah pada garis masa paparan Media.",
   "editor.media.linkedVideoCaptionsOn": "Sari katanya berada pada garis masa paparan Media, dalam {tracks}.",
   "editor.media.openMediaView": "Buka paparan Media",
-  "editor.media.linkedVideoUpload": "Ada rakaman asal? Seret & lepas audio atau video di sini, atau",
   "editor.media.linkedVideoUploadHint": "Rakaman mesti mengikut masa yang sama dengan video yang dipautkan — segmennya menjadi baris fail ini.",
   "editor.footnotes.label": "Nota Kaki",
   "editor.footnotes.trayRegion": "Nota kaki yang kelihatan",

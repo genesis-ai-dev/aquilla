@@ -216,14 +216,23 @@ export const editor = defineNamespace({
     "editor.media.linkedVideoTitleGeneric": "Linked to a video",
     // AQU-1566: shown to everyone below maintainer. Under option b the first
     // captions become this file's rows, and only a maintainer attaches them.
+    // Sam's D1 (2026-10-05): one sentence.
     "editor.media.linkedVideoNoCaptions":
-      "No captions on this video yet. Once a maintainer attaches them, they " +
-      "become this file's rows.",
+      "When a maintainer attaches captions, they become this file's rows.",
     "editor.media.linkedVideoCaptionsOn":
       "Its captions are on the Media view's timeline, in {tracks}.",
     "editor.media.openMediaView": "Open Media view",
-    "editor.media.linkedVideoUpload":
-      "Have the original recording? Drag & drop the audio or video here, or",
+    // Sam's D1 (2026-10-05): the empty state is one card with one action;
+    // the original recording is a quiet second way in, and its explanation
+    // waits on the step it explains.
+    "editor.media.linkedVideoUseRecording": "or use the original recording",
+    "editor.media.linkedVideoAddRecording": "Add the original recording",
+    "editor.media.linkedVideoRecordingTitle": "Use the original recording",
+    "editor.media.linkedVideoBackToCaptions": "Back to captions",
+    // Sam's D3 (2026-10-05): in the Media view the prompt lives on the
+    // timeline's Source text lane, so the Text pane only points at it.
+    "editor.media.linkedVideoMediaHint":
+      "No rows yet. Attach captions on the timeline's Source text lane, and they become this file's rows.",
     // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
     // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
@@ -237,8 +246,7 @@ export const editor = defineNamespace({
     // its OWN rows, so a maintainer gets the action in place, and a caption
     // track that is already on the timeline can be turned into the rows.
     "editor.media.linkedVideoAttachHint":
-      "No captions on this video yet. Attach a caption file (VTT, SRT or SBV) " +
-      "and its captions become this file's rows, ready to translate.",
+      "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
 
@@ -920,6 +928,8 @@ export const editor = defineNamespace({
     "editor.timeline.soundSourceTrigger": "Sound: {source}",
     "editor.timeline.soundSourceHeading": "Sound",
     "editor.timeline.soundSourceVideo": "The video's own sound",
+    // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
+    "editor.timeline.noCaptionsYet": "No captions yet",
     "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
     "editor.timeline.soundSourceRecordingUnnamed": "Uploaded recording",
     "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
@@ -2784,12 +2794,39 @@ export const editor = defineNamespace({
           "'Media view' must match the name in the view switcher.",
         maxLength: 24,
       },
-      "editor.media.linkedVideoUpload": {
+      "editor.media.linkedVideoUseRecording": {
         description:
-          "Offer under the linked-video empty state to upload the original audio " +
-          "or video recording, which does produce rows for this file. Like " +
-          "editor.media.dropHint it ends with 'or' on purpose — the file-picker " +
-          "button follows and completes the sentence.",
+          "Quiet link under the 'Attach captions' button in the linked-video empty " +
+          "state. It opens a second step for uploading the original audio or video " +
+          "recording instead, which also produces rows for this file. Lower-case " +
+          "and starting with 'or' because it continues the button above it.",
+        maxLength: 40,
+      },
+      "editor.media.linkedVideoAddRecording": {
+        description:
+          "The same link when there is no 'Attach captions' button above it (the " +
+          "person may upload a recording but not attach captions), so it stands " +
+          "on its own.",
+        maxLength: 40,
+      },
+      "editor.media.linkedVideoRecordingTitle": {
+        description:
+          "Heading of that second step of the linked-video empty state: upload " +
+          "the original recording of this video.",
+        maxLength: 40,
+      },
+      "editor.media.linkedVideoBackToCaptions": {
+        description:
+          "Link at the bottom of that second step that goes back to the first " +
+          "one, where captions are attached.",
+        maxLength: 32,
+      },
+      "editor.media.linkedVideoMediaHint": {
+        description:
+          "The one line shown in the Media view's Text pane on a linked video with " +
+          "no rows, for someone who may attach captions. The prompt itself sits " +
+          "on the timeline's 'Source text' lane (it must match that lane's name as " +
+          "the timeline shows it); this line points there.",
       },
       "editor.media.linkedVideoUploadHint": {
         description:
@@ -2878,8 +2915,18 @@ export const editor = defineNamespace({
       },
       "editor.timeline.soundSourceVideo": {
         description:
-          "Menu choice: play the YouTube video with its own soundtrack. The default.",
+          "Menu choice: play the YouTube video with its own soundtrack. The default. " +
+          "Also the label of the dashed placeholder on the timeline's Source audio " +
+          "lane of a linked video with no rows yet: what that lane holds is the " +
+          "video's own sound.",
         maxLength: 40,
+      },
+      "editor.timeline.noCaptionsYet": {
+        description:
+          "Shown inside the empty 'Source text' lane of the Media view's timeline " +
+          "on a linked video with no rows yet. A maintainer sees an 'Attach " +
+          "captions' link after it (importExport.captionTrack.attach).",
+        maxLength: 32,
       },
       "editor.timeline.soundSourceRecording": {
         description:

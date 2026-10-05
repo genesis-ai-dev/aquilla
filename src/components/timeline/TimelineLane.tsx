@@ -6,6 +6,7 @@
 // candidates (visible neighbors' edges + the cell's own frozen section edges),
 // and carries the lane's `retimable` flag — the source row passes false.
 
+import type { ReactNode } from "react"
 import { Pencil } from "lucide-react"
 import { trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { isVisible } from "@/lib/timeline/scale"
@@ -70,6 +71,10 @@ export interface TimelineLaneProps {
   /** Stage 4: linking mode is ON for this lane. Absent — the normal case —
    *  renders no overlay, so a click cannot mean anything new. */
   linkOverlay?: LaneLinkOverlay
+  /** Sam's D3 (2026-10-05): drawn inside the lane, over everything, while it
+   *  has no cells — the Source text lane of an empty linked video says "No
+   *  captions yet · Attach captions" here. The caller positions it. */
+  emptyPrompt?: ReactNode
 }
 
 export function TimelineLane({
@@ -94,6 +99,7 @@ export function TimelineLane({
   canRemove,
   onRemove,
   linkOverlay,
+  emptyPrompt,
 }: TimelineLaneProps) {
   const t = useT()
   // Which add-line slot the pointer is on. State rather than CSS `:hover` —
@@ -270,6 +276,7 @@ export function TimelineLane({
           {...linkOverlay}
         />
       )}
+      {cells.length === 0 && emptyPrompt}
     </div>
   )
 }

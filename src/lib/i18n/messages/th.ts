@@ -497,7 +497,6 @@ export const th: Catalog = {
   "editor.media.linkedVideoNoCaptions": "วิดีโอนี้ยังไม่มีคำบรรยาย เพิ่มแทร็กคำบรรยายได้ที่ไทม์ไลน์ของมุมมองสื่อ",
   "editor.media.linkedVideoCaptionsOn": "คำบรรยายอยู่ที่ไทม์ไลน์ของมุมมองสื่อ ใน {tracks}",
   "editor.media.openMediaView": "เปิดมุมมองสื่อ",
-  "editor.media.linkedVideoUpload": "มีการบันทึกต้นฉบับไหม? ลากและวางไฟล์เสียงหรือวิดีโอที่นี่ หรือ",
   "editor.media.linkedVideoUploadHint": "การบันทึกต้องมีจังหวะเวลาเดียวกับวิดีโอที่เชื่อมโยง เพราะส่วนต่างๆ ของการบันทึกจะกลายเป็นแถวของไฟล์นี้",
   "editor.footnotes.label": "เชิงอรรถ",
   "editor.footnotes.trayRegion": "เชิงอรรถในแถวที่เห็นอยู่",

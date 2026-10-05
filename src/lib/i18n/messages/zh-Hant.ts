@@ -497,7 +497,6 @@ export const zh_Hant: Catalog = {
   "editor.media.linkedVideoNoCaptions": "此影片尚無字幕。字幕軌請在媒體檢視的時間軸上新增。",
   "editor.media.linkedVideoCaptionsOn": "其字幕位於媒體檢視的時間軸上，軌道為 {tracks}。",
   "editor.media.openMediaView": "開啟媒體檢視",
-  "editor.media.linkedVideoUpload": "有原始錄音嗎？將音訊或影片拖放到此處，或",
   "editor.media.linkedVideoUploadHint": "錄音的時間軸必須與連結的影片一致，其片段會成為此檔案的各列。",
   "editor.footnotes.label": "註腳",
   "editor.footnotes.trayRegion": "可見範圍內的註腳",

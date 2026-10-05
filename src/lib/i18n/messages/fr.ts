@@ -489,7 +489,6 @@ export const fr: Catalog = {
   "editor.media.linkedVideoNoCaptions": "Aucun sous-titre sur cette vidéo pour l'instant. Dès qu'un mainteneur les joint, ils deviennent les lignes de ce fichier.",
   "editor.media.linkedVideoCaptionsOn": "Ses sous-titres se trouvent dans la chronologie de la vue Média, dans {tracks}.",
   "editor.media.openMediaView": "Ouvrir la vue Média",
-  "editor.media.linkedVideoUpload": "Vous avez l’enregistrement original ? Glissez-déposez l’audio ou la vidéo ici, ou",
   "editor.media.linkedVideoUploadHint": "L'enregistrement doit suivre le même minutage que la vidéo. Ses segments deviennent les lignes de ce fichier. La vidéo continue de jouer avec son propre son ; pour entendre l'enregistrement à la place, choisissez-le dans le menu du son sur la vidéo.",
   "editor.media.linkedVideoUploadHintGeneric": "L'enregistrement doit suivre le même minutage que la vidéo liée. Ses segments deviennent les lignes de ce fichier.",
   "editor.media.linkedVideoAttachHint": "Aucun sous-titre sur cette vidéo pour l'instant. Joignez un fichier de sous-titres (VTT, SRT ou SBV) : ses sous-titres deviennent les lignes de ce fichier, prêtes à traduire.",

@@ -497,7 +497,6 @@ export const ar: Catalog = {
   "editor.media.linkedVideoNoCaptions": "لا توجد ترجمات نصية لهذا الفيديو بعد. تُضاف مسارات الترجمات النصية على الخط الزمني في عرض الوسائط.",
   "editor.media.linkedVideoCaptionsOn": "ترجماته النصية على الخط الزمني في عرض الوسائط، ضمن {tracks}.",
   "editor.media.openMediaView": "فتح عرض الوسائط",
-  "editor.media.linkedVideoUpload": "هل لديك التسجيل الأصلي؟ اسحب الملف الصوتي أو المرئي وأفلته هنا، أو",
   "editor.media.linkedVideoUploadHint": "يجب أن يتطابق توقيت التسجيل مع توقيت الفيديو المرتبط — إذ تصبح مقاطعه صفوف هذا الملف.",
   "editor.footnotes.label": "الحواشي",
   "editor.footnotes.trayRegion": "حواشي الأسطر الظاهرة",

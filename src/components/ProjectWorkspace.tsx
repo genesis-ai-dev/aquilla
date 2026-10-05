@@ -13469,6 +13469,12 @@ export function ProjectWorkspace() {
                     // AQU-1566: on a linked video with no rows the captions
                     // become its rows, which needs no track-editing switch.
                     canImportCaptions={canImportCaptions}
+                    // Sam's D3: that same file, once its rows have loaded and
+                    // there are none — the Source text lane says so with Attach
+                    // captions inline, and the Source audio placeholder says it
+                    // is the video's own sound.
+                    linkedVideoEmpty={captionRowsMode
+                      ? { captionTrackCount: attachedCaptionTracks.length } : null}
                     onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
                       ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
                     canAlignScript={canEditTracks}
@@ -13848,6 +13854,9 @@ export function ProjectWorkspace() {
             onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
             onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
             linkedVideoEmptyState={linkedVideoEmptyState}
+            // Sam's D3: under the Media view's timeline the empty state is one
+            // line; the prompt itself is on the timeline's Source text lane.
+            linkedVideoEmptyPlacement={lens === "audio" ? "media" : "text"}
             onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
             // AQU-1566: Attach captions in place, and Use (track) as this
             // file's rows, for maintainers on an empty linked video only.

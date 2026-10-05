@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
@@ -68,6 +68,8 @@ function renderTable(opts: {
    *  maintainer on an empty linked video whose rows have loaded). */
   onAttachCaptions?: () => void
   onUseCaptionTrackAsRows?: (trackId: string) => void
+  /** Sam's D3: "media" = the Media view's Text pane, under the timeline. */
+  placement?: "text" | "media"
 } = {}) {
   const qc = new QueryClient()
   return render(
@@ -94,6 +96,7 @@ function renderTable(opts: {
           onAttachMediaFile={opts.withAttach === false ? undefined : async () => {}}
           onAttachMediaUrl={opts.withAttach === false ? undefined : async () => {}}
           linkedVideoEmptyState={opts.linkedVideoEmptyState ?? null}
+          linkedVideoEmptyPlacement={opts.placement}
           onOpenMediaView={opts.onOpenMediaView}
           onAttachCaptions={opts.onAttachCaptions}
           onUseCaptionTrackAsRows={opts.onUseCaptionTrackAsRows}
@@ -117,12 +120,12 @@ describe("EditorTable — empty time-ordered file", () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
     expect(await screen.findByTestId("linked-video-empty")).toBeInTheDocument()
     expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
-    expect(screen.getByText(/Once a maintainer attaches them, they become this file's rows/)).toBeInTheDocument()
+    expect(screen.getByText("When a maintainer attaches captions, they become this file's rows.")).toBeInTheDocument()
     expect(screen.queryByText("No media on this file yet")).toBeNull()
     expect(screen.queryByLabelText("Media URL")).toBeNull()
   })
 
-  it("offers Open Media view, and the original recording with its timing caveat", async () => {
+  it("offers Open Media view, and the original recording with its timing caveat on the next step", async () => {
     const onOpenMediaView = vi.fn()
     renderTable({
       linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
@@ -131,7 +134,12 @@ describe("EditorTable — empty time-ordered file", () => {
     const open = await screen.findByRole("button", { name: "Open Media view" })
     open.click()
     expect(onOpenMediaView).toHaveBeenCalledTimes(1)
-    expect(screen.getByText(/Have the original recording\?/)).toBeInTheDocument()
+    // Sam's D1: the recording, and its explanation, wait behind a quiet link.
+    expect(screen.queryByText("Choose media file")).toBeNull()
+    expect(screen.queryByText(/same timing as the video/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    expect(screen.getByText("Use the original recording")).toBeInTheDocument()
+    expect(screen.getByText("Choose media file")).toBeInTheDocument()
     // AQU-1565 follow-up: the caveat says the video keeps its own sound and
     // where to switch to the recording (the sound menu on the video).
     expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
@@ -141,7 +149,9 @@ describe("EditorTable — empty time-ordered file", () => {
 
   it("a non-YouTube picture's caveat has no sound menu to point to", async () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: false, captionTracks: [] } })
-    expect(await screen.findByText(/same timing as the linked video/)).toBeInTheDocument()
+    // With no caption action above it, the link stands on its own.
+    fireEvent.click(await screen.findByRole("button", { name: "Add the original recording" }))
+    expect(screen.getByText(/same timing as the linked video/)).toBeInTheDocument()
     expect(screen.queryByText(/sound menu/)).toBeNull()
   })
 
@@ -152,7 +162,7 @@ describe("EditorTable — empty time-ordered file", () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] }, withAttach: false })
     await screen.findByTestId("linked-video-empty")
     expect(screen.queryByText("Choose media file")).toBeNull()
-    expect(screen.queryByText(/Have the original recording\?/)).toBeNull()
+    expect(screen.queryByRole("button", { name: /original recording/ })).toBeNull()
   })
 
   it("a file with no linked video offers no attach prompt either, without the handlers", async () => {
@@ -217,7 +227,7 @@ describe("EditorTable — empty time-ordered file", () => {
     await screen.findByTestId("linked-video-empty")
     expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
     expect(screen.queryByText("Choose media file")).toBeNull()
-    expect(screen.queryByText(/Have the original recording\?/)).toBeNull()
+    expect(screen.queryByRole("button", { name: /original recording/ })).toBeNull()
     expect(screen.queryByLabelText("Media URL")).toBeNull()
   })
 
@@ -232,21 +242,22 @@ describe("EditorTable — empty time-ordered file", () => {
     })
     await screen.findByTestId("linked-video-empty")
     expect(screen.getByText(
-      "No captions on this video yet. Attach a caption file (VTT, SRT or SBV) and its captions " +
-      "become this file's rows, ready to translate.",
+      "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
     )).toBeInTheDocument()
     // The old pointer to the timeline is for people who cannot attach here.
-    expect(screen.queryByText(/Once a maintainer attaches them, they become this file's rows/)).toBeNull()
+    expect(screen.queryByText(/When a maintainer attaches captions/)).toBeNull()
     screen.getByRole("button", { name: "Attach captions" }).click()
     expect(onAttachCaptions).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole("button", { name: "Open Media view" })).toBeInTheDocument()
+    // Sam's D1: one primary action. Open Media view would compete with it, so
+    // it is kept only for people who cannot attach captions.
+    expect(screen.queryByRole("button", { name: "Open Media view" })).toBeNull()
   })
 
   it("offers no Attach captions when the workspace withholds it (below maintainer)", async () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
     await screen.findByTestId("linked-video-empty")
     expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
-    expect(screen.getByText(/Once a maintainer attaches them, they become this file's rows/)).toBeInTheDocument()
+    expect(screen.getByText("When a maintainer attaches captions, they become this file's rows.")).toBeInTheDocument()
   })
 
   it("offers one Use-as-rows button per source caption track, and never for a target-text track", async () => {
@@ -307,5 +318,74 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(onOpenMediaView).toHaveBeenCalledTimes(1)
     expect(screen.getAllByRole("button")).toHaveLength(1)
     expect(screen.queryByText("Choose media file")).toBeNull()
+  })
+
+  // ── Sam's D1 and D3 (2026-10-05) ──
+
+  it("hides the column-header bar while an empty linked video has no rows, and only then", async () => {
+    const { unmount } = renderTable()
+    await screen.findByText("No media on this file yet")
+    expect(screen.getByTestId("table-column-headers")).toBeInTheDocument()
+    unmount()
+    renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
+    await screen.findByTestId("linked-video-empty")
+    expect(screen.queryByTestId("table-column-headers")).toBeNull()
+  })
+
+  it("is one card for a maintainer: title, one sentence, Attach captions, and a quiet link to the recording", async () => {
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
+      onAttachCaptions: () => {},
+      onOpenMediaView: () => {},
+    })
+    const card = await screen.findByTestId("linked-video-empty")
+    expect(card).toHaveAttribute("data-placement", "text")
+    expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
+      "Attach captions", "or use the original recording",
+    ])
+    expect(screen.getByRole("button", { name: "Attach captions" })).toHaveAttribute("data-variant", "default")
+    expect(screen.getByRole("button", { name: "or use the original recording" })).toHaveAttribute("data-variant", "link")
+    // The recording's explanation waits on its own step...
+    expect(screen.queryByText(/same timing as the video/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "or use the original recording" }))
+    expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
+    // ...and the way back is right there.
+    fireEvent.click(screen.getByRole("button", { name: "Back to captions" }))
+    expect(screen.getByRole("button", { name: "Attach captions" })).toBeInTheDocument()
+  })
+
+  it("is one line in the Media view's Text pane, pointing at the Source text lane", async () => {
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
+      onAttachCaptions: () => {},
+      placement: "media",
+    })
+    const card = await screen.findByTestId("linked-video-empty")
+    expect(card).toHaveAttribute("data-placement", "media")
+    expect(card).toHaveTextContent(
+      "No rows yet. Attach captions on the timeline's Source text lane, and they become this file's rows.",
+    )
+    // The prompt itself is on the lane, so it is not repeated here.
+    expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
+    expect(screen.queryByText("Linked to a YouTube video")).toBeNull()
+    expect(screen.queryByText("Choose media file")).toBeNull()
+    expect(screen.queryByTestId("table-column-headers")).toBeNull()
+    // The timeline has no upload of its own, so the recording stays reachable.
+    fireEvent.click(screen.getByRole("button", { name: "Add the original recording" }))
+    expect(screen.getByText("Choose media file")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to captions" }))
+    expect(screen.getByTestId("linked-video-empty")).toHaveAttribute("data-placement", "media")
+  })
+
+  it("tells someone below maintainer, in the Media view, who will attach the captions", async () => {
+    renderTable({
+      linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
+      withAttach: false,
+      placement: "media",
+    })
+    const card = await screen.findByTestId("linked-video-empty")
+    expect(card).toHaveTextContent("When a maintainer attaches captions, they become this file's rows.")
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
   })
 })

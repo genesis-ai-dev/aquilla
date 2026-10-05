@@ -156,6 +156,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -254,6 +255,17 @@ export interface TimelineEditorProps {
   onRequestImportAudioVtt?(): void
   onRequestImportCaptions?(): void
   canImportCaptions?: boolean
+  /**
+   * Sam's D3 (2026-10-05): this file is a linked video whose rows have loaded
+   * and there are none. Each prompt is said once, where it belongs: the empty
+   * Source text lane reads "No captions yet" with Attach captions inline (the
+   * same caption dialog as the Sources menu), and the dashed Source audio
+   * placeholder reads "The video's own sound" instead of a raw time range.
+   * `captionTrackCount` > 0 means captions are on the timeline already, in
+   * their own tracks, so the Source text lane does not claim there are none.
+   * Absent/null for every other file.
+   */
+  linkedVideoEmpty?: { captionTrackCount: number } | null
   onRequestAlignScript?(): void
   canAlignScript?: boolean
   /**
@@ -658,6 +670,30 @@ interface LaneLabelReorder {
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
 
+/**
+ * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
+ * rows says what is missing, in the lane where the captions will appear, with
+ * the way to add them right there. `leftPx` holds it at the visible left edge
+ * as the timeline scrolls. Below the people who may attach captions it is the
+ * statement alone.
+ */
+function LinkedVideoLanePrompt({ leftPx, onAttach }: { leftPx: number; onAttach?: () => void }) {
+  const t = useT()
+  return (
+    <div data-testid="tl-linked-video-lane-prompt"
+      className="pointer-events-none absolute inset-y-0 z-10 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
+      style={{ left: `${leftPx + 10}px` }}>
+      <span>{t("editor.timeline.noCaptionsYet")}</span>
+      {onAttach && <>
+        <span aria-hidden>·</span>
+        <Button variant="link" size="xs" className="pointer-events-auto h-auto px-0 text-xs" onClick={onAttach}>
+          {t("importExport.captionTrack.attach")}
+        </Button>
+      </>}
+    </div>
+  )
+}
+
 function LaneLabel({
   name,
   sub,
@@ -1054,6 +1090,7 @@ export function TimelineEditor({
   onRequestImportAudioVtt,
   onRequestImportCaptions,
   canImportCaptions = true,
+  linkedVideoEmpty = null,
   onRequestAlignScript,
   canAlignScript = false,
   onRequestExtractSubtitles,
@@ -3465,6 +3502,10 @@ export function TimelineEditor({
             key={track.id}
             cells={subtitle}
             variant="subtitle"
+            emptyPrompt={linkedVideoEmpty && linkedVideoEmpty.captionTrackCount === 0 ? (
+              <LinkedVideoLanePrompt leftPx={scrollLeft}
+                onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
+            ) : undefined}
             retimable={!audioFirst}
             // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
             //
@@ -3558,6 +3599,13 @@ export function TimelineEditor({
             retimable={!timingLocked}
             onRetime={onRetimeCue}
             snapEnabled={snapOn}
+            // Sam's D3: on an empty linked video the row is one dashed chip
+            // the length of the film, and what it stands for is the video's
+            // own sound. In Free timing the video is hidden and silent, so
+            // the row says nothing at all rather than claim it.
+            gapLabel={linkedVideoEmpty && !audioFirst ? t("editor.timeline.soundSourceVideo") : undefined}
+            hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
+            scrollLeftPx={scrollLeft}
           />
         )
       case "target-subtitles":

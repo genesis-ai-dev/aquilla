@@ -497,7 +497,6 @@ export const my: Catalog = {
   "editor.media.linkedVideoNoCaptions": "ဤဗီဒီယိုတွင် စာတန်းထိုး မရှိသေးပါ။ စာတန်းထိုး track များကို Media view ၏ အချိန်ဇယားတွင် ထည့်သည်။",
   "editor.media.linkedVideoCaptionsOn": "၎င်း၏ စာတန်းထိုးများသည် Media view ၏ အချိန်ဇယားရှိ {tracks} တွင် ရှိသည်။",
   "editor.media.openMediaView": "Media view ကို ဖွင့်ရန်",
-  "editor.media.linkedVideoUpload": "မူရင်းအသံသွင်းမှု ရှိပါသလား။ အသံ သို့မဟုတ် ဗီဒီယိုကို ဤနေရာသို့ ဆွဲချပါ၊ သို့မဟုတ်",
   "editor.media.linkedVideoUploadHint": "အသံသွင်းမှုသည် ချိတ်ဆက်ထားသော ဗီဒီယိုနှင့် အချိန်ကိုက်ညီရမည် — ၎င်း၏ အပိုင်းများသည် ဤဖိုင်၏ အတန်းများ ဖြစ်လာမည်။",
   "editor.footnotes.label": "အောက်ခြေမှတ်စု",
   "editor.footnotes.trayRegion": "မြင်နေရသော အောက်ခြေမှတ်စုများ",

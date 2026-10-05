@@ -19,6 +19,17 @@
 // stored as the file's source audio, and a YouTube video keeps its own sound
 // until the person picks the recording. Only people who can add rows and set
 // source audio get the offer; a viewer gets the sentence and nothing else.
+//
+// Sam's D1 (2026-10-05): ONE card — a short title, one sentence, "Attach
+// captions" as the one primary action, and "or use the original recording" as
+// a quiet link to a second step that holds the upload and its explanation.
+// "Open Media view" stays only for people who cannot attach captions: for them
+// it is the one useful thing to do (watch the video, see where captions go);
+// for a maintainer it would be a second button competing with the action the
+// card exists for, and the view switcher is one row up anyway.
+//
+// Sam's D3: in the Media view the prompt lives on the timeline's Source text
+// lane, so there (placement "media") this is one line pointing at it.
 
 import { useState } from "react"
 import { Clapperboard } from "lucide-react"
@@ -38,6 +49,9 @@ interface TimelineLinkedVideoEmptyProps {
   /** Caption tracks already on this file's timeline. Non-empty ⇒ the file has
    *  captions, so the copy names them instead of claiming it has none. */
   captionTracks: readonly LinkedVideoCaptionTrack[]
+  /** "text" (the default): the Text view's card. "media": under the Media
+   *  view's timeline, where the prompt is on the Source text lane. */
+  placement?: "text" | "media"
   /** Upload the original recording as this file's media. Absent ⇒ read-only. */
   onAttachFile?: (file: File) => Promise<void>
   /** Switch this file to the Media view. Absent when already there. */
@@ -52,6 +66,7 @@ interface TimelineLinkedVideoEmptyProps {
 export function TimelineLinkedVideoEmpty({
   isYouTube,
   captionTracks,
+  placement = "text",
   onAttachFile,
   onOpenMediaView,
   onAttachCaptions,
@@ -61,6 +76,8 @@ export function TimelineLinkedVideoEmpty({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  // The second step: uploading the original recording instead.
+  const [recordingStep, setRecordingStep] = useState(false)
 
   const attachFile = async (file: File) => {
     if (!onAttachFile) return
@@ -80,32 +97,75 @@ export function TimelineLinkedVideoEmpty({
     }
   }
 
-  const description = captionTracks.length > 0
-    ? t("editor.media.linkedVideoCaptionsOn", {
-      tracks: captionTracks.map(track => track.name).join(", "),
-    })
-    // Only someone who can attach is told that attaching makes rows; everyone
-    // else keeps the sentence that says where captions live.
-    : t(onAttachCaptions ? "editor.media.linkedVideoAttachHint" : "editor.media.linkedVideoNoCaptions")
   const promotable = onUseCaptionTrackAsRows
     ? captionTracks.filter(track => track.canBecomeRows)
     : []
+  const tracksLine = captionTracks.length > 0
+    ? t("editor.media.linkedVideoCaptionsOn", {
+      tracks: captionTracks.map(track => track.name).join(", "),
+    })
+    : null
+  const promoteButtons = promotable.length > 0 && (
+    <div className="mt-3 flex flex-col items-center gap-2">
+      {promotable.map(track => (
+        // Wraps: a track name runs to 120 characters, and a one-line
+        // button would spill out of this column.
+        <Button key={track.id} className="h-auto max-w-full whitespace-normal py-1.5 text-center"
+          onClick={() => onUseCaptionTrackAsRows?.(track.id)}>
+          {t("editor.media.useTrackAsRows", { track: track.name })}
+        </Button>
+      ))}
+      {/* Only worth saying when there is another track to stay. */}
+      {captionTracks.length > 1 && (
+        <p className="text-xs text-muted-foreground">{t("editor.media.useTrackAsRowsHint")}</p>
+      )}
+    </div>
+  )
+
+  // The Media view: one line pointing at the Source text lane, and the same
+  // quiet way to the recording step (the timeline has no upload of its own).
+  // Once on that step, the card below draws it exactly as the Text view does.
+  if (placement === "media" && !(recordingStep && onAttachFile)) {
+    return (
+      <div className="mx-auto w-full max-w-md px-4 py-8 text-center" data-testid="linked-video-empty"
+        data-placement="media">
+        <p className="text-xs text-muted-foreground">
+          {tracksLine ?? t(onAttachCaptions ? "editor.media.linkedVideoMediaHint" : "editor.media.linkedVideoNoCaptions")}
+        </p>
+        {promoteButtons}
+        {onAttachFile && (
+          <Button variant="link" size="sm" className="mt-1 text-muted-foreground"
+            onClick={() => { setRecordingStep(true); setError(null) }}>
+            {t("editor.media.linkedVideoAddRecording")}
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  // Only someone who can attach is told that attaching makes rows; everyone
+  // else keeps the sentence that says what will happen.
+  const description = tracksLine
+    ?? t(onAttachCaptions ? "editor.media.linkedVideoAttachHint" : "editor.media.linkedVideoNoCaptions")
+  const captionAction = Boolean(onAttachCaptions) || promotable.length > 0
+  const showRecordingStep = recordingStep && Boolean(onAttachFile)
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-10" data-testid="linked-video-empty">
+    <div className="mx-auto w-full max-w-md px-4 py-10" data-testid="linked-video-empty" data-placement={placement}>
       <div
         className={cn(
           "flex flex-col items-center rounded-lg border-2 border-dashed p-6 text-center transition-colors",
           dragOver ? "border-primary bg-primary/5" : "border-muted",
         )}
-        // Drop only lands when uploading is actually on offer — a viewer must
-        // not get a drop target that silently does nothing.
-        onDragOver={onAttachFile ? (e) => {
+        // Drop lands only on the recording step, where the card says what a
+        // recording does — and never for a viewer, who must not get a drop
+        // target that silently does nothing.
+        onDragOver={showRecordingStep ? (e) => {
           e.preventDefault()
           setDragOver(true)
         } : undefined}
-        onDragLeave={onAttachFile ? () => setDragOver(false) : undefined}
-        onDrop={onAttachFile ? (e) => {
+        onDragLeave={showRecordingStep ? () => setDragOver(false) : undefined}
+        onDrop={showRecordingStep ? (e) => {
           e.preventDefault()
           setDragOver(false)
           const file = e.dataTransfer.files?.[0]
@@ -116,6 +176,35 @@ export function TimelineLinkedVideoEmpty({
           <p className="flex items-center gap-2 text-sm font-medium">
             <Spinner /> {t("editor.media.adding")}
           </p>
+        ) : showRecordingStep ? (
+          <>
+            <Clapperboard className="mb-2 h-6 w-6 text-muted-foreground" />
+            <p className="text-sm font-medium">{t("editor.media.linkedVideoRecordingTitle")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {/* AQU-1565 follow-up: only a YouTube picture keeps its own sound
+                  after an upload and offers the sound menu to switch. */}
+              {t(isYouTube ? "editor.media.linkedVideoUploadHint" : "editor.media.linkedVideoUploadHintGeneric")}
+            </p>
+            <p className="mt-3 text-xs text-muted-foreground">{t("editor.media.dropHint")}</p>
+            <Button className="mt-2" nativeButton={false} render={<label />}>
+              {t("editor.media.choose")}
+              <input
+                type="file"
+                className="hidden"
+                accept={MEDIA_FILE_ACCEPT}
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ""
+                  if (file) void attachFile(file)
+                }}
+              />
+            </Button>
+            <Button variant="link" size="sm" className="mt-2 text-muted-foreground"
+              onClick={() => { setRecordingStep(false); setError(null) }}>
+              {t("editor.media.linkedVideoBackToCaptions")}
+            </Button>
+          </>
         ) : (
           <>
             <Clapperboard className="mb-2 h-6 w-6 text-muted-foreground" />
@@ -123,66 +212,25 @@ export function TimelineLinkedVideoEmpty({
               {t(isYouTube ? "editor.media.linkedVideoTitle" : "editor.media.linkedVideoTitleGeneric")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-            {promotable.length > 0 && (
-              <div className="mt-3 flex flex-col items-center gap-2">
-                {promotable.map(track => (
-                  // Wraps: a track name runs to 120 characters, and a one-line
-                  // button would spill out of this column.
-                  <Button key={track.id} className="h-auto max-w-full whitespace-normal py-1.5 text-center"
-                    onClick={() => onUseCaptionTrackAsRows?.(track.id)}>
-                    {t("editor.media.useTrackAsRows", { track: track.name })}
-                  </Button>
-                ))}
-                {/* Only worth saying when there is another track to stay. */}
-                {captionTracks.length > 1 && (
-                  <p className="text-xs text-muted-foreground">{t("editor.media.useTrackAsRowsHint")}</p>
-                )}
-              </div>
-            )}
-            {(onAttachCaptions || onOpenMediaView) && (
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                {onAttachCaptions && (
-                  // Primary until a track is there to promote; then that is
-                  // the main way in and this is the alternative.
-                  <Button variant={promotable.length > 0 ? "outline" : "default"} onClick={onAttachCaptions}>
-                    {t("importExport.captionTrack.attach")}
-                  </Button>
-                )}
-                {onOpenMediaView && (
-                  <Button variant="outline" onClick={onOpenMediaView}>
-                    {t("editor.media.openMediaView")}
-                  </Button>
-                )}
-              </div>
+            {promoteButtons}
+            {onAttachCaptions ? (
+              <Button className="mt-3" variant={promotable.length > 0 ? "outline" : "default"} onClick={onAttachCaptions}>
+                {t("importExport.captionTrack.attach")}
+              </Button>
+            ) : !captionAction && onOpenMediaView ? (
+              <Button className="mt-3" variant="outline" onClick={onOpenMediaView}>
+                {t("editor.media.openMediaView")}
+              </Button>
+            ) : null}
+            {onAttachFile && (
+              <Button variant="link" size="sm" className="mt-1 text-muted-foreground"
+                onClick={() => { setRecordingStep(true); setError(null) }}>
+                {t(captionAction || onOpenMediaView ? "editor.media.linkedVideoUseRecording" : "editor.media.linkedVideoAddRecording")}
+              </Button>
             )}
           </>
         )}
       </div>
-
-      {onAttachFile && !busy && (
-        <div className="mt-3 text-center">
-          <p className="text-xs text-muted-foreground">{t("editor.media.linkedVideoUpload")}</p>
-          <Button variant="outline" className="mt-2" nativeButton={false} render={<label />}>
-            {t("editor.media.choose")}
-            <input
-              type="file"
-              className="hidden"
-              accept={MEDIA_FILE_ACCEPT}
-              disabled={busy}
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                e.target.value = ""
-                if (file) void attachFile(file)
-              }}
-            />
-          </Button>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {/* AQU-1565 follow-up: only a YouTube picture keeps its own sound
-                after an upload and offers the sound menu to switch. */}
-            {t(isYouTube ? "editor.media.linkedVideoUploadHint" : "editor.media.linkedVideoUploadHintGeneric")}
-          </p>
-        </div>
-      )}
 
       {error && <p className="mt-2 text-center text-xs text-destructive">{error}</p>}
     </div>

@@ -301,3 +301,44 @@ describe("runDeterministicCheck", () => {
     expect(result.termFindings[0].flaggedCells).toHaveLength(225)
   })
 })
+
+// AQU-1573: Check file runs the "Reference Bible quotes" check with the lane's
+// Bible from the caller (verses already loaded), and lists its findings.
+describe("runDeterministicCheck — reference Bible quotes", () => {
+  const quoteRule: TranslationRule = {
+    id: "builtin:reference-quote", name: "Reference Bible quotes", description: "", severity: "minor",
+    source: "algorithmic", scope: "project", enabled: true, createdAt: "1970-01-01T00:00:00.000Z",
+    check: { type: "builtin", checkId: "reference-quote" },
+  }
+  const checkContext = {
+    referenceBible: {
+      versionName: "King James Version",
+      lookup: (canonical: string) =>
+        canonical === "PSA 23:1" ? ["The LORD is my shepherd; I shall not want."] : undefined,
+    },
+  }
+  const cells = [
+    cell("The psalmist writes, \"The Lord is my shepherd, I lack nothing\" (Ps 23:1).", "The Lord looks after me and I need nothing (Psalm 23:1).", { id: "fresh" }),
+    cell("\"The Lord is my shepherd\" (Psalm 23:1)", "\"The Lord is my shepherd; I shall not want.\" (Psalm 23:1)", { id: "exact" }),
+    // The exact verse, but the reference is gone.
+    cell("\"The Lord is my shepherd\" (Psalm 23:1)", "\"The Lord is my shepherd; I shall not want.\"", { id: "dropped" }),
+  ]
+
+  it("lists a visibly quoted verse that was translated fresh, and a dropped reference", async () => {
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: [quoteRule], concepts: [], checkContext })
+    expect(result.ruleFindings).toHaveLength(1)
+    const infractions = result.ruleFindings[0].infractions
+    expect(infractions.map((i) => i.cellId)).toEqual(["fresh", "dropped"])
+    expect(infractions[0].reasonParams).toMatchObject({ kind: "missing", refs: "Psalm 23:1" })
+    expect(infractions[1].reasonParams).toEqual({ kind: "dropped", refs: "Psalm 23:1", count: "1", version: "King James Version" })
+    const at = cells[2].original.indexOf("Psalm 23:1")
+    expect(infractions[1].spans).toEqual([{ side: "source", start: at, end: at + 10, matchedText: "Psalm 23:1" }])
+  })
+
+  it("without the context finds only the dropped reference, which needs no Bible", async () => {
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: [quoteRule], concepts: [] })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].infractions.map((i) => i.cellId)).toEqual(["dropped"])
+    expect(result.ruleFindings[0].infractions[0].reasonParams).toEqual({ kind: "dropped", refs: "Psalm 23:1", count: "1" })
+  })
+})

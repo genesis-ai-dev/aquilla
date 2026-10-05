@@ -15,6 +15,9 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import { importDisplayLabel } from "@/lib/scripture-reference"
+import { isStructuralCell } from "@/lib/cells/structural"
+import { formatInfractionReason } from "@/lib/rules/format-infraction"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatTime, formatCount } from "@/lib/i18n/format"
 import type { CellData } from "@/hooks/useCells"
@@ -77,12 +80,33 @@ function formatRunTime(iso: string, locale: string): string {
 
 /** SUB-5: human title for a finding card. Prefer the cell's label (verse ref);
  * for subtitle cues (no label) fall back to the cue's timestamp range parsed
- * from `context` — never show a raw cell UUID unless the cell is unknown. */
-export function findingCellLabel(cell: CellData | undefined, cellId: string): string {
+ * from `context`; for any other known cell (a Markdown or Word paragraph has
+ * neither) use `rowLabel`, the row number the editor shows. A raw cell UUID
+ * only when the cell is unknown (AQU-1573: every sermon row hit that). */
+export function findingCellLabel(
+  cell: CellData | undefined,
+  cellId: string,
+  rowLabel?: string,
+): string {
   if (cell?.cellLabel) return cell.cellLabel
   const range = cell ? parseTimestampRange(cell.context) : null
   if (range) return `${fmtCueTime(range.start)}–${fmtCueTime(range.end)}`
+  if (cell && rowLabel) return rowLabel
   return cellId
+}
+
+/** The number the editor's gutter gives each row of the open file: content
+ * rows count 1, 2, 3… and skip headings and other structural rows, which keep
+ * their plain position (mirrors `createEditorStructureCache` + EditorTable's
+ * `contentNumber`). */
+export function findingRowNumbers(cells: readonly CellData[]): Map<string, number> {
+  const out = new Map<string, number>()
+  let ordinal = 0
+  cells.forEach((cell, index) => {
+    const numbered = !isStructuralCell(cell.type) && importDisplayLabel(cell.metadata) !== null
+    out.set(cell.id, numbered ? ++ordinal : index + 1)
+  })
+  return out
 }
 
 /** Compact cue clock: mm:ss.t, hours only when nonzero. */
@@ -101,9 +125,11 @@ interface CellRefButtonProps {
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
   detail?: string
+  /** A full sentence saying what is wrong, wrapped rather than cut off. */
+  reason?: string
 }
 
-function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
+function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail, reason }: CellRefButtonProps) {
   const t = useT()
   return (
     // min-w-0 on the flex item + button (SUB-5): without it, long unbroken
@@ -118,6 +144,7 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
           onClick={() => onNavigateToCell(cellId)}
         >
         <div className="truncate font-medium">{label}</div>
+        {reason && <div className="break-words text-muted-foreground">{reason}</div>}
         {detail && <div className="truncate text-muted-foreground">{detail}</div>}
         {cell && (
           <div className="truncate text-muted-foreground">
@@ -146,11 +173,13 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
 function RuleFindingCard({
   group,
   cellMap,
+  rowNumbers,
   onNavigateToCell,
   onOpenComments,
 }: {
   group: RuleFindingGroup
   cellMap: Map<string, CellData>
+  rowNumbers: Map<string, number>
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
 }) {
@@ -172,14 +201,20 @@ function RuleFindingCard({
       <ul className="min-w-0 space-y-1">
         {group.infractions.map((inf) => {
           const cell = cellMap.get(inf.cellId)
+          // AQU-1573: a Reference Bible finding's sentence names the verse and
+          // the Bible ("does not use the Van Dyck wording"); the card title
+          // alone cannot say which verse or what is wrong. Its matched text is
+          // only the quote or the bare reference, so the sentence replaces it.
+          const isReferenceQuote = inf.reason === "builtin:reference-quote"
           return (
             <CellRefButton
               key={`${inf.ruleId}:${inf.cellId}`}
               cellId={inf.cellId}
-              label={findingCellLabel(cell, inf.cellId)}
+              label={findingCellLabel(cell, inf.cellId, rowLabel(rowNumbers, inf.cellId, t))}
               cell={cell}
+              reason={isReferenceQuote ? formatInfractionReason(inf, t) : undefined}
               detail={
-                inf.spans[0]?.matchedText
+                !isReferenceQuote && inf.spans[0]?.matchedText
                   ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
                   : undefined
               }
@@ -193,14 +228,21 @@ function RuleFindingCard({
   )
 }
 
+function rowLabel(rowNumbers: Map<string, number>, cellId: string, t: TFunction): string | undefined {
+  const n = rowNumbers.get(cellId)
+  return n === undefined ? undefined : t("rules.checkDrawer.rowLabel", { number: n })
+}
+
 function TermFindingCard({
   finding,
   cellMap,
+  rowNumbers,
   onNavigateToCell,
   onOpenComments,
 }: {
   finding: TermConsistencyFinding
   cellMap: Map<string, CellData>
+  rowNumbers: Map<string, number>
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
 }) {
@@ -224,7 +266,7 @@ function TermFindingCard({
           <CellRefButton
             key={fc.cellId}
             cellId={fc.cellId}
-            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId, rowLabel(rowNumbers, fc.cellId, t))}
             cell={cellMap.get(fc.cellId)}
             onNavigateToCell={onNavigateToCell}
             onOpenComments={onOpenComments}
@@ -247,6 +289,7 @@ export function CheckFindingsDrawer({
   const t = useT()
   const { locale } = useI18n()
   const cellMap = new Map(cells.map((c) => [c.id, c]))
+  const rowNumbers = findingRowNumbers(cells)
 
   const flaggedTermFindings = result?.termFindings.filter((f) => f.flaggedCells.length > 0) ?? []
   const cleanTermCount = (result?.termFindings.length ?? 0) - flaggedTermFindings.length
@@ -322,6 +365,7 @@ export function CheckFindingsDrawer({
                         key={group.rule.id}
                         group={group}
                         cellMap={cellMap}
+                        rowNumbers={rowNumbers}
                         onNavigateToCell={onNavigateToCell}
                         onOpenComments={onOpenComments}
                       />
@@ -343,6 +387,7 @@ export function CheckFindingsDrawer({
                         key={finding.conceptId}
                         finding={finding}
                         cellMap={cellMap}
+                        rowNumbers={rowNumbers}
                         onNavigateToCell={onNavigateToCell}
                         onOpenComments={onOpenComments}
                       />

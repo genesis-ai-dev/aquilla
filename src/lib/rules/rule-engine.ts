@@ -1,7 +1,7 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
-import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
+import { BUILTIN_CHECKS, type BuiltinCheckContext } from "@/lib/lqa/builtin-registry"
 
 // Compiled-regex cache. Rule patterns are stable across cells and across
 // calls; without this the hot keystroke path recompiles every pattern for
@@ -69,11 +69,15 @@ export function checkRules(
  * keystroke in X never requires re-evaluating rules on any Y.
  *
  * Pass pre-filtered `enabledRules` to avoid re-filtering on every call.
+ *
+ * `ctx` (AQU-1573) is what a built-in check needs beyond the cell, such as the
+ * lane's reference Bible. Callers without one get the old results unchanged.
  */
 export function checkRulesForCell(
   cell: CellData,
   fileId: string,
   enabledRules: TranslationRule[],
+  ctx?: BuiltinCheckContext,
 ): RuleInfraction[] {
   if (enabledRules.length === 0) return []
   const out: RuleInfraction[] = []
@@ -88,7 +92,7 @@ export function checkRulesForCell(
     // the caller has to make the distinction — a dub with no text was being
     // reported as a MAJOR infraction on work that is finished.
     if (rule.check.checkId === "empty-target" && cell.hasOwnTake) continue
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, ctx)
     if (infraction) out.push(infraction)
   }
 
@@ -101,13 +105,18 @@ export function checkRulesForCell(
       const def = BUILTIN_CHECKS[rule.check.checkId]
       if (def?.runsOnEmptyTarget) continue
     }
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, ctx)
     if (infraction) out.push(infraction)
   }
   return out
 }
 
-function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleInfraction | null {
+function checkRule(
+  rule: TranslationRule,
+  cell: CellData,
+  fileId: string,
+  ctx?: BuiltinCheckContext,
+): RuleInfraction | null {
   // SUB-28: media sections match rules against their transcript (the displayed
   // source), never the import filename / span offsets stay display-aligned.
   const source = effectiveSourceText(cell)
@@ -197,15 +206,20 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "builtin": {
       const def = BUILTIN_CHECKS[check.checkId]
       if (!def) return null
-      const spans = def.run(source, cell.translated)
-      if (!spans || spans.length === 0) return null
+      const result = def.run(source, cell.translated, ctx)
+      if (!result) return null
+      // A check that names something in its reason returns `{ spans, params }`
+      // (AQU-1573 reference-quote: which verses, which Bible).
+      const spans = Array.isArray(result) ? result : result.spans
+      if (spans.length === 0) return null
       return {
         ruleId: rule.id,
         cellId: cell.id,
         fileId,
         reason: `builtin:${check.checkId}`,
-        reasonParams:
-          check.checkId === "placeholder-integrity" ? placeholderIntegrityParams(spans) : undefined,
+        reasonParams: !Array.isArray(result)
+          ? result.params
+          : check.checkId === "placeholder-integrity" ? placeholderIntegrityParams(spans) : undefined,
         spans,
       }
     }

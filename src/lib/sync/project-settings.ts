@@ -238,6 +238,16 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1573: the Bible each target language quotes verses from — a map from
+   * lane tag to reference Bible id, "" being the default lane (e.g.
+   * `{ "": "arb-vandyck", "en": "eng-kjv" }`). The ticket's one-item array
+   * `["arb-vandyck"]` is also accepted and means the default lane. Read it
+   * through referenceBibleForLane (src/lib/reference-bible/lane-setting.ts),
+   * never directly. Independent of `bibleResourcesEnabled`. A PatchSettings
+   * `null` clears it server-side; the SPA itself always writes a map.
+   */
+  referenceBibleVersions?: Record<string, string> | string[]
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

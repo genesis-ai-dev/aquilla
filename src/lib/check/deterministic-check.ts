@@ -29,6 +29,7 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import type { BuiltinCheckContext } from "@/lib/lqa/builtin-registry"
 import { semanticSourceText } from "@/lib/semantic-source-text"
 import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
@@ -201,6 +202,9 @@ export interface CheckRunInput {
   concepts: readonly Concept[]
   /** Project-level source matching defaults (AQU-1271). */
   termMatching?: TermMatchingSettings
+  /** AQU-1573: what built-in checks need beyond the cell (the lane's
+   *  reference Bible, verses already loaded by the caller). */
+  checkContext?: BuiltinCheckContext
 }
 
 const CHUNK_SIZE = 100
@@ -225,7 +229,7 @@ export async function runDeterministicCheck(
   for (let i = 0; i < input.cells.length; i += CHUNK_SIZE) {
     const chunk = input.cells.slice(i, i + CHUNK_SIZE)
     for (const cell of chunk) {
-      infractions.push(...checkRulesForCell(cell, cell.fileId, enabledRules))
+      infractions.push(...checkRulesForCell(cell, cell.fileId, enabledRules, input.checkContext))
     }
     if (i + CHUNK_SIZE < input.cells.length) await nextTick()
   }

@@ -66,6 +66,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       await attachAudioFileToCell({
         session, projectId, fileId, cellId, file, username,
         ...(targetLang ? { targetLang } : {}),
+        surface: "cell",
       })
       onTakeSaved?.(cellId)
     } catch (e) {

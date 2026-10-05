@@ -107,6 +107,9 @@ export interface CellSummary {
   aiDrafted?: boolean
   aiDraft?: AiDraftProvenance
   lastEditAt?: number
+  /** AQU-1571: mirrors `CellData.lastEditor` — the active lane's last editor,
+   *  so the bulk paths can leave the reader's own latest change alone. */
+  lastEditor?: string | null
   startTime?: number
   endTime?: number
   sequenceIndex?: number
@@ -254,6 +257,16 @@ interface OptimisticEdit extends PendingOverlay {
   cellId: string
   targetLang: string
   seq: number
+  /**
+   * AQU-1571: who the server will record as this lane's last editor once this
+   * edit lands, and what the row said before the first unconfirmed edit
+   * (carried along a chain of edits). `applyContentOverlays` shows
+   * `lastEditor`; the base lets a revert to the confirmed text hand the line
+   * back to its real editor instead of to the viewer.
+   */
+  lastEditor: string | null
+  baseValue: string
+  baseEditor: string | null
 }
 
 const FETCH_RETRY_DELAYS_MS = [2000, 5000, 10000] as const
@@ -897,6 +910,7 @@ export class CellStore {
       aiDrafted: view.aiDrafted,
       aiDraft: view.aiDraft,
       lastEditAt: view.lastEditAt,
+      lastEditor: view.lastEditor,
       startTime: view.startTime,
       endTime: view.endTime,
       sequenceIndex: view.sequenceIndex,
@@ -1472,6 +1486,30 @@ export class CellStore {
     return this.optimisticEdits.size > 0
   }
 
+  /**
+   * AQU-1571: who the line belongs to once an optimistic edit to `value`
+   * lands. The viewer, when the text changes from what the server last
+   * confirmed or a commit of theirs is already queued for this lane; the
+   * confirmed editor otherwise. The second case is the revert a failed
+   * enqueue writes back: it must not leave the viewer named as the editor of
+   * a line they never changed, or "Allow self-validation" off would block
+   * their vote on somebody else's work.
+   */
+  private optimisticAuthorship(
+    cellId: string,
+    lane: string,
+    value: string,
+    existing: CellRow | undefined,
+  ): Pick<OptimisticEdit, "lastEditor" | "baseValue" | "baseEditor"> {
+    const prior = this.optimisticEdits.get(targetOverlayKey(cellId, lane))
+    const baseValue = prior ? prior.baseValue : existing?.value ?? ""
+    const baseEditor = prior ? prior.baseEditor : existing?.lastEditor ?? null
+    const pending = this.pendingOverlay.get(cellId)
+    const queued = pending !== undefined && (pending.targetLang ?? "") === lane
+    const lastEditor = value !== baseValue || queued ? this.ctx.username : baseEditor
+    return { lastEditor, baseValue, baseEditor }
+  }
+
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
     const existing = this.targetById.get(cellId)
     const lane = this.ctx.lane ?? ""
@@ -1489,11 +1527,13 @@ export class CellStore {
       && countNumericFootnotes(existing?.value ?? "") === countNumericFootnotes(patch.value)
     const seq = ++this.writeSeq
     const targetLang = this.ctx.lane ?? ""
+    const authorship = this.optimisticAuthorship(cellId, targetLang, patch.value, existing)
     this.optimisticEdits.set(targetOverlayKey(cellId, targetLang), {
       ...patch,
       cellId,
       targetLang,
       seq,
+      ...authorship,
     })
     this.freshnessFloors.set(cellId, seq)
 
@@ -1504,6 +1544,10 @@ export class CellStore {
         valueHtml: patch.valueHtml ?? null,
         aiDrafted: patch.aiDrafted ?? false,
         aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
+        // AQU-1571: on the row too, so the line stays the viewer's in the
+        // window after the server confirms (the overlay is dropped) and
+        // before the refetched row, which says the same, is installed.
+        lastEditor: authorship.lastEditor,
       })
     } else {
       const source = this.sourceById.get(cellId)
@@ -1867,18 +1911,25 @@ export class CellStore {
     for (const patch of patches) {
       const seq = ++this.writeSeq
       const targetLang = this.ctx.lane ?? ""
+      const existing = this.targetById.get(patch.cellId)
+      const authorship = this.optimisticAuthorship(patch.cellId, targetLang, patch.value, existing)
       this.optimisticEdits.set(targetOverlayKey(patch.cellId, targetLang), {
         cellId: patch.cellId,
         targetLang,
         value: patch.value,
         valueHtml: patch.valueHtml,
         seq,
+        ...authorship,
       })
       this.freshnessFloors.set(patch.cellId, seq)
 
-      const existing = this.targetById.get(patch.cellId)
       if (existing) {
-        this.targetById.set(patch.cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null })
+        this.targetById.set(patch.cellId, {
+          ...existing,
+          value: patch.value,
+          valueHtml: patch.valueHtml ?? null,
+          lastEditor: authorship.lastEditor,
+        })
       } else {
         const source = this.sourceById.get(patch.cellId)
         if (!source) {
@@ -2113,6 +2164,12 @@ export class CellStore {
       cell.aiDraft = optimistic.aiDrafted ? optimistic.aiDraft : undefined
       cell.hasPendingEdit = true
     }
+    // AQU-1571: whose change the line now shows. A pending overlay is a commit
+    // of the viewer's still in the outbox, which the server will record as
+    // theirs. Without it, the edit's own answer (a revert to the confirmed
+    // text keeps the line's real editor).
+    if (activePending) cell.lastEditor = this.ctx.username
+    else if (optimistic) cell.lastEditor = optimistic.lastEditor
     if (activePending || optimistic) {
       // The overlay changed `translated`/`status`; recompute validationStatus
       // from the overlaid text so the row's aria/ring can't keep reporting
@@ -2640,8 +2697,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // this runs once per mount.
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__cellStore = store
+    ;(window as typeof window & { __cellStore?: CellStore }).__cellStore = store
   }, [store])
   const [loadProgress, setLoadProgress] = useState<UseActiveCellStoreResult["loadProgress"]>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -3189,10 +3245,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__aquillaMemorySnapshot = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const memory = (performance as any).memory
+    const snapshotHandle = window as typeof window & {
+      __aquillaMemorySnapshot?: () => ReturnType<CellStore["getMemorySnapshot"]>
+    }
+    snapshotHandle.__aquillaMemorySnapshot = () => {
+      const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number } })
+        .memory
       const root = document.querySelector("[data-aquilla-editor-root]") ?? document
       const rowCount = root.querySelectorAll("[data-cell-id][data-index]").length
       const prosemirrorCount = root.querySelectorAll(".ProseMirror").length
@@ -3221,8 +3279,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       })
     }
     return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((window as any).__aquillaMemorySnapshot) delete (window as any).__aquillaMemorySnapshot
+      if (snapshotHandle.__aquillaMemorySnapshot) delete snapshotHandle.__aquillaMemorySnapshot
     }
   }, [store])
 

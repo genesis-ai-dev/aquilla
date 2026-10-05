@@ -510,6 +510,11 @@ async function prefetchCommentAuthors(
   return authors
 }
 
+/** A target cell in one lane — `cellKeyOf` plus the lane's tag ('' = default). */
+function laneCellKeyOf(projectId: string, fileId: string, cellId: string, lane: string): string {
+  return `${cellKeyOf(projectId, fileId, cellId)}\0${lane}`
+}
+
 /**
  * `last_editor` of each target cell in `cells`, in ONE SELECT. Backs the
  * FRO-189 self-validation check (cell.validate with allowSelfValidation
@@ -517,13 +522,21 @@ async function prefetchCommentAuthors(
  * cell.validate candidate regardless of the project's allowSelfValidation
  * setting — a superset read is cheap and the setting isn't known until the
  * per-event loop reads readProjectSettings (memoized separately).
+ *
+ * AQU-1571: keyed per LANE. Every lane is its own target row, and keying by
+ * cell alone kept whichever row the database returned last — so on a cell
+ * translated in two lanes, validating one lane was judged against the other
+ * lane's editor: a reviewer refused for somebody else's work, or let through
+ * on their own, depending on row order. `heads` is every target head of these
+ * cells, which the check treats as an edit the server knows.
  */
 async function prefetchLastEditors(
   db: AquillaDb,
   cells: readonly CellKey[],
-): Promise<Map<string, string | null>> {
+): Promise<{ editors: Map<string, string | null>; heads: Set<string> }> {
   const editors = new Map<string, string | null>()
-  if (cells.length === 0) return editors
+  const heads = new Set<string>()
+  if (cells.length === 0) return { editors, heads }
 
   const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
   const binds: unknown[] = []
@@ -531,24 +544,31 @@ async function prefetchLastEditors(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, last_editor FROM cells
+      `SELECT project_id, file_id, cell_id, target_lang, event_id, last_editor FROM cells
        WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
-    .all<{ project_id: string; file_id: string; cell_id: string; last_editor: string | null }>()
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      target_lang: string | null; event_id: string | null; last_editor: string | null
+    }>()
 
   for (const r of results) {
-    editors.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.last_editor)
+    editors.set(laneCellKeyOf(r.project_id, r.file_id, r.cell_id, r.target_lang ?? ''), r.last_editor)
+    if (r.event_id) heads.add(r.event_id)
   }
-  return editors
+  return { editors, heads }
 }
 
 interface TakeKey extends CellKey {
   audioId: string
 }
 
+// The separator is the `\0` ESCAPE, never a literal NUL character. A literal one
+// here made grep treat this whole file as binary, which is how an AQU-1571
+// audit concluded the validation gates below did not exist (they do).
 const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: string) =>
-  `${projectId} ${fileId} ${cellId} ${audioId}`
+  `${projectId}\0${fileId}\0${cellId}\0${audioId}`
 
 /**
  * AQU-490: who RECORDED each take a batch is about to validate, for the audio
@@ -566,12 +586,20 @@ const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: s
  * A NULL recorder — a take whose attach event is gone, or one on a project the
  * rollout has not reached — is "unknown", never a match. It must not silently
  * equal the caller.
+ *
+ * AQU-1571: the take's stored `url` comes along, so a re-attach in the same
+ * request that SWAPS the audio can be told from one that only refreshes it.
  */
+interface StoredTake {
+  createdBy: string | null
+  url: string | null
+}
+
 async function prefetchTakeRecorders(
   db: AquillaDb,
   takes: readonly TakeKey[],
-): Promise<Map<string, string | null>> {
-  const recorders = new Map<string, string | null>()
+): Promise<Map<string, StoredTake>> {
+  const recorders = new Map<string, StoredTake>()
   if (takes.length === 0) return recorders
 
   const placeholders = takes.map(() => '(?, ?, ?, ?)').join(', ')
@@ -580,17 +608,20 @@ async function prefetchTakeRecorders(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, audio_id, created_by FROM cell_audio
+      `SELECT project_id, file_id, cell_id, audio_id, created_by, url FROM cell_audio
        WHERE (project_id, file_id, cell_id, audio_id) IN (${placeholders})`,
     )
     .bind(...binds)
     .all<{
       project_id: string; file_id: string; cell_id: string
-      audio_id: string; created_by: string | null
+      audio_id: string; created_by: string | null; url: string | null
     }>()
 
   for (const r of results) {
-    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), r.created_by)
+    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), {
+      createdBy: r.created_by,
+      url: r.url,
+    })
   }
   return recorders
 }
@@ -768,9 +799,12 @@ export async function handleEventsWriteRequest(
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
+  /** The edits this request's cell.validate events name (AQU-1571). */
+  const validateEditIds = new Set<string>()
   const validateTakes = new Map<string, TakeKey>()
-  /** Takes attached earlier in THIS request, by author. */
-  const batchTakeAuthors = new Map<string, string>()
+  /** Takes this request attaches, with the urls it attaches them under (see
+   *  the cell.audio.attach note below). */
+  const batchAttachedTakes = new Map<string, Set<string>>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -810,6 +844,8 @@ export async function handleEventsWriteRequest(
     // setting, which isn't known until the per-event loop below.
     if (e.kind === 'cell.validate') {
       validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+      const editEventId = (e.payload as { editEventId?: unknown } | undefined)?.editEventId
+      if (typeof editEventId === 'string' && editEventId) validateEditIds.add(editEventId)
     }
     // AQU-490: the audio twin (see prefetchTakeRecorders), gathered on the
     // same terms — before the project's allowSelfValidationAudio setting is
@@ -822,23 +858,35 @@ export async function handleEventsWriteRequest(
         })
       }
     }
-    // AQU-490: who attaches a take IN THIS BATCH. The prefetch below reads
+    // AQU-490: which takes this request ATTACHES. The prefetch below reads
     // cell_audio, which cannot know about a row this same request is about to
     // create — and that is exactly the recorder's own save: the modal enqueues
     // the attach and its auto-validation back to back with no server ack
     // between them, and the flusher posts them together. So the self-
     // validation gate was a no-op on the one path it exists to guard.
     // (Adversarial review, 2026-09-22.)
+    //
+    // AQU-1571: only WHICH takes, never `e.author`. That field is the client's
+    // claim; the stored author (and so cell_audio.created_by) is the token's
+    // username. Trusting it let a request attach its own take as "someone
+    // else" and validate it in the same breath. Every event in one request is
+    // authorized against the same bearer token, so a take attached here was
+    // recorded by the caller — the self-validation check below reads it that
+    // way. Collected before authorization and regardless of order, so a vote
+    // placed AHEAD of its attach in the batch is caught too.
     if (e.kind === 'cell.audio.attach') {
-      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
-      if (typeof audioId === 'string' && audioId && e.author) {
-        batchTakeAuthors.set(`${key}\u0000${audioId}`, e.author)
+      const p = e.payload as { audioId?: unknown; url?: unknown } | undefined
+      if (typeof p?.audioId === 'string' && p.audioId) {
+        const takeKey = `${key}\u0000${p.audioId}`
+        const urls = batchAttachedTakes.get(takeKey) ?? new Set<string>()
+        if (typeof p.url === 'string') urls.add(p.url)
+        batchAttachedTakes.set(takeKey, urls)
       }
     }
   }
   const [
-    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors,
-    takeRecorders,
+    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, validateTargets,
+    takeRecorders, knownEditIds,
   ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
@@ -847,6 +895,7 @@ export async function handleEventsWriteRequest(
       prefetchCommentAuthors(db, foreignComments),
       prefetchLastEditors(db, [...validateCells.values()]),
       prefetchTakeRecorders(db, [...validateTakes.values()]),
+      readExistingEventIds(db, validateEditIds),
     ])
 
   // PERF-2: project_settings is read at most once per (request, project) —
@@ -1256,6 +1305,8 @@ export async function handleEventsWriteRequest(
     //   1. validationRoleFloor — reject if caller's role < configured floor
     //   2. validationNamedUsers — reject if caller is not in the allowlist
     //   3. allowSelfValidation=false — reject if caller is the cell's last editor
+    //      in the validated lane, or made the edit in this same request; and
+    //      reject a vote on an edit the server has never seen (AQU-1571)
     //   4. (FRO-279) validationCount — read for the projection's threshold recompute
     // For cell.unvalidate events:
     //   The FRO-189 role/named/self checks do NOT apply (unvalidation is always
@@ -1321,10 +1372,47 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const lastEditor = lastEditors.get(
-            cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+          // The AUTHORIZED payload: an event may name its lane by `laneId`
+          // alone (AQU-1612), and authorize() fills in the tag. Off the wire
+          // such a vote read as a default-lane vote and was judged by that
+          // lane's editor instead of its own.
+          const p = authResult.event.event.payload as
+            | { editEventId?: unknown; targetLang?: unknown }
+            | undefined
+          const lane = typeof p?.targetLang === 'string' ? p.targetLang : ''
+          const editEventId = typeof p?.editEventId === 'string' ? p.editEventId : undefined
+          // AQU-1571: the last editor was read BEFORE this request, so an edit
+          // made in the same request as its own vote went unseen — commit and
+          // validate in one post and the gate compared against the previous
+          // editor. Every event in one request is authorized against the same
+          // bearer token, so an edit this request introduces is the caller's.
+          // (An id already stored is a retry, and its row says who made it.)
+          const editedHere =
+            editEventId !== undefined && candidateIds.has(editEventId) && !existingIds.has(editEventId)
+          // AQU-1571: and a vote is stored pinned to its edit id whether or
+          // not that edit exists, while event ids are the client's to choose.
+          // Voting on an id first and committing under it afterwards made the
+          // vote count for its own author. The edit must be one the server has
+          // seen — any stored event, or a target head the projection holds
+          // (data older than the event log has heads without rows) — or one
+          // this request makes. A malformed payload is left to the handler.
+          if (
+            editEventId !== undefined &&
+            !editedHere &&
+            !knownEditIds.has(editEventId) &&
+            !validateTargets.heads.has(editEventId)
+          ) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `validating an edit before it is saved is not allowed on this project`,
+            })
+            continue
+          }
+          const lastEditor = validateTargets.editors.get(
+            laneCellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, lane),
           )
-          if (lastEditor === callerUsername) {
+          if (editedHere || lastEditor === callerUsername) {
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,
@@ -1420,11 +1508,44 @@ export async function handleEventsWriteRequest(
           const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
           if (typeof audioId === 'string' && audioId) {
             const takeKey = takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId)
-            // The stored recorder, or — for a take this very batch is
-            // attaching — the author of that attach. Without the fallback the
-            // check silently passes for every fresh recording, which is the
-            // only case that reliably reaches it.
-            const recorder = takeRecorders.get(takeKey) ?? batchTakeAuthors.get(takeKey)
+            const attachedHere = batchAttachedTakes.has(takeKey)
+            // AQU-1571: a take the server has never seen is NOT an unknown
+            // recorder. The vote is stored keyed by audio id whether or not the
+            // take exists, and audio ids are the client's to choose, so a vote
+            // cast first and the take recorded afterwards made the recorder's
+            // own vote count — the first time anyone else's vote recounted the
+            // take. Nothing the app draws can be voted on before it is saved,
+            // so refusing costs no real flow. (Only while self-validation is
+            // off: elsewhere there is no recorder to protect against.)
+            if (!takeRecorders.has(takeKey) && !attachedHere) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating a recording before it is saved is not allowed on this project`,
+              })
+              continue
+            }
+            // The stored recorder, or — for a take this very request is
+            // attaching — the caller (see batchAttachedTakes). Without the
+            // fallback the check silently passes for every fresh recording,
+            // which is the only case that reliably reaches it. A stored
+            // recorder wins over the fallback: re-attaching somebody else's
+            // take (the transcription re-attach) leaves created_by alone.
+            //
+            // AQU-1571: unless this request swaps the take's AUDIO. Putting
+            // your own recording under somebody else's take id is a new
+            // recording, and the projection now credits it to whoever attached
+            // it (cell.audio.attach); this is the same rule for a vote cast in
+            // the same request, before that projection has run.
+            const stored = takeRecorders.get(takeKey)
+            const attachedUrls = batchAttachedTakes.get(takeKey)
+            const swappedHere =
+              stored !== undefined &&
+              attachedUrls !== undefined &&
+              [...attachedUrls].some((url) => url !== stored.url)
+            const recorder = swappedHere
+              ? callerUsername
+              : (stored?.createdBy ?? (attachedHere ? callerUsername : null))
             if (recorder != null && recorder === callerUsername) {
               rejected.push({
                 id: rawEvent.id ?? '(unknown)',

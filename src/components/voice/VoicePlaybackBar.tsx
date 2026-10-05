@@ -59,6 +59,10 @@ interface Props {
   virtualSoundingCellId?: string | null
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
+  /** AQU-1591: the active target-language lane. The bar plays this lane's takes
+   *  (plus the shared programme audio), so a line voiced only in another
+   *  language reads as unvoiced here, which is what it is. */
+  lane?: string
 }
 
 function fmtTime(s: number): string {
@@ -71,6 +75,7 @@ function fmtTime(s: number): string {
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
   videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, below,
+  lane,
 }: Props) {
   const t = useT()
 
@@ -80,7 +85,7 @@ export function VoicePlaybackBar({
   // bus, so generating/recording a take flips "No voiced lines yet" at once
   // instead of staying stale until reload.
   const fileId = rawCells[0]?.fileId ?? null
-  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(projectId, fileId)
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(projectId, fileId, lane)
   const cells = useMemo(
     () => mergeCellsWithAudio(rawCells, audioByCellId),
     [rawCells, audioByCellId],

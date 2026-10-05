@@ -10,8 +10,10 @@
 // picker must not reach further.
 //
 // Pinned here:
-//   1. A named lane is stored and echoed; omitting it stores NULL, which is the
-//      pre-slice shape every existing link has until AQU-1616's backfill.
+//   1. A named lane is stored and echoed. Omitting it stores a concrete id:
+//      the one target lane the caller can see, or a 400 when that is not
+//      exactly one. NULL remains the pre-slice shape of rows AQU-1616 has
+//      not backfilled; this writer does not produce it.
 //   2. A lane that is not one of THIS upstream's target lanes is refused —
 //      including a real lane of another project (lane ids are globally unique
 //      since AQU-1606, so one resolves) and the upstream's own source lane.
@@ -138,14 +140,78 @@ describe("POST /:projectId/link-source — the upstream lane (AQU-1605)", () => 
     expect(await storedLaneId()).toBe(LANE_FRENCH)
   })
 
-  // WHY: every link made before this slice omits it, and must keep working — the
-  // readers fall back to the upstream's former default lane, and AQU-1616's
-  // backfill is what fills the column in.
-  it("omitting the lane stores NULL (the pre-slice shape)", async () => {
+  // WHY: omitting the lane used to store NULL before any visibility check, and
+  // NULL means the former default lane. A caller who can see more than one
+  // target lane has not chosen, so the link is refused rather than guessed.
+  it("omitting the lane when several target lanes are visible is a 400", async () => {
     const res = await link({ sourceProjectId: UP, mode: "live", consumes: "target" })
-    expect(res.status).toBe(200)
-    expect((await res.json<{ laneId: string | null }>()).laneId).toBeNull()
+    expect(res.status).toBe(400)
     expect(await storedLaneId()).toBeNull()
+  })
+
+  // WHY: the same omission, for a member granted only French. NULL would have
+  // linked the default lane, which this member cannot see. Exactly one visible
+  // non-archived target lane is stored instead.
+  it("a walled member granted only French, omitting laneId, does not link the default lane", async () => {
+    env.LANE_READ_WALL = "1"
+    await grantLane(UP, 2, LANE_FRENCH)
+
+    const res = await link({ sourceProjectId: UP, mode: "live", consumes: "target" }, "scoped")
+    expect(res.status).toBe(200)
+    expect((await res.json<{ laneId: string }>()).laneId).toBe(LANE_FRENCH)
+    expect(await storedLaneId()).toBe(LANE_FRENCH)
+  })
+
+  it("a source link that omits laneId stores the upstream source lane", async () => {
+    const res = await link({ sourceProjectId: UP, mode: "live", consumes: "source" })
+    expect(res.status).toBe(200)
+    expect(await storedLaneId()).toBe(LANE_SOURCE)
+  })
+
+  // WHY: re-posting link-source is how Source & sync settings changes the
+  // lane. The downstream source already holds the old lane's text, and this
+  // route does not rewrite it.
+  it("refuses to change the lane of a live link until it is detached", async () => {
+    const first = await link({
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "target",
+      laneId: LANE_FRENCH,
+    })
+    expect(first.status).toBe(200)
+
+    const changed = await link({
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "target",
+      laneId: LANE_DEFAULT,
+    })
+    expect(changed.status).toBe(409)
+    expect(await storedLaneId()).toBe(LANE_FRENCH)
+
+    const same = await link({
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "target",
+      laneId: LANE_FRENCH,
+    })
+    expect(same.status).toBe(200)
+    expect(await storedLaneId()).toBe(LANE_FRENCH)
+
+    const detached = await app.request(
+      `/api/v2/projects/${DOWN}/detach-source`,
+      { method: "POST", headers: authHeader(await jwtFor("lead")) },
+      env,
+    )
+    expect(detached.status).toBe(200)
+    const after = await link({
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "target",
+      laneId: LANE_DEFAULT,
+    })
+    expect(after.status).toBe(200)
+    expect(await storedLaneId()).toBe(LANE_DEFAULT)
   })
 
   // WHY: lane ids are globally unique (AQU-1606), so a lane id from another
@@ -233,5 +299,26 @@ describe("POST /:projectId/link-source — the upstream lane (AQU-1605)", () => 
     )
     expect(res.status).toBe(200)
     expect(await storedLaneId()).toBeNull()
+  })
+})
+
+describe("GET /:projectId/settings — lanes a walled member may link (AQU-1605)", () => {
+  // WHY: the link wizard reads this response (loadUpstreamLaneChoices) and
+  // offers every target lane it contains. The wizard tests mock that loader;
+  // this is the server answer they are mocking.
+  it("returns only the target lanes the member was granted", async () => {
+    env.LANE_READ_WALL = "1"
+    await grantLane(UP, 2, LANE_FRENCH)
+
+    const res = await app.request(
+      `/api/v2/projects/${UP}/settings`,
+      { headers: authHeader(await jwtFor("scoped")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json<{ lanes: { id: string; role: string }[] }>()
+    expect(body.lanes.filter((lane) => lane.role === "target").map((lane) => lane.id)).toEqual([
+      LANE_FRENCH,
+    ])
   })
 })

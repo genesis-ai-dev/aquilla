@@ -43,6 +43,7 @@ import {
   loadStoppedUpstreamFileIds,
   loadUpstreamFileIds,
   parseLinkFileIds,
+  liveLinkKeepsLane,
   resolveUpstreamLinkLane,
   snapshotSourceCells,
   triggerLinkSeedSync,
@@ -83,12 +84,10 @@ const linkSourceSchema = z.object({
   // whole Bible and then some; files.id is a UUID, hence 256.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000).optional(),
   // AQU-1605: WHICH of the upstream's lanes this link consumes, by `lanes.id`.
-  // Omitted means the upstream's former default lane (`legacy_tag ''`) — what
-  // every link consumed before this slice, and what the batch backfill writes
-  // into the existing rows. For `consumes: 'target'` it picks one of the
-  // upstream's translations; for `'source'` it names its source lane, which
-  // changes no read (source rows are not lane-scoped) and is recorded so a
-  // later reader never has to guess.
+  // Omitted: the server picks when the choice is unambiguous (the upstream
+  // source lane, or the one non-archived target lane this caller can see) and
+  // 400s otherwise. A new link always stores a concrete id. Existing rows may
+  // still be null until AQU-1616's backfill; that null means the '' lane.
   laneId: z.string().min(1).max(256).optional(),
 })
 
@@ -165,6 +164,30 @@ sourceLinking.post(
     })
     if (!lane.ok) return c.json({ error: lane.error }, lane.status)
 
+    // Re-pointing a live link at a different lane leaves the downstream source
+    // as a mix of the old lane's text and the new one's. The stored cells are
+    // not rewritten here. Detach first (that snapshots and clears the lane),
+    // or send the lane the link already follows.
+    if (project.source_project_id && project.source_link_mode === "live") {
+      const stored = await c.env.AQUILLA_PG.prepare(
+        `SELECT source_link_lane_id FROM projects WHERE id = ?`,
+      )
+        .bind(projectId)
+        .first<{ source_link_lane_id: string | null }>()
+      const keeps = await liveLinkKeepsLane(c.env, {
+        upstreamProjectId: sourceProjectId,
+        consumes,
+        storedLaneId: stored?.source_link_lane_id ?? null,
+        requestedLaneId: lane.laneId,
+      })
+      if (!keeps) {
+        return c.json(
+          { error: "detach the link before changing which upstream lane it follows" },
+          409,
+        )
+      }
+    }
+
     // Cycle check: starting at the prospective source, walk its source
     // chain upstream. If we ever encounter `projectId`, accepting the link
     // would create a cycle.
@@ -203,17 +226,15 @@ sourceLinking.post(
         .run()
     } catch (err) {
       // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
-      // worker can be deployed before it is applied (a per-PR preview runs new
-      // code against the shared development database). A whole-project link does
-      // not need the column at all, so it falls back to the pre-slice statement
-      // rather than failing a link that worked before this slice. A link that
-      // asked to follow a subset genuinely cannot be honoured there, and saying
-      // so is better than silently saving a whole-project link instead.
-      // AQU-1605: and a link that named a lane cannot be honoured without
-      // `source_link_lane_id` (migration 0129) either — saving it as a
-      // default-lane link would mirror a different language's translations than
-      // the one the lead picked.
-      if (followedFileIdsJson !== null || lane.laneId !== null) {
+      // worker can be deployed before it is applied. A whole-project link does
+      // not need that column, so an undefined-column (42703) retries without
+      // it. The lane is still written — dropping it would save a default-lane
+      // link (AQU-1605). A subset link cannot be honoured without the column,
+      // and a missing lane column cannot either; both fail closed.
+      const cause = err && typeof err === "object" ? (err as { cause?: { code?: unknown } }).cause : undefined
+      const missingColumn =
+        (err as { code?: unknown } | null)?.code === "42703" || cause?.code === "42703"
+      if (followedFileIdsJson !== null || !missingColumn) {
         console.error("link-source UPDATE failed:", err)
         return c.json({ error: "link failed" }, 500)
       }
@@ -224,11 +245,12 @@ sourceLinking.post(
                   source_link_mode     = ?,
                   source_link_consumes = ?,
                   source_link_gate     = ?,
+                  source_link_lane_id  = ?,
                   source_link_cursor   = 0,
                   updated_at           = CURRENT_TIMESTAMP
             WHERE id = ?`,
         )
-          .bind(sourceProjectId, mode, consumes, gate, projectId)
+          .bind(sourceProjectId, mode, consumes, gate, lane.laneId, projectId)
           .run()
       } catch (retryErr) {
         console.error("link-source UPDATE failed:", retryErr)
@@ -283,7 +305,7 @@ sourceLinking.post(
       gate,
       // AQU-1559: the stored selection, echoed back. null = the whole project.
       fileIds: followedFileIds,
-      // AQU-1605: the stored lane. null = the upstream's former default lane.
+      // AQU-1605: the stored lane. Always a concrete upstream lane id.
       laneId: lane.laneId,
       previousSourceProjectId: project.source_project_id,
       // AQU-476/QA-BUG-1: best-effort signal — false means the client
@@ -637,7 +659,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    // AQU-1559 / AQU-1605: a database that predates migration 0127 or 0129 has
+    // AQU-1559 / AQU-1605: a database that predates migration 0127 or 0138 has
     // nothing to clear in those columns, and detach is not the operation to
     // break over it — it worked before this slice. Retry without them.
     try {

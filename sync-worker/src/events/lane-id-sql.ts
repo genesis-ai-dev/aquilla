@@ -53,11 +53,9 @@ export function laneIdResolveFromColSql(
 /**
  * artifact_bindings resolution (slice 8): a 'source' binding_role -> the
  * project's single source lane; any other role -> the target lane whose
- * legacy_tag matches the inbound lane tag. AQU-1611 dropped the table's own
- * target_lang column, so this resolver is the only thing that turns the tag a
- * caller supplies into the row's stored identity. Returns NULL when the
- * project's lanes do not exist, which the NOT NULL column then rejects. The
- * caller MUST splice {@link laneIdResolveBindingBinds}.
+ * legacy_tag matches target_lang. Mirrors the backfill's ARTIFACT_BINDINGS
+ * rule (scripts/neon-backfill-lanes.ts). Returns NULL until the project's
+ * lanes exist. The caller MUST splice {@link laneIdResolveBindingBinds}.
  */
 export function laneIdResolveBindingSql(): string {
   return `(SELECT id FROM public.lanes WHERE project_id = ?

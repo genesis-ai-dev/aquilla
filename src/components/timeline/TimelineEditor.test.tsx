@@ -4531,6 +4531,23 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(attach).toHaveBeenCalledOnce()
   })
 
+  // Walk r3 (2026-10-05): in Free timing the empty timeline is ~2 s wide and
+  // the one-line prompt ran past the lane's end.
+  it("stays inside the lane, breaking its line rather than running past a short lane's end", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        timingMode="audioFirst" onRequestImportCaptions={() => {}} canImportCaptions
+        linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    expect(prompt.style.right).toBe("10px")
+    expect(prompt.className).toMatch(/\bflex-wrap\b/)
+    expect(prompt.className).toMatch(/\boverflow-hidden\b/)
+    expect(prompt.className).not.toMatch(/(^|\s)whitespace-nowrap(\s|$)/)
+    expect(prompt).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+  })
+
   it("is the statement alone for someone who cannot attach, and absent once captions are on the timeline", () => {
     setVideoDurationSec(LINKED, 635)
     const { rerender } = render(

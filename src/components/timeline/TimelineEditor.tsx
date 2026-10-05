@@ -679,17 +679,21 @@ interface LaneLabelReorder {
  */
 function LinkedVideoLanePrompt({ leftPx, onAttach }: { leftPx: number; onAttach?: () => void }) {
   const t = useT()
+  // Held inside the lane on the right as well: in Free timing an empty file's
+  // timeline is about two seconds wide, and a single unbroken line ran past
+  // the lane's end into blank space (walk r3, 2026-10-05). A lane too narrow
+  // for one line breaks it after "No captions yet".
   return (
     <div data-testid="tl-linked-video-lane-prompt"
-      className="pointer-events-none absolute inset-y-0 z-10 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
-      style={{ left: `${leftPx + 10}px` }}>
-      <span>{t("editor.timeline.noCaptionsYet")}</span>
-      {onAttach && <>
+      className="pointer-events-none absolute inset-y-0 z-10 flex flex-wrap content-center items-center gap-x-1.5 overflow-hidden text-xs leading-4 text-muted-foreground"
+      style={{ left: `${leftPx + 10}px`, right: "10px" }}>
+      <span className="whitespace-nowrap">{t("editor.timeline.noCaptionsYet")}</span>
+      {onAttach && <span className="flex items-center gap-1.5 whitespace-nowrap">
         <span aria-hidden>·</span>
         <Button variant="link" size="xs" className="pointer-events-auto h-auto px-0 text-xs" onClick={onAttach}>
           {t("importExport.captionTrack.attach")}
         </Button>
-      </>}
+      </span>}
     </div>
   )
 }

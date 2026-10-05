@@ -31,8 +31,14 @@ declare module "react" {
 type Props = VideoHTMLAttributes<HTMLVideoElement> & { ref: RefObject<HTMLVideoElement | null> }
 /** The element forces YouTube's own captions on (cc_load_policy=1). The pane
  *  draws its captions itself, from the cells, so YouTube's must not stack on
- *  top of them. */
-const PLAYER_CONFIG = { cc_load_policy: 0 }
+ *  top of them.
+ *
+ *  `referrerpolicy` lands on the player's iframe. YouTube refuses to play an
+ *  embed whose request carries no Referer (player error 153, "Video player
+ *  configuration error"), and in Safari the pane's picture showed "This video
+ *  could not be loaded" on every try. Naming the policy on the iframe sends
+ *  the page's origin however the page or browser default is set. */
+const PLAYER_CONFIG = { cc_load_policy: 0, referrerpolicy: "strict-origin-when-cross-origin" }
 
 type Handler = (e: SyntheticEvent<HTMLVideoElement>) => void
 

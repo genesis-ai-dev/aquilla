@@ -56,6 +56,9 @@ vi.mock("youtube-video-element", () => {
     currentTime = 0
     readyState = 0
     muted = false
+    // The real element has a `config` property, so React hands the object over
+    // as a property rather than stringifying it into an attribute.
+    config: Record<string, unknown> | null = null
     play() { return Promise.resolve() }
     pause() {}
     load() {}
@@ -1048,6 +1051,14 @@ describe("a YouTube link", () => {
     const media = screen.getByTestId("video-pane-media") as HTMLElement
     expect(media.style.minWidth).toMatch(/^0(px)?$/)
     expect(media.style.minHeight).toMatch(/^0(px)?$/)
+  })
+
+  // Walk r3 (2026-10-05): Safari's YouTube player failed with error 153 (no
+  // Referer on the embed request) and the pane showed the error card.
+  it("asks the YouTube player's iframe to send the page's origin", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement & { config?: Record<string, unknown> }
+    expect(media.config?.referrerpolicy).toBe("strict-origin-when-cross-origin")
   })
 
   it("still hears the element's media events", () => {

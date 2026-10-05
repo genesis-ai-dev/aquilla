@@ -6,7 +6,6 @@ import {
   summarizePortfolioProjects,
   type PortfolioMetricsProject,
 } from "../../../src/lib/frontier/portfolio-metrics"
-import { PORTFOLIO_ORG_IDS_MAX } from "../routes/orgs"
 
 interface SummaryBody {
   projectCount: number
@@ -174,9 +173,9 @@ describe("POST /api/v2/orgs/portfolio/summary", () => {
     expect(((await owner.json()) as SummaryBody).projectCount).toBe(3)
   })
 
-  it("resolves every membership when orgIds is omitted, past the explicit-list cap", async () => {
+  it("accepts an explicit list of every membership with no org-count cap (AQU-756)", async () => {
     await seedUser(1, "wendi")
-    const count = PORTFOLIO_ORG_IDS_MAX + 1
+    const count = 501
     await env.AQUILLA_PG.prepare(
       `INSERT INTO organizations (id, name, owner_user_id)
        SELECT g, 'Org ' || g, 1 FROM generate_series(1, ${count}) AS g`,
@@ -199,13 +198,16 @@ describe("POST /api/v2/orgs/portfolio/summary", () => {
       expect.objectContaining({ orgId: count, projectCount: 1 }),
     ]))
 
-    const tooManyIds = Array.from({ length: count }, (_, i) => i + 1)
-    const rejected = await postSummary("wendi", { orgIds: tooManyIds })
-    expect(rejected.status).toBe(400)
-
-    const atCap = await postSummary("wendi", { orgIds: tooManyIds.slice(0, PORTFOLIO_ORG_IDS_MAX) })
-    expect(atCap.status).toBe(200)
-    expect(((await atCap.json()) as SummaryBody).projectCount).toBe(1)
+    const everyId = Array.from({ length: count }, (_, i) => i + 1)
+    const listed = await postSummary("wendi", { orgIds: everyId })
+    expect(listed.status).toBe(200)
+    const listedBody = (await listed.json()) as SummaryBody
+    expect(listedBody.projectCount).toBe(2)
+    expect(listedBody.orgs).toHaveLength(count)
+    expect(listedBody.orgs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ orgId: 1, projectCount: 1 }),
+      expect.objectContaining({ orgId: count, projectCount: 1 }),
+    ]))
   })
 
   it("treats an empty orgIds array as no orgs and rejects a non-member", async () => {

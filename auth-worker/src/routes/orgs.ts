@@ -291,14 +291,8 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
-/**
- * Cap on an explicit orgIds list. This is a request-size limit, not a cap on
- * how many orgs an account may belong to. Omitted orgIds resolves every
- * membership (AQU-756).
- */
-export const PORTFOLIO_ORG_IDS_MAX = 500
-
-const portfolioOrgIdsField = z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional()
+/** No length cap. Omitted orgIds resolves every membership (AQU-756). */
+const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
 const portfolioBatchBody = z.object({
   orgIds: portfolioOrgIdsField,
@@ -313,9 +307,9 @@ const portfolioSummaryBody = z.object({
 
 /**
  * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
- * for this org"). Omitted orgIds means every membership. An empty array
- * still means none. Platform admins may name orgs they are not members of;
- * everyone else must belong to each explicit id.
+ * for this org"). There is no org-count cap. Omitted orgIds means every
+ * membership. An empty array still means none. Platform admins may name
+ * orgs they are not members of; everyone else must belong to each explicit id.
  */
 async function resolvePortfolioOrgIds(
   env: Env,

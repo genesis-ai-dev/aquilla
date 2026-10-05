@@ -161,8 +161,6 @@ export async function getPortfolio(jwt: string, orgId: number): Promise<Portfoli
 }
 
 export const PORTFOLIO_PAGE_SIZE = 40
-/** Must match auth-worker PORTFOLIO_ORG_IDS_MAX. Over this, omit orgIds. */
-export const PORTFOLIO_ORG_IDS_MAX = 500
 
 export interface PortfolioDirectoryPage {
   projects: PortfolioProject[]
@@ -210,8 +208,7 @@ export async function getPortfoliosPage(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
     signal: opts.signal,
     body: JSON.stringify({
-      // AQU-756: over the batch cap, omit orgIds so the worker uses memberships.
-      ...(uniqueOrgIds.length <= PORTFOLIO_ORG_IDS_MAX ? { orgIds: uniqueOrgIds } : {}),
+      orgIds: uniqueOrgIds,
       q: opts.q?.trim() || undefined,
       limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
       cursor: opts.cursor || undefined,
@@ -236,9 +233,7 @@ export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgP
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify(
-      uniqueOrgIds.length <= PORTFOLIO_ORG_IDS_MAX ? { orgIds: uniqueOrgIds } : {},
-    ),
+    body: JSON.stringify({ orgIds: uniqueOrgIds }),
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { portfolios: OrgPortfolio[] }).portfolios
@@ -266,11 +261,7 @@ function readAggregate(body: Partial<PortfolioAggregate> | null | undefined): Po
   }
 }
 
-/**
- * All-orgs overview totals. Omitting orgIds above the explicit-list cap asks
- * the worker to resolve memberships; that cap is not a limit on how many orgs
- * an account may belong to.
- */
+/** All-orgs overview totals for these orgs. There is no org-count cap. */
 export async function getPortfolioAggregates(
   jwt: string,
   orgIds: number[],
@@ -280,9 +271,7 @@ export async function getPortfolioAggregates(
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio/summary`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify(
-      uniqueOrgIds.length <= PORTFOLIO_ORG_IDS_MAX ? { orgIds: uniqueOrgIds } : {},
-    ),
+    body: JSON.stringify({ orgIds: uniqueOrgIds }),
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
   const body = (await res.json()) as Partial<PortfolioAggregate> & {

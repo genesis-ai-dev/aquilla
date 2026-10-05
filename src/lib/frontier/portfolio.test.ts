@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, PORTFOLIO_ORG_IDS_MAX, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -85,18 +85,18 @@ describe("getPortfolioPage / getPortfoliosPage", () => {
     })
   })
 
-  it("omits orgIds when the membership list exceeds the batch cap (AQU-756)", async () => {
+  it("sends every org id with no length cap (AQU-756)", async () => {
     let calledBody: unknown
     global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
       calledBody = JSON.parse(String(init?.body))
       return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
     }) as unknown as typeof fetch
 
-    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
     await getPortfoliosPage("jwt", orgIds, { limit: 40 })
-    expect(calledBody).toEqual({ limit: 40 })
+    expect(calledBody).toEqual({ orgIds, limit: 40 })
     await getPortfolios("jwt", orgIds)
-    expect(calledBody).toEqual({})
+    expect(calledBody).toEqual({ orgIds })
   })
 })
 
@@ -129,7 +129,7 @@ describe("getPortfolioAggregates", () => {
     ])
   })
 
-  it("omits orgIds above the explicit-list cap so membership resolution is not capped", async () => {
+  it("sends every org id on the summary request (AQU-756)", async () => {
     let calledBody: unknown
     global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
       calledBody = JSON.parse(String(init?.body))
@@ -145,9 +145,9 @@ describe("getPortfolioAggregates", () => {
       }), { status: 200 })
     }) as unknown as typeof fetch
 
-    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
     await getPortfolioAggregates("jwt", orgIds)
-    expect(calledBody).toEqual({})
+    expect(calledBody).toEqual({ orgIds })
   })
 })
 

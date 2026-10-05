@@ -22,6 +22,12 @@ export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS, AUDIO_CTE_SQL }
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
 /**
+ * AQU-1591 — the audio CTE is joined on `lane` as well as `cell_id`. Audio used
+ * to have no lane at all, so a single `a.cell_id = s.cell_id` was the whole
+ * join and every lane of a file reported the same takes; now a take belongs to
+ * one lane and the join has to say which. `a.lane` is a CTE column, so the
+ * index note below does not apply to it.
+ *
  * AQU-1261 — why every lane join below compares the BARE column.
  *
  * `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
@@ -250,7 +256,7 @@ export function fileProgressRecomputeStmt(
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
           AND t.target_lang = lanes.join_tag
-         LEFT JOIN audio a ON a.cell_id = s.cell_id
+         LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
@@ -411,7 +417,7 @@ export function sectionsProgressRecomputeStmt(
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
           AND t.target_lang = lanes.join_tag
-         LEFT JOIN audio a ON a.cell_id = s.cell_id
+         LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
@@ -559,7 +565,7 @@ export function fullProgressRecomputeStmts(
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
             AND t.target_lang = lanes.join_tag
-           LEFT JOIN audio a ON a.cell_id = s.cell_id
+           LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1424: see the note on the other paired CTEs — parked cells leave
             -- progress entirely, numerator and denominator together. So do cells the

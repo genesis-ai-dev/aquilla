@@ -104,6 +104,11 @@ export interface Env {
    *  email includes a "join the community" CTA; when absent the email simply
    *  omits it (no dead link). Plain config var, not a secret. */
   DISCORD_INVITE_URL?: string
+  /** Webhook URL of the private channel that receives in-app feedback
+   *  (services/discord-feedback.ts). Worker SECRET: anyone holding it can post
+   *  to the channel. When absent the route still accepts the report and answers
+   *  `delivered: false` (local/e2e). */
+  DISCORD_FEEDBACK_WEBHOOK_URL?: string
 
   ENVIRONMENT?: string
   /**

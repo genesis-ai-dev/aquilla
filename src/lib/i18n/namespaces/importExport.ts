@@ -933,6 +933,18 @@ export const importExport = defineNamespace({
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
+    // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
+    "importExport.errors.unchainableTargetCells": plural({
+      one:
+        "Import failed: {count} of the {total} selected lines has no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+      other:
+        "Import failed: {count} of the {total} selected lines have no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+    }),
+
     // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
     "importExport.errors.oversizedCells": plural({
       one:
@@ -2068,6 +2080,20 @@ export const importExport = defineNamespace({
       "importExport.errors.sourceUploadTooLarge": {
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.unchainableTargetCells": {
+        description:
+          "Thrown when a target import is asked to fill lines that have no event to " +
+          "attach a translation to, so none of them can be saved. Aquilla chains every " +
+          "translation onto the line's latest event; a line whose events are not known " +
+          "to the app yet — usually because the chosen language's lines had not finished " +
+          "loading — cannot be chained, and the import is abandoned whole rather than " +
+          "saving part of it. The closing sentence is the remedy: reopen the file so the " +
+          "lines load, then import again.",
+        placeholders: {
+          count: "How many of the selected lines could not be chained.",
+          total: "How many lines the user selected for import in total.",
+        },
       },
       "importExport.errors.oversizedCells": {
         description:

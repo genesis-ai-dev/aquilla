@@ -63,13 +63,11 @@ export function captureReportProblem(payload: ReportProblemPayload): boolean {
 
 /**
  * Try to get the current session replay URL from posthog-js.
- * posthog.get_session_replay_url() exists in posthog-js ≥ 1.87.
  * We guard defensively because the method is absent when recording is disabled.
  */
 export function getSessionReplayUrl(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fn = (posthog as any).get_session_replay_url
+    const fn: unknown = posthog.get_session_replay_url
     if (typeof fn !== "function") return null
     return (fn as () => string | null).call(posthog) ?? null
   } catch {

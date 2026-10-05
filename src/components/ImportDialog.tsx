@@ -415,6 +415,13 @@ export function ImportDialog({
   const translationDestination = translationRun
     ? translationFiles.find((file) => file.id === translationRun.fileId) ?? null
     : null
+  // AQU-1669: a translation's import OUTCOME names the lane it filled. A
+  // partner's failing import into a second lane was invisible in PostHog
+  // because the outcome said nothing about WHICH lane, and only non-default
+  // lanes were broken. The lane can move while the dialog is open ("Fill which
+  // language"), so it is read at the outcome, when it is the lane actually
+  // written to; "import started" keeps its properties as they were.
+  const translationLaneProperty = targetLang || "default"
 
   // AQU-1365: each opening starts from the caller's situation: New source text
   // unless only a translation is allowed, and the open file as the translation's
@@ -1566,8 +1573,13 @@ export function ImportDialog({
                   import_type: "file-target",
                   entry: translationRun.entry,
                   suggested: translationRun.suggested,
+                  // `file_count` has always carried the CELL count here; existing
+                  // dashboards read it, so it stays and `cell_count` names the
+                  // same number honestly for anything new (AQU-1669).
                   file_count: committedCount,
+                  cell_count: committedCount,
                   project_id: projectId,
+                  target_lane: translationLaneProperty,
                 })
                 onOpenChange(false)
               }}
@@ -1577,6 +1589,7 @@ export function ImportDialog({
                   entry: translationRun.entry,
                   phase,
                   project_id: projectId,
+                  target_lane: translationLaneProperty,
                   error: message,
                 })
               }}

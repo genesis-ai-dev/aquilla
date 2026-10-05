@@ -43,6 +43,8 @@ vi.mock("@/components/ui/scroll-area", () => ({
 import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { applyEBibleTargetImport } from "@/lib/import"
+import posthog from "@/lib/posthog"
+import { IMPORT_FAILED, IMPORT_SUCCEEDED } from "@/lib/event-names"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 
 const JONAH_CELLS: FileTargetCellRef[] = [1, 2].map((verse) => ({
@@ -238,5 +240,51 @@ describe("A translation: the chosen language is the one written (AQU-1631)", () 
     fireEvent.click(within(screen.getByTestId("translation-held-file")).getByRole("button", { name: "Continue" }))
     await screen.findByText(/review matches/i)
     expect((await importAll()).targetLang).toBe("fr")
+  })
+})
+
+describe("A translation: the import's outcome names the language it filled (AQU-1669)", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("reports the lane picked on the screen with a successful import", async () => {
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+    render(<Host initialLane="" />)
+    await chooseTranslation()
+    await pickLane("pt-BR")
+    await dropUsfm()
+    await screen.findByText(/review matches/i)
+    await importAll()
+    await waitFor(() => expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
+      import_type: "file-target",
+      file_count: 2,
+      cell_count: 2,
+      target_lane: "pt-BR",
+    })))
+  })
+
+  it("names the default lane \"default\" rather than an empty tag", async () => {
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+    render(<Host initialLane="" />)
+    await chooseTranslation()
+    await dropUsfm()
+    await screen.findByText(/review matches/i)
+    await importAll()
+    await waitFor(() => expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
+      target_lane: "default",
+    })))
+  })
+
+  it("reports the lane with a failed import too", async () => {
+    vi.mocked(applyEBibleTargetImport).mockRejectedValue(new Error("Source upload failed"))
+    render(<Host initialLane="fr" />)
+    await chooseTranslation()
+    await dropUsfm()
+    await screen.findByText(/review matches/i)
+    await importAll()
+    await waitFor(() => expect(posthog.capture).toHaveBeenCalledWith(IMPORT_FAILED, expect.objectContaining({
+      import_type: "file-target",
+      target_lane: "fr",
+    })))
+    expect(posthog.capture).not.toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.anything())
   })
 })

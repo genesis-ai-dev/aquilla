@@ -5,7 +5,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -31,7 +30,6 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { t as tStandalone } from "@/lib/i18n/standalone"
@@ -145,6 +143,7 @@ import {
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
 import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
 import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
+import { ImportOptionCard } from "@/components/import/ImportOptionCard"
 import {
   translationCheckLayout,
   translationCheckSignal,
@@ -819,7 +818,7 @@ export function ImportDialog({
         setScreen(check.returnScreen)
         return
       case "translation":
-        // "Put it into Jonah as its translation": the same File goes to the
+        // "A translation of Jonah": the same File goes to the
         // review, so nothing is dropped twice. Choosing Jonah here is the
         // person's own choice, as if they had picked it.
         if (layout.kind !== "sameBook" || !flaggedFile) return
@@ -1724,52 +1723,27 @@ function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
 
 function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen, partnerId?: string) => void }) {
   const t = useT()
-  const { icon: Icon, disabled } = option
   const title = t(option.titleKey)
-  const select = () => { if (!disabled && option.id) onSelect(option.id, option.partnerId) }
-  const disabledTooltip = !disabled
-    ? undefined
-    : option.disabledReasonKey
-      ? t(option.disabledReasonKey)
-      : t("importExport.landing.comingSoonTooltip", { title })
-  const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
-  const card = (
-    <Card
-      size="sm"
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled || undefined}
-      data-tooltip={testTooltipAttr}
-      onClick={select}
-      onKeyDown={(e) => {
-        if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select() }
+  return (
+    <ImportOptionCard
+      icon={option.icon}
+      title={title}
+      hint={option.hintKey ? t(option.hintKey) : undefined}
+      badge={option.badge ? <OptionBadge kind={option.badge} /> : undefined}
+      description={t(option.descriptionKey)}
+      disabled={option.disabled}
+      disabledTooltip={
+        !option.disabled
+          ? undefined
+          : option.disabledReasonKey
+            ? t(option.disabledReasonKey)
+            : t("importExport.landing.comingSoonTooltip", { title })
+      }
+      onSelect={() => {
+        if (option.id) onSelect(option.id, option.partnerId)
       }}
-      className={cn(
-        "gap-0 px-3",
-        disabled
-          ? "cursor-not-allowed opacity-55"
-          : "transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium leading-none">{title}</span>
-            {option.hintKey && <span className="text-xs text-muted-foreground">{t(option.hintKey)}</span>}
-            {option.badge && <span className="ml-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
-          </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{t(option.descriptionKey)}</p>
-        </div>
-      </div>
-    </Card>
+    />
   )
-
-  if (!disabled) return card
-
-  return <AppTooltip content={disabledTooltip}>{card}</AppTooltip>
 }
 
 function ImportSection({ label, children }: { label: string; children: ReactNode }) {
@@ -1958,7 +1932,8 @@ export interface UploadForTranslationCheck extends TranslationCheckUpload {
   /** True when the person already answered about it on the collision screen. */
   resolved: boolean
   /** Each parsed result's books and the keys `emitParsedFile` looks it up by
-   *  in `reimportFileIds`, so "Update Jonah's source text" re-imports in place. */
+   *  in `reimportFileIds`, so "A new version of Jonah's source text"
+   *  re-imports in place. */
   results: { books: string[]; reimportKeys: string[] }[]
 }
 
@@ -1966,7 +1941,8 @@ export interface UploadForTranslationCheck extends TranslationCheckUpload {
 export interface TranslationCheckResume {
   /** Uploads to leave out of this import. */
   leaveOut?: ReadonlySet<File>
-  /** Extra in-place re-imports ("Update Jonah's source text"): book code → file id. */
+  /** Extra in-place re-imports ("A new version of Jonah's source text"):
+   *  book code → file id. */
   reimportFileIds?: ReadonlyMap<string, string>
 }
 

@@ -1302,18 +1302,12 @@ export const importExport = defineNamespace({
     "importExport.translation.chooseFileFirst": "Choose the file first.",
     "importExport.translation.fileHasNoLines": "{fileName} has no lines yet, so there is nothing for a translation to fill.",
     "importExport.translationCheck.sameBookTitle": "{book} is already in this project",
-    "importExport.translationCheck.sameBookBody": "{fileName} is for {book}, and {book} is already in this project. Is it a translation of {book}, or a new version of {book}'s source text?",
     "importExport.translationCheck.languageToo": "It also says it's in {language}, the language you translate into.",
-    "importExport.translationCheck.putInto": "Put it into {book} as its translation",
-    "importExport.translationCheck.update": "Update {book}'s source text",
-    "importExport.translationCheck.separate": "Import it as a separate file",
     "importExport.translationCheck.severalSameBook": "{fileName} is for {book}, and this project already has more than one {book}. If it's a translation, choose which file it translates.",
     "importExport.translationCheck.multiBookTitle": "Some of its books are already in this project",
     "importExport.translationCheck.multiBookBody": "{fileName} holds more than one book, and this project already has {books}. A translation goes into one file at a time, so to bring it in as a translation, split it into one file per book first.",
     "importExport.translationCheck.languageTitle": "This looks like a translation",
     "importExport.translationCheck.languageBody": "{fileName} says it's in {language}, the language you translate into. A translation goes into a file that's already in this project.",
-    "importExport.translationCheck.chooseFile": "Choose the file it translates",
-    "importExport.translationCheck.importAsSource": "Import it as a new source text",
     // AQU-1365 review: the check when the upload can't be handed to the
     // translation review (format, another lane), and a Contributor's empty project.
     "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
@@ -1327,11 +1321,28 @@ export const importExport = defineNamespace({
       one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
       other: "{count} of these files may be translations of files already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
     }),
-    "importExport.translationCheck.leaveOut": plural({
-      one: "Leave it out and import the rest",
-      other: "Leave those out and import the rest",
+    // AQU-1365 (PR 3 pass): the check's answers as option cards, each a short
+    // title and one line saying what choosing it does.
+    "importExport.translationCheck.whatIsIt": "What is it?",
+    "importExport.translationCheck.option.translation.title": "A translation of {book}",
+    "importExport.translationCheck.option.translation.description": "Fills {book}'s empty translation lines. You check every match before anything is saved.",
+    "importExport.translationCheck.option.update.title": "A new version of {book}'s source text",
+    "importExport.translationCheck.option.update.description": "Updates {book}'s source lines from this file. Translations, comments and audio are kept.",
+    "importExport.translationCheck.option.separate.title": "A separate source text",
+    "importExport.translationCheck.option.newSource.title": "New source text",
+    "importExport.translationCheck.option.addAsSource.description": "Adds it to the project as new source text. Nothing already here changes.",
+    "importExport.translationCheck.option.chooseFile.title": "A translation",
+    "importExport.translationCheck.option.chooseFile.description": "Choose the file it translates, then check every match before anything is saved.",
+    "importExport.translationCheck.option.leaveOut.title": plural({
+      one: "Leave it out",
+      other: "Leave those out",
     }),
-    "importExport.translationCheck.importAll": "Import them all as new source files",
+    "importExport.translationCheck.option.leaveOut.description": plural({
+      one: "Imports only {count} other file, as new source text.",
+      other: "Imports only {count} other files, as new source text.",
+    }),
+    "importExport.translationCheck.option.importAll.title": "Import them all",
+    "importExport.translationCheck.option.importAll.description": "Adds every file to the project as new source text, those included.",
     "importExport.review.useOtherFile": "Import into {fileName} instead",
   },
   context: {
@@ -4008,29 +4019,10 @@ export const importExport = defineNamespace({
           "Title of the Import dialog when an uploaded file is for a book the project already has. Statement, not a question.",
         placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
       },
-      "importExport.translationCheck.sameBookBody": {
-        description:
-          "Explains the screen titled '{book} is already in this project' and asks whether the upload is a translation of that file or a new version of its source (original-language) text. Two sentences; the buttons below answer the question.",
-        placeholders: { fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.", book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
-      },
       "importExport.translationCheck.languageToo": {
         description:
           "Extra sentence on the same screen when the uploaded file's header also names the language the project translates into. 'It' is the uploaded file.",
         placeholders: { language: "Name of the project's target language that the uploaded file's header names, e.g. 'Siberian Tatar'. Do not translate the substituted value." },
-      },
-      "importExport.translationCheck.putInto": {
-        description:
-          "Main button on that screen: send the uploaded file into the existing file's translation (target) column instead of creating a new file. Imperative.",
-        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
-      },
-      "importExport.translationCheck.update": {
-        description:
-          "Button on that screen: replace the existing file's source text with the upload, keeping its translations. Imperative.",
-        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
-      },
-      "importExport.translationCheck.separate": {
-        description:
-          "Button on the 'Is this a translation?' screens: ignore the warning and import the upload as its own new source file. Imperative.",
       },
       "importExport.translationCheck.severalSameBook": {
         description:
@@ -4058,19 +4050,11 @@ export const importExport = defineNamespace({
           "Explains that screen: the upload says it is in the target language, and a translation belongs in a file already in the project. Two sentences.",
         placeholders: { fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.", language: "Name of the project's target language that the uploaded file's header names, e.g. 'Siberian Tatar'. Do not translate the substituted value." },
       },
-      "importExport.translationCheck.chooseFile": {
-        description:
-          "Button on the 'Is this a translation?' screens: go to the translation import and choose which existing file the upload translates. Imperative.",
-      },
-      "importExport.translationCheck.importAsSource": {
-        description:
-          "Button on the 'This looks like a translation' screen: ignore the warning and import the upload as new source text. Imperative.",
-      },
       // AQU-1365 review: the check's answers when the upload can only come in as
       // source text, and a Contributor's empty project.
       "importExport.translationCheck.sameBookPlain": {
         description:
-          "Shown instead of the usual question on the '{book} is already in this project' screen when the upload can't be imported as a translation (its format, or its language belongs to another lane), so the screen doesn't ask whether it is one. One sentence.",
+          "Opening sentence of the '{book} is already in this project' screen. When the upload could be a translation, the question 'What is it?' follows it; when it can't be imported as one (its format, or its language belongs to another lane), it stands alone. One sentence.",
         placeholders: {
           fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
           book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value.",
@@ -4119,13 +4103,68 @@ export const importExport = defineNamespace({
           files: "The names of those uploaded files, already joined into a list. Do not translate the substituted value.",
         },
       },
-      "importExport.translationCheck.leaveOut": {
+      // AQU-1365 (PR 3 pass): the answers on the 'Is this a translation?'
+      // screens, drawn as cards: a title, and one line saying what it does.
+      "importExport.translationCheck.whatIsIt": {
         description:
-          "Main button on that screen: import only the files that don't look like translations. Count-governed by how many files are left out (not shown): 'it' for one flagged file, 'those' for several.",
+          "Question closing the '{book} is already in this project' screen, after the sentence saying the uploaded file is for a book the project already has. 'It' is the uploaded file; the cards below answer it (a translation of that book, a new version of its source text, or a separate source text).",
       },
-      "importExport.translationCheck.importAll": {
+      "importExport.translationCheck.option.translation.title": {
         description:
-          "Button on that screen: ignore the warning and import every uploaded file as new source text. Imperative.",
+          "Title of the first answer card on the '{book} is already in this project' screen: the uploaded file is the translation of that existing file. Answers 'What is it?'. Short noun phrase.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.translation.description": {
+        description:
+          "Line under that card saying what choosing it does: the upload fills the existing file's translation lines that are still empty, after the user reviews each match. Two short sentences.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.update.title": {
+        description:
+          "Title of an answer card on the '{book} is already in this project' screen: the uploaded file is a newer version of that file's source (original-language) text. Answers 'What is it?'. Short noun phrase.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.update.description": {
+        description:
+          "Line under that card saying what choosing it does: the existing file's source lines are updated in place from the upload, and its translations, comments and audio recordings stay. Two short sentences.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.separate.title": {
+        description:
+          "Title of an answer card on the 'Is this a translation?' screens when the upload's book is already in the project: it is a different source text, to be added as a file of its own next to the existing one. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.newSource.title": {
+        description:
+          "Title of the answer card on the 'This looks like a translation' screen for importing the upload as new source text after all. Matches the 'New source text' choice on the Import dialog's first screen. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.addAsSource.description": {
+        description:
+          "Line under the 'A separate source text' and 'New source text' cards saying what choosing them does: the upload is added as new source text, and the files already in the project are left untouched. Two short sentences.",
+      },
+      "importExport.translationCheck.option.chooseFile.title": {
+        description:
+          "Title of the answer card on the 'Is this a translation?' screens that says the upload is a translation, when the screen can't tell which existing file it translates. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.chooseFile.description": {
+        description:
+          "Line under that card saying what choosing it does: the user picks which existing file the upload translates, then reviews each match before anything is saved. One sentence.",
+      },
+      "importExport.translationCheck.option.leaveOut.title": {
+        description:
+          "Title of the suggested answer card on the 'Some of these look like translations' screen: skip the uploaded files that look like translations. Count-governed by how many files are left out (not shown): 'it' for one, 'those' for several. Short imperative.",
+      },
+      "importExport.translationCheck.option.leaveOut.description": {
+        description:
+          "Line under that card saying what choosing it does: only the other uploaded files are imported, as new source text. Count-governed by how many OTHER files are imported.",
+        placeholders: { count: "How many of the uploaded files will be imported; also governs the plural form." },
+      },
+      "importExport.translationCheck.option.importAll.title": {
+        description:
+          "Title of the answer card on the 'Some of these look like translations' screen that ignores the warning. Short imperative.",
+      },
+      "importExport.translationCheck.option.importAll.description": {
+        description:
+          "Line under that card saying what choosing it does: every uploaded file is added as new source text, including the ones that look like translations. One sentence.",
       },
       "importExport.review.useOtherFile": {
         description:

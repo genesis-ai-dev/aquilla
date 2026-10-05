@@ -11,6 +11,8 @@
  *  - A clear source upload must reach the preview exactly as before (AC3).
  *  - Nothing may be created on Back, and a file the collision screen already
  *    settled is not asked about twice.
+ *  - The answers are option cards (Sam's PR 3 pass): each says what it does,
+ *    and each still does exactly what its button did.
  */
 
 import React from "react"
@@ -136,6 +138,11 @@ async function answer(name: string | RegExp) {
   })
 }
 
+/** The answer cards on the check screen, as [title + description] text, in order. */
+function cards() {
+  return within(screen.getByTestId("translation-check-options")).getAllByRole("button")
+}
+
 
 function lastCheckEvent() {
   const calls = vi.mocked(posthog.capture).mock.calls.filter(([name]) => name === IMPORT_TRANSLATION_CHECK)
@@ -175,12 +182,14 @@ describe("AQU-1365: Is this a translation?", () => {
     await upload([usfm(JON_TATAR, "JON-tatar.usfm")])
     expect(await screen.findByRole("heading", { name: "Jonah is already in this project" })).toBeInTheDocument()
     const check = screen.getByTestId("translation-check")
-    expect(check).toHaveTextContent(
-      "JON-tatar.usfm is for Jonah, and Jonah is already in this project. Is it a translation of Jonah, or a new version of Jonah's source text?",
-    )
-    expect(check).toHaveTextContent("It also says it's in Siberian Tatar, the language you translate into.")
+    // The body above the cards: what was found, then the question.
+    expect([...check.firstElementChild!.querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "JON-tatar.usfm is for Jonah, and Jonah is already in this project.",
+      "It also says it's in Siberian Tatar, the language you translate into.",
+      "What is it?",
+    ])
 
-    await answer("Put it into Jonah as its translation")
+    await answer(/^A translation of Jonah/)
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
@@ -192,12 +201,48 @@ describe("AQU-1365: Is this a translation?", () => {
     }))
   })
 
+  // Sam's PR 3 pass: three long buttons wrapped unevenly. Each answer is now a
+  // card whose second line says what choosing it does.
+  it("answers with three cards, each saying what it does, the translation first", async () => {
+    renderDialog()
+    await upload([usfm(JON_TATAR, "JON-tatar.usfm")])
+    await screen.findByTestId("translation-check")
+    expect(cards().map((card) => card.dataset.testid)).toEqual([
+      "translation-check-translation",
+      "translation-check-update",
+      "translation-check-separate",
+    ])
+    expect(cards().map((card) => card.textContent)).toEqual([
+      "A translation of JonahFills Jonah's empty translation lines. You check every match before anything is saved.",
+      "A new version of Jonah's source textUpdates Jonah's source lines from this file. Translations, comments and audio are kept.",
+      "A separate source textAdds it to the project as new source text. Nothing already here changes.",
+    ])
+    // The suggested answer is marked; the others are not.
+    expect(cards()[0]).toHaveClass("bg-primary/5")
+    expect(cards()[1]).not.toHaveClass("bg-primary/5")
+    expect(importFile).not.toHaveBeenCalled()
+  })
+
+  it("takes an answer from the keyboard", async () => {
+    const { translation } = renderDialog()
+    await upload([usfm(RUT_TATAR, "RUT-tatar.usfm")])
+    await screen.findByTestId("translation-check")
+    const card = screen.getByTestId("translation-check-translation")
+    expect(card).toHaveAttribute("tabindex", "0")
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "Enter" })
+      for (let i = 0; i < 5; i++) await flush()
+    })
+    expect(translation.openFile).toHaveBeenCalledWith("ruth")
+    expect(lastCheckEvent()).toMatchObject({ choice: "translation" })
+  })
+
   it("opens the other file first when the translation is for a file that isn't open", async () => {
     const { translation } = renderDialog()
     await upload([usfm(RUT_TATAR, "RUT-tatar.usfm")])
     const check = await screen.findByTestId("translation-check")
     expect(check).not.toHaveTextContent("It also says")
-    await answer("Put it into Ruth as its translation")
+    await answer(/^A translation of Ruth/)
     expect(translation.openFile).toHaveBeenCalledWith("ruth")
     expect(await screen.findByText("Opening Ruth…")).toBeInTheDocument()
   })
@@ -206,7 +251,7 @@ describe("AQU-1365: Is this a translation?", () => {
     renderDialog()
     await upload([usfm(JON_TATAR, "JON-tatar.usfm")])
     await screen.findByTestId("translation-check")
-    await answer("Update Jonah's source text")
+    await answer(/^A new version of Jonah's source text/)
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(1)
     const ctx = vi.mocked(importFile).mock.calls[0][1]
@@ -223,7 +268,7 @@ describe("AQU-1365: Is this a translation?", () => {
     renderDialog()
     await upload([usfm(JON_TATAR, "JON-tatar.usfm")])
     await screen.findByTestId("translation-check")
-    await answer("Import it as a separate file")
+    await answer(/^A separate source text/)
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(1)
     expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.size ?? 0).toBe(0)
@@ -236,7 +281,9 @@ describe("AQU-1365: Is this a translation?", () => {
     expect(screen.getByTestId("translation-check")).toHaveTextContent(
       "GEN1-tatar.usfm says it's in Siberian Tatar, the language you translate into.",
     )
-    await answer("Choose the file it translates")
+    expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-choose-file", "translation-check-separate"])
+    expect(cards()[1]).toHaveTextContent(/^New source text/)
+    await answer(/^A translation/)
     expect(await screen.findByTestId("translation-chooser")).toBeInTheDocument()
     const held = screen.getByTestId("translation-held-file")
     expect(held).toHaveTextContent("GEN1-tatar.usfm")
@@ -259,7 +306,8 @@ describe("AQU-1365: Is this a translation?", () => {
     expect(screen.getByTestId("translation-check")).toHaveTextContent(
       "1 of these files may be a translation of a file already in this project: JON-tatar.usfm.",
     )
-    await answer("Leave it out and import the rest")
+    expect(cards()[0]).toHaveTextContent("Leave it outImports only 1 other file, as new source text.")
+    await answer(/^Leave it out/)
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(1)
     expect(vi.mocked(importFile).mock.calls[0][0]).toBe(luke)
@@ -271,7 +319,8 @@ describe("AQU-1365: Is this a translation?", () => {
     await upload([usfm(JON_TATAR, "JON-tatar.usfm"), usfm(RUT_TATAR, "RUT-tatar.usfm")])
     await screen.findByTestId("translation-check")
     expect(screen.queryByRole("button", { name: /leave/i })).not.toBeInTheDocument()
-    await answer("Import them all as new source files")
+    expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-import-all"])
+    await answer(/^Import them all/)
     await confirmPreview()
     expect(importFile).toHaveBeenCalledTimes(2)
   })
@@ -294,9 +343,8 @@ describe("AQU-1365: Is this a translation?", () => {
     await upload([usfm(JON_TATAR, "JON-tatar.usfm")])
     const check = await screen.findByTestId("translation-check")
     expect(check).toHaveTextContent("this project already has more than one Jonah")
-    expect(within(check).queryByRole("button", { name: /put it into/i })).not.toBeInTheDocument()
-    expect(within(check).queryByRole("button", { name: /update/i })).not.toBeInTheDocument()
-    expect(within(check).getByRole("button", { name: "Choose the file it translates" })).toBeInTheDocument()
+    expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-choose-file", "translation-check-separate"])
+    expect(cards()[0]).toHaveTextContent(/^A translation/)
   })
 
   it("doesn't ask again about a file the collision screen already settled", async () => {
@@ -322,17 +370,18 @@ describe("AQU-1365: Is this a translation?", () => {
     expect(check).toHaveTextContent(
       "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
     )
-    expect(check).not.toHaveTextContent("Is it a translation")
-    const buttons = within(check).getAllByRole("button")
-    expect(buttons.map((button) => button.textContent)).toEqual(["Import it as a separate file", "Update Jonah's source text"])
+    expect(check).not.toHaveTextContent("What is it?")
+    expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-separate", "translation-check-update"])
+    expect(cards()[0]).toHaveTextContent(/^A separate source text/)
+    expect(cards()[1]).toHaveTextContent(/^A new version of Jonah's source text/)
   })
 
   it("offers no in-place update of a file whose book is only guessed from its name", async () => {
     renderDialog({ translation: host({ files: [{ id: "jud", name: "Judgment notes", type: "usfm" }, ...FILES] }) })
     await upload([usfm("\\id JUD\n\\c 1\n\\v 1 Иуда\n", "JUD-tatar.usfm")])
     const check = await screen.findByTestId("translation-check")
-    expect(within(check).getByRole("button", { name: "Put it into Judgment notes as its translation" })).toBeInTheDocument()
-    expect(within(check).queryByRole("button", { name: /update/i })).not.toBeInTheDocument()
+    expect(within(check).getByRole("button", { name: /^A translation of Judgment notes/ })).toBeInTheDocument()
+    expect(within(check).queryByTestId("translation-check-update")).not.toBeInTheDocument()
   })
 
   it("names another lane's language and doesn't hand the file to the lane that's open", async () => {
@@ -349,8 +398,8 @@ describe("AQU-1365: Is this a translation?", () => {
     expect(check).toHaveTextContent(
       "episode-ru.vtt says it's in Russian, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
     )
-    expect(within(check).queryByRole("button", { name: "Choose the file it translates" })).not.toBeInTheDocument()
-    expect(within(check).getByRole("button", { name: "Import it as a new source text" })).toBeInTheDocument()
+    expect(within(check).queryByTestId("translation-check-choose-file")).not.toBeInTheDocument()
+    expect(within(check).getByRole("button", { name: /^New source text/ })).toBeInTheDocument()
   })
 
   it("doesn't check at all without the translation path", async () => {

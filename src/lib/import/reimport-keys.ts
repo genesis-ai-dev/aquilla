@@ -4,8 +4,8 @@
  * it holds.
  *
  * Kept out of `@/lib/import` so the Import dialog, which builds those maps
- * (the collision screen's "Update existing", AQU-1365's "Update Jonah's source
- * text"), can share the exact lookup `emitParsedFile` does, and its tests can
+ * (the collision screen's "Update existing", AQU-1365's "A new version of
+ * Jonah's source text"), can share the exact lookup `emitParsedFile` does, and its tests can
  * run it for real while `@/lib/import` is mocked.
  */
 

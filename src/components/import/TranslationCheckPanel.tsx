@@ -8,7 +8,7 @@
  *  - One file, its book in exactly one project file: put it into that file as
  *    its translation, update that file's source text, or import it separately.
  *    Update is offered only when that file's book is known rather than
- *    guessed from its name, and is never the highlighted answer.
+ *    guessed from its name, and is never the suggested (first) answer.
  *  - A file the translation review can't read (a .usx), or one in another
  *    lane's language, can only come in as source text; the question then
  *    says so instead of asking whether it is a translation.
@@ -22,10 +22,17 @@
  *
  * The dialog's title carries the question and a back arrow to the upload;
  * this panel is the body and the answers.
+ *
+ * The answers are option cards (Sam's PR 3 pass), stacked full width, each a
+ * short title and one line saying what it leads to, the first one marked as
+ * the suggested answer. A row of three long buttons wrapped unevenly, and a
+ * label alone couldn't say that "a new version of Jonah's source text" keeps
+ * Jonah's translations.
  */
 
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
+import { FilePlus, FileSearch, FileX, Files, Languages, RefreshCw, type LucideIcon } from "lucide-react"
+import { ImportOptionCard } from "@/components/import/ImportOptionCard"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatList } from "@/lib/i18n/format"
 import { isFileTargetFileName } from "@/lib/import/translation-destination"
@@ -45,7 +52,7 @@ interface TranslationCheckPanelProps {
   onChoose: (choice: TranslationCheckChoice) => void
 }
 
-type Answer = { choice: TranslationCheckChoice; label: string }
+type Answer = { choice: TranslationCheckChoice; icon: LucideIcon; title: string; description: string }
 
 export function TranslationCheckPanel({ layout, fileCount, canImportTranslation, describeLanguage, onChoose }: TranslationCheckPanelProps) {
   const { t, locale } = useI18n()
@@ -78,33 +85,54 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
     : null
 
   let body: string[]
+  /** Asked after the body, when the answers are what the file is. */
+  let question: string | null = null
   let answers: Answer[]
+  const chooseFile: Answer = {
+    choice: "choose-file",
+    icon: FileSearch,
+    title: t("importExport.translationCheck.option.chooseFile.title"),
+    description: t("importExport.translationCheck.option.chooseFile.description"),
+  }
+  const addAsSource = (title: string): Answer => ({
+    choice: "separate",
+    icon: FilePlus,
+    title,
+    description: t("importExport.translationCheck.option.addAsSource.description"),
+  })
   switch (layout.kind) {
     case "sameBook": {
       const book = layout.book.file.name
       // Only a file whose book is known, not guessed from a few letters of
       // its name, is offered an in-place update of its source text, and that
-      // is never the highlighted answer.
+      // is never the suggested answer.
       const update: Answer[] = layout.book.file.bookCertain
-        ? [{ choice: "update", label: t("importExport.translationCheck.update", { book }) }]
+        ? [{
+            choice: "update",
+            icon: RefreshCw,
+            title: t("importExport.translationCheck.option.update.title", { book }),
+            description: t("importExport.translationCheck.option.update.description", { book }),
+          }]
         : []
-      const separate: Answer = { choice: "separate", label: t("importExport.translationCheck.separate") }
+      const separate = addAsSource(t("importExport.translationCheck.option.separate.title"))
+      body = [
+        t("importExport.translationCheck.sameBookPlain", { fileName: layout.signal.fileName, book }),
+        ...(languageLine ? [languageLine] : []),
+        ...(formatLine ? [formatLine] : []),
+      ]
       if (canHandOff) {
-        body = [
-          t("importExport.translationCheck.sameBookBody", { fileName: layout.signal.fileName, book }),
-          ...(languageLine ? [languageLine] : []),
-        ]
+        question = t("importExport.translationCheck.whatIsIt")
         answers = [
-          { choice: "translation", label: t("importExport.translationCheck.putInto", { book }) },
+          {
+            choice: "translation",
+            icon: Languages,
+            title: t("importExport.translationCheck.option.translation.title", { book }),
+            description: t("importExport.translationCheck.option.translation.description", { book }),
+          },
           ...update,
           separate,
         ]
       } else {
-        body = [
-          t("importExport.translationCheck.sameBookPlain", { fileName: layout.signal.fileName, book }),
-          ...(languageLine ? [languageLine] : []),
-          ...(formatLine ? [formatLine] : []),
-        ]
         answers = [separate, ...update]
       }
       break
@@ -119,8 +147,8 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
         ...(formatLine ? [formatLine] : []),
       ]
       answers = [
-        ...(canHandOff ? [{ choice: "choose-file" as const, label: t("importExport.translationCheck.chooseFile") }] : []),
-        { choice: "separate", label: t("importExport.translationCheck.separate") },
+        ...(canHandOff ? [chooseFile] : []),
+        addAsSource(t("importExport.translationCheck.option.separate.title")),
       ]
       break
     case "multiBook": {
@@ -132,7 +160,7 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
         }),
         ...(languageLine ? [languageLine] : []),
       ]
-      answers = [{ choice: "separate", label: t("importExport.translationCheck.separate") }]
+      answers = [addAsSource(t("importExport.translationCheck.option.separate.title"))]
       break
     }
     case "language":
@@ -149,8 +177,8 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
             ...(formatLine ? [formatLine] : []),
           ]
       answers = [
-        ...(canHandOff ? [{ choice: "choose-file" as const, label: t("importExport.translationCheck.chooseFile") }] : []),
-        { choice: "separate", label: t("importExport.translationCheck.importAsSource") },
+        ...(canHandOff ? [chooseFile] : []),
+        addAsSource(t("importExport.translationCheck.option.newSource.title")),
       ]
       break
     case "many": {
@@ -161,9 +189,19 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
       })]
       answers = [
         ...(count < fileCount
-          ? [{ choice: "leave-out" as const, label: t("importExport.translationCheck.leaveOut", { count }) }]
+          ? [{
+              choice: "leave-out" as const,
+              icon: FileX,
+              title: t("importExport.translationCheck.option.leaveOut.title", { count }),
+              description: t("importExport.translationCheck.option.leaveOut.description", { count: fileCount - count }),
+            }]
           : []),
-        { choice: "import-all", label: t("importExport.translationCheck.importAll") },
+        {
+          choice: "import-all",
+          icon: Files,
+          title: t("importExport.translationCheck.option.importAll.title"),
+          description: t("importExport.translationCheck.option.importAll.description"),
+        },
       ]
       break
     }
@@ -175,18 +213,21 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
         {body.map((paragraph) => (
           <p key={paragraph} className="text-sm leading-relaxed text-muted-foreground">{paragraph}</p>
         ))}
+        {question && <p className="text-sm font-medium">{question}</p>}
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+      <div className="flex flex-col gap-2" data-testid="translation-check-options">
         {answers.map((answer, index) => (
-          <Button
+          <ImportOptionCard
             key={answer.choice}
-            type="button"
-            variant={index === 0 ? "default" : "outline"}
+            data-testid={`translation-check-${answer.choice}`}
+            icon={answer.icon}
+            title={answer.title}
+            description={answer.description}
+            chevron
+            emphasis={index === 0}
             disabled={chosen}
-            onClick={() => choose(answer.choice)}
-          >
-            {answer.label}
-          </Button>
+            onSelect={() => choose(answer.choice)}
+          />
         ))}
       </div>
     </div>

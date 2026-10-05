@@ -401,6 +401,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
     "projectSettings.info.sourceLanguageLabel": "Source Language",
     "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.smartQuotesLabel": "Smart quotes",
+    "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
     "projectSettings.bible.enableLabel": "Enable Bible resources",
@@ -496,7 +498,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
     "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
@@ -507,7 +509,7 @@ export const projectSettings = defineNamespace({
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
     "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
-    "projectSettings.advancedLlm.modelOverrideHelp": "Optionally specify an OpenRouter model (e.g. {example}).",
+    "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
     "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
@@ -554,7 +556,7 @@ export const projectSettings = defineNamespace({
 
     // ── ValidationSettingsSection.tsx ──
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
-    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
+    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
@@ -638,9 +640,9 @@ export const projectSettings = defineNamespace({
       "Decide when audio recordings are downloaded from storage to this device. You " +
       "can switch any time without re-recording — only future loads are affected.",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
     "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
     "projectSettings.audioMedia.strategyManualName": "Manual",

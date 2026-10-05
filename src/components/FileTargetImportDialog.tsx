@@ -14,6 +14,7 @@ import {
 import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
 import { ImportDialogBackButton } from "@/components/import/ImportDialogBackButton"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED, IMPORT_FAILED } from "@/lib/event-names"
@@ -25,6 +26,13 @@ export interface FileTargetImportDialogProps {
   username: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** AQU-1631: lanes the import may fill. Fewer than two hides the picker. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** Moves the destination lane — and with it the editor's open lane, which is
+   *  where the cells the import matches against come from. */
+  onTargetLangChange?: (lane: string) => void
+  /** True while the chosen lane's cells are loading. */
+  laneCellsLoading?: boolean
   fileName: string
   /** The open file's cells, in display order. */
   cells: FileTargetCellRef[]
@@ -45,6 +53,9 @@ export function FileTargetImportDialog({
   projectId,
   username,
   targetLang,
+  laneOptions,
+  onTargetLangChange,
+  laneCellsLoading,
   fileName,
   cells,
   getToken,
@@ -59,6 +70,17 @@ export function FileTargetImportDialog({
   // Where the title's back arrow leads. The panel reports it per step, and a
   // freshly mounted panel reports none, so reopening clears it.
   const [back, setBack] = useState<FileTargetPanelBack | null>(null)
+  // AQU-1669: the lane rides the import-OUTCOME events below. The partner's
+  // failing import was invisible in PostHog because the outcome told us nothing
+  // about WHICH lane it filled, and only non-default lanes were broken.
+  //
+  // It deliberately does not ride IMPORT_STARTED: the lane moves while the
+  // dialog is open (the panel's own picker reports a change and the workspace
+  // re-renders us on the new one), so as a dependency of the open-effect below
+  // it would re-run on every lane change, bump `panelKey`, and remount the
+  // panel out from under the user mid-import. The outcome is the event that
+  // needs the lane anyway — by then it is the lane actually written to.
+  const laneProperty = targetLang || "default"
   useEffect(() => {
     if (open) {
       setPanelKey((k) => k + 1)
@@ -89,6 +111,9 @@ export function FileTargetImportDialog({
             projectId={projectId}
             username={username}
             targetLang={targetLang}
+            laneOptions={laneOptions}
+            onTargetLangChange={onTargetLangChange}
+            laneCellsLoading={laneCellsLoading}
             fileName={fileName}
             cells={cells}
             getToken={getToken}
@@ -96,8 +121,13 @@ export function FileTargetImportDialog({
             onImported={(committedCount) => {
               posthog.capture(IMPORT_SUCCEEDED, {
                 import_type: "file-target",
+                // `file_count` has always carried the CELL count here; existing
+                // dashboards read it, so it stays and `cell_count` names the
+                // same number honestly for anything new (AQU-1669).
                 file_count: committedCount,
+                cell_count: committedCount,
                 project_id: projectId,
+                target_lane: laneProperty,
               })
               onImported(committedCount)
               onOpenChange(false)
@@ -107,6 +137,7 @@ export function FileTargetImportDialog({
                 import_type: "file-target",
                 phase,
                 project_id: projectId,
+                target_lane: laneProperty,
                 error: message,
               })
             }}

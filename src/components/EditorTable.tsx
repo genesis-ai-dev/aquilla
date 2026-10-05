@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
+import { laneComboboxOptions } from "@/components/lane-options"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -131,7 +132,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { CellPresenceBadges } from "./CellPresenceBadges"
-import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
@@ -449,17 +449,19 @@ function areNumberArraysEqual(a: number[], b: number[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfRowRenders = rowRenders
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfDumpRowRenders = () => {
+  const perfHandles = window as typeof window & {
+    __perfRowRenders?: Map<string, number>
+    __perfDumpRowRenders?: () => void
+    __perfResetRowRenders?: () => void
+  }
+  perfHandles.__perfRowRenders = rowRenders
+  perfHandles.__perfDumpRowRenders = () => {
     const obj: Record<string, number> = {}
     for (const [k, v] of rowRenders) obj[k] = v
     // eslint-disable-next-line no-console
     console.table(obj)
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+  perfHandles.__perfResetRowRenders = () => rowRenders.clear()
 }
 
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
@@ -888,7 +890,7 @@ interface EditorTableProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
    *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -2872,13 +2874,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={switchableLanes.map((lane) => ({
-                  value: lane,
-                  label: laneLabels?.[lane]
-                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
-                  archived: isLaneArchived(lane, archivedLanes),
-                  testId: lane,
-                }))}
+                options={laneComboboxOptions({
+                  lanes: switchableLanes,
+                  laneLabels,
+                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+                  archivedLanes,
+                })}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -3652,7 +3653,7 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -4077,7 +4078,7 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -6660,8 +6661,8 @@ function EditorRow({
   // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
     if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -7660,6 +7661,7 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={project.targetLanguage || undefined}
+                    smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",

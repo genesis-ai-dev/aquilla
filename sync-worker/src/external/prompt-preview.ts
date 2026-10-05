@@ -43,6 +43,7 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { laneLanguage } from "./lane-language"
 import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
@@ -274,9 +275,15 @@ export async function buildPromptPreview(
   const draftContext = objectSetting(settings, "draftContext")
 
   const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // Default lane inherits the project target language; a named lane IS its own
-  // target language (resolveActiveTargetLanguage, project-workspace-lane-target.ts).
-  const targetLanguage = targetLang || stringSetting(settings, "targetLanguage")
+  // The default lane inherits the project target language; any other lane has
+  // its own, and that language lives on the LANE ROW (AQU-1586) — mirroring
+  // resolveActiveTargetLanguage in project-workspace-lane-target.ts. `targetLang`
+  // is the lane's `legacy_tag`, an event key that `planNewTargetLane` sets to
+  // the opaque lane id whenever a sibling already holds the language string, so
+  // using it directly told the model to translate "into a3f09c1e".
+  const targetLanguage =
+    (targetLang ? await laneLanguage(db, projectId, targetLang) : null) ||
+    stringSetting(settings, "targetLanguage")
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;

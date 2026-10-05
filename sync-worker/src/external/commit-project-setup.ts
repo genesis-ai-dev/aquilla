@@ -389,6 +389,8 @@ async function applyImportStep(
     fileType: current.fileType,
     ...(current.sourceLanguage !== undefined ? { sourceLanguage: current.sourceLanguage } : {}),
     ...(current.targetLanguage !== undefined ? { targetLanguage: current.targetLanguage } : {}),
+    ...(current.sourceTextDirection !== undefined ? { sourceTextDirection: current.sourceTextDirection } : {}),
+    ...(current.targetTextDirection !== undefined ? { targetTextDirection: current.targetTextDirection } : {}),
     artifactId: current.artifactId,
     cells: parsed.parsed.cells,
   }

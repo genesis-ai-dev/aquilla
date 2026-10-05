@@ -11,7 +11,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bot, Paperclip, X } from "lucide-react"
+import { Bot, CheckIcon, CopyIcon, Paperclip, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
@@ -27,6 +29,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, FileCandidate } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { chatTranscript } from "@/lib/agent/transcript"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -114,7 +117,7 @@ function ScopedAgentDockView({
   conversationPrelude,
 }: AgentDockViewProps & { draftScope: ComposerDraftScope }) {
   const t = useT()
-  const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
+  const { state, send, stop, startNewChat, noteActivity } = useAgentSession(projectId, author)
   // Bumped on every own-send: the scroller snaps to the end so the sent
   // message (and the reply about to stream) is in view even if the user had
   // scrolled up to read history.
@@ -215,10 +218,21 @@ function ScopedAgentDockView({
   }, [pendingPrompt, jwt, sendPrompt, onPendingPromptConsumed])
 
   // Insert a chip handed in from the editor's "Ask AI" selection action.
+  //
+  // AQU-1653: "Ask AI" is a fresh question about the passage the reader just
+  // selected, so it starts a NEW chat rather than appending to whatever the
+  // last conversation was about — safe now that the old chat is saved on the
+  // server and reopenable from the chat menu. Two cases keep the current chat:
+  // an empty one (there is nothing to start away from) and a streaming one
+  // (a new chat aborts the run in flight, which the reader did not ask for).
   useEffect(() => {
     if (!pendingChip) return
+    if (state.runs.length > 0 && !state.isStreaming) startNewChat()
     composerRef.current?.insertChip(pendingChip)
     onPendingChipConsumed?.()
+    // Deliberately keyed on the chip alone: re-running when runs/isStreaming
+    // change would start a second new chat for one "Ask AI".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChip, onPendingChipConsumed])
 
   const applyContext: ApplyContext = {
@@ -326,6 +340,7 @@ function ScopedAgentDockView({
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton className="shadow-sm" />
+            {state.runs.length > 0 && <CopyChatButton text={() => chatTranscript(state.runs)} />}
           </MessageScroller>
         </MessageScrollerProvider>
       )}
@@ -404,5 +419,35 @@ function ScopedAgentDockView({
         }
       />
     </div>
+  )
+}
+
+/** Copies the whole conversation as plain text. Hover-revealed on pointer
+ *  devices (like the step inspector), always visible on touch. */
+function CopyChatButton({ text }: { text: () => string }) {
+  const t = useT()
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  const label = t(copied ? "agent.dock.copiedChat" : "agent.dock.copyChat")
+  return (
+    <AppTooltip content={label} side="left" delay={150}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        data-testid="agent-copy-chat"
+        className="absolute right-2 top-2 z-10 bg-background/80 shadow-sm [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message-scroller:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100"
+        onClick={() => {
+          void navigator.clipboard?.writeText(text()).then(() => setCopied(true), () => {})
+        }}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </AppTooltip>
   )
 }

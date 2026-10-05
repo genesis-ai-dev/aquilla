@@ -79,7 +79,7 @@ import type {
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import {
   createProjectShared,
@@ -97,11 +97,6 @@ import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/sh
  *  never header-derived: only the session routes pass it, as a code parameter. */
 function readChannel(request: Request): ProvenanceChannel {
   return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
 /** Who is committing, under which ownership rule, on which channel (AQU-926).
@@ -131,7 +126,7 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const identifier = `credential:${cred.credentialId}`
@@ -752,6 +747,12 @@ export async function applyPlanImport(
       kind: cmd.fileType.toLowerCase() === 'tmx' ? 'translation-memory' : cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+      // AQU-1471: stamped ONLY when the command named one. The project-level
+      // default is resolved on every read (db/shared/text-direction.ts), so
+      // copying it onto the row here would silently turn a project default into
+      // 49 per-file overrides and freeze them against a later language change.
+      ...(cmd.sourceTextDirection !== undefined ? { sourceTextDirection: cmd.sourceTextDirection } : {}),
+      ...(cmd.targetTextDirection !== undefined ? { targetTextDirection: cmd.targetTextDirection } : {}),
       importManifest: compiled.fileSummary,
     },
     clientTs,

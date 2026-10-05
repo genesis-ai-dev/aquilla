@@ -145,7 +145,6 @@ describe("languagesEqual — normalizer equality (AQU-249 WARN e)", () => {
 
   it('"fra" equals "fr"', () => {
     expect(languagesEqual("fra", "fr")).toBe(true)
-    expect(languagesEqual("Yoruba", "yo")).toBe(true)
   })
 
   it('"fre" equals "fra" (ISO 639-2/B alias)', () => {

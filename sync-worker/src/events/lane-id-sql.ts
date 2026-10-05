@@ -53,15 +53,37 @@ export function laneIdResolveFromColSql(
 /**
  * artifact_bindings resolution (slice 8): a 'source' binding_role -> the
  * project's single source lane; any other role -> the target lane whose
- * legacy_tag matches target_lang. Mirrors the backfill's ARTIFACT_BINDINGS
- * rule (scripts/neon-backfill-lanes.ts). Returns NULL until the project's
- * lanes exist. The caller MUST splice {@link laneIdResolveBindingBinds}.
+ * legacy_tag matches the inbound lane tag. Mirrors the backfill's
+ * ARTIFACT_BINDINGS rule (scripts/neon-backfill-lanes.ts). AQU-1611's expand
+ * step keeps `target_lang`; this resolver fills `lane_id` from the tag the
+ * caller still sends. Returns NULL when the project's lanes do not exist,
+ * which the NOT NULL column then rejects. The caller MUST splice
+ * {@link laneIdResolveBindingBinds}.
  */
 export function laneIdResolveBindingSql(): string {
   return `(SELECT id FROM public.lanes WHERE project_id = ?
     AND ( (? = 'source' AND role = 'source')
        OR (? <> 'source' AND role = 'target' AND legacy_tag = ?) )
     LIMIT 1)`
+}
+
+/**
+ * Which column an `artifact_bindings` upsert must name in `ON CONFLICT`.
+ *
+ * Migration 0134 adds `artifact_bindings_lane_member_key` on `lane_id`. The
+ * Workers can deploy before that lands, and naming a column the live unique
+ * does not cover raises "there is no unique or exclusion constraint matching
+ * the ON CONFLICT specification". Absent that index, the tag-keyed unique is
+ * the one that exists, so fail toward `target_lang`.
+ */
+export async function artifactBindingConflictColumn(
+  db: AquillaDb,
+): Promise<"lane_id" | "target_lang"> {
+  const row = await db
+    .prepare("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?")
+    .bind("artifact_bindings_lane_member_key")
+    .first<{ indexdef: string }>()
+  return row?.indexdef.includes("lane_id") ? "lane_id" : "target_lang"
 }
 
 /** Binds for {@link laneIdResolveBindingSql}: projectId, role, role, targetLang. */

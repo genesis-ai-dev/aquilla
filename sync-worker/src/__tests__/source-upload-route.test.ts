@@ -313,6 +313,30 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
     ).bind(artifactId).first<{ n: number }>()
     expect(bindings?.n).toBe(1)
+
+    // Before migration 0134 the lane unique is absent and the tag unique is
+    // the conflict target. A second write still updates the one row.
+    await db.prepare(
+      "ALTER TABLE artifact_bindings DROP CONSTRAINT artifact_bindings_lane_member_key",
+    ).run()
+    const beforeMigration = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "xlsx",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Target-Lang": "fr-CA",
+        },
+        body: new Uint8Array([0x50, 0x4b, 1]),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(beforeMigration?.status).toBe(200)
+    expect((await db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>())?.n).toBe(1)
   })
 
   it("replaces the round-trip sidecar for an explicitly selected target skeleton", async () => {
@@ -441,6 +465,34 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
     ).first<{ format: string; r2_key: string }>()
     expect(sidecar).toEqual({ format: "usfm", r2_key: "existing-usfm-key" })
+
+    const bindingBody = JSON.stringify({
+      artifactId,
+      bindingRole: "support",
+      memberPath: "My Project/02EXO.SFM",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+    })
+    const postBinding = () => handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secondToken}`, "Content-Type": "application/json" },
+        body: bindingBody,
+      },
+    ), env)
+    const bindingCount = () => db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>()
+
+    expect((await postBinding())?.status).toBe(200)
+    expect((await bindingCount())?.n).toBe(2)
+    await db.prepare(
+      "ALTER TABLE artifact_bindings DROP CONSTRAINT artifact_bindings_lane_member_key",
+    ).run()
+    expect((await postBinding())?.status).toBe(200)
+    expect((await bindingCount())?.n).toBe(2)
   })
 
   it("does not allow an artifact to be bound to a file in another project", async () => {

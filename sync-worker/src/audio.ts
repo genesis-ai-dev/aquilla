@@ -22,7 +22,7 @@
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
-import { laneIdResolveSql } from "./events/lane-id-sql"
+import { artifactBindingConflictColumn, laneIdResolveSql } from "./events/lane-id-sql"
 import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
@@ -326,6 +326,7 @@ export async function handleAudioRequest(
     })
     if (artifactId) {
       const db = env.AQUILLA_PG!
+      const conflictColumn = await artifactBindingConflictColumn(db)
       try {
         await db.batch([
           db.prepare(
@@ -353,7 +354,7 @@ export async function handleAudioRequest(
                member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
              ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', '', 'builtin:media', '1',
                        'preserved-only', '{}'::jsonb, NULL, ${laneIdResolveSql('source')})
-             ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
+             ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
              DO UPDATE SET
                updated_at = now()`,
             // AQU-1240 slice 8: source-side media binding -> the source lane.

@@ -14,7 +14,7 @@ import { withCors } from "../cors"
 import { r2KeyPrefix, type AudioEnv } from "../audio"
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
-import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
 import {
   MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
   MAX_SOURCE_ARTIFACT_BYTES,
@@ -173,12 +173,13 @@ async function handleSourceBindingRequest(
   if (!artifact) return withCors(new Response('artifact not found', { status: 404 }), request)
 
   try {
+    const conflictColumn = await artifactBindingConflictColumn(env.AQUILLA_PG)
     await env.AQUILLA_PG.prepare(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest, lane_id
        ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, ${laneIdResolveBindingSql()})
-       ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
+       ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,
@@ -406,7 +407,7 @@ export async function handleSourceUploadRequest(
   // The sidecar is the export skeleton, not necessarily the source lane's
   // original. A target-side Paratext import deliberately selects its target
   // USFM skeleton; other target artifacts explicitly send update=false.
-  const statements = buildSourceArtifactPersistenceStatements(db, {
+  const statements = await buildSourceArtifactPersistenceStatements(db, {
     projectId,
     fileId,
     artifactId,

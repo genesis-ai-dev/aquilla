@@ -1,4 +1,4 @@
-import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
 
 export interface SourceArtifactPersistenceInput {
   projectId: string
@@ -30,10 +30,10 @@ export interface SourceArtifactPersistenceInput {
  * copies. Keeping all three rows in one returned batch makes binding + sidecar
  * visibility atomic from the database's perspective.
  */
-export function buildSourceArtifactPersistenceStatements(
+export async function buildSourceArtifactPersistenceStatements(
   db: AquillaDb,
   input: SourceArtifactPersistenceInput,
-): AquillaStatement[] {
+): Promise<AquillaStatement[]> {
   const statements: AquillaStatement[] = []
   if (input.updateSourceSidecar) {
     statements.push(db.prepare(
@@ -55,6 +55,7 @@ export function buildSourceArtifactPersistenceStatements(
       input.createdAt,
     ))
   }
+  const conflictColumn = await artifactBindingConflictColumn(db)
   statements.push(
     db.prepare(
       `INSERT INTO artifacts (
@@ -79,7 +80,7 @@ export function buildSourceArtifactPersistenceStatements(
          id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
        ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
-       ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
+       ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,

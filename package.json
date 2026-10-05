@@ -112,6 +112,7 @@
     "deploy:context": "npm run build:context && pnpm run prepare:pages-deployment-artifacts && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
     "prepare": "husky",
     "seams:eval": "tsx scripts/seam-eval.ts",
+    "harmonizer:eval": "tsx scripts/harmonizer-eval.ts",
     "tags:eval": "tsx scripts/passage-tags-eval.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",

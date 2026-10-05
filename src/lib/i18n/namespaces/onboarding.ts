@@ -18,7 +18,7 @@ import { defineNamespace, plural } from "./types"
 export const onboarding = defineNamespace({
   keys: {
     "onboarding.connect.title": "Connect your agent",
-    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent gets its credential from Aquilla.",
     "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
     "onboarding.connect.handoff": "Agent still waiting? Paste this message into its chat. It contains no secrets.",
     "onboarding.connect.handoffCopy": "Copy message",
@@ -31,7 +31,7 @@ export const onboarding = defineNamespace({
     "onboarding.connect.agent": "Agent name: {name}",
     "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
     "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
-    "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
+    "onboarding.connect.act": "Read project data and apply changes with no further approval.",
     "onboarding.connect.expiry": "Access doesn't expire. You can see when it was last used and revoke it from API tokens at any time.",
     "onboarding.connect.project": "Project",
     "onboarding.connect.choose": "Choose a project",
@@ -65,7 +65,7 @@ export const onboarding = defineNamespace({
     "onboarding.oauth.organizations": "Organizations",
     "onboarding.oauth.allOrganizations": "All current organizations",
     "onboarding.oauth.scopeHint": "Only organizations where you have maintainer access or higher appear here. Access includes their current and future projects. Organizations you join later require a new connection.",
-    "onboarding.oauth.validation": "Saving a change does not mark it as human-validated. Reviewers validate specific translation versions separately.",
+    "onboarding.oauth.validation": "Saving a change does not mark it as human-validated. Reviewers validate each translation version on its own.",
     "onboarding.oauth.approve": "Allow access",
     "onboarding.oauth.redirecting": "Returning you to {host}…",
     "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
@@ -282,7 +282,7 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.voiceLegend": "Voice generation",
     "onboarding.checklist.aiModels.noneLabel": "None — set up later",
     "onboarding.checklist.aiModels.noneHint":
-      "Skip voice generation entirely. You can come back from project settings.",
+      "Skip voice generation. You can come back from project settings.",
     "onboarding.checklist.aiModels.geminiLabel": "Gemini (cloud, BYOK)",
     "onboarding.checklist.aiModels.geminiHint":
       "Highest quality, promptable voices. Needs a Google AI Studio API key. No local download.",
@@ -342,14 +342,15 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
-    // — ComingSoonStep + its two checklist entries —
-    "onboarding.checklist.comingSoon.badge": "Coming soon",
-    "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
-    "onboarding.checklist.comingSoon.standards.description":
+    // — LinkStep: optional steps that open the surface where the work happens —
+    "onboarding.checklist.standards.title": "Set project standards",
+    "onboarding.checklist.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
-    "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or term lists to keep terminology consistent.",
+    "onboarding.checklist.standards.actionLabel": "Open standards",
+    "onboarding.checklist.glossary.title": "Import terminology",
+    "onboarding.checklist.glossary.description":
+      "Existing term lists (CSV, TBX, LIFT) to keep terminology consistent.",
+    "onboarding.checklist.glossary.actionLabel": "Open terminology",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)
@@ -451,7 +452,7 @@ export const onboarding = defineNamespace({
       "Optional personal AI provider override for this device only.",
     "onboarding.preferences.section.localModels.title": "Local models",
     "onboarding.preferences.section.localModels.description":
-      "Whisper transcription and MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+      "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
     // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
     // there). Named "Offline AI provider" rather than "Local LLM" so it doesn't read as a
     // sibling of "Local models" right above it — that section is on-device Whisper/MMS

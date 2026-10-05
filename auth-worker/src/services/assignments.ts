@@ -54,26 +54,57 @@ const CELLS_TOTAL_SUBQUERY = `(
  * assignment is pinned to.
  *
  * AQU-1278 fixed the lane predicate. `cells` keys on (project, file, cell,
- * side, target_lang), so a multi-lane project holds one target row per lane;
- * without `c.target_lang = a.target_lang` a cell validated in Spanish AND
- * French counted twice, and cellsDone could exceed cellsTotal (the denominator
- * counts SOURCE rows, which are lane-independent — one per cell). That was on
- * screen in two places: the project Team card
- * (GET /:projectId/assignments/all) and the org-wide manager workload view
- * (GET /orgs/:orgId/assignments/workload). Both columns silently over-counted
- * exactly on the projects that need them most — the ones with several lanes.
+ * lane_id), so a multi-lane project holds one target row per lane; without a
+ * lane predicate a cell validated in Spanish AND French counted twice, and
+ * cellsDone could exceed cellsTotal (the denominator counts SOURCE rows, which
+ * are lane-independent — one per cell). That was on screen in two places: the
+ * project Team card (GET /:projectId/assignments/all) and the org-wide manager
+ * workload view (GET /orgs/:orgId/assignments/workload). Both columns silently
+ * over-counted exactly on the projects that need them most — the ones with
+ * several lanes.
  *
- * `a.target_lang` rather than a bound lane is deliberate: an assignment IS
- * pinned to one lane (AQU-538 §3.5, '' = the default lane), so its progress is
- * only ever measured in that lane.
+ * AQU-1609: the predicate is `c.lane_id = a.lane_id`, the identity both tables
+ * key on, rather than the legacy `target_lang` tag they both also carry. The
+ * two agree today only because `planNewTargetLane` hands a second lane of the
+ * same language its own lane id as its tag — identity routed through a string
+ * chosen for backwards compatibility. Comparing the ids directly needs no such
+ * guarantee, and is what survives AQU-1611 retiring the tag columns.
+ *
+ * `a.lane_id` rather than a bound lane is deliberate: an assignment IS pinned
+ * to one lane (AQU-538 §3.5), so its progress is only ever measured there.
  */
 const CELLS_DONE_SUBQUERY = `(
   SELECT COUNT(*) FROM assignment_cells ac
     JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
-                 AND c.target_lang = a.target_lang AND c.validated = 1
+                 AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
 )`
+
+/**
+ * AQU-1609: the `lanes.id` a legacy target-language tag names, or `''` when the
+ * project has no such lane.
+ *
+ * Only for the seam where a caller still speaks tags — the `?lane=` query param
+ * on the per-unit read, kept for clients deployed before `?laneId=`. Everything
+ * inside this service compares `lane_id` to `lane_id`.
+ *
+ * `''` rather than null on a miss is deliberate: it is not a lane id any row
+ * carries, so an unresolvable tag reads as "no cells in that lane" instead of
+ * matching a NULL-tolerant join and borrowing another lane's totals.
+ */
+export async function resolveTargetLaneId(
+  env: Env,
+  projectId: string,
+  laneTag: string,
+): Promise<string> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?",
+  )
+    .bind(projectId, laneTag)
+    .first<{ id: string }>()
+  return row?.id ?? ""
+}
 
 /**
  * One open assignment in the org-wide "Team workload" manager view, with its
@@ -92,10 +123,12 @@ export interface OrgAssignmentRow {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
-  /** AQU-538 (§3.5): target-language lane. '' = default lane. */
+  /** AQU-538 (§3.5): target-language lane, as the legacy tag. '' = default lane. */
   targetLang: string
   /** Display name from the lane row, when one exists. */
   laneName?: string | null
+  /** AQU-1609: `lanes.id` — the lane's identity, straight off the assignment. */
+  laneId: string
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -118,6 +151,7 @@ export async function getOrgAssignmentWorkload(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
+            a.lane_id          AS lane_id,
             ln.name            AS lane_name,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -128,7 +162,7 @@ export async function getOrgAssignmentWorkload(
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
-         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -142,6 +176,7 @@ export async function getOrgAssignmentWorkload(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_id: string
       lane_name: string | null
       cells_total: number
       cells_done: number
@@ -158,6 +193,7 @@ export async function getOrgAssignmentWorkload(
     username: r.assignee_username,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneId: r.lane_id,
     laneName: r.lane_name,
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
@@ -225,10 +261,12 @@ export interface UnitAssignment {
   assigneeUserId: number
   username: string | null
   scopeLabel: string
-  /** AQU-538 (§3.5): the lane this assignment is pinned to. '' = default. */
+  /** AQU-538 (§3.5): the lane this assignment is pinned to, as the legacy tag. */
   targetLang: string
   /** Display name from the lane row, when one exists. */
   laneName?: string | null
+  /** AQU-1609: `lanes.id` — the lane's identity, straight off the assignment. */
+  laneId: string
   deadline: string | null
   /** The assignment's cells that are inside this unit and still exist. */
   cellsTotal: number
@@ -322,13 +360,16 @@ async function readThreshold(
  * spoken for either way, and hiding the row would make the unit look
  * unassigned — which is why every row carries its own `targetLang` for the
  * caller to label. Audio has no lane at all (below).
+ *
+ * AQU-1609: `laneId` is `lanes.id`. The route resolves it, accepting a legacy
+ * `?lane=` tag from an older client; nothing below compares tags.
  */
 export async function getUnitAssignments(
   env: Env,
   projectId: string,
   fileId: string,
   sectionKey: string,
-  lane: string,
+  laneId: string,
 ): Promise<UnitAssignment[]> {
   const [validationCount, validationCountAudio] = await Promise.all([
     readValidationCount(env, projectId),
@@ -381,6 +422,7 @@ export async function getUnitAssignments(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
+            a.lane_id          AS lane_id,
             a.deadline         AS deadline,
             -- AQU-1278. One row per (assignment, chapter) rather than per
             -- assignment: the inspector needs to say WHICH chapters a person
@@ -406,13 +448,16 @@ export async function getUnitAssignments(
        -- stranding the assignment short of 100% forever (AQU-1068).
        JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
                    AND c.cell_id = ac.cell_id AND c.side = 'source'
+       -- AQU-1609: the lane's identity, not its legacy tag. The caller
+       -- resolved the lane id; a tag would re-introduce the string indirection
+       -- that AQU-1611 retires.
        LEFT JOIN cells t ON t.project_id = c.project_id AND t.file_id = c.file_id
                         AND t.cell_id = c.cell_id AND t.side = 'target'
-                        AND t.target_lang = ?
+                        AND t.lane_id = ?
        LEFT JOIN audio au ON au.cell_id = c.cell_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
-         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND ac.file_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -428,13 +473,14 @@ export async function getUnitAssignments(
         AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
-               a.target_lang, a.deadline, a.created_at, ${sectionKeyExpr("c")}
+               a.target_lang, a.lane_id, a.deadline, a.created_at,
+               ${sectionKeyExpr("c")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane on the target join, then the
-    // WHERE — and the section key last, only when the fragment above put a
+    // audio thresholds in the SELECT list, the lane id on the target join, then
+    // the WHERE — and the section key last, only when the fragment above put a
     // placeholder there. Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
     .bind(
@@ -443,7 +489,7 @@ export async function getUnitAssignments(
       fileId,
       validationCount,
       validationCountAudio,
-      lane,
+      laneId,
       projectId,
       fileId,
       ...(sectionKey === "" ? [] : [sectionKey]),
@@ -454,6 +500,7 @@ export async function getUnitAssignments(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      lane_id: string
       lane_name: string | null
       deadline: string | null
       chapter_key: string
@@ -479,6 +526,7 @@ export async function getUnitAssignments(
         scopeLabel: r.scope_label,
         targetLang: r.target_lang ?? "",
         laneName: r.lane_name,
+        laneId: r.lane_id,
         deadline: r.deadline,
         cellsTotal: 0,
         translated: 0,
@@ -545,6 +593,13 @@ export interface MyAssignment {
   fileIds: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the resolved source cell ids, present ONLY for a 'cells' scope
+   * (the editor's current selection). A book or chapter scope leaves it absent
+   * — its extent is the whole file or the chapters `scopeLabel` names — so a
+   * reader branches on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
   /** Display name of that lane, when the row exists. */
@@ -592,6 +647,40 @@ async function fileIdsForAssignments(
 }
 
 /**
+ * assignment_id → its resolved source cell ids (AQU-1628).
+ *
+ * Only called with the ids of 'cells'-scope assignments: for a book or chapter
+ * scope the extent is re-derivable (the whole file, or the chapters named in
+ * `scope_label`), while an explicit line set is not — the editor gutter cannot
+ * tell which lines are the person's without being told. Keeping the call to
+ * that scope means an inbox with no selection assignments pays nothing.
+ *
+ * Callers pass assignment ids they already selected, so this inherits their
+ * authorization exactly — it never widens what the caller may see.
+ */
+async function cellIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  if (assignmentIds.length === 0) return byAssignment
+  for (const id of assignmentIds) byAssignment.set(id, [])
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.cell_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; cell_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.cell_id)
+  return byAssignment
+}
+
+/**
  * The caller's open assignments in one project (the "Assigned to me" inbox).
  * Newest first.
  */
@@ -605,7 +694,7 @@ export async function getMyAssignments(
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
             ln.name AS lane_name,
-            ln.id AS lane_id,
+            a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -616,7 +705,7 @@ export async function getMyAssignments(
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
        LEFT JOIN lanes ln
-         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -641,6 +730,10 @@ export async function getMyAssignments(
 
   const results = rows.results ?? []
   const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+  const cellIds = await cellIdsForAssignments(
+    env,
+    results.filter((r) => r.scope_kind === "cells").map((r) => r.assignment_id),
+  )
 
   return results.map((r) => ({
     assignmentId: r.assignment_id,
@@ -650,6 +743,7 @@ export async function getMyAssignments(
     fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    ...(cellIds.has(r.assignment_id) ? { cellIds: cellIds.get(r.assignment_id) ?? [] } : {}),
     targetLang: r.target_lang ?? "",
     laneName: r.lane_name,
     laneId: r.lane_id,
@@ -744,7 +838,7 @@ export async function getMyAssignmentsAcrossOrg(
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
             ln.name AS lane_name,
-            ln.id AS lane_id,
+            a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -756,7 +850,7 @@ export async function getMyAssignmentsAcrossOrg(
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN lanes ln
-         ON ln.project_id = a.project_id AND ln.role = 'target' AND ln.legacy_tag = a.target_lang
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL

@@ -27,6 +27,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
+import { laneComboboxOptions } from "@/components/lane-options"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -51,6 +52,8 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
+import { v7 as uuidv7 } from "uuid"
+import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
@@ -129,7 +132,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { CellPresenceBadges } from "./CellPresenceBadges"
-import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
@@ -198,6 +200,7 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { closeRuleCard, openRuleCard, useOpenRuleId } from "@/lib/rules/open-rule-card"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
@@ -785,7 +788,7 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** AQU-1391: called after a cell is validated, so the parent can
    *  auto-propagate the confirmed translation to repeated source segments.
    *  Fired by the explicit validate gesture and (AQU-1484) by the commit
@@ -797,6 +800,11 @@ interface EditorTableProps {
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
   repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
+  /** AQU-1578: record an editor commit as the cell's pending head BEFORE its
+   *  asynchronous outbox write, so a second commit inside that window chains
+   *  on it. Returns a release that undoes the reservation (only while it still
+   *  holds this id) when the enqueue fails. */
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -818,6 +826,10 @@ interface EditorTableProps {
    *  or null when focus leaves the table. Non-lock-bearing presence: peers see
    *  this user on the row even when they never activate the editor. */
   onViewCell?: (cellId: string | null) => void
+  /** Fires with the cell a navigation control (the section dropdown, a
+   *  suggested passage) jumped to, so the workspace can remember it as where
+   *  the user is in this file. */
+  onNavigateToCell?: (cellId: string) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -876,7 +888,7 @@ interface EditorTableProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
    *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1021,11 +1033,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onValidated,
   repetitionCounts,
   getPendingTargetEventId,
+  reservePendingTargetCommit,
   onOptimisticEdit,
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onViewCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onNavigateToCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -2106,6 +2119,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
     if (!targetCellId) return
+    onNavigateToCell?.(targetCellId)
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
@@ -2123,7 +2137,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
+  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone])
 
   /**
    * Open a suggested passage (AQU-515) — land on the first cell inside the
@@ -2140,6 +2154,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         && compareAddresses(parsed.address, suggestion.end) <= 0
     }))
     if (!targetCellId) return
+    onNavigateToCell?.(targetCellId)
     const milestoneKey = milestoneKeyByCellId.get(targetCellId)
     if (milestoneKey) {
       setChapterNavigationSelection({ fileId: audioFileId, label: milestoneKey })
@@ -2175,7 +2190,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
       return
     }
-    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    // A jump already asked for a page (revealCellPage — e.g. the workspace
+    // restoring the last cell when the editor remounts) outranks the row at
+    // the top; otherwise this re-run would turn the page straight back.
+    const requested = pendingJumpCellIdRef.current
+    const visibleId = requested && milestoneKeyByCellId.has(requested)
+      ? requested
+      : fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
     const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
     if (!key) return
     const subsectionKey = idmlMilestoneNavigation && visibleId
@@ -2501,6 +2522,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onValidated={onValidated}
           repetitionCounts={repetitionCounts}
           getPendingTargetEventId={getPendingTargetEventId}
+          reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
           presenceStore={presenceStore}
@@ -2669,6 +2691,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onJumpToCell,
     onOpenAudioSetup,
     getPendingTargetEventId,
+    reservePendingTargetCommit,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -2849,13 +2872,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={switchableLanes.map((lane) => ({
-                  value: lane,
-                  label: laneLabels?.[lane]
-                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
-                  archived: isLaneArchived(lane, archivedLanes),
-                  testId: lane,
-                }))}
+                options={laneComboboxOptions({
+                  lanes: switchableLanes,
+                  laneLabels,
+                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+                  archivedLanes,
+                })}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -3544,7 +3566,7 @@ interface MemoizedRowProps {
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
@@ -3553,6 +3575,7 @@ interface MemoizedRowProps {
    *  source. Only repeated cells appear. */
   repetitionCounts?: ReadonlyMap<string, number>
   getPendingTargetEventId?: (cellId: string) => string | null
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -3628,7 +3651,7 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -3736,7 +3759,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -3916,6 +3939,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onValidated={onValidated}
         repetitionCount={repetitionCounts?.get(cell.id)}
         getPendingTargetEventId={getPendingTargetEventId}
+        reservePendingTargetCommit={reservePendingTargetCommit}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
         presenceStore={presenceStore}
@@ -3982,7 +4006,7 @@ interface EditorRowProps {
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string) => void
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
@@ -3991,6 +4015,7 @@ interface EditorRowProps {
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
   repetitionCount?: number
   getPendingTargetEventId?: (cellId: string) => string | null
+  reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   presenceStore?: ProjectPresenceStore | null
@@ -4051,7 +4076,7 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -4966,7 +4991,7 @@ function EditorRow({
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
-  onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -5081,7 +5106,13 @@ function EditorRow({
     return () => clearTimeout(timer)
   }, [holdingRemoteDraft])
   const overlayDraftText = liveRemoteDraft ?? heldRemoteDraft?.text
-  const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  // AQU-1634: the rule card is one app-wide surface, so its open state lives in
+  // a shared store rather than per-row state — opening another row's underline
+  // replaces the open card instead of stacking a second one.
+  const openRuleId = useOpenRuleId(cell.id)
+  // Teardown (virtualisation, lane switch, file change) closes this row's card,
+  // matching the per-row lifetime the card had before the store.
+  useEffect(() => () => closeRuleCard(cell.id), [cell.id])
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
@@ -5459,7 +5490,7 @@ function EditorRow({
   )
 
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
     // (useCellsAuditStatsWithOverlay) reflects it on `cell.waivers` instantly
@@ -5484,7 +5515,7 @@ function EditorRow({
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    setOpenRuleId(null)
+    closeRuleCard(cell.id)
     if (!project.id) return
     void emitCellUnwaive({
       projectId: project.id,
@@ -5607,19 +5638,35 @@ function EditorRow({
     // it is wired the row-local ref must not be consulted — it would re-chain
     // on the losing id. The row-local ref only covers hosts without a
     // workspace getter.
-    const parentId =
-      (getPendingTargetEventId
-        ? getPendingTargetEventId(cell.id)
-        : pendingTargetEventIdRef.current) ??
-      cell.targetEventId ??
-      cell.sourceEventId ??
-      null
+    // AQU-1578: resolveTargetCommitParent treats the optimistic placeholder
+    // `targetEventId: ""` of a just-filled empty cell as absent, so a commit
+    // never leaves with an empty parentId.
+    const parentId = resolveTargetCommitParent({
+      pending: [
+        getPendingTargetEventId
+          ? getPendingTargetEventId(cell.id)
+          : pendingTargetEventIdRef.current,
+      ],
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    })
+    // AQU-1578: mint the id here and record it as this cell's pending head
+    // SYNCHRONOUSLY, before the asynchronous outbox write below. Recording it
+    // only after the await left a window — Tab on, Shift+Tab straight back,
+    // type — in which the next commit could not see this one, chained on the
+    // lagging projection, and was dropped by the server as a stale sibling
+    // (taking the cell's validation with it).
+    const reservedEventId = uuidv7()
+    const previousRowHead = pendingTargetEventIdRef.current
+    pendingTargetEventIdRef.current = reservedEventId
+    const releaseReservation = reservePendingTargetCommit?.(cell.id, reservedEventId, parentId)
     // AQU-538: tag the commit with the active lane. The store now renders this
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
     try {
       const eventId = await emitTargetCellCommit({
+        id: reservedEventId,
         projectId: project.id,
         fileId: cell.fileId,
         cellId: cell.id,
@@ -5630,7 +5677,6 @@ function EditorRow({
         author: username,
         targetLang: activeLane,
       })
-      pendingTargetEventIdRef.current = eventId
       lastCommittedEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
@@ -5682,13 +5728,19 @@ function EditorRow({
       }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId, parentId)
+      void onCellCommitted?.(cell.id, eventId)
       return true
     } catch (err) {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
+      // AQU-1578: the reserved head exists nowhere durable — undo it, unless a
+      // newer commit has already reserved over it.
+      releaseReservation?.()
+      if (pendingTargetEventIdRef.current === reservedEventId) {
+        pendingTargetEventIdRef.current = previousRowHead
+      }
       const msg = err instanceof Error ? err.message : t("editor.write.saveFailed")
       setWriteError(msg)
       setLocalTargetDraft(null)
@@ -5699,7 +5751,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -5998,8 +6050,9 @@ function EditorRow({
     // back by the time the control appears — without this, validating a
     // just-recorded line would silently do nothing, which is the exact failure
     // the empty commit exists to prevent.
+    // AQU-1578: firstEventId skips the optimistic placeholder `""`.
     const editEventId =
-      cell.targetEventId ?? pendingTargetEventIdRef.current ?? getPendingTargetEventId?.(cell.id) ?? null
+      firstEventId(cell.targetEventId, pendingTargetEventIdRef.current, getPendingTargetEventId?.(cell.id))
     if (!project.id || !editEventId) return false
     // AQU-538: scope the validation to the active lane. emitCellValidate/
     // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
@@ -6606,8 +6659,8 @@ function EditorRow({
   // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
     if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -6700,8 +6753,14 @@ function EditorRow({
   // produces one violation surface.
   const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
-    setOpenRuleId(ruleId)
-  }, [])
+    openRuleCard(cell.id, ruleId)
+  }, [cell.id])
+
+  // Same card, opened from the cell's Issues tab instead of an inline blot.
+  const handleOpenRuleCard = useCallback(
+    (ruleId: string) => openRuleCard(cell.id, ruleId),
+    [cell.id],
+  )
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
   // rule explanation; mouse-out clears it. Snapshotting mirrors openInlineRule
@@ -7600,6 +7659,7 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={project.targetLanguage || undefined}
+                    smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -8394,7 +8454,7 @@ function EditorRow({
                   waivedInfractions={waivedInfractions}
                   ruleMap={ruleMap}
                   editable={editable}
-                  onOpenRule={setOpenRuleId}
+                  onOpenRule={handleOpenRuleCard}
                   onWaive={handleWaive}
                   onUnwaive={handleUnwaive}
                 />
@@ -8433,13 +8493,13 @@ function EditorRow({
           <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) setOpenRuleId(null)
+              if (!next) closeRuleCard(cell.id)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             onOpenRule={(ruleId) => {
-              setOpenRuleId(null)
+              closeRuleCard(cell.id)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}

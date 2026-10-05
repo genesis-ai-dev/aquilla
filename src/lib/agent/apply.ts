@@ -20,6 +20,7 @@ import { enqueueEvent } from "@/lib/sync/events-emit"
 import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -71,8 +72,11 @@ export async function applyStagedEvent(
       const live = ctx.resolveCell?.(ev.cellId)
       // Same precedence as the editor's commit paths (commitCompletedCell):
       // freshest known chain head → staged pin → source genesis fallback.
-      const parentId =
-        live?.targetEventId ?? ev.parentId ?? live?.sourceEventId ?? null
+      // AQU-1578: an optimistic placeholder head ("") counts as unknown.
+      const parentId = resolveTargetCommitParent({
+        pending: [live?.targetEventId, ev.parentId],
+        sourceEventId: live?.sourceEventId,
+      })
       const { eventId } = await enqueueEvent({
         kind: "target.cell.commit",
         projectId: ctx.projectId,

@@ -30,20 +30,57 @@ describe("HighlightedText range chunking", () => {
       <HighlightedText text={TEXT} ranges={[r(0, 16, "outer"), r(4, 8, "inner")]} />,
     )
     expect(container.textContent).toBe(TEXT)
-    // Inner range is fully covered by the outer one — only the outer renders.
-    expect(container.querySelector('[data-rule-id="inner"]')).toBeNull()
-    expect(container.querySelector('[data-rule-id="outer"]')?.textContent).toBe(TEXT.slice(0, 16))
   })
 
-  it("later overlapping range keeps only its uncovered tail", () => {
+  // AQU-1633: a range sitting wholly inside another used to be dropped, so a
+  // red "Identical to source" underline hid an amber finding on the same words
+  // and the amber one was unreachable from the editor.
+  it("keeps a fully-contained range reachable alongside the one covering it", () => {
+    const { container } = render(
+      <HighlightedText
+        text={TEXT}
+        ranges={[r(0, 16, "outer"), r(4, 8, "inner", "violation-minor")]}
+      />,
+    )
+    expect(container.textContent).toBe(TEXT)
+    expect(container.querySelector('[data-rule-id="inner"]')?.textContent).toBe(TEXT.slice(4, 8))
+    // The covering range still underlines the whole span it reported, now as
+    // the outer layer of the stack over the shared characters.
+    const outer = container.querySelectorAll('[data-rule-id="outer"]')
+    expect(Array.from(outer).map((el) => el.textContent).join("")).toBe(TEXT.slice(0, 16))
+  })
+
+  it("stacks the two underlines at different offsets", () => {
+    const { container } = render(
+      <HighlightedText
+        text={TEXT}
+        ranges={[r(0, 16, "outer"), r(4, 8, "inner", "violation-minor")]}
+      />,
+    )
+    const inner = container.querySelector('[data-rule-id="inner"]')
+    // Most severe sits innermost, closest to the text; the minor finding is
+    // the layer outside it, so both wavy lines are visible.
+    expect(inner).toHaveClass("decoration-amber-500", "underline-offset-[6px]")
+    const major = Array.from(container.querySelectorAll('[data-rule-id="outer"]'))
+      .find((el) => el.textContent === TEXT.slice(4, 8))
+    expect(major).toHaveClass("decoration-red-500", "underline-offset-[3px]")
+  })
+
+  it("partially overlapping ranges each underline their whole reported span", () => {
     const { container } = render(
       <HighlightedText text={TEXT} ranges={[r(0, 10, "a"), r(5, 16, "b")]} />,
     )
-    expect(container.querySelector('[data-rule-id="a"]')?.textContent).toBe(TEXT.slice(0, 10))
-    expect(container.querySelector('[data-rule-id="b"]')?.textContent).toBe(TEXT.slice(10, 16))
+    expect(container.textContent).toBe(TEXT)
+    const spanText = (id: string) =>
+      Array.from(container.querySelectorAll(`[data-rule-id="${id}"]`))
+        .filter((el) => !el.parentElement?.closest(`[data-rule-id="${id}"]`))
+        .map((el) => el.textContent)
+        .join("")
+    expect(spanText("a")).toBe(TEXT.slice(0, 10))
+    expect(spanText("b")).toBe(TEXT.slice(5, 16))
   })
 
-  it("more severe range wins a shared start offset", () => {
+  it("keeps both findings on a shared span, most severe innermost", () => {
     const { container } = render(
       <HighlightedText
         text={TEXT}
@@ -51,8 +88,20 @@ describe("HighlightedText range chunking", () => {
       />,
     )
     expect(container.textContent).toBe(TEXT)
-    expect(container.querySelector('[data-rule-id="major-rule"]')).not.toBeNull()
-    expect(container.querySelector('[data-rule-id="minor-rule"]')).toBeNull()
+    const minor = container.querySelector('[data-rule-id="minor-rule"]')
+    const major = container.querySelector('[data-rule-id="major-rule"]')
+    expect(minor).not.toBeNull()
+    expect(major).not.toBeNull()
+    // The more severe finding owns the click on a fully shared span.
+    expect(minor?.contains(major!)).toBe(true)
+  })
+
+  it("underlines a rule reported twice over the same run only once", () => {
+    const { container } = render(
+      <HighlightedText text={TEXT} ranges={[r(0, 10, "a"), r(0, 10, "a")]} />,
+    )
+    expect(container.textContent).toBe(TEXT)
+    expect(container.querySelectorAll('[data-rule-id="a"]')).toHaveLength(1)
   })
 
   it("handles identical duplicate ranges without duplicating text", () => {

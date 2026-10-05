@@ -741,6 +741,36 @@ export async function snapshotSourceFiles(
 }
 
 /**
+ * AQU-1608: which of a project's files are in Recently deleted, by id.
+ *
+ * `snapshotSourceFiles` copies only live files (`deleted_at IS NULL`), but the
+ * cell SELECT in `snapshotSourceCells` reads every source row in the project.
+ * On a whole-project copy — the default, with every listed file left checked —
+ * that handed the new project the source lines of a file the upstream had
+ * tombstoned, keyed to a `file_id` the new project has no row for: invisible in
+ * the file list, but returned by project-wide search (`scoped-search.ts` matches
+ * on `project_id` alone) and counted as an extra unnamed file by the health
+ * rollup, which builds its file list from `DISTINCT file_id` on `cells`.
+ *
+ * Returns `null` — not an empty set — when the question cannot be answered, so
+ * a failure degrades to the pre-AQU-1608 behaviour (copy everything) rather
+ * than to an empty clone. Same posture as `hiddenSourceCellKeys` below.
+ */
+async function deletedFileIds(env: Env, projectId: string): Promise<Set<string> | null> {
+  if (!env.AQUILLA_PG) return null
+  try {
+    const rows = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM files WHERE project_id = ? AND deleted_at IS NOT NULL`,
+    )
+      .bind(projectId)
+      .all<{ id: string }>()
+    return new Set((rows.results ?? []).map((r) => r.id))
+  } catch {
+    return null
+  }
+}
+
+/**
  * AQU-1453: which source cells of a project are currently PARKED, as a set of
  * `file_id\0cell_id` keys.
  *
@@ -785,6 +815,10 @@ async function hiddenSourceCellKeys(
  * Copies `files` first (see `snapshotSourceFiles`) so the cell rows below
  * resolve to a real file — a clone with 0 file rows was BUG-1 in the
  * 2026-07-06 live-UI QA pass.
+ *
+ * AQU-1608: and only the cells of the files it actually copied. A file the
+ * upstream has moved to Recently deleted is left out of both halves — its
+ * lines in the new project would point at a file row that does not exist here.
  *
  * Existing local source cells receive `source.cell.commit` events chained to
  * their current head; missing rows receive `source.cell.create` genesis
@@ -883,6 +917,17 @@ export async function snapshotSourceCells(
   if (args.onlyUpstreamFileIds) {
     const followed = new Set(args.onlyUpstreamFileIds)
     cells = cells.filter((c) => followed.has(c.file_id))
+  }
+
+  // AQU-1608: and nor are the lines of a file the upstream moved to Recently
+  // deleted. `snapshotSourceFiles` above already leaves that file out, so
+  // without this its cells would arrive pointing at a file row this project
+  // does not have — hidden from the file list, but found by project-wide search
+  // and counted by the health rollup. A subset copy was already safe (the
+  // selection never lists a deleted file); the whole-project copy was not.
+  const deletedUpstream = await deletedFileIds(env, args.upstreamProjectId)
+  if (deletedUpstream !== null && deletedUpstream.size > 0) {
+    cells = cells.filter((c) => !deletedUpstream.has(c.file_id))
   }
 
   if (cells.length === 0) return 0

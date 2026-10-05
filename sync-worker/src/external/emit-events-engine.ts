@@ -36,6 +36,7 @@ import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage } from './canonical-lane'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import {
   archiveCheckApplies,
@@ -240,10 +241,19 @@ export async function prepareEmitEvents(
   projectId: string,
   id: string,
   autonomyMode: 'ask' | 'act',
-  cmd: EmitEventsCommand,
+  requested: EmitEventsCommand,
   env: ExternalEnv,
   callerRoleLevel: number,
 ): Promise<Response> {
+  // AQU-1532: settings are loaded only when an event names a lane. A lane id
+  // naming the primary language becomes '' (the default lane) before head
+  // resolution, the archive check and the staged plan.
+  const projectSettings = requested.events.some((e) => e.laneId)
+    ? await loadProjectSettings(db, projectId)
+    : null
+  const cmd = projectSettings
+    ? canonicalEmitEvents(requested, settingsTargetLanguage(projectSettings.settings))
+    : requested
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
   const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
@@ -264,8 +274,7 @@ export async function prepareEmitEvents(
     errorResponse('validation_failed', `events[${i}]: ${message}`, details)
 
   const namedLaneEvents = cmd.events.some((e) => e.laneId && archiveCheckApplies(e.kind))
-  if (namedLaneEvents) {
-    const projectSettings = await loadProjectSettings(db, projectId)
+  if (namedLaneEvents && projectSettings) {
     const lanes = (projectSettings.lanes ?? [])
       .filter((lane) => lane.role === 'target')
       .map((lane) => ({
@@ -543,6 +552,21 @@ export async function prepareEmitEvents(
   })
 }
 
+/**
+ * AQU-1532: the plan with every lane id made canonical. A lane id naming the
+ * primary language becomes '' (the default lane). It is kept as '' rather than
+ * dropped, because `assignment.reassign` reads an absent laneId as "keep the
+ * lane" and '' as "move to the default lane".
+ */
+function canonicalEmitEvents(cmd: EmitEventsCommand, targetLanguage: string | null): EmitEventsCommand {
+  return {
+    ...cmd,
+    events: cmd.events.map((e) =>
+      e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) },
+    ),
+  }
+}
+
 /** AQU-1462: stamp the lane so authorize can refuse an archived one. */
 function withLaneTag(kind: string, laneId: string | undefined, payload: Record<string, unknown>): Record<string, unknown> {
   if (!laneId || !archiveCheckApplies(kind)) return payload
@@ -725,10 +749,17 @@ export async function commitEmitEvents(
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
 
+  // AQU-1532: a plan staged before prepare canonicalized lane ids can still
+  // name the primary language. Pins stay keyed by the stored lane id; the
+  // compiled payload carries the canonical one.
+  const targetLanguage = cmd.events.some((e) => e.laneId)
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   for (const [i, e] of cmd.events.entries()) {
     const planned = cs.plannedIds?.emitEvents?.[i]
     const pin = e.cellId ? pins.get(laneCellKey(e.fileId!, e.cellId, e.laneId)) : undefined
-    const payload = compilePayload(e, pin, planned)
+    const compiledEvent = e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) }
+    const payload = compilePayload(compiledEvent, pin, planned)
     if (payload === null) {
       return errorResponse('job_failed', `events[${i}]: stored plan is missing its precondition pin`)
     }

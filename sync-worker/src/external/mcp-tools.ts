@@ -711,7 +711,9 @@ const TOOL_SPECS: McpToolSpec[] = [
           description:
             'SetTranslation entries to stage. Each may name a target-language lane via ' +
             'laneId to write one of a multi-language project\'s targets (e.g. "es", "pt"); ' +
-            'omit laneId for the default lane. The lane must already be registered in the ' +
+            'omit laneId for the default lane. The project\'s primary targetLanguage IS the ' +
+            'default lane, so passing it as laneId also writes the default lane. Any other ' +
+            'lane must already be registered in the ' +
             'project\'s settings.targetLanes (via UpdateProjectSettings) or prepare returns ' +
             'validation_failed — see get_capabilities.multiLanguage for the full workflow.',
           items: {
@@ -724,7 +726,7 @@ const TOOL_SPECS: McpToolSpec[] = [
               laneId: {
                 type: 'string',
                 description:
-                  'Target-language lane (a registered settings.targetLanes tag, e.g. "es"). Omit for the default lane.',
+                  'Target-language lane (a registered settings.targetLanes tag, e.g. "es"). Omit it, or pass the project\'s primary targetLanguage, for the default lane.',
               },
             },
             required: ['cellId', 'fileId', 'value'],
@@ -823,7 +825,7 @@ const TOOL_SPECS: McpToolSpec[] = [
                   laneId: {
                     type: 'string',
                     description:
-                      'Target-language lane (a registered settings.targetLanes tag). Omit for the default lane.',
+                      'Target-language lane (a registered settings.targetLanes tag). Omit it, or pass the project\'s primary targetLanguage, for the default lane.',
                   },
                   instructions: {
                     type: 'string',

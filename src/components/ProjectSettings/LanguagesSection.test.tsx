@@ -354,3 +354,86 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     expect(screen.queryByTestId("lane-last-change-lane-es")).toBeNull()
   })
 })
+
+// AQU-1600: the lane a project was created with (the "default lane", recorded
+// with an empty legacy tag) used to be pulled out of the archivable list
+// entirely — it had no archive control at all. It is now an ordinary lane. The
+// one rule left is that a project keeps at least one ACTIVE target lane, so
+// the last one's control is disabled instead of offering a click the server
+// would refuse with `last_lane`.
+describe("LanguagesSection — the former default lane archives like any other (AQU-1600)", () => {
+  const DEFAULT_LANE: ProjectLaneView = {
+    id: "lane-default",
+    role: "target",
+    name: "French",
+    langCode: "fr",
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  }
+  const SPANISH: ProjectLaneView = {
+    id: "lane-es",
+    role: "target",
+    name: "Spanish",
+    langCode: "es",
+    legacyTag: "es",
+    position: 1,
+    archivedAt: null,
+  }
+
+  function renderLanes(lanes: ProjectLaneView[], canEdit = true) {
+    const onSetLaneArchived = vi.fn(async () => true)
+    const utils = renderWithTooltips(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={["fr", "es"]}
+        canEdit={canEdit}
+        disabledTooltip={canEdit ? null : "You need Project Lead to change languages."}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={lanes}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={vi.fn(async () => "ok" as const)}
+        onSetLaneArchived={onSetLaneArchived}
+      />,
+    )
+    return { ...utils, onSetLaneArchived }
+  }
+
+  it("offers an archive control on the former default lane and archives it by lane id", async () => {
+    const { onSetLaneArchived } = renderLanes([DEFAULT_LANE, SPANISH])
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(false)
+    fireEvent.click(button)
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
+    await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-default", true))
+  })
+
+  it("lists the archived former default lane with a restore control", () => {
+    renderLanes([{ ...DEFAULT_LANE, archivedAt: "2026-10-03T00:00:00.000Z" }, SPANISH])
+    // No second archive control for a lane that is already archived…
+    expect(screen.queryByTestId("archive-lane-lane-default")).toBeNull()
+    // …and it is restorable from the archived list.
+    const archivedList = screen.getByTestId("archived-lanes-list")
+    expect(archivedList.textContent).toContain("French")
+  })
+
+  it("refuses the project's only active lane, and says why", async () => {
+    const { onSetLaneArchived } = renderLanes([DEFAULT_LANE])
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(true)
+    await expectTooltip(button, /only active lane/i)
+    expect(onSetLaneArchived).not.toHaveBeenCalled()
+  })
+
+  it("refuses an extra lane too when it is the only active one left", () => {
+    renderLanes([{ ...DEFAULT_LANE, archivedAt: "2026-10-03T00:00:00.000Z" }, SPANISH])
+    expect(screen.getByTestId("archive-lane-lane-es").hasAttribute("disabled")).toBe(true)
+  })
+
+  it("still shows the permission reason, not the last-lane one, when the user cannot edit", async () => {
+    renderLanes([DEFAULT_LANE, SPANISH], false)
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(true)
+    await expectTooltip(button, /project lead/i)
+  })
+})

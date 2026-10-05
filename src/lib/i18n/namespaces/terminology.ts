@@ -585,7 +585,7 @@ export const terminology = defineNamespace({
     "terminology.match.optionsLabel": "Matching options",
     "terminology.match.foldMarks": "Ignore vowel marks and accents",
     "terminology.match.affixes": "Allow prefixes and suffixes",
-    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.caseSensitive": "Match case",
     "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
     "terminology.match.addFormLabel": "Add form",
     "terminology.match.addFormPlaceholder": "Another spelling of this term…",
@@ -1009,6 +1009,13 @@ export const terminology = defineNamespace({
           "Stat line on the term detail header: how many occurrences violate the " +
           "concept's approved/forbidden renderings; {count} is that count.",
         placeholders: { count: "Number of occurrences that violate the concept's renderings." },
+      },
+      "terminology.termDetail.atLeastCount": {
+        description:
+          "Stat line on the term detail header, shown in place of the exact occurrence " +
+          "count when the server scan stopped before the end of the project; {count} is " +
+          "the occurrences found so far, so the real total is that or more.",
+        placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
       },
       "terminology.reviewQueue.approveAria": {
         description:

@@ -67,6 +67,7 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
 import type { ProjectLaneRecord } from '../../../db/shared/lanes'
 import {
   archivedLaneReason,
@@ -612,7 +613,7 @@ export async function prepareChangesetCore(
 
   // Past the PlanImport branch every remaining command is a SetTranslation —
   // either the caller's own, or the ones DraftCells just materialized.
-  const setCommands = pending.filter(
+  let setCommands = pending.filter(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
@@ -622,6 +623,11 @@ export async function prepareChangesetCore(
   // lane-less common case costs no extra query.
   if (setCommands.some((c) => c.laneId)) {
     const projectSettings = await loadProjectSettings(db, projectId)
+    // AQU-1532: a lane id naming the primary language is the default lane.
+    // Canonicalize before the registry check, the de-dupe and the
+    // precondition keys, so "bla" in a "bla" project writes the default row.
+    const targetLanguage = settingsTargetLanguage(projectSettings.settings)
+    setCommands = setCommands.map((c) => withCanonicalLaneId(c, targetLanguage))
     const registeredLanes = new Set(
       Array.isArray(projectSettings.settings.targetLanes)
         ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
@@ -768,6 +774,8 @@ async function expandDraftCells(
 ): Promise<Command[]> {
   const projectSettings = await loadProjectSettings(db, projectId)
   assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
+  // AQU-1532: a lane id naming the primary drafts (and later writes) the default lane.
+  const laneId = withCanonicalLaneId(cmd, settingsTargetLanguage(projectSettings.settings)).laneId
 
   const { drafts } = await requestDrafts(env, {
     projectId,
@@ -775,7 +783,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
-    ...(cmd.laneId !== undefined ? { laneId: cmd.laneId } : {}),
+    ...(laneId !== undefined ? { laneId } : {}),
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -797,7 +805,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellId: d.cellId,
     value: d.value,
-    ...(cmd.laneId ? { laneId: cmd.laneId } : {}),
+    ...(laneId ? { laneId } : {}),
     ...(d.aiDraft !== undefined && d.aiDraft !== null ? { aiDraft: d.aiDraft } : {}),
   }))
 }
@@ -912,17 +920,29 @@ async function preparePlanImport(
         )
       ).visible
     : null
+  // AQU-1532: a variant naming the primary language writes the default lane.
+  // Commit applies the same mapping when it stamps targetLang.
+  const targetLanguage = settingsTargetLanguage(projectSettings.settings)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
+    const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
-      if (variant.laneId && !registeredLanes.has(variant.laneId)) {
+      const lane = canonicalLaneId(variant.laneId, targetLanguage)
+      if (cellLanes.has(lane)) {
+        return errorResponse(
+          'validation_failed',
+          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] writes the same lane as an earlier variant; the primary language "${targetLanguage ?? ''}" is the default lane`,
+        )
+      }
+      cellLanes.add(lane)
+      if (lane && !registeredLanes.has(lane)) {
         return errorResponse(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
         )
       }
-      if (variant.laneId) {
+      if (lane) {
         const archived = archivedLaneReason({
-          tag: variant.laneId,
+          tag: lane,
           lanes: archivedRows,
           archivedTags,
           visibleLaneIds,

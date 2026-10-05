@@ -86,6 +86,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -550,12 +551,18 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
+  // AQU-1532: a changeset staged before prepare canonicalized lane ids can
+  // still name the primary language; stamp it as the default lane.
+  const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
-    if (!cmd) continue
+    const stored = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
+    if (!stored) continue
+    const cmd = withCanonicalLaneId(stored, targetLanguage)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -818,11 +825,17 @@ export async function applyPlanImport(
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
   // pin, matching browser bilingual imports.
+  // AQU-1532: a variant naming the primary language writes the default lane.
+  const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
+  const targetLanguage = namesALane
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
-    for (const [variantIndex, variant] of (unit.cell.variants ?? []).entries()) {
+    for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
+      const variant = { ...stored, laneId: canonicalLaneId(stored.laneId, targetLanguage) }
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,

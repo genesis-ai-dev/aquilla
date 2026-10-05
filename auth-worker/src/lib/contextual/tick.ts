@@ -147,6 +147,23 @@ export interface LlmCallUsage {
   tokensPerSecond?: number
 }
 
+/** One model call's full content, for the step inspector's trace view. Fired
+ *  once per call (after retries settle), success or failure. Unlike
+ *  LlmCallUsage this carries the prompt and the reply, so it must only reach
+ *  stores the project already trusts with that text (lib/contextual/traces.ts). */
+export interface LlmCallTrace extends LlmCallUsage {
+  system: string
+  user: string
+  /** The model's reply; null when the call failed. */
+  output: string | null
+  /** Machine error code ("provider_http_error status=429"); null on success.
+   *  Never the provider's error body — see the note in makeLlmCall. */
+  error: string | null
+  /** OpenRouter generation id, for looking the call up on the provider side. */
+  generationId?: string
+  attempts: number
+}
+
 /** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
  *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
 function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -179,6 +196,9 @@ export function makeLlmCall(cfg: {
   models: ContextualModels
   signal?: AbortSignal
   onUsage?: (u: LlmCallUsage) => void
+  /** Same contract as onUsage (never throws, fires once per call), but with
+   *  the prompt and reply attached. */
+  onTrace?: (t: LlmCallTrace) => void
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
@@ -216,6 +236,29 @@ export function makeLlmCall(cfg: {
       }
     }
     const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+    let attempts = 0
+    const trace = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+      result: { output: string | null; error: string | null; generationId?: string },
+    ): void => {
+      if (!cfg.onTrace) return
+      try {
+        cfg.onTrace({
+          ...u,
+          ...result,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+          system: req.system,
+          user: req.user,
+          attempts,
+        })
+      } catch {
+        /* tracing must never break the run it is recording */
+      }
+    }
 
     // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
     // rate limit, or a self-hosted server whose slots are all occupied) answers
@@ -255,6 +298,7 @@ export function makeLlmCall(cfg: {
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
+      attempts = attempt
       let outcome: Attempt
       try {
         // The gate holds a slot only for the round-trip, never across the
@@ -288,8 +332,10 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
+        const code = cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error"
+        trace(failed, { output: null, error: code })
         await hold()
-        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+        throw new Error(code)
       }
       if (outcome.ok) {
         body = outcome.body
@@ -306,6 +352,7 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        trace(failed, { output: null, error: `${code} status=${outcome.status}` })
         await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
@@ -316,14 +363,17 @@ export function makeLlmCall(cfg: {
     }
     if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
-    report({
+    const usage = {
       promptTokens: body.usage?.prompt_tokens ?? 0,
       completionTokens: body.usage?.completion_tokens ?? 0,
       costCents: (body.usage?.cost ?? 0) * 100,
       ok: body.usage !== undefined,
       ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
-    })
-    return body.choices?.[0]?.message?.content ?? ""
+    }
+    report(usage)
+    const output = body.choices?.[0]?.message?.content ?? ""
+    trace(usage, { output, error: null, ...(body.id ? { generationId: body.id } : {}) })
+    return output
   }
 }
 

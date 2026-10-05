@@ -658,3 +658,46 @@ describe("buildGlosser — pointed scripts tokenize at word level (AQU-1190)", (
     expect(buildGlosser([]).gloss("起初 神创造")).toBe("起初 神创造")
   })
 })
+
+describe("leave-one-out gloss", () => {
+  const corpus = [
+    { id: "a", source: "in the beginning God created the heavens", target: "al principio Dios creó los cielos" },
+    { id: "b", source: "God saw the light", target: "Dios vio la luz" },
+    { id: "c", source: "God called the light day", target: "Dios llamó a la luz día" },
+    { id: "d", source: "the earth was without form", target: "la tierra estaba desordenada" },
+    { id: "e", source: "the spirit of God moved", target: "el espíritu de Dios se movía" },
+  ]
+  const target = "al principio Dios creó los cielos"
+
+  it("without excludeId, a corpus cell is replayed from its own memorized pair", () => {
+    expect(buildGlosser(corpus).gloss(target)).toContain("in the beginning")
+  })
+
+  it("excluding the cell's own id stops it replaying its source", () => {
+    const loo = buildGlosser(corpus).gloss(target, { excludeId: "a" })
+    expect(loo).not.toContain("in the beginning")
+    // Words only the excluded pair taught the model fall back to the literal token.
+    expect(loo).toContain("principio")
+  })
+
+  it("equals a model rebuilt from the corpus without that cell", () => {
+    const rebuilt = buildGlosser(corpus.filter((p) => p.id !== "a"))
+    for (const text of [target, "Dios vio la luz", "la luz del espíritu de Dios"]) {
+      expect(buildGlosser(corpus).gloss(text, { excludeId: "a" })).toBe(rebuilt.gloss(text))
+    }
+  })
+
+  it("drops the cell's own seeds too", () => {
+    const seeds = [{ source: "beginning", target: "principio", weight: 2, originId: "a" }]
+    const rebuilt = buildGlosser(corpus.filter((p) => p.id !== "a"))
+    expect(buildGlosser(corpus, seeds).gloss("principio", { excludeId: "a" })).toBe(
+      rebuilt.gloss("principio"),
+    )
+    expect(buildGlosser(corpus, seeds).gloss("principio")).toBe("beginning")
+  })
+
+  it("ignores an unknown id", () => {
+    const g = buildGlosser(corpus)
+    expect(g.gloss(target, { excludeId: "nope" })).toBe(g.gloss(target))
+  })
+})

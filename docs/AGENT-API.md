@@ -317,7 +317,11 @@ target row/chain per lane. The external surface is lane-aware end to end:
 2. **Write per lane**: `SetTranslation` takes an optional `laneId` — the compiled
    `target.cell.commit` is stamped `payload.targetLang` and lands on that lane's row
    and chain slot. An unregistered `laneId` is rejected at prepare
-   (`validation_failed`). Omitted `laneId` = the default lane (unchanged behavior).
+   (`validation_failed`). The project's primary `targetLanguage` **is** the default
+   lane: omitting `laneId` and passing the primary (in any spelling — `"bla"`,
+   `"BLA"`, or `"es"` for a `"Spanish"` project) both write the same default row
+   (AQU-1532). A regional lane beside the primary (`fr-CA` in a `French` project)
+   is its own lane and must be registered.
 3. **Read per lane**: `GET .../files/:fileId/cells?lane=es` (and the MCP
    `read_content` `lane` argument) filters target cells to one lane; source cells are
    always included. Without `lane`, every lane's targets are returned, each carrying

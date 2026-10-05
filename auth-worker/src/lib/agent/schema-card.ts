@@ -106,7 +106,7 @@ const EVENT_LINES: Record<string, string> = {
   "cell.backtranslation.set":
     "cell.backtranslation.set {btText, targetEventId, polished} — record a back-translation pinned to the target head event.",
   "assignment.create":
-    "assignment.create {assignmentId, scopeKind:'books'|'chapters', scope:[{fileId,chapter?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
+    "assignment.create {assignmentId, scopeKind:'books'|'chapters'|'cells', scope:[{fileId,chapter?,cellIds?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
   "assignment.reassign": "assignment.reassign {assignmentId, assigneeUserId} — hand an assignment to someone else.",
   "assignment.unassign": "assignment.unassign {assignmentId} — withdraw an assignment.",
   // project.link-source is auth-worker-internal; never offered to the agent.

@@ -282,6 +282,10 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** Typing " or ' in the translation editor produces curly quotes in the
+   *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
+   *  (the default) leaves straight quotes alone. */
+  smartQuotes?: boolean
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode

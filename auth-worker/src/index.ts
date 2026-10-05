@@ -104,6 +104,7 @@ import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
@@ -114,6 +115,7 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
+import { pruneExpiredTraces } from "./lib/contextual/traces"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
@@ -317,6 +319,11 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Team chat history — the caller's own past agent conversations, listed and
+// reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
+// read-only, and scoped to (project, user) so it never surfaces another
+// member's chats.
+app.route("/api/v2/projects", agentSessionRoutes)
 // Knowledge base — project + org document upload/extract/index/read/search
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
@@ -525,6 +532,8 @@ const scheduled = async (
     // revoked_tokens hygiene lives here now, off the request path (it used to
     // be a random 2%-of-logouts DELETE). Non-throwing.
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
+    // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
+    await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.

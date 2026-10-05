@@ -129,6 +129,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 
 const app = new Hono<HonoEnv>()
 
@@ -200,11 +201,12 @@ app.use("*", async (c, next) => {
   try {
     await next()
   } catch (err) {
+    const path = redactLogPath(c.req.path)
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${path}`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.duration_ms": Date.now() - startedAt,
         "error.message": err instanceof Error ? err.message : String(err),
       }),
@@ -213,14 +215,18 @@ app.use("*", async (c, next) => {
   }
   const durationMs = Date.now() - startedAt
   if (durationMs >= SLOW_REQUEST_MS) {
+    // OPS-42: `redactLogPath`, not `c.req.path` — [slow-request] fires on
+    // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+    // access-link redeem that merely ran slowly would log a live token.
+    const path = redactLogPath(c.req.path)
     console.warn(
-      `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+      `[slow-request] ${c.req.method} ${path} took ${durationMs}ms (status ${c.res.status})`,
     )
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${path} (${durationMs}ms)`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.status": c.res.status,
         "http.duration_ms": durationMs,
       }),

@@ -123,6 +123,27 @@ export async function mintApiToken(): Promise<MintedApiToken> {
   return { token, tokenHash, tokenPrefix: token.slice(0, TOKEN_PREFIX_LEN) }
 }
 
+/**
+ * Live-authority floor for re-filtering an OAuth credential's organization
+ * allowlist (AQU-1529) on every call: org MAINTAINER, or the org's owner.
+ *
+ * [Pen test] Auth & session mgmt (2026-10-05, OPS-43). This must equal the
+ * floor in `eligibleOrganizations()` (auth-worker/src/routes/mcp-oauth.ts),
+ * which gates both the consent screen and the mint-time re-check. It was
+ * VIEWER (100) here, so of the three places the grant floor is applied, the
+ * only one that runs AFTER the token exists was the one a demotion could not
+ * narrow — and that is the one the module header advertises as the live-role
+ * check. The practical blast radius was bounded by the per-project live-role
+ * gate every external route runs (`scopeCredentialToProject`,
+ * `mintInternalSyncToken`), which is why this is drift rather than a breach:
+ * the allowlist had stopped meaning "orgs this user may still delegate".
+ *
+ * Mirrors ROLE.MAINTAINER (auth-worker/src/types.ts); redeclared here because
+ * db/shared must not import from a worker package.
+ * `auth-worker/src/__tests__/mcp-oauth.test.ts` pins the two together.
+ */
+export const OAUTH_ORG_ALLOWLIST_FLOOR = 600
+
 interface CredentialRow {
   id: string
   oauth_resource: string | null
@@ -188,7 +209,7 @@ export async function validateApiCredential(
                   o.owner_user_id::text = ac.user_id OR EXISTS (
                     SELECT 1 FROM org_members om
                     WHERE om.org_id = o.id AND om.user_id::text = ac.user_id
-                      AND om.role_level >= 100
+                      AND om.role_level >= ${OAUTH_ORG_ALLOWLIST_FLOOR}
                   )
                 )
               ), '[]'::jsonb) END AS org_ids

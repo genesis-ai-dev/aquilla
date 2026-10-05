@@ -1128,3 +1128,123 @@ Chromium revision gap is closed, so budget one A/B pass rather than treating smo
 blocker — and kill stray `wrangler dev`/`workerd serve` processes between shard runs, because
 a leftover one holding `:9788` makes the next boot die with `[sync] timed out waiting for
 :9788`, which reads like a backend failure and is not one.
+
+## 2026-10-05 — type-tightening run: the SPA's `(window as any)` debug-handle casts
+
+**Done this run** (theme 3, type tightening; 4 files, 30 insertions / 30 deletions, no test
+file touched): removed the last 10 `as any` casts in the SPA's browser-global debug handles
+and the 6 `@typescript-eslint/no-explicit-any` suppressions that existed only to permit them.
+
+- `src/lib/perf-log.ts` — the 5 console handles (`togglePerfLog`, `setPerfLog`,
+  `startMemSampler`, `stopMemSampler`, `memReport`) now assign through one
+  `window as typeof window & {…}` binding whose property types are `typeof <the function>`,
+  so a signature change to any of them is a compile error at the assignment instead of
+  silently re-typing the console handle. `heapUsedBytes()`'s `(performance as any)?.memory`
+  is now `performance as Performance & { memory?: { usedJSHeapSize?: number } }` — the
+  optional property is what makes the existing `typeof mem.usedJSHeapSize === "number"`
+  guard type-checked rather than decorative, and the `?.` on `performance` itself is kept
+  verbatim (it is runtime-meaningful on engines where the global is absent).
+- `src/components/EditorTable.tsx` — the three `__perf*RowRenders` handles, same treatment.
+  Types are stated identically to the `declare global` block in
+  `EditorTable.incrementalMemo.test.tsx:176` (`__perfRowRenders?: Map<string, number>`,
+  `__perfResetRowRenders?: () => void`) so interface merging stays conflict-free; the test
+  file itself is untouched.
+- `src/hooks/useActiveCellStore.ts` — `__cellStore` and `__aquillaMemorySnapshot`. This file
+  is the ledger's standing trap zone, so note the scope precisely: **only the two
+  debug-handle `useEffect`s changed.** Nothing in the `readAtVersion()` / `useCellStoreViews`
+  machinery was read, moved or inlined. The idiom used is the one already in the same
+  function at (pre-change) lines 3204 and 3206 — `window as typeof window & { … }` — chosen
+  over a `declare global` augmentation precisely so the widened type stays local to the
+  assignment and does not reach the rest of the app.
+- `src/lib/report-problem.ts` — `(posthog as any).get_session_replay_url` became
+  `const fn: unknown = posthog.get_session_replay_url`. The method **is** in posthog-js's
+  types now (`node_modules/posthog-js/dist/module.d.ts:4664`; the repo pins `^1.434.12`), so
+  the `any` was a stale workaround for the `≥ 1.87` floor the doc comment named — that
+  sentence was dropped with it. `unknown` rather than the typed method on purpose:
+  `report-problem.test.ts:114-119` deletes the method at runtime and asserts `null`, so a
+  type claiming it is always present would be a lie the guard exists to catch.
+
+**Proof**: type-level only — no runtime expression changed, no control flow, no
+suppression removed that ESLint still needed. `npx tsc -b` green, and the four files'
+lint output is byte-identical to baseline except for the one directive that goes away
+(`perf-log.ts:76:1`, already reported *unused* at baseline — see below).
+
+### The `(window as any)` set is now empty in `src/`, and this was all of it
+
+`grep -rnI "window as any\|globalThis as any\|performance as any\|self as any\|document as any"
+--include=*.ts --include=*.tsx src | grep -v "\.test\."` returned exactly these 13 lines
+before the run and returns nothing after. Non-test `as any` / `: any` hits left in the SPA
+after this run, for whoever picks the theme up next:
+
+- `src/hooks/useProjectSettings.ts:560` (`...(existing.completionSettings ?? ({} as any))`)
+  and `:918` (`;(next as any)[key] = (snapTarget as any)[key]` inside a generic key-copy
+  loop). **Not taken**: both need the surrounding settings-merge generics understood, not a
+  cast swapped — `:918` in particular is a keyof-indexed write across two object types and
+  tightening it is a real typing exercise, not a mechanical one.
+- `sync-worker/src/__tests__/helpers/in-memory-db.ts` (4) — test helper, frozen zone.
+- Everything else `grep` reports for `:\s*any\b` in `src`, `auth-worker/src`,
+  `sync-worker/src`, `agent-worker/src` and `worker/` is the English word "any" in prose
+  comments (checked line by line; ~35 of them). Do not re-derive that list — the pattern
+  is noisy and the real set is the two `useProjectSettings.ts` lines above.
+
+## 51 unused `eslint-disable` directives repo-wide — a whole candidate theme
+
+- **Found**: 2026-10-05 run, while diffing the touched files' lint output against baseline.
+- **Friction**: `pnpm lint` reports 51 `Unused eslint-disable directive` warnings. They are
+  pure noise in a 1096-problem report, and each one is a comment claiming a rule fires where
+  it does not. 29 are `@typescript-eslint/no-explicit-any` in **test** files, where
+  `eslint.config.js:163` turns that rule off for `**/*.test.{ts,tsx}` — i.e. the suppression
+  was copied into a file where it was never needed. Those are all in frozen test files, so
+  the actionable set is the 8 non-test, non-`dist` files (17 directives):
+  `src/lib/perf-log.ts` (10 `no-console`), `src/components/EditorTable.tsx:354`
+  (`no-console`), `src/components/CommentsPage.tsx` (`react/no-danger`),
+  `src/components/MarketingLoginRoute.tsx` + `src/hooks/useHealth.ts:364` +
+  `src/components/AudioRecorder/RecordingVideoSurface.tsx:158`
+  (`react-hooks/exhaustive-deps`), `src/hooks/useFocusLock.ts`
+  (`react-hooks/set-state-in-effect`), `src/lib/parsers/ebible.ts`
+  (`no-constant-condition`).
+- **Why deferred**: it is a different theme from this run's, and it has a question in front
+  of it that a cleanup pass should not answer alone. A directive for a rule that is *off* is
+  dead text, but the two shapes behind "unused" are not the same: the `no-console` ones say
+  the rule does not reach `src/lib/*` at all (so `console.log` in shipped code is
+  unpoliced), and the `react-hooks/*` ones say the React Compiler's lint moved and these
+  deps lists now pass on their own. On the first shape, `no-console` is **not configured
+  anywhere** in `eslint.config.js` and is not part of `js.configs.recommended`, so every
+  `// eslint-disable-next-line no-console` in the repo is dead text and `console.*` in
+  shipped code is unpoliced. Its *real* fix is enabling the rule — a CI behaviour change,
+  explicitly out of scope here — and deleting the comments first would erase the only
+  breadcrumb pointing at it.
+- **Proof needed**: comment-only deletions, so `pnpm lint` error list byte-identical and
+  warning count down by exactly the number removed, plus `pnpm build`/`pnpm test`
+  green-to-green. Worth checking `eslint.config.js`'s `files` globs for `no-console` first
+  and saying in the PR body which of the two shapes each deletion is.
+
+### Container-setup delta 2026-10-05: the Chromium shim needs TWO inner layouts
+
+Addendum to the 2026-09-25 recipe and the 2026-10-02 revision bump. Playwright's pinned
+revision is **1243** (`@playwright/test` 1.63.0) and the image still ships 1194, but the two
+browser flavours renamed their inner directory **differently**, so one symlink is not enough.
+The 2026-10-02 entry only recorded the headless-shell path, and following it alone fails at
+`[s1] Playwright browser executable is missing: /opt/pw-browsers/chromium-1243/chrome-linux64/chrome`
+— which reads like a missing install and is not one. Both are needed:
+
+```
+/opt/pw-browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+  -> /opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell
+/opt/pw-browsers/chromium-1243/chrome-linux64
+  -> /opt/pw-browsers/chromium-1194/chrome-linux          # chrome-linux64, NOT chrome-linux
+```
+
+plus `INSTALLATION_COMPLETE` and `DEPENDENCIES_VALIDATED` marker files in each `-1243`
+directory. Symlink the **directory** for the full-Chromium case, not the `chrome` binary
+inside it — it needs its sibling `.pak`/resource files.
+
+Also reconfirmed, and worth stating as a hard sequencing rule rather than a hint: **after any
+shard run, kill the stray `wrangler dev` supervisors before the next one.** The first A/B
+attempt this run died at `[e2e-up] fatal: Error: [sync] timed out waiting for :9788` with
+`exit 143`, which looks exactly like a sync-worker regression. It was a leftover
+`aquilla-sync-worker-local-e2e` wrangler from the previous shard holding its state directory.
+`pkill -f workerd` alone is not enough — the `wrangler dev` parent respawns `workerd`
+immediately, so kill the `node .../wrangler dev` processes (by PID if the pattern kill misses
+them) and confirm with `ps -eo pid,comm | grep -E "workerd|wrangler"` returning nothing before
+re-running. The retry then booted and ran normally.

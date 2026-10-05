@@ -2640,8 +2640,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // this runs once per mount.
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__cellStore = store
+    ;(window as typeof window & { __cellStore?: CellStore }).__cellStore = store
   }, [store])
   const [loadProgress, setLoadProgress] = useState<UseActiveCellStoreResult["loadProgress"]>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -3189,10 +3188,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).__aquillaMemorySnapshot = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const memory = (performance as any).memory
+    const snapshotHandle = window as typeof window & {
+      __aquillaMemorySnapshot?: () => ReturnType<CellStore["getMemorySnapshot"]>
+    }
+    snapshotHandle.__aquillaMemorySnapshot = () => {
+      const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number } })
+        .memory
       const root = document.querySelector("[data-aquilla-editor-root]") ?? document
       const rowCount = root.querySelectorAll("[data-cell-id][data-index]").length
       const prosemirrorCount = root.querySelectorAll(".ProseMirror").length
@@ -3221,8 +3222,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       })
     }
     return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((window as any).__aquillaMemorySnapshot) delete (window as any).__aquillaMemorySnapshot
+      if (snapshotHandle.__aquillaMemorySnapshot) delete snapshotHandle.__aquillaMemorySnapshot
     }
   }, [store])
 

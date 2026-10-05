@@ -1041,6 +1041,15 @@ describe("a YouTube link", () => {
     expect(container.querySelector("video")).toBeNull()
   })
 
+  // Walk r2 (2026-10-05): the element's shadow :host carries min-width 300px,
+  // so at 1440 wide the picture ran 13px past a 287px pane.
+  it("lets the YouTube picture shrink below the element's 300px minimum", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement
+    expect(media.style.minWidth).toMatch(/^0(px)?$/)
+    expect(media.style.minHeight).toMatch(/^0(px)?$/)
+  })
+
   it("still hears the element's media events", () => {
     const onVideoDuration = vi.fn()
     renderPane({ src: YT, onVideoDuration })

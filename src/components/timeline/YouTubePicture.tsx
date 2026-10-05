@@ -45,7 +45,14 @@ function isHandlerProp(key: string, value: unknown): value is Handler {
   return key.startsWith("on") && typeof value === "function"
 }
 
-export function YouTubePicture({ ref, src, ...rest }: Props) {
+/** The element's own shadow style gives it `min-width: 300px; min-height:
+ *  150px`, so in a Video pane narrower than 300px (about 287px at 1440 wide)
+ *  the picture overflowed the pane and was cut off under the Text pane. A
+ *  style on the element outranks its `:host` rule, so these let it take the
+ *  pane's size like a <video> does. */
+const FIT_PANE = { minWidth: 0, minHeight: 0 }
+
+export function YouTubePicture({ ref, src, style, ...rest }: Props) {
   // Latest handlers, read at dispatch time, so listeners are attached once per
   // element rather than re-bound on every render (most are fresh closures).
   const propsRef = useRef<Record<string, unknown>>(rest)
@@ -84,6 +91,7 @@ export function YouTubePicture({ ref, src, ...rest }: Props) {
     <youtube-video
       {...(attrs as VideoHTMLAttributes<HTMLVideoElement>)}
       ref={ref}
+      style={style ? { ...FIT_PANE, ...style } : FIT_PANE}
       config={PLAYER_CONFIG}
       // Canonical form: the element's own matcher misses some share-link shapes.
       src={id ? `https://www.youtube.com/watch?v=${id}` : src}

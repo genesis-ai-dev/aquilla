@@ -30,8 +30,9 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
+import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneLabelsByTag, laneRowLanguage } from "@/lib/lanes/lane-language"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -12281,6 +12282,11 @@ export function ProjectWorkspace() {
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
   ) {
     if (!project) return
+    // The lane the rows were imported into, captured before the await: the
+    // warning and the settings write both have to name that lane, not whichever
+    // one is active by the time the import finishes.
+    const importedLaneTag = activeLane
+    const importedLaneRows = laneRows
     // FRO-249 fix (Fix 2): serialize the read-modify-write through a module-level
     // promise chain so concurrent imports don't race on the project.files array.
     // Each call appends to _lastImportWrite; if the previous call fails the chain
@@ -12338,52 +12344,41 @@ export function ProjectWorkspace() {
     //   that mismatch vs the server's MAINTAINER (600) is a separate issue
     //   flagged for follow-up (see Linear comment on FRO-249).
     if (inferredLanguages && baseProject) {
-      const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
+      const { targetLanguage: inTgt } = inferredLanguages
       // Read from baseProject (fresh) for the emptiness decision (WARN a).
       const currentSource = baseProject.sourceLanguage?.trim() || ""
       const currentTarget = baseProject.targetLanguage?.trim() || ""
+      const importedLane = importedLaneRows.find((lane) => (lane.legacyTag ?? "") === importedLaneTag)
+        ?? importedLaneRows.find((lane) => lane.id === importedLaneTag)
+      const importedLaneLanguage = importedLane ? (laneRowLanguage(importedLane) ?? "") : ""
+      const decision = importLanguageDecision(currentSource, currentTarget, inferredLanguages, {
+        nonDefaultLane: importedLaneTag !== "",
+        laneLanguage: importedLaneLanguage,
+      })
 
       // AQU-1596: a declared language that disagrees with the lane is a
       // warning, never a block and never a silent overwrite. The import has
       // already succeeded at this point; this only tells the user that the file
       // said something different from the lane they imported into, so they can
       // decide whether the lane's language or the file was wrong.
-      if (!explicit) {
-        const declaredTarget = inTgt?.trim() || ""
-        if (declaredTarget && currentTarget && !languagesEqual(declaredTarget, currentTarget)) {
-          toast.add({
-            type: "warning",
-            title: `This file says ${declaredTarget} — you imported into the ${currentTarget} lane.`,
-          })
-        }
+      if (decision.warns) {
+        toast.add({
+          type: "warning",
+          title: t("importExport.declaredLanguage.laneMismatch", {
+            declared: (inTgt ?? "").trim(),
+            lane: importedLaneLanguage || currentTarget,
+          }),
+        })
       }
 
-      let newSource: string
-      let newTarget: string
-
-      if (explicit) {
-        // BLOCKER 1: explicit answer from DirectionPanel wins.
-        // Replace when current target is empty OR equals current source (broken state).
-        const targetBroken = currentTarget === "" || languagesEqual(currentTarget, currentSource)
-        newSource = (inSrc?.trim() || currentSource)
-        newTarget = targetBroken
-          ? (inTgt?.trim() || currentTarget)
-          : currentTarget
-      } else {
-        // Not explicit: nothing the file declared may become the lane's
-        // language, so the settings stay exactly as they are and the patch
-        // below no-ops.
-        newSource = currentSource
-        newTarget = currentTarget
-      }
+      const newSource = decision.newSource
+      const newTarget = decision.newTarget
 
       // Distinct source/target is the key invariant — skip if both would end
       // up as the same value (WARN e: use normalizer for comparison).
-      const sourceDiffers = newSource !== currentSource
-      const targetDiffers = newTarget !== currentTarget
-      const resultDistinct = !languagesEqual(newSource, newTarget)
-
-      if ((sourceDiffers || targetDiffers) && resultDistinct && (newSource || newTarget)) {
+      if (decision.shouldPatch) {
+        const sourceDiffers = newSource !== currentSource
+        const targetDiffers = newTarget !== currentTarget
         const patch: Record<string, string> = {}
         if (sourceDiffers && newSource) patch.sourceLanguage = newSource
         if (targetDiffers && newTarget) patch.targetLanguage = newTarget

@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { emitParsedFile } from "./import"
+import { importLanguageDecision } from "./import-language"
 import type { TranslatableString } from "./parsers/types"
 import { normalizeLanguageTag, languagesEqual } from "./language-normalize"
 
@@ -205,50 +206,7 @@ describe("normalizeLanguageTag — individual cases (AQU-249 WARN e)", () => {
 // (which needs a full render environment) but the contract is identical.
 
 describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCKER 1)", () => {
-  /**
-   * Simulates the handleImported decision for language patch without the React
-   * and IDB layers. Returns { newSource, newTarget } after applying the logic.
-   *
-   * AQU-1596: the non-explicit branch no longer fills anything. A language that
-   * came off the file's header is a *declaration* — import information that can
-   * disagree with the lane — so only the user's explicit answer may set a
-   * lane's language. `warns` reports the disagreement the user is told about
-   * instead.
-   */
-  function computeLanguagePatch(
-    currentSource: string,
-    currentTarget: string,
-    inferredLanguages: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
-  ): { newSource: string; newTarget: string; shouldPatch: boolean; warns: boolean } {
-    const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
-
-    let newSource: string
-    let newTarget: string
-    let warns = false
-
-    if (explicit) {
-      // BLOCKER 1: explicit answer from DirectionPanel wins.
-      const targetBroken = currentTarget === "" || languagesEqual(currentTarget, currentSource)
-      newSource = (inSrc?.trim() || currentSource)
-      newTarget = targetBroken
-        ? (inTgt?.trim() || currentTarget)
-        : currentTarget
-    } else {
-      // AQU-1596: declared values never become the lane's language; a
-      // disagreement with the lane warns instead.
-      const declaredTarget = inTgt?.trim() || ""
-      warns = Boolean(declaredTarget && currentTarget && !languagesEqual(declaredTarget, currentTarget))
-      newSource = currentSource
-      newTarget = currentTarget
-    }
-
-    const sourceDiffers = newSource !== currentSource
-    const targetDiffers = newTarget !== currentTarget
-    const resultDistinct = !languagesEqual(newSource, newTarget)
-    const shouldPatch = (sourceDiffers || targetDiffers) && resultDistinct && !!(newSource || newTarget)
-
-    return { newSource, newTarget, shouldPatch, warns }
-  }
+  const computeLanguagePatch = importLanguageDecision
 
   it("explicit confirm repairs source==target broken state (BLOCKER 1 primary case)", () => {
     // Project has source="English", target="English" (broken state).
@@ -334,6 +292,35 @@ describe("explicit-confirm-wins — handleImported logic contract (AQU-249 BLOCK
       explicit: false,
     })
     expect(result.warns).toBe(false)
+  })
+
+  it("warns against the imported lane's language, not the project target", () => {
+    const agrees = computeLanguagePatch(
+      "English",
+      "French",
+      { targetLanguage: "Spanish", explicit: false },
+      { laneLanguage: "Spanish" },
+    )
+    expect(agrees.warns).toBe(false)
+    const disagrees = computeLanguagePatch(
+      "English",
+      "French",
+      { targetLanguage: "French", explicit: false },
+      { laneLanguage: "Spanish" },
+    )
+    expect(disagrees.warns).toBe(true)
+    expect(disagrees.shouldPatch).toBe(false)
+  })
+
+  it("does not write the project target when the import landed in another lane", () => {
+    const result = computeLanguagePatch(
+      "English",
+      "",
+      { sourceLanguage: "English", targetLanguage: "French", explicit: true },
+      { nonDefaultLane: true },
+    )
+    expect(result.newTarget).toBe("")
+    expect(result.shouldPatch).toBe(false)
   })
 
   it("shouldPatch is false when result would be source==target (normalizer-aware)", () => {

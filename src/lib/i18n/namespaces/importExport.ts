@@ -1212,6 +1212,8 @@ export const importExport = defineNamespace({
     }),
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
+    "importExport.declaredLanguage.laneMismatch":
+      "This file says {declared} — you imported into the {lane} lane.",
   },
   context: {
     _context: {
@@ -3500,6 +3502,17 @@ export const importExport = defineNamespace({
           "Heading at the top of the spreadsheet import panel, shown when the user " +
           "has chosen to import a comma- or tab-separated file or an Excel " +
           "workbook. Short noun phrase naming the panel, not an instruction.",
+      },
+      "importExport.declaredLanguage.laneMismatch": {
+        description:
+          "Warning toast after an import whose file declares a target language " +
+          "different from the lane the rows were imported into. The import has " +
+          "already succeeded; this only tells the user the two disagree. Not a " +
+          "question and not a block.",
+        placeholders: {
+          declared: "The target language the file itself declared, verbatim.",
+          lane: "The language of the lane the user imported into, verbatim.",
+        },
       },
     },
   },

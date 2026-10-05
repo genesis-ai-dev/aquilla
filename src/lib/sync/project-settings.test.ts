@@ -5,6 +5,7 @@ import {
   patchProjectSettings,
   PROJECT_SETTINGS_VERSION_INITIAL,
   resolveTimingLocked,
+  settingsEditorName,
 } from "./project-settings"
 import type { TranslationBrief } from "@/lib/brief/types"
 
@@ -76,8 +77,18 @@ describe("patchProjectSettings", () => {
     expect(got.kind).toBe("conflict")
     if (got.kind === "conflict") {
       expect(got.latest.version).toBe(7)
-      expect(got.latest.updatedBy?.username).toBe("alex")
+      expect(settingsEditorName(got.latest.updatedBy)).toBe("alex")
     }
+  })
+
+  // Walk 10-02: the identity worker sends the saver as a bare user id, and
+  // the General page printed "Last edited by undefined" off it.
+  it("names the saver only when the response carries a username", () => {
+    expect(settingsEditorName({ id: 12, username: "alex" })).toBe("alex")
+    expect(settingsEditorName(1)).toBeNull()
+    expect(settingsEditorName("agent:7")).toBeNull()
+    expect(settingsEditorName(null)).toBeNull()
+    expect(settingsEditorName(undefined)).toBeNull()
   })
 
   it("accepts identity's current field on 409 conflicts", async () => {

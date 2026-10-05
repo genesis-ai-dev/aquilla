@@ -132,7 +132,7 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidateAudio.description": plural({
       one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
-    }),
+    }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
     // unvalidated count — untranslated cells, untouched AI drafts and cells
@@ -149,6 +149,22 @@ export const nav = defineNamespace({
         other:
           "This validates {count} eligible cells under your name — human-authored " +
           "or human-edited text you have not signed off yet.",
+      },
+      "count",
+    ),
+    // The org setting that lets bulk validation take untouched AI drafts: with
+    // it on, "human-authored or human-edited" above would misdescribe the very
+    // cells the reader is signing off.
+    "nav.workspaceActions.batchValidate.willValidateWithDrafts": plural(
+      {
+        one:
+          "This validates {count} eligible cell under your name — text you have " +
+          "not signed off yet, including untouched AI drafts, which your " +
+          "organization allows in batch validation.",
+        other:
+          "This validates {count} eligible cells under your name — text you have " +
+          "not signed off yet, including untouched AI drafts, which your " +
+          "organization allows in batch validation.",
       },
       "count",
     ),
@@ -824,6 +840,18 @@ export const nav = defineNamespace({
           "A skipped-cells clause and then batchValidate.capNote are concatenated " +
           "after it, each with its own leading space, so end this string with a " +
           "period and no trailing space.",
+        placeholders: {
+          count: "How many cells this run will validate. Selects the plural form.",
+        },
+        maxLength: 500,
+      },
+      "nav.workspaceActions.batchValidate.willValidateWithDrafts": {
+        description:
+          "Replaces willValidate when the run includes untouched AI drafts, which " +
+          "happens only when the organization has turned on bulk validation of AI " +
+          "drafts. Same position and punctuation rules as willValidate: the " +
+          "skipped clause and capNote follow it, so end with a period and no " +
+          "trailing space.",
         placeholders: {
           count: "How many cells this run will validate. Selects the plural form.",
         },

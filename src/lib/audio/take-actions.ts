@@ -3,7 +3,7 @@
 // 2026-09-29: deletable "even if it's the only take that exists", and
 // renameable when it is the selected one).
 
-import { emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
+import { emitCellAudioRemove, emitCellAudioRename, enqueueEvents } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 
@@ -30,6 +30,39 @@ export async function removeTake(args: {
   injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
   await removeP
   notifyAudioAttachmentsChanged(fileId)
+}
+
+export interface TakeRemoval {
+  projectId: string
+  /** The file the CELL lives in — a heard line's take is the cue sibling's. */
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The take's own slot, verbatim. */
+  slot: string
+}
+
+/**
+ * Remove many takes in one outbox transaction: a deleted track's recordings.
+ * Each gets the overlay `removeTake` gives one (AQU-1495). Without it the
+ * takes stayed on screen — the editor's audio column with them — until the
+ * socket echoed each remove back, and a socket gap meant until a reload.
+ * Returns the files touched, for the caller to poke once the batch is sent.
+ */
+export async function enqueueTakeRemovals(removals: readonly TakeRemoval[], author: string): Promise<string[]> {
+  const queued = await enqueueEvents(
+    removals.map((r) => ({
+      kind: "cell.audio.remove" as const,
+      projectId: r.projectId,
+      fileId: r.fileId,
+      cellId: r.cellId,
+      parentId: null,
+      author,
+      payload: { audioId: r.audioId },
+    })),
+  )
+  removals.forEach((r, i) => injectOptimisticAudioRemove(r.fileId, r.cellId, r.audioId, r.slot, queued[i]?.eventId))
+  return [...new Set(removals.map((r) => r.fileId))]
 }
 
 /**

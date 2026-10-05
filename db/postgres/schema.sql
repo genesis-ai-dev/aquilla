@@ -1834,6 +1834,36 @@ CREATE INDEX IF NOT EXISTS contextual_run_events_run_time
 CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
   ON contextual_run_events(project_id, created_at DESC, id DESC);
 
+-- Autopilot model-call traces (0129_contextual_run_traces.sql): prompt and
+-- reply per call for the Team step inspector. VIEWER-readable, 30-day TTL.
+CREATE TABLE IF NOT EXISTS contextual_run_traces (
+  id                bigserial PRIMARY KEY,
+  run_id            text NOT NULL,
+  project_id        text NOT NULL,
+  span_id           text NOT NULL DEFAULT '',
+  label             text NOT NULL DEFAULT '',
+  tier              text NOT NULL,
+  model             text NOT NULL,
+  system_prompt     text NOT NULL,
+  user_prompt       text NOT NULL,
+  output            text,
+  error             text,
+  generation_id     text,
+  prompt_tokens     integer NOT NULL DEFAULT 0,
+  completion_tokens integer NOT NULL DEFAULT 0,
+  cost_cents        double precision NOT NULL DEFAULT 0,
+  latency_ms        integer NOT NULL DEFAULT 0,
+  attempts          integer NOT NULL DEFAULT 1,
+  truncated         boolean NOT NULL DEFAULT false,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS contextual_run_traces_run_span
+  ON contextual_run_traces(run_id, span_id, created_at, id);
+-- Retention sweep.
+CREATE INDEX IF NOT EXISTS contextual_run_traces_created
+  ON contextual_run_traces(created_at);
+
 -- Cross-isolate weighted capacity leases for project Autopilot waves (0074).
 -- Rows are ephemeral coordination state: every lease expires and is deleted
 -- on normal completion; project-row locking serializes capacity acquisition.

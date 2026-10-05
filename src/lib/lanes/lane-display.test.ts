@@ -21,7 +21,7 @@ describe("laneLanguage", () => {
     expect(laneLanguage({ language: "Yooper English", name: null })).toBe("Yooper English")
   })
 
-  it("falls back to the stored name on a row that predates migration 0136", () => {
+  it("falls back to the stored name on a row that predates migration 0140", () => {
     // Until the AQU-1616 backfill runs, a legacy row carries its label in
     // `name` with `language` NULL. Reading it must still answer "Spanish".
     expect(laneLanguage({ language: null, name: "Spanish" })).toBe("Spanish")
@@ -109,7 +109,7 @@ describe("laneLanguageCode", () => {
     expect(laneLanguageCode({ language: "Spanish", name: null, langCode: "!!" })).toBe("!!")
   })
 
-  it("derives from the stored name on a row that predates migration 0136", () => {
+  it("derives from the stored name on a row that predates migration 0140", () => {
     expect(laneLanguageCode({ language: null, name: "French", langCode: null })).toBe("fr")
   })
 })

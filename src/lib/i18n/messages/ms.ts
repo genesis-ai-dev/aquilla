@@ -3717,7 +3717,6 @@ export const ms: Catalog = {
   "importExport.mediaPreview.textSource": "Sumber teks",
   "importExport.mediaPreview.automatic": "Transkripsi audio",
   "importExport.mediaPreview.automaticHint": "Pisahkan audio pada jeda. Anda boleh memilih transkripsi automatik selepas import.",
-  "importExport.mediaPreview.segmentCount": {"forms":{"other":"{count} segmen"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"other":"{count} segmen perlu perhatian"},"countVar":"count"},
   "importExport.mediaPreview.wording": "Perkataan segmen {number}",
   "importExport.mediaPreview.start": "Mula segmen {number} (saat)",

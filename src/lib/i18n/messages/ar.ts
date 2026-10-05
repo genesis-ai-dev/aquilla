@@ -3735,7 +3735,6 @@ export const ar: Catalog = {
   "importExport.mediaPreview.textSource": "مصدر النص",
   "importExport.mediaPreview.automatic": "تفريغ الصوت نصيًا",
   "importExport.mediaPreview.automaticHint": "يقسّم الصوت عند فترات التوقف. يمكنك اختيار التفريغ النصي التلقائي بعد الاستيراد.",
-  "importExport.mediaPreview.segmentCount": {"forms":{"zero":"{count} مقطع","one":"مقطع واحد ({count})","two":"مقطعان ({count})","few":"{count} مقاطع","many":"{count} مقطعًا","other":"{count} مقطع"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"zero":"{count} مقطع بحاجة إلى مراجعة","one":"مقطع واحد ({count}) بحاجة إلى مراجعة","two":"مقطعان ({count}) بحاجة إلى مراجعة","few":"{count} مقاطع بحاجة إلى مراجعة","many":"{count} مقطعًا بحاجة إلى مراجعة","other":"{count} مقطع بحاجة إلى مراجعة"},"countVar":"count"},
   "importExport.mediaPreview.wording": "صياغة المقطع {number}",
   "importExport.mediaPreview.start": "بداية المقطع {number} (بالثواني)",

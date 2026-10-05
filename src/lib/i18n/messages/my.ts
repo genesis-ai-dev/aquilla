@@ -3732,7 +3732,6 @@ export const my: Catalog = {
   "importExport.mediaPreview.textSource": "စာသားရင်းမြစ်",
   "importExport.mediaPreview.automatic": "အသံကို စာသားပြောင်းရန်",
   "importExport.mediaPreview.automaticHint": "အသံကို ရပ်နားချိန်များတွင် ခွဲပါ။ တင်သွင်းပြီးနောက် အလိုအလျောက်စာသားပြောင်းခြင်းကို ရွေးနိုင်သည်။",
-  "importExport.mediaPreview.segmentCount": {"forms":{"other":"အပိုင်း {count} ခု"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"other":"အပိုင်း {count} ခု ဂရုပြုရန်လိုသည်"},"countVar":"count"},
   "importExport.mediaPreview.wording": "အပိုင်း {number} ၏ စကားလုံးများ",
   "importExport.mediaPreview.start": "အပိုင်း {number} စတင်ချိန် (စက္ကန့်)",

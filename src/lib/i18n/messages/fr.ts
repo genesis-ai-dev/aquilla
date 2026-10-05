@@ -3706,7 +3706,6 @@ export const fr: Catalog = {
   "importExport.mediaPreview.textSource": "Source du texte",
   "importExport.mediaPreview.automatic": "Transcrire l'audio",
   "importExport.mediaPreview.automaticHint": "Découpe l'audio aux pauses. Vous pourrez choisir la transcription automatique après l'importation.",
-  "importExport.mediaPreview.segmentCount": {"forms":{"many":"{count} de segments"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"one":"{count} segment demande votre attention","many":"{count} de segments demandent votre attention","other":"{count} segments demandent votre attention"},"countVar":"count"},
   "importExport.mediaPreview.wording": "Texte du segment {number}",
   "importExport.mediaPreview.start": "Début du segment {number} (secondes)",

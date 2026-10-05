@@ -3767,7 +3767,6 @@ export const ru: Catalog = {
   "importExport.mediaPreview.textSource": "Источник текста",
   "importExport.mediaPreview.automatic": "Расшифровать аудио",
   "importExport.mediaPreview.automaticHint": "Разделить аудио по паузам. Автоматическую расшифровку можно выбрать после импорта.",
-  "importExport.mediaPreview.segmentCount": {"forms":{"one":"{count} сегмент","few":"{count} сегмента","many":"{count} сегментов","other":"{count} сегмента"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"one":"{count} сегмент требует внимания","few":"{count} сегмента требуют внимания","many":"{count} сегментов требуют внимания","other":"{count} сегмента требуют внимания"},"countVar":"count"},
   "importExport.mediaPreview.wording": "Текст сегмента {number}",
   "importExport.mediaPreview.start": "Начало сегмента {number} (секунды)",

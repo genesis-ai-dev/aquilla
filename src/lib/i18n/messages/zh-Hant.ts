@@ -3733,7 +3733,6 @@ export const zh_Hant: Catalog = {
   "importExport.mediaPreview.textSource": "文字來源",
   "importExport.mediaPreview.automatic": "轉錄音訊",
   "importExport.mediaPreview.automaticHint": "在停頓處分割音訊。匯入後您可以選擇自動轉錄。",
-  "importExport.mediaPreview.segmentCount": {"forms":{"other":"{count} 個片段"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"other":"{count} 個片段需要處理"},"countVar":"count"},
   "importExport.mediaPreview.wording": "片段 {number} 文字",
   "importExport.mediaPreview.start": "片段 {number} 開始（秒）",

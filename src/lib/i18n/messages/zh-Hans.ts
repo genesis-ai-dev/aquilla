@@ -3733,7 +3733,6 @@ export const zh_Hans: Catalog = {
   "importExport.mediaPreview.textSource": "文本来源",
   "importExport.mediaPreview.automatic": "转写音频",
   "importExport.mediaPreview.automaticHint": "在停顿处拆分音频。导入后可选择自动转写。",
-  "importExport.mediaPreview.segmentCount": {"forms":{"other":"{count} 个片段"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"other":"{count} 个片段需要处理"},"countVar":"count"},
   "importExport.mediaPreview.wording": "片段 {number} 文字",
   "importExport.mediaPreview.start": "片段 {number} 开始（秒）",

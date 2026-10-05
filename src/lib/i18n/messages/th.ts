@@ -3730,7 +3730,6 @@ export const th: Catalog = {
   "importExport.mediaPreview.textSource": "แหล่งข้อความ",
   "importExport.mediaPreview.automatic": "ถอดเสียง",
   "importExport.mediaPreview.automaticHint": "แบ่งเสียงตามช่วงหยุด คุณเลือกถอดเสียงอัตโนมัติได้หลังนำเข้า",
-  "importExport.mediaPreview.segmentCount": {"forms":{"other":"{count} ช่วง"},"countVar":"count"},
   "importExport.mediaPreview.needsAttention": {"forms":{"other":"{count} ช่วงที่ต้องตรวจดู"},"countVar":"count"},
   "importExport.mediaPreview.wording": "ถ้อยคำของช่วงที่ {number}",
   "importExport.mediaPreview.start": "เวลาเริ่มของช่วงที่ {number} (วินาที)",

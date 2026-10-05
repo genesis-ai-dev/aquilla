@@ -7,6 +7,9 @@
 // on the projects table. Sub-paths:
 //
 //   POST   /:projectId/link-source        link to upstream  (project_lead+)
+//   POST   /:projectId/link-source/match  how this project's files compare
+//                                         with the upstream files they would
+//                                         follow            (project_lead+)
 //   GET    /:projectId/link-source/files  what the link follows, and which
 //                                         files are stopped (project_lead+)
 //   POST   /:projectId/link-source/files  add upstream files to a live
@@ -33,15 +36,18 @@ import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
 import {
   chainContains,
+  clearLinkAdoption,
   clearLinkBackfill,
   emitLinkSourceEvent,
   listDownstreamProjects,
+  loadLinkAdoption,
   loadLinkBackfillRaw,
   loadProjectWithSource,
   loadLinkFileIds,
   loadLinkFileIdsRaw,
   loadStoppedUpstreamFileIds,
   loadUpstreamFileIds,
+  matchFilesForReplace,
   parseLinkFileIds,
   snapshotSourceCells,
   triggerLinkSeedSync,
@@ -51,6 +57,7 @@ import {
   parseSourceLinkBackfill,
   serializeSourceLinkBackfill,
 } from "../../../db/shared/source-link-backfill"
+import { serializeSourceLinkAdoption } from "../../../db/shared/source-link-adopt"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
@@ -71,6 +78,34 @@ const LINK_MIN_ROLE = ROLE.PROJECT_LEAD // 500
 // upstream does not (or no longer) has simply never matches, and a client that
 // passes the upstream's entire current list is asking for exactly that: those
 // files, pinned.
+//
+// AQU-1679: `replaceFiles` names files this project ALREADY has that should
+// follow an upstream file, instead of that upstream file arriving as a second
+// copy. Each pair is an upstream file id and one of this project's own file
+// ids. The project's file keeps its id and its cell ids — so every translation,
+// validation and comment on it stays where it is — and the mirror writes the
+// upstream's source onto it (sync-worker events/link-adopt.ts). Only a live
+// link to the upstream's SOURCE can do this: a clone never syncs, and a chain
+// link's source is the upstream's translations, which a file imported on its
+// own cannot line up with.
+const replaceFilePairSchema = z.object({
+  upstreamFileId: z.string().min(1).max(256),
+  fileId: z.string().min(1).max(256),
+})
+
+/** Why a set of replace pairs cannot be honoured as given, or null. */
+function replacePairsProblem(
+  pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
+): string | null {
+  if (new Set(pairs.map((p) => p.upstreamFileId)).size !== pairs.length) {
+    return "an upstream file can replace the source of only one file"
+  }
+  if (new Set(pairs.map((p) => p.fileId)).size !== pairs.length) {
+    return "a file can follow only one upstream file"
+  }
+  return null
+}
+
 const linkSourceSchema = z.object({
   sourceProjectId: z.string().min(1).max(256),
   mode: z.enum(["clone", "live"]).optional(),
@@ -81,6 +116,9 @@ const linkSourceSchema = z.object({
   // got past that is a 400 rather than a link that can never sync. The cap is a
   // whole Bible and then some; files.id is a UUID, hence 256.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000).optional(),
+  // Each pair costs a read of both files' source lines before the link is
+  // saved, so the cap is a Bible's worth of books rather than the selection's.
+  replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -100,6 +138,7 @@ sourceLinking.post(
       consumes = "source",
       gate = "validated",
       fileIds,
+      replaceFiles,
     } = c.req.valid("json")
 
     // AQU-1559: deduped so the stored list is the set it is read as, and
@@ -111,6 +150,22 @@ sourceLinking.post(
 
     if (sourceProjectId === projectId) {
       return c.json({ error: "a project cannot link to itself" }, 400)
+    }
+
+    // AQU-1679: refused on shape alone, before any lookup.
+    if (replaceFiles) {
+      if (mode !== "live" || consumes !== "source") {
+        return c.json(
+          { error: "only a live link to the upstream's source can replace a file's source" },
+          400,
+        )
+      }
+      const problem = replacePairsProblem(replaceFiles)
+      if (problem) return c.json({ error: problem }, 400)
+      // A file the link does not follow cannot be followed INTO anything.
+      if (followedFileIds && replaceFiles.some((p) => !followedFileIds.includes(p.upstreamFileId))) {
+        return c.json({ error: "a replaced file must be one of the files the link follows" }, 400)
+      }
     }
 
     const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
@@ -157,11 +212,44 @@ sourceLinking.post(
       )
     }
 
+    // AQU-1679: the replace pairs are checked against the two projects' actual
+    // lines BEFORE anything is saved — the same pairing the mirror is about to
+    // perform. A pair that names a missing file, or two files that are not the
+    // same material, refuses the whole request: the lead asked for one file and
+    // must not silently get two.
+    let adoptionJson: string | null = null
+    if (replaceFiles) {
+      const matches = await matchFilesForReplace(c.env, {
+        projectId,
+        sourceProjectId,
+        pairs: replaceFiles,
+      })
+      if (matches.some((m) => !m.canReplace)) {
+        return c.json(
+          {
+            error: "some files do not match the upstream files they were to follow",
+            replaceFiles: matches,
+          },
+          422,
+        )
+      }
+      adoptionJson = serializeSourceLinkAdoption({
+        files: Object.fromEntries(replaceFiles.map((p) => [p.upstreamFileId, p.fileId])),
+        pending: replaceFiles.map((p) => p.upstreamFileId),
+      })
+    }
+
     try {
       // AQU-476: persist link metadata alongside source_project_id. Cursor
       // resets to 0 on (re)link so a fresh live link always seeds from
       // scratch via the mirror sync (§5 — "seeding IS the first mirror
       // sync"), regardless of any prior link's cursor position.
+      //
+      // AQU-1679: the adopted files ride in the SAME statement as the link —
+      // a link saved without them would mirror those files in as copies before
+      // a second write could say otherwise. The column (migration 0137) is only
+      // named when there is something to put in it, so a link that replaces
+      // nothing still saves on a database that predates it.
       await c.env.AQUILLA_PG.prepare(
         `UPDATE projects
             SET source_project_id    = ?,
@@ -169,6 +257,7 @@ sourceLinking.post(
                 source_link_consumes = ?,
                 source_link_gate     = ?,
                 source_link_file_ids = ?,
+                ${adoptionJson !== null ? "source_link_adopt    = ?," : ""}
                 source_link_cursor   = 0,
                 updated_at           = CURRENT_TIMESTAMP
           WHERE id = ?`,
@@ -176,7 +265,15 @@ sourceLinking.post(
         // AQU-1559: written on every link, including a whole-project one —
         // re-linking a project that previously followed a subset must clear the
         // old list, not inherit it.
-        .bind(sourceProjectId, mode, consumes, gate, followedFileIdsJson, projectId)
+        .bind(
+          sourceProjectId,
+          mode,
+          consumes,
+          gate,
+          followedFileIdsJson,
+          ...(adoptionJson !== null ? [adoptionJson] : []),
+          projectId,
+        )
         .run()
     } catch (err) {
       // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
@@ -186,7 +283,8 @@ sourceLinking.post(
       // rather than failing a link that worked before this slice. A link that
       // asked to follow a subset genuinely cannot be honoured there, and saying
       // so is better than silently saving a whole-project link instead.
-      if (followedFileIdsJson !== null) {
+      // AQU-1679: the same goes for a link that asked to replace a file.
+      if (followedFileIdsJson !== null || adoptionJson !== null) {
         console.error("link-source UPDATE failed:", err)
         return c.json({ error: "link failed" }, 500)
       }
@@ -213,6 +311,9 @@ sourceLinking.post(
     // selection above — files that were part-way into the OLD link must not
     // carry over into this one.
     await clearLinkBackfill(c.env, projectId)
+    // AQU-1679: and so is "which of my files does it follow into" — a link
+    // that replaces nothing must not inherit the previous link's pairs.
+    if (adoptionJson === null) await clearLinkAdoption(c.env, projectId)
 
     // Emit the durable event. 1A's projector consumes this kind.
     await emitLinkSourceEvent(c.env, {
@@ -256,12 +357,68 @@ sourceLinking.post(
       gate,
       // AQU-1559: the stored selection, echoed back. null = the whole project.
       fileIds: followedFileIds,
+      // AQU-1679: the pairs recorded, echoed back. null = nothing replaced.
+      replaceFiles: replaceFiles ?? null,
       previousSourceProjectId: project.source_project_id,
       // AQU-476/QA-BUG-1: best-effort signal — false means the client
       // should not assume content is present yet (e.g. the sync-worker
       // call failed) and may fall back to its own self-heal trigger.
       seeded,
     })
+  },
+)
+
+// ──────────────────────────────────────────────────────────────────────────
+// POST /:projectId/link-source/match  (AQU-1679)
+//
+// Before a link is made: how each of this project's files compares with the
+// upstream file it would follow. Body: `{ sourceProjectId, files: [{
+// upstreamFileId, fileId }, …] }`. Answers, per pair, how many lines are the
+// same, how many would have their source text replaced, how many the upstream
+// would add and how many only this project has — and whether the two are the
+// same material at all (`canReplace`). The confirm step shows those numbers
+// next to "Replace the source in my existing file", and the link request
+// repeats the check itself before it records anything.
+//
+// POST because it carries a list; it writes nothing. Same access as the link it
+// previews: project_lead+ here, and some access to the upstream, whose lines it
+// reads.
+// ──────────────────────────────────────────────────────────────────────────
+
+const matchLinkFilesSchema = z.object({
+  sourceProjectId: z.string().min(1).max(256),
+  files: z.array(replaceFilePairSchema).min(1).max(200),
+})
+
+sourceLinking.post(
+  "/:projectId/link-source/match",
+  authMiddleware,
+  zValidator("json", matchLinkFilesSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const { sourceProjectId, files } = c.req.valid("json")
+
+    if (sourceProjectId === projectId) {
+      return c.json({ error: "a project cannot link to itself" }, 400)
+    }
+    const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
+    if (!role) return c.json({ error: "not found or no access" }, 403)
+    if (role.level < LINK_MIN_ROLE) {
+      return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
+    }
+    const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, sourceProjectId)
+    if (!sourceRole) {
+      return c.json({ error: "not found or no access to source project" }, 403)
+    }
+
+    try {
+      const matches = await matchFilesForReplace(c.env, { projectId, sourceProjectId, pairs: files })
+      return c.json({ projectId, sourceProjectId, files: matches })
+    } catch (err) {
+      console.error("link-source/match failed:", err)
+      return c.json({ error: "could not compare those files" }, 500)
+    }
   },
 )
 
@@ -420,7 +577,10 @@ sourceLinking.get("/:projectId/link-source/files", authMiddleware, async (c) => 
 
   const followed = await loadLinkFileIds(c.env, projectId)
   const upstreamFileIds = await loadUpstreamFileIds(c.env, upstreamId)
-  const stoppedFileIds = await loadStoppedUpstreamFileIds(c.env, projectId, upstreamFileIds, followed)
+  const adoption = await loadLinkAdoption(c.env, projectId)
+  const stoppedFileIds = await loadStoppedUpstreamFileIds(
+    c.env, projectId, upstreamFileIds, followed, adoption?.files ?? null,
+  )
 
   return c.json({ projectId, fileIds: followed, stoppedFileIds })
 })
@@ -588,6 +748,9 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   // and so does a database that predates migration 0127 (see `loadLinkFileIds`):
   // detach kept working before this slice and must keep working.
   const followedFileIds = await loadLinkFileIds(c.env, projectId)
+  // AQU-1679: likewise read before it is cleared below — the snapshot has to
+  // write a followed-into file's source onto that file, not into a new copy.
+  const adoption = await loadLinkAdoption(c.env, projectId)
 
   try {
     // AQU-476: clear link metadata too — detach makes the project fully
@@ -631,6 +794,8 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
 
   // AQU-1560: a pending addition was for the link that just ended.
   await clearLinkBackfill(c.env, projectId)
+  // AQU-1679: and so were the files it followed into.
+  await clearLinkAdoption(c.env, projectId)
 
   // 1) Durable link-source event with null payload.
   await emitLinkSourceEvent(c.env, {
@@ -646,6 +811,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
     targetProjectId: projectId,
     authorUsername: user.username,
     onlyUpstreamFileIds: followedFileIds,
+    adoptedFileIdOf: adoption?.files ?? null,
   })
 
   return c.json({

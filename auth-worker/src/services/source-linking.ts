@@ -22,6 +22,16 @@
 
 import { sign } from "hono/jwt"
 import type { Env } from "../types"
+import {
+  loadFileSourceLines,
+  matchLinkedFileLines,
+  summarizeLinkFileMatch,
+  type LinkFileMatchSummary,
+} from "../../../db/shared/link-file-match"
+import {
+  parseSourceLinkAdoption,
+  type SourceLinkAdoption,
+} from "../../../db/shared/source-link-adopt"
 
 /** Server-generated event id for identity-side maintenance events. */
 export function makeEventId(): string {
@@ -385,6 +395,8 @@ export async function loadStoppedUpstreamFileIds(
   projectId: string,
   upstreamFileIds: readonly string[],
   followed: readonly string[] | null,
+  /** AQU-1679: upstream file id → the project's own file that stands in for it. */
+  adoptedFileIdOf: Readonly<Record<string, string>> | null = null,
 ): Promise<string[]> {
   if (!followed) return []
   const followedSet = new Set(followed)
@@ -393,7 +405,12 @@ export async function loadStoppedUpstreamFileIds(
 
   const downstreamIdOf = new Map<string, string>() // downstream file id -> upstream file id
   for (const upstreamFileId of candidates) {
-    downstreamIdOf.set(deterministicDownstreamFileId(projectId, upstreamFileId), upstreamFileId)
+    // AQU-1679: a file the link followed INTO one of the project's own is that
+    // file, not a mirrored copy under the derived id.
+    downstreamIdOf.set(
+      adoptedFileIdOf?.[upstreamFileId] ?? deterministicDownstreamFileId(projectId, upstreamFileId),
+      upstreamFileId,
+    )
   }
   const downstreamIds = [...downstreamIdOf.keys()]
 
@@ -425,6 +442,117 @@ export async function loadStoppedUpstreamFileIds(
   // The upstream's own order, as every other file list here is.
   const stoppedSet = new Set(stopped)
   return upstreamFileIds.filter((id) => stoppedSet.has(id))
+}
+
+/**
+ * AQU-1679: the project's own files that stand in for upstream files, from
+ * `projects.source_link_adopt` (migration 0137).
+ *
+ * Read in a statement of its own, like the selection and the pending addition
+ * above: on a database that predates the column the answer is `null`, "none" —
+ * which is what every link there means — rather than a failed read of
+ * something that worked before this slice.
+ */
+export async function loadLinkAdoption(
+  env: Env,
+  projectId: string,
+): Promise<SourceLinkAdoption | null> {
+  if (!env.AQUILLA_PG) return null
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_adopt FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_adopt: string | null }>()
+    return parseSourceLinkAdoption(row?.source_link_adopt ?? null)
+  } catch {
+    return null
+  }
+}
+
+/** AQU-1679: forget the adopted files — the link they belonged to has ended or
+ *  been replaced. Best-effort for the same reason as `clearLinkBackfill`. */
+export async function clearLinkAdoption(env: Env, projectId: string): Promise<void> {
+  if (!env.AQUILLA_PG) return
+  try {
+    await env.AQUILLA_PG.prepare("UPDATE projects SET source_link_adopt = NULL WHERE id = ?")
+      .bind(projectId)
+      .run()
+  } catch {
+    // Pre-0137 database: there is no column, so there is nothing to clear.
+  }
+}
+
+/** One "replace the source in my existing file" pair, as the link flow sends it. */
+export interface ReplaceFilePair {
+  /** The upstream file to follow. */
+  upstreamFileId: string
+  /** The project's own file whose source it replaces. */
+  fileId: string
+}
+
+export interface ReplaceFileMatch extends ReplaceFilePair, LinkFileMatchSummary {
+  /** One of the two files does not exist (or is in Recently deleted). */
+  missing: boolean
+}
+
+/**
+ * AQU-1679: how each of the project's files compares with the upstream file it
+ * would follow — the numbers the confirm step shows before a replace, and the
+ * check the link request repeats before it records one.
+ *
+ * Answered by the server because the pairing reads both projects' source rows,
+ * and because it is the same pairing the mirror then performs
+ * (db/shared/link-file-match.ts) — a client-side estimate could promise a
+ * match the sync does not make.
+ */
+export async function matchFilesForReplace(
+  env: Env,
+  args: { projectId: string; sourceProjectId: string; pairs: readonly ReplaceFilePair[] },
+): Promise<ReplaceFileMatch[]> {
+  const live = async (projectId: string, ids: readonly string[]): Promise<Set<string>> => {
+    const found = new Set<string>()
+    const CHUNK = 200
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK)
+      const { results } = await env.AQUILLA_PG.prepare(
+        `SELECT id FROM files
+          WHERE project_id = ? AND deleted_at IS NULL AND id IN (${chunk.map(() => "?").join(", ")})`,
+      )
+        .bind(projectId, ...chunk)
+        .all<{ id: string }>()
+      for (const row of results ?? []) found.add(row.id)
+    }
+    return found
+  }
+  const liveUpstream = await live(args.sourceProjectId, args.pairs.map((p) => p.upstreamFileId))
+  const liveOwn = await live(args.projectId, args.pairs.map((p) => p.fileId))
+
+  const matches: ReplaceFileMatch[] = []
+  for (const pair of args.pairs) {
+    if (!liveUpstream.has(pair.upstreamFileId) || !liveOwn.has(pair.fileId)) {
+      matches.push({
+        ...pair,
+        missing: true,
+        upstreamLines: 0,
+        localLines: 0,
+        same: 0,
+        changed: 0,
+        added: 0,
+        kept: 0,
+        canReplace: false,
+      })
+      continue
+    }
+    const upstreamLines = await loadFileSourceLines(env.AQUILLA_PG, args.sourceProjectId, pair.upstreamFileId)
+    const ownLines = await loadFileSourceLines(env.AQUILLA_PG, args.projectId, pair.fileId)
+    matches.push({
+      ...pair,
+      missing: false,
+      ...summarizeLinkFileMatch(matchLinkedFileLines(upstreamLines, ownLines)),
+    })
+  }
+  return matches
 }
 
 /** AQU-1560: the upstream's current (non-deleted) file ids. */
@@ -616,6 +744,10 @@ export async function snapshotSourceFiles(
      *  project. A subset link must not hand the project files it never
      *  followed — detach keeps what the link brought in, it does not widen it. */
     onlyUpstreamFileIds?: string[] | null
+    /** AQU-1679: upstream file id → the project's OWN file that stood in for it
+     *  under the link. Such a file is already this project's and is left as it
+     *  is; it only joins the map, so the cell snapshot writes into it. */
+    adoptedFileIdOf?: Readonly<Record<string, string>> | null
   },
 ): Promise<Map<string, string>> {
   const fileIdMap = new Map<string, string>()
@@ -686,6 +818,14 @@ export async function snapshotSourceFiles(
   }
 
   for (const file of files) {
+    // AQU-1679: the project's own file followed this upstream file. It is not a
+    // copy to refresh — its name, kind and meta are the project's own (the
+    // import it came from, the blob its export round-trips through) and stay.
+    const adoptedId = args.adoptedFileIdOf?.[file.id]
+    if (adoptedId && liveFileIds.has(adoptedId)) {
+      fileIdMap.set(file.id, adoptedId)
+      continue
+    }
     try {
       // AQU-1547: identity only — the marker this function writes, else the
       // live mirror's deterministic id if such a row is actually present. No
@@ -771,6 +911,35 @@ async function deletedFileIds(env: Env, projectId: string): Promise<Set<string> 
 }
 
 /**
+ * AQU-1679: `<file id>\0<upstream cell id>` → the project's own cell id, for
+ * the files the link followed into (`cells.upstream_cell_id`, migration 0137).
+ *
+ * Empty on any failure, and on a database that predates the column — where no
+ * file can have been adopted, so there is nothing to map.
+ */
+async function adoptedCellIds(
+  env: Env,
+  projectId: string,
+  fileIds: readonly string[],
+): Promise<Map<string, string>> {
+  const mapping = new Map<string, string>()
+  for (const fileId of fileIds) {
+    try {
+      const { results } = await env.AQUILLA_PG.prepare(
+        `SELECT cell_id, upstream_cell_id FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'source' AND upstream_cell_id IS NOT NULL`,
+      )
+        .bind(projectId, fileId)
+        .all<{ cell_id: string; upstream_cell_id: string }>()
+      for (const row of results ?? []) mapping.set(`${fileId}\0${row.upstream_cell_id}`, row.cell_id)
+    } catch {
+      return new Map()
+    }
+  }
+  return mapping
+}
+
+/**
  * AQU-1453: which source cells of a project are currently PARKED, as a set of
  * `file_id\0cell_id` keys.
  *
@@ -844,6 +1013,9 @@ export async function snapshotSourceCells(
      *  whole project. Cells of an unfollowed file are skipped, so a detach on a
      *  subset link leaves exactly the files the link brought in. */
     onlyUpstreamFileIds?: string[] | null
+    /** AQU-1679: upstream file id → the project's own file that stood in for it
+     *  under the link (detach passes the record it is about to clear). */
+    adoptedFileIdOf?: Readonly<Record<string, string>> | null
   },
 ): Promise<number> {
   if (!env.AQUILLA_PG) return 0
@@ -855,6 +1027,16 @@ export async function snapshotSourceCells(
   // reference file_id and must point at the target's own file row, not the
   // upstream's.
   const fileIdMap = await snapshotSourceFiles(env, args)  // same `onlyUpstreamFileIds`
+
+  // AQU-1679: in a file the project already had, an upstream cell's text
+  // belongs on the project's OWN cell — the one the mirror joined it to, which
+  // is where the translations are. Without this the snapshot would create every
+  // upstream line a second time, under the upstream's ids, in that same file.
+  const adoptedCellIdOf = await adoptedCellIds(
+    env,
+    args.targetProjectId,
+    Object.values(args.adoptedFileIdOf ?? {}),
+  )
 
   // AQU-1453: the upstream's parked cells, and the target's own, read once
   // rather than per cell. `null` from either means this deployment predates
@@ -942,6 +1124,7 @@ export async function snapshotSourceCells(
     // not the upstream's file_id, or they'd reference a file row that
     // belongs to a different project (or doesn't exist under this one).
     const targetFileId = fileIdMap.get(cell.file_id) ?? cell.file_id
+    const targetCellId = adoptedCellIdOf.get(`${targetFileId}\0${cell.cell_id}`) ?? cell.cell_id
     const id = makeEventId()
     // AQU-1520: normalized once — the genesis payload below and the `cells`
     // row it projects to must carry the same envelope, or a log replay would
@@ -953,7 +1136,7 @@ export async function snapshotSourceCells(
            FROM cells
           WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
       )
-        .bind(args.targetProjectId, targetFileId, cell.cell_id)
+        .bind(args.targetProjectId, targetFileId, targetCellId)
         .first<{ event_id: string }>()
 
       const kind = existing ? "source.cell.commit" : "source.cell.create"
@@ -963,7 +1146,7 @@ export async function snapshotSourceCells(
             valueHtml: cell.value_html ?? undefined,
           })
         : JSON.stringify({
-            cellId: cell.cell_id,
+            cellId: targetCellId,
             anchorCellId: cell.anchor_cell_id,
             value: cell.value,
             valueHtml: cell.value_html ?? undefined,
@@ -988,7 +1171,7 @@ export async function snapshotSourceCells(
           id,
           args.targetProjectId,
           targetFileId,
-          cell.cell_id,
+          targetCellId,
           existing?.event_id ?? null,
           kind,
           args.authorUsername,
@@ -1024,7 +1207,7 @@ export async function snapshotSourceCells(
             hash,
             args.targetProjectId,
             targetFileId,
-            cell.cell_id,
+            targetCellId,
           )
           .run()
       } else {
@@ -1044,7 +1227,7 @@ export async function snapshotSourceCells(
           .bind(
             args.targetProjectId,
             targetFileId,
-            cell.cell_id,
+            targetCellId,
             cell.value,
             cell.value_html,
             cell.type,
@@ -1078,7 +1261,7 @@ export async function snapshotSourceCells(
         const wantHidden = upstreamHidden.has(`${cell.file_id}\0${cell.cell_id}`)
         // A row that does not exist yet cannot be parked, so a fresh create is
         // visible — which is what makes `false` the right default here.
-        const isHidden = targetHidden?.has(`${targetFileId}\0${cell.cell_id}`) ?? false
+        const isHidden = targetHidden?.has(`${targetFileId}\0${targetCellId}`) ?? false
         if (wantHidden !== isHidden) {
           const visibilityEventId = makeEventId()
           const visibilitySeq = await nextServerSeq(env, args.targetProjectId)
@@ -1093,7 +1276,7 @@ export async function snapshotSourceCells(
               visibilityEventId,
               args.targetProjectId,
               targetFileId,
-              cell.cell_id,
+              targetCellId,
               args.authorUsername,
               JSON.stringify({ hidden: wantHidden }),
               now,
@@ -1113,7 +1296,7 @@ export async function snapshotSourceCells(
               wantHidden ? now : null,
               args.targetProjectId,
               targetFileId,
-              cell.cell_id,
+              targetCellId,
             )
             .run()
         }

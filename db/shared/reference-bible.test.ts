@@ -57,7 +57,7 @@ const arbRows = fixture("arb-vd-sample.usfm")
 const kjvRows = fixture("eng-kjv-sample.usfm")
 
 beforeAll(async () => {
-  await pg.exec(readFileSync(path.join(root, "db/postgres/migrations/0129_reference_bibles.sql"), "utf8"))
+  await pg.exec(readFileSync(path.join(root, "db/postgres/migrations/0131_reference_bibles.sql"), "utf8"))
 }, 30_000)
 afterAll(async () => {
   await pg.close()

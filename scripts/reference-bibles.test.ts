@@ -78,7 +78,7 @@ describe("reference-bibles load (AQU-1573)", () => {
       return wrap(pg)
     })()
     try {
-      await pg.exec(readFileSync(path.resolve(import.meta.dirname, "../db/postgres/migrations/0129_reference_bibles.sql"), "utf8"))
+      await pg.exec(readFileSync(path.resolve(import.meta.dirname, "../db/postgres/migrations/0131_reference_bibles.sql"), "utf8"))
       const db = new PostgresDb(executor)
       const first = await loadAll(db)
       expect(describeOutcomes(first)).toBe("reference Bibles: arb-vandyck loaded (31104), eng-kjv loaded (31102)")

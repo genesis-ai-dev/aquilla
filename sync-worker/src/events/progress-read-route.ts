@@ -604,9 +604,9 @@ export async function handleProgressReadRequest(
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
   // AQU-730: a restricted caller may read only a lane they were granted.
-  // The unscoped `files` counter fallback below is not per-lane, so once the
-  // wall is on it must not run for a restricted caller — it would report
-  // another lane's totals. 600+ stays unrestricted (visible === null).
+  // The file-counter fallback below answers a granted lane that has no
+  // progress rows yet. It is the wrong body for a lane this caller cannot
+  // see. 600+ stays unrestricted (visible === null).
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const laneAllowed = await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane)
   if (!laneAllowed) {
@@ -795,6 +795,8 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT f.cell_count AS total_count, f.filled_count, f.approved_count,
                 f.structural_cell_count, f.structural_filled_count, f.structural_approved_count,
+                (SELECT COUNT(*) FROM lanes l
+                  WHERE l.project_id = f.project_id AND l.role = 'target') AS target_lanes,
                 GREATEST(
                   COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = f.project_id AND file_id = f.id), 0),
                   COALESCE((SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = f.project_id), 0)
@@ -805,21 +807,30 @@ export async function handleProgressReadRequest(
       .first<{
         total_count: number; filled_count: number; approved_count: number
         structural_cell_count: number; structural_filled_count: number
-        structural_approved_count: number; revision: number
+        structural_approved_count: number; target_lanes: number; revision: number
       }>()
     if (!fallback) return new Response('file not found', { status: 404 })
-    const histogram = fallback.approved_count > 0 ? { [String(validationCount)]: fallback.approved_count } : {}
-    // The fallback fakes a histogram by parking every approved cell at the
-    // threshold, so the structural one has to be faked the same way or the
-    // subtraction would not line up on a bucket.
-    const structuralHistogram = fallback.structural_approved_count > 0
+    // files.filled_count and files.approved_count sum every target lane. With
+    // at most one target lane — none yet counts as one, an archived lane
+    // still counts — that sum is the lane, and it is the only fill before
+    // the first progress row. The histogram parks every approved cell at the
+    // threshold, and the structural one the same way, so the subtraction
+    // lines up on a bucket. Two or more target lanes make the sum another
+    // lane's work, so those numerators are empty. The denominator is
+    // files.cell_count either way.
+    const singleLane = Number(fallback.target_lanes) <= 1
+    const histogram = singleLane && fallback.approved_count > 0
+      ? { [String(validationCount)]: fallback.approved_count }
+      : {}
+    const structuralHistogram = singleLane && fallback.structural_approved_count > 0
       ? { [String(validationCount)]: fallback.structural_approved_count }
       : {}
     rows = [{
       scope: 'file', section_key: '', total_count: fallback.total_count,
-      filled_count: fallback.filled_count, validator_histogram: histogram,
+      filled_count: singleLane ? fallback.filled_count : 0,
+      validator_histogram: histogram,
       structural_count: fallback.structural_cell_count,
-      structural_filled_count: fallback.structural_filled_count,
+      structural_filled_count: singleLane ? fallback.structural_filled_count : 0,
       structural_validator_histogram: structuralHistogram,
       revision: fallback.revision,
       // `files` carries no audio rollup — the projection is the only source,

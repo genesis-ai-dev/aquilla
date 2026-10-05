@@ -1860,6 +1860,8 @@ CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
 
 -- Autopilot model-call traces (0129_contextual_run_traces.sql): prompt and
 -- reply per call for the Team step inspector. VIEWER-readable, 30-day TTL.
+-- Row-level security: 0136_contextual_run_traces_rls.sql (the exact-project
+-- scope its sibling contextual tables got in 0074/0076; policies live in migrations).
 CREATE TABLE IF NOT EXISTS contextual_run_traces (
   id                bigserial PRIMARY KEY,
   run_id            text NOT NULL,

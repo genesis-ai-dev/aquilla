@@ -246,7 +246,7 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
   it("validationNamedUsers", () => {
     currentSettings = { validationNamedUsers: ["bob"] }
     renderSettings("validation")
-    const trigger = screen.getByRole("combobox", { name: "Named validators (optional)" })
+    const trigger = screen.getByRole("combobox", { name: "Named validators" })
     expect(trigger).toHaveTextContent("bob")
     expect(trigger).not.toHaveTextContent("alice")
   })

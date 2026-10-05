@@ -66,6 +66,13 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   'validationCount',
   'validationCountAudio',
   'allowSelfValidation',
+  // AQU-1571: the audio twins of the three text keys above (AQU-490). Only the
+  // count had made it onto this list, so an agent could lower who validates
+  // RECORDINGS — drop the floor, widen the allowlist, allow self-validation —
+  // while the same writes on the text keys were refused.
+  'validationRoleFloorAudio',
+  'validationNamedUsersAudio',
+  'allowSelfValidationAudio',
   'harmonize_min_role',
   'contributeToGlobalTm',
   // AQU-1068: the tier that decides who may add and remove cells. An agent

@@ -114,4 +114,199 @@ describe("TargetValidationControl", () => {
     expect(await screen.findByText("Text validated by")).toBeInTheDocument()
     expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
   })
+
+  // AQU-1571: the project's own text rules, mirrored so a vote the server is
+  // about to refuse is never sent — and the reader is told why.
+  describe("when the project's text rules refuse the vote", () => {
+    const hover = async () => {
+      const button = screen.getByRole("button")
+      fireEvent.mouseEnter(button)
+      fireEvent.pointerEnter(button)
+      fireEvent.focus(button)
+      return screen.findByRole("tooltip")
+    }
+
+    it("says the reader made the latest change, and a click sends nothing", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      expect(screen.getByRole("button")).toHaveAttribute("aria-disabled", "true")
+      expect(await hover()).toHaveTextContent(
+        "You made the latest change to this text, so someone else must validate it",
+      )
+      fireEvent.click(screen.getByRole("button"))
+      expect(onValidationChange).not.toHaveBeenCalled()
+    })
+
+    it("puts the same sentence under somebody else's vote", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button"))
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+      expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent(
+        "You made the latest change to this text, so someone else must validate it",
+      )
+      expect(onValidationChange).not.toHaveBeenCalled()
+    })
+
+    // The named-validator list is deliberately not named, as audio does not.
+    it("reads as unavailable when the minimum role or validator list excludes the reader", async () => {
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="none" activeValidators={[]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="policy" onValidationChange={vi.fn()}
+        />,
+      )
+      expect(await hover()).toHaveTextContent("Text validation unavailable")
+    })
+
+    // The server never gates taking your own vote back.
+    it("still offers to remove a vote the reader cast before the rule applied", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={1}
+          canValidate canValidateThisCell={false} blockedReason="self"
+          onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Validated/ }))
+      expect(screen.queryByTestId("validation-blocked-note")).not.toBeInTheDocument()
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+    })
+  })
+
+  // PR 1 browser pass, 2026-10-02: after hover opened the "Text validated by"
+  // list, a click on the check closed it. Base UI reads a click that comes
+  // more than 500 ms after a hover open as "close". A click now pins it.
+  describe("the Text validated by list", () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    // Walk 10-02: the check still announced "Click to remove your validation"
+    // after a press stopped removing anything. It names what a press does now.
+    it("names your own validation for what a press does: open the list, not remove the vote", () => {
+      const onValidationChange = vi.fn()
+      const { rerender } = render(
+        <TargetValidationControl
+          cellRef="row 4" hasContent validationStatus="self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={onValidationChange}
+        />,
+      )
+      const button = screen.getByRole("button", {
+        name: "Validated by you, row 4. Click to see the list, where you can remove your validation.",
+      })
+      fireEvent.click(button)
+      expect(onValidationChange).not.toHaveBeenCalled()
+      expect(screen.getByRole("button", { name: "Remove your validation" })).toBeInTheDocument()
+
+      // Without the right to validate here, there is no Remove button to point at.
+      rerender(
+        <TargetValidationControl
+          cellRef="row 4" hasContent validationStatus="self" activeValidators={["alice"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate={false} canValidateThisCell={false} onValidationChange={onValidationChange}
+        />,
+      )
+      expect(screen.getByRole("button", { name: "Validated by you, row 4." })).toBeInTheDocument()
+    })
+
+    it("stays open after a click on a hover-opened list, and after the pointer leaves", async () => {
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice", "bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={vi.fn()}
+        />,
+      )
+      const button = screen.getByRole("button", { name: /Validated/ })
+      fireEvent.pointerEnter(button, { pointerType: "mouse" })
+      fireEvent.mouseEnter(button)
+      fireEvent.mouseMove(button, { movementX: 5, movementY: 5 })
+      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+
+      // Past Base UI's 500 ms "patient click" window, where the click used to close it.
+      await wait(650)
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      await wait(50)
+      expect(screen.getByText("Text validated by")).toBeInTheDocument()
+
+      fireEvent.mouseLeave(button, { relatedTarget: document.body })
+      await wait(300)
+      expect(screen.getByText("Text validated by")).toBeInTheDocument()
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+
+      // Closed lists open again on the next click.
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+    })
+
+    it("closes after Remove your validation", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice", "bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={onValidationChange}
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Validated/ }))
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+    })
+
+    // PR 1 area 5 step 6 (Sam, 2026-10-03): open the list with a click, remove
+    // your vote, and hovering the check never opened the list again. The
+    // trash button closed the list behind Base UI's back, so Base UI still
+    // remembered the CLICK that opened it, and it ignores hover while a list
+    // it thinks a click opened is around. Closing through Base UI clears that.
+    it("opens on hover again after Remove your validation closed a click-opened list", async () => {
+      const onValidationChange = vi.fn()
+      const props = {
+        cellRef: "Mark 1:1", hasContent: true, validationHistory: [], currentUsername: "alice",
+        validationRequirement: 2, canValidate: true, canValidateThisCell: true, onValidationChange,
+      }
+      const { rerender } = render(
+        <TargetValidationControl {...props} validationStatus="full-self" activeValidators={["alice", "bo"]} />,
+      )
+      const button = screen.getByRole("button", { name: /Validated/ })
+      fireEvent.pointerDown(button, { pointerType: "mouse" })
+      fireEvent.click(button)
+      fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
+      expect(onValidationChange).toHaveBeenCalledWith(false)
+      // The server agrees: only bo's vote is left, so there is still a list to show.
+      rerender(<TargetValidationControl {...props} validationStatus="others" activeValidators={["bo"]} />)
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+
+      const check = screen.getByRole("button", { name: /Validated by others/ })
+      fireEvent.mouseLeave(check, { relatedTarget: document.body })
+      await wait(150)
+      fireEvent.pointerEnter(check, { pointerType: "mouse" })
+      fireEvent.mouseEnter(check)
+      fireEvent.mouseMove(check, { movementX: 5, movementY: 5 })
+      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+      expect(screen.getByText("bo")).toBeInTheDocument()
+    })
+  })
 })

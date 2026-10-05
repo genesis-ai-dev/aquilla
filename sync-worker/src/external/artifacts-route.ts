@@ -26,7 +26,7 @@ import { uuidv7 } from './uuid'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -53,11 +53,6 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
 
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect|parse))?)?$/
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
 
 function artifactR2Key(env: ExternalEnv, projectId: string, artifactId: string): string {
   return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}`
@@ -87,7 +82,7 @@ export async function authArtifact(
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
-  const cred = await validateApiCredential(db, bearer(request) ?? '', request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {

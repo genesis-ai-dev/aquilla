@@ -759,6 +759,9 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /** Curly quotes as you type in the translation editor. Synced via
+   *  ProjectWideSettings; absent/false leaves straight quotes alone. */
+  smartQuotes?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */

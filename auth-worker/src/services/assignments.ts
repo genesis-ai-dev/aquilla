@@ -594,6 +594,13 @@ export interface MyAssignment {
   fileIds: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the resolved source cell ids, present ONLY for a 'cells' scope
+   * (the editor's current selection). A book or chapter scope leaves it absent
+   * — its extent is the whole file or the chapters `scopeLabel` names — so a
+   * reader branches on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
   /** Display name of that lane, when the row exists. */
@@ -637,6 +644,40 @@ async function fileIdsForAssignments(
     .all<{ assignment_id: string; file_id: string }>()
 
   for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.file_id)
+  return byAssignment
+}
+
+/**
+ * assignment_id → its resolved source cell ids (AQU-1628).
+ *
+ * Only called with the ids of 'cells'-scope assignments: for a book or chapter
+ * scope the extent is re-derivable (the whole file, or the chapters named in
+ * `scope_label`), while an explicit line set is not — the editor gutter cannot
+ * tell which lines are the person's without being told. Keeping the call to
+ * that scope means an inbox with no selection assignments pays nothing.
+ *
+ * Callers pass assignment ids they already selected, so this inherits their
+ * authorization exactly — it never widens what the caller may see.
+ */
+async function cellIdsForAssignments(
+  env: Env,
+  assignmentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const byAssignment = new Map<string, string[]>()
+  if (assignmentIds.length === 0) return byAssignment
+  for (const id of assignmentIds) byAssignment.set(id, [])
+
+  const placeholders = assignmentIds.map(() => "?").join(", ")
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
+       FROM assignment_cells ac
+      WHERE ac.assignment_id IN (${placeholders})
+      ORDER BY ac.assignment_id, ac.cell_id`,
+  )
+    .bind(...assignmentIds)
+    .all<{ assignment_id: string; cell_id: string }>()
+
+  for (const r of rows.results ?? []) byAssignment.get(r.assignment_id)?.push(r.cell_id)
   return byAssignment
 }
 
@@ -690,6 +731,10 @@ export async function getMyAssignments(
 
   const results = rows.results ?? []
   const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
+  const cellIds = await cellIdsForAssignments(
+    env,
+    results.filter((r) => r.scope_kind === "cells").map((r) => r.assignment_id),
+  )
 
   return results.map((r) => ({
     assignmentId: r.assignment_id,
@@ -699,6 +744,7 @@ export async function getMyAssignments(
     fileIds: fileIds.get(r.assignment_id) ?? [],
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
+    ...(cellIds.has(r.assignment_id) ? { cellIds: cellIds.get(r.assignment_id) ?? [] } : {}),
     targetLang: r.target_lang ?? "",
     laneName: r.lane_name,
     laneId: r.lane_id,

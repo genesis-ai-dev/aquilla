@@ -292,6 +292,20 @@ describe("worker deployment environment contract", () => {
     expect(observability).toContain("enabled = true")
   })
 
+  // AQU-1166: the two DB-heavy Workers run near Hyperdrive→Neon rather than at the
+  // requester's edge PoP. [placement] is not inherited by env blocks either, so a
+  // deployed profile that omits its own copy silently loses co-location.
+  it.each(["sync-worker/wrangler.toml", "auth-worker/wrangler.toml"])(
+    "co-locates %s with Postgres via Smart Placement in every deployed profile",
+    (file) => {
+      const config = readRepoFile(...file.split("/"))
+
+      for (const marker of ["[placement]", "[env.production.placement]", "[env.development.placement]"]) {
+        expect(tomlBlock(config, marker)).toContain('mode = "smart"')
+      }
+    },
+  )
+
   it.each([
     ["production", "production", "https://api.aquilla.app/identity"],
     ["development", "development", "https://api.dev.aquilla.app/identity"],

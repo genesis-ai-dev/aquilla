@@ -335,7 +335,7 @@ export const rules = defineNamespace({
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
-    "rules.importDialog.pastePlaceholder": "Paste text here and it will be processed automatically…",
+    "rules.importDialog.pastePlaceholder": "Paste text here to process it…",
     "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",

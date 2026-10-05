@@ -42,6 +42,20 @@ function rowsFor(db: AquillaDb, projectId: string, cache: RequestCache): Promise
 }
 
 /**
+ * AQU-1612: the project's target lane rows, memoized per request. The lane
+ * resolver needs them to turn an event's `laneId` into the lane's frozen tag;
+ * sharing the archived-lane list means an id-bearing batch pays for the lane
+ * list once, not once per event.
+ */
+export function targetLaneRowsFor(
+  db: AquillaDb,
+  projectId: string,
+  cache: RequestCache,
+): Promise<ArchiveLaneRow[]> {
+  return rowsFor(db, projectId, cache)
+}
+
+/**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
  * exactly `tag` — the same match the projection's lane_id lookup uses. The
  * default lane (`''`) always counts as present. Shares the per-request lane
@@ -59,7 +73,12 @@ export async function targetLaneRowExists(
 }
 
 /**
- * Stable 403 reason, or null. `tag` of `''` is the default lane and is never refused.
+ * Stable 403 reason, or null.
+ *
+ * AQU-1600: a `tag` of `''` is the former default lane — an ordinary lane that
+ * can be archived — so it is checked like any other rather than waved through.
+ * A project with no `''` lane row simply has no match and is not refused.
+ *
  * `visibleLaneIds` null means the caller may know every lane. A set hides the
  * archived name from a caller who may not know that lane exists.
  */
@@ -70,7 +89,6 @@ export async function refusalForArchivedLane(
   cache: RequestCache,
   visibleLaneIds: ReadonlySet<string> | null = null,
 ): Promise<string | null> {
-  if (tag === '') return null
   const [settings, lanes] = await Promise.all([
     cache.projectSettings(projectId),
     rowsFor(db, projectId, cache),

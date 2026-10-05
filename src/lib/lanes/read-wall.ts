@@ -13,9 +13,6 @@
  * hidden by these rules.
  */
 
-import { parseReferenceBibleSetting } from "../reference-bible/lane-setting"
-import { canonicalLaneId } from "./registry-lanes"
-
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
 /** Maintainer. At and above this role, every lane is visible. */
@@ -127,19 +124,6 @@ export function filterSettingsToVisibleLanes<
     settings[key] = value.filter((lane) => typeof lane === "string" && kept.has(lane))
   }
   const primary = settings.targetLanguage
-  // AQU-1573: the reference Bible map is keyed by lane, and its values name
-  // each lane's language ("arb-vandyck"): keep only the granted lanes' entries,
-  // judged before targetLanguage is blanked (a key may be the primary
-  // language's name). Only Maintainers write this key, and they see every
-  // lane, so a filtered map is never written back (review 2026-10-02).
-  if (settings.referenceBibleVersions !== undefined && settings.referenceBibleVersions !== null) {
-    settings.referenceBibleVersions = referenceBiblesForGrantedLanes(
-      settings.referenceBibleVersions,
-      typeof primary === "string" ? primary : null,
-      lanes,
-      visible,
-    )
-  }
   if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
     settings.targetLanguage = ""
   }
@@ -150,25 +134,6 @@ export function filterSettingsToVisibleLanes<
     settings,
     lanes: rows.filter((lane) => lane.role !== "target" || visible.has(lane.id)),
   }
-}
-
-/** The granted lanes' entries of a `referenceBibleVersions` value, as a map. */
-function referenceBiblesForGrantedLanes(
-  value: unknown,
-  targetLanguage: string | null,
-  lanes: readonly LaneIdentity[],
-  visible: ReadonlySet<string>,
-): Record<string, string> {
-  const map = parseReferenceBibleSetting(value) ?? {}
-  const granted = new Set<string>()
-  for (const lane of lanes) {
-    if (visible.has(lane.id)) granted.add(canonicalLaneId(lane.legacyTag ?? "", targetLanguage).toLowerCase())
-  }
-  const out: Record<string, string> = {}
-  for (const [key, id] of Object.entries(map)) {
-    if (granted.has(canonicalLaneId(key, targetLanguage).toLowerCase())) out[key] = id
-  }
-  return out
 }
 
 /**

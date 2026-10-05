@@ -14,7 +14,6 @@ describe("builtin-registry", () => {
       "repeated-word",
       "unpaired-symbols",
       "abbreviation-mismatch",
-      "reference-quote",
     ])
   })
 
@@ -44,21 +43,5 @@ describe("builtin-registry", () => {
   it("dispatches run() correctly", () => {
     expect(BUILTIN_CHECKS["empty-target"].run("hello", "")).not.toBeNull()
     expect(BUILTIN_CHECKS["empty-target"].run("hello", "world")).toBeNull()
-  })
-
-  it("reference-quote is a minor warning that needs the lane's Bible from the context (AQU-1573)", () => {
-    const def = BUILTIN_CHECKS["reference-quote"]
-    expect(def.defaultSeverity).toBe("minor")
-    expect(def.runsOnEmptyTarget).toBe(false)
-    const source = "\"For God so loved the world\" (John 3:16)"
-    const draft = "For God so loved the whole world, that he gave his only begotten Son (John 3:16)"
-    expect(def.run(source, draft)).toBeNull()
-    const ctx = {
-      referenceBible: {
-        versionName: "King James Version",
-        lookup: () => ["For God so loved the world, that he gave his only begotten Son"],
-      },
-    }
-    expect(def.run(source, draft, ctx)).toMatchObject({ params: { kind: "differs", refs: "John 3:16" } })
   })
 })

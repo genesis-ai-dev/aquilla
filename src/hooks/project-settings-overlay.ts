@@ -76,14 +76,6 @@ export function overlaySettings(
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
-  // AQU-1573: which Bible each lane quotes from. Must reach the workspace or
-  // drafting and the quote check would never see the choice. A PatchSettings
-  // `null` means "cleared"; assign() skips null, so it is read as {} here
-  // rather than leaving the old choice in place.
-  assign(
-    "referenceBibleVersions",
-    (settings.referenceBibleVersions as unknown) === null ? {} : settings.referenceBibleVersions,
-  )
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

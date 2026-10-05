@@ -17,7 +17,7 @@ it('binds identifiable OAuth grants and revokes unknown OAuth grants only', asyn
       ('00000000-0000-0000-0000-000000000003', '["10"]', NULL);
     INSERT INTO mcp_oauth_codes VALUES
       ('00000000-0000-0000-0000-000000000002', 'https://api.aquilla.app/sync/api/v1/external/mcp', 'consumed');`)
-    const migration = readFileSync(new URL('../../../db/postgres/migrations/0129_mcp_oauth_resource.sql', import.meta.url), 'utf8')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0130_mcp_oauth_resource.sql', import.meta.url), 'utf8')
     await pg.exec(migration)
     const rows = (await pg.query<{ oauth_resource: string | null; revoked: boolean }>(
       'SELECT oauth_resource, revoked_at IS NOT NULL AS revoked FROM api_credentials ORDER BY id',

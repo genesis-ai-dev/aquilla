@@ -95,7 +95,7 @@ describe("changed-file E2E impact selection", () => {
 
   it("selects browser authorization for plugin package, credential and OAuth changes", () => {
     for (const file of ["plugins/aquilla/.codex-plugin/plugin.json", "sync-worker/src/external/mcp-chatgpt.ts",
-      "db/shared/api-credentials.ts", "db/postgres/migrations/0129_mcp_oauth_resource.sql"]) {
+      "db/shared/api-credentials.ts", "db/postgres/migrations/0130_mcp_oauth_resource.sql"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain("e2e/specs/agent/agent-connection.smoke.spec.ts")
     }
   })

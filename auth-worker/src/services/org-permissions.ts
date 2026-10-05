@@ -1341,10 +1341,18 @@ async function fetchPortfolioLanes(
       // joining the settings table hides exactly those projects. The columns
       // this used to read come back null for them, which is what they meant
       // before anyway (default threshold, no registered lanes).
+      //
+      // Every column here is a STORED generated one. `archived_lanes` was the
+      // exception until migration 0139: it was read as
+      // (ps.settings::jsonb)->'archivedLanes', which fetches and parses each
+      // project's whole blob to pull out a list that seven projects on dev
+      // even have. That one expression was 4s of this request for a
+      // 433-project caller (10s cold) and, once the rollup beside it was
+      // fixed, most of the endpoint. Do not read `ps.settings` here.
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
               ps.target_lanes AS target_lanes,
-              (ps.settings::jsonb)->'archivedLanes' AS archived_lanes,
+              ps.archived_lanes AS archived_lanes,
               ps.target_language AS target_language,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p

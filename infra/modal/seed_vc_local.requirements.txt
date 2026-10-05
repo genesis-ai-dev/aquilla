@@ -1,0 +1,20 @@
+# Local (Apple silicon) deps for seed_vc_local.py — only what the non-F0 speech
+# path imports, not upstream's GUI/Gradio/training stack. Versions follow
+# upstream requirements.txt at the commit pinned in seed_vc.py, except torch,
+# bumped to a stable build with working MPS kernels.
+torch==2.5.1
+torchaudio==2.5.1
+numpy==1.26.4
+scipy==1.13.1
+librosa==0.10.2
+soundfile==0.12.1
+transformers==4.46.3
+huggingface-hub>=0.28.1
+descript-audio-codec==1.0.0
+munch==4.0.0
+einops==0.8.0
+pyyaml
+tqdm
+fastapi
+uvicorn
+python-multipart

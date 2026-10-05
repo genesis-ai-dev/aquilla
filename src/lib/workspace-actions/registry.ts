@@ -1,4 +1,5 @@
-import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2, AudioLines } from "lucide-react"
+import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -221,5 +222,19 @@ export const workspaceActions: WorkspaceAction[] = [
       confirmLabelKey: "nav.workspaceActions.synthAll.confirmLabel",
     },
     run: (_c, args) => args.runSynthAll(),
+  },
+  {
+    id: "change-voice-all", labelKey: "nav.workspaceActions.changeVoiceAll.label", icon: AudioLines, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.voiceChangeable ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.changeVoiceAll.title",
+      description: (c, t) => {
+        const n = c.audioCounts?.voiceChangeable ?? 0
+        const quality = t(CHANGE_VOICE_QUALITY_LABEL[getChangeVoiceQuality()])
+        return t("nav.workspaceActions.changeVoiceAll.description", { n, quality })
+      },
+      confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
+    },
+    run: (_c, args) => args.runChangeVoiceAll(),
   },
 ]

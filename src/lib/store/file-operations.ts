@@ -106,6 +106,49 @@ export function overlayPendingSortIndexes<T extends { id: string; sortIndex?: nu
 }
 
 /**
+ * The corpus a drop should show while its `file.corpus.set` is still on the
+ * way. Same reason as `overlayPendingSortIndexes`: the list on screen is the
+ * server read, so without this the file is back in its old corpus the moment
+ * the pointer lets go.
+ */
+export function overlayPendingCorpusMarkers<T extends { id: string; corpusMarker?: string }>(
+  files: readonly T[],
+  pending: ReadonlyMap<string, string>,
+): T[] {
+  if (pending.size === 0) return files as T[]
+  let changed = false
+  const next = files.map((file) => {
+    if (!pending.has(file.id)) return file
+    const corpusMarker = pending.get(file.id)
+    if (!corpusMarker || file.corpusMarker === corpusMarker) return file
+    changed = true
+    return { ...file, corpusMarker }
+  })
+  return changed ? next : (files as T[])
+}
+
+/**
+ * Drop a pending corpus once the server read carries it. Returns the same
+ * map when nothing has landed yet.
+ */
+export function settlePendingCorpusMarkers(
+  files: readonly { id: string; corpusMarker?: string }[],
+  pending: ReadonlyMap<string, string>,
+): Map<string, string> {
+  if (pending.size === 0) return pending as Map<string, string>
+  let changed = false
+  const next = new Map(pending)
+  for (const file of files) {
+    const wanted = next.get(file.id)
+    if (wanted !== undefined && file.corpusMarker === wanted) {
+      next.delete(file.id)
+      changed = true
+    }
+  }
+  return changed ? next : (pending as Map<string, string>)
+}
+
+/**
  * Drop pending positions the server read has caught up with. Returns the same
  * map when nothing has landed yet, so a render can bail out.
  */

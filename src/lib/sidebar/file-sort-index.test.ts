@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   SORT_INDEX_STEP,
   hasPlacedFiles,
+  planFileInsert,
   planFileMove,
   planFileNudge,
   planFileOrderReset,
@@ -133,6 +134,34 @@ describe("planFileMove — no-ops", () => {
 
   it("clamps a position past the end instead of dropping the move", () => {
     expect(planFileMove(ordered, "a", 99)).toEqual([{ fileId: "a", sortIndex: 1024 + SORT_INDEX_STEP }])
+  })
+})
+
+describe("planFileInsert", () => {
+  const placed = group(["c", 0], ["d", SORT_INDEX_STEP])
+
+  it("lands an incoming file between the neighbours it was dropped on", () => {
+    const writes = planFileInsert(placed, "a", 1)
+    expect(writes).toEqual([{ fileId: "a", sortIndex: SORT_INDEX_STEP / 2 }])
+    expect(applied([...placed, { id: "a" }], writes)).toEqual(["c", "a", "d"])
+  })
+
+  it("lands an incoming file after the last row", () => {
+    expect(planFileInsert(placed, "a", placed.length)).toEqual([
+      { fileId: "a", sortIndex: SORT_INDEX_STEP * 2 },
+    ])
+  })
+
+  it("stamps a whole unplaced group so the incoming file can sit in the slot", () => {
+    const loose = group(["c"], ["d"])
+    expect(applied(
+      [...loose, { id: "a" }],
+      planFileInsert(loose, "a", 0),
+    )).toEqual(["a", "c", "d"])
+  })
+
+  it("uses the same-group move when the file is already in the list", () => {
+    expect(planFileInsert(placed, "d", 0)).toEqual(planFileMove(placed, "d", 0))
   })
 })
 

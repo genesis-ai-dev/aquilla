@@ -68,6 +68,88 @@ function normalize(marker: string): string {
 }
 
 /**
+ * A named corpus a person created (a season, a series), as opposed to the
+ * Old and New Testament folders and the synthetic Ungrouped bucket.
+ * Derived testament groups count as those folders too: their label is OT or
+ * NT only because a book code said so, and dragging must not retitle them.
+ */
+export function isCustomCorpusLabel(label: string, derived = false): boolean {
+  if (derived) return false
+  return label !== "OT" && label !== "NT" && label !== "Ungrouped"
+}
+
+/** OT, then NT, then every other name alphabetically. Ungrouped is not a name. */
+export function compareCorpusLabels(a: string, b: string): number {
+  if (a === "OT" && b !== "OT") return -1
+  if (b === "OT" && a !== "OT") return 1
+  if (a === "NT" && b !== "NT") return -1
+  if (b === "NT" && a !== "NT") return 1
+  return a.localeCompare(b)
+}
+
+/**
+ * A custom corpus is a folder, not a side effect of the files currently in it.
+ * Moving the last file out must leave the folder on screen. `retainedLabels`
+ * are corpus names this project has already had; names that still have files
+ * are left as they are. Testament folders and Ungrouped are never kept this way.
+ */
+export function withRetainedCustomCorpuses<T>(
+  groups: readonly CorpusGroup<T>[],
+  retainedLabels: readonly string[],
+): CorpusGroup<T>[] {
+  const present = new Set(groups.map((group) => group.label.trim().toLowerCase()))
+  const missing: CorpusGroup<T>[] = []
+  const claimed = new Set<string>()
+  for (const raw of retainedLabels) {
+    const label = raw.trim()
+    if (!label || !isCustomCorpusLabel(label)) continue
+    const key = label.toLowerCase()
+    if (present.has(key) || claimed.has(key)) continue
+    claimed.add(key)
+    missing.push({ label, files: [] })
+  }
+  if (missing.length === 0) return groups as CorpusGroup<T>[]
+  const ungrouped = groups.filter((group) => group.label === "Ungrouped")
+  const named = [
+    ...groups.filter((group) => group.label !== "Ungrouped"),
+    ...missing,
+  ].sort((a, b) => compareCorpusLabels(a.label, b.label))
+  return [...named, ...ungrouped]
+}
+
+/** Union of corpus names already remembered and names still present on files. */
+export function rememberCustomCorpusLabels(
+  current: readonly string[],
+  seen: readonly string[],
+): string[] {
+  const next = current.slice()
+  const keys = new Set(next.map((label) => label.trim().toLowerCase()))
+  let changed = false
+  for (const raw of seen) {
+    const label = raw.trim()
+    if (!label || !isCustomCorpusLabel(label)) continue
+    const key = label.toLowerCase()
+    if (keys.has(key)) continue
+    keys.add(key)
+    next.push(label)
+    changed = true
+  }
+  return changed ? next : (current as string[])
+}
+
+/** A rename keeps the folder and drops the old name, so the old one is not left empty. */
+export function renameRetainedCorpusLabel(
+  current: readonly string[],
+  from: string,
+  to: string,
+): string[] {
+  const fromKey = from.trim().toLowerCase()
+  const without = current.filter((label) => label.trim().toLowerCase() !== fromKey)
+  const base = without.length === current.length ? current : without
+  return rememberCustomCorpusLabels(base, [to])
+}
+
+/**
  * A `sortIndex` is only usable if it is a real finite number: the value
  * arrives as raw JSON off the wire (`files.meta`), where a newer client, a
  * hand-edited blob or a failed parse could leave a string, a NaN or an
@@ -175,13 +257,9 @@ export function groupByCorpus<T extends GroupableFile>(
     return placed !== null ? placed : compareByCanonicalBookOrder(a.name, b.name)
   })
 
-  const named: CorpusGroup<T>[] = Array.from(groupsByKey.values()).sort((a, b) => {
-    if (a.label === "OT" && b.label !== "OT") return -1
-    if (b.label === "OT" && a.label !== "OT") return 1
-    if (a.label === "NT" && b.label !== "NT") return -1
-    if (b.label === "NT" && a.label !== "NT") return 1
-    return a.label.localeCompare(b.label)
-  })
+  const named: CorpusGroup<T>[] = Array.from(groupsByKey.values()).sort((a, b) =>
+    compareCorpusLabels(a.label, b.label),
+  )
 
   if (ungrouped.length > 0) {
     // i18n-exempt control-flow identity value, not display text — labelKey

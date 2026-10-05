@@ -344,6 +344,7 @@ export const nav = defineNamespace({
 
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
+    "nav.fileList.moveHandle": "Move {name} to another corpus",
     "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
     "nav.fileList.resetOrder": "Reset the order of {group}",
     "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
@@ -1430,16 +1431,27 @@ export const nav = defineNamespace({
       "nav.fileList.reorderHandle": {
         description:
           "Accessible name for the grip a Project Lead drags to move a file to a new " +
-          "position inside its own sidebar group (AQU-1569). Shown only to roles that " +
-          "may reorder. {name} is the file's own display name.",
+          "position inside its own sidebar group, or into another custom corpus " +
+          "(AQU-1569). Shown only to roles that may reorder. {name} is the file's own " +
+          "display name. A group of one file uses nav.fileList.moveHandle instead, " +
+          "because that grip can only change corpus.",
+        placeholders: { name: "The file's display name." },
+      },
+      "nav.fileList.moveHandle": {
+        description:
+          "Accessible name for the grip on the only file in a custom corpus, when " +
+          "another custom corpus exists to drop it into. Dragging it changes which " +
+          "corpus the file belongs to. {name} is the file's own display name.",
         placeholders: { name: "The file's display name." },
       },
       "nav.fileList.reorderWrongGroup": {
         description:
-          "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
-          "group than its own, which is refused (AQU-1569). \u201cMove to corpus\u2026\u201d " +
-          "names the separate menu action that does change a file's group \u2014 keep it " +
-          "worded identically to fileDetails.moveToCorpus in this locale.",
+          "Live-region message shown when a file is dragged over a group that will " +
+          "not take it: the Old Testament folder, the New Testament folder, or " +
+          "Ungrouped (AQU-1569). Custom corpuses accept the drop instead and do not " +
+          "show this. \u201cMove to corpus\u2026\u201d names the menu action that still " +
+          "changes those folders \u2014 keep it worded identically to " +
+          "fileDetails.moveToCorpus in this locale.",
       },
       "nav.fileList.resetOrder": {
         description:

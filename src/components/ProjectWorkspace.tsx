@@ -5834,7 +5834,7 @@ export function ProjectWorkspace() {
 
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
-      .map((c) => ({ source: c.original!, target: c.translated }))
+      .map((c) => ({ source: c.original!, target: c.translated, id: c.id }))
     const seeds = buildGlosserSeeds({
       corpusCells,
       backtranslationCache,
@@ -5978,7 +5978,7 @@ export function ProjectWorkspace() {
         corpusByCellId,
         currentCellId: cell.id,
       })
-      const glossRaw = getGlosser().gloss(cell.translated).trim()
+      const glossRaw = getGlosser().gloss(cell.translated, { excludeId: cell.id }).trim()
       const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
       const projectPairsGloss = norm(glossRaw) === norm(cell.translated) ? "" : glossRaw
       const btText = await generateBacktranslation({
@@ -6018,9 +6018,11 @@ export function ProjectWorkspace() {
    * reference" section. Computed from the project's own translation pairs,
    * never persisted — it's a rough corpus-derived hint, not the BT of record.
    */
-  const getStatisticalBt = useCallback((translatedText: string): string => {
+  const getStatisticalBt = useCallback((translatedText: string, cellId: string): string => {
     if (!translatedText.trim()) return ""
-    const gloss = getGlosser().gloss(translatedText).trim()
+    // Leave-one-out: the cell's own pair is in the corpus, and glossing it with
+    // a model that has memorized it just replays its source.
+    const gloss = getGlosser().gloss(translatedText, { excludeId: cellId }).trim()
     // A gloss that only echoes the translation back is the glosser's
     // no-corpus fallback (unknown tokens pass through) — return "" so the
     // BT tab can say "not enough pairs yet" instead of presenting the

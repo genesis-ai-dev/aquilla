@@ -888,7 +888,7 @@ interface EditorTableProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
    *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -3651,7 +3651,7 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -4076,7 +4076,7 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -6659,8 +6659,8 @@ function EditorRow({
   // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
     if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {

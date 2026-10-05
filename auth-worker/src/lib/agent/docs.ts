@@ -236,7 +236,9 @@ FROM project_members pm
 WHERE pm.project_id = :project ORDER BY pm.role_level DESC
 
 Creating one (PROJECT_LEAD+). scopeKind 'books' = whole file(s);
-'chapters' = chapter slices matched by canonical_ref prefix:
+'chapters' = chapter slices matched by canonical_ref prefix; 'cells' = exactly
+the source cell ids in scope[].cellIds (AQU-1628), required for that kind and
+rejected for the other two:
 emit: [{kind:'assignment.create', payload:{
   assignmentId:'a-fresh-unique-id-string',
   scopeKind:'chapters', scope:[{fileId:'#f1', chapter:'GEN 1'}],

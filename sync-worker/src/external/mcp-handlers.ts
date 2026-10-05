@@ -31,6 +31,7 @@ import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
+import { listReferenceBibles } from '../../../db/shared/reference-bible'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
@@ -98,6 +99,8 @@ function bearer(token: string): Record<string, string> {
 /** Marks a synthetic in-process Request as MCP-originated so commit.ts stamps
  *  `channel: 'mcp'` into the provenance envelope (§2) instead of the REST default. */
 const MCP_CHANNEL_HEADER: Record<string, string> = { 'x-aquilla-channel': 'mcp' }
+
+const makeRequest = (input: RequestInfo | URL, init?: RequestInit) => new Request(input, init)
 
 const EXTERNAL_ROOT = 'https://internal/api/v1/external'
 const EXTERNAL_BASE = `${EXTERNAL_ROOT}/projects`
@@ -434,6 +437,13 @@ async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<M
   return ok({ orgs })
 }
 
+async function listReferenceBiblesTool(env: ExternalEnv): Promise<McpToolResult> {
+  if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  // AQU-1573: shared with REST GET /api/v1/external/reference-bibles.
+  const versions = await listReferenceBibles(env.AQUILLA_PG)
+  return ok({ versions })
+}
+
 async function listProjects(
   env: ExternalEnv,
   cred: ApiCredentialContext,
@@ -555,7 +565,7 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
 // ── delegated reads ──────────────────────────────────────────────────────────
 
 async function runRead(env: ExternalEnv, token: string, path: string): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalReadRequest(req, env)
   if (!res) return fail('not_found', 'read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -569,7 +579,7 @@ async function runMemoryRead(
   token: string,
   path: string,
 ): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalMemoryReadRequest(req, env)
   if (!res) return fail('not_found', 'memory read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -678,7 +688,7 @@ async function searchProjects(
   if (side) params.set('side', side)
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
 
-  const req = new Request(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
   const res = await handleExternalReadRequest(req, env)
   if (!res) return fail('not_found', 'read route did not match')
   if (!res.ok) return delegatedError(res)
@@ -740,7 +750,7 @@ async function readComments(
   const cursor = str(args, 'cursor')
   if (cursor) params.set('cursor', cursor)
   const query = params.toString()
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/comments${query ? `?${query}` : ''}`,
     { headers: bearer(token) },
   )
@@ -792,7 +802,7 @@ async function getPromptPreview(
 
 /** Same delegation shape as runRead, against the quality router. */
 async function runQualityRead(env: ExternalEnv, token: string, path: string): Promise<McpToolResult> {
-  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
   const res = await handleExternalQualityRequest(req, env)
   if (!res) return fail('not_found', 'quality route did not match')
   if (!res.ok) return delegatedError(res)
@@ -934,7 +944,7 @@ async function stageCommands(
   const body: Record<string, unknown> = { commands }
   if (changesetId) body.id = changesetId
 
-  const req = new Request(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
+  const req = (env.mcpRequest ?? makeRequest)(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
     method: 'POST',
     headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER },
     body: JSON.stringify(body),
@@ -1011,14 +1021,14 @@ async function runParseArtifact(
   if (!artifactId) return fail('validation_failed', 'artifactId is required')
 
   const body: Record<string, unknown> = { stage }
-  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId'] as const) {
+  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'sourceTextDirection', 'targetTextDirection', 'changesetId'] as const) {
     const v = str(args, key)
     if (v) body[key] = v
   }
   if (typeof args.resultIndex === 'number') body.resultIndex = args.resultIndex
   if (typeof args.excludeFrontMatter === 'boolean') body.excludeFrontMatter = args.excludeFrontMatter
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/parse`,
     {
       method: 'POST',
@@ -1084,7 +1094,7 @@ async function exportFile(
   const restPath = `/api/v1/external/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/export${qs}`
 
   const res = await handleExternalExportRequest(
-    new Request(`https://internal${restPath}`, { headers: bearer(token) }),
+    (env.mcpRequest ?? makeRequest)(`https://internal${restPath}`, { headers: bearer(token) }),
     { ...env, SNAPSHOTS: env.SNAPSHOTS },
   )
   if (!res) return fail('not_found', 'export route did not match')
@@ -1143,7 +1153,7 @@ async function getChangeset(
   const changesetId = str(args, 'changesetId')
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!changesetId) return fail('validation_failed', 'changesetId is required')
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}`,
     { headers: bearer(token) },
   )
@@ -1224,7 +1234,7 @@ async function listChangesets(
   if (cursor) qs.set('cursor', cursor)
 
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets${suffix}`,
     { headers: bearer(token) },
   )
@@ -1251,7 +1261,7 @@ async function waitForChangeset(
   const qs =
     typeof timeoutMs === 'number' ? `?timeoutMs=${encodeURIComponent(String(timeoutMs))}` : ''
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/wait${qs}`,
     { headers: bearer(token) },
   )
@@ -1298,7 +1308,7 @@ async function confirmChangeset(
     return fail('plan_stale', 'digest does not match the stored plan — re-prepare')
   }
 
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/commit`,
     { method: 'POST', headers: { ...bearer(token), ...MCP_CHANNEL_HEADER } },
   )
@@ -1327,7 +1337,7 @@ async function discardChangeset(
   const changesetId = str(args, 'changesetId')
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!changesetId) return fail('validation_failed', 'changesetId is required')
-  const req = new Request(
+  const req = (env.mcpRequest ?? makeRequest)(
     `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/discard`,
     { method: 'POST', headers: bearer(token) },
   )
@@ -1361,6 +1371,8 @@ export async function callTool(
       return listOrgs(env, cred)
     case 'list_projects':
       return listProjects(env, cred, args)
+    case 'list_reference_bibles':
+      return listReferenceBiblesTool(env)
     case 'get_project': {
       const projectId = str(args, 'projectId')
       if (!projectId) return fail('validation_failed', 'projectId is required')

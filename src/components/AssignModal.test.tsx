@@ -233,9 +233,33 @@ describe("selection scope", () => {
     fireEvent.click(screen.getByRole("button", { name: /assign/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     const args = mockCreate.mock.calls[0][0]
-    expect(args.scopeKind).toBe("books")
     expect(args.scopeLabel).toBe("3 verse(s)")
     expect(args.assigneeUserId).toBe(99)
+  })
+
+  it("AQU-1628: sends the selected lines, not the file they live in", async () => {
+    const selectedCellIds = new Set(["cell-a", "cell-b", "cell-c"])
+    render(<AssignModal {...BASE_PROPS} selectedCellIds={selectedCellIds} />)
+    await pickSelectOption(/assign to/i, /bob/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    const args = mockCreate.mock.calls[0][0]
+    // A bare { fileId } resolves to EVERY source line in the file server-side,
+    // which is what handed the assignee the whole file while the label said
+    // "3 verse(s)".
+    expect(args.scopeKind).toBe("cells")
+    expect(args.scope).toEqual([{ fileId: "file-1", cellIds: ["cell-a", "cell-b", "cell-c"] }])
+  })
+
+  it("the whole-file scope stays a book scope with no cell list", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    // No selection ⇒ the dialog opens on "All verses in file".
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    const args = mockCreate.mock.calls[0][0]
+    expect(args.scopeKind).toBe("books")
+    expect(args.scope).toEqual([{ fileId: "file-1" }])
   })
 })
 
@@ -438,6 +462,10 @@ describe("non-scripture unit copy (AQU-658)", () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][0].scopeLabel).toBe("2 segment(s)")
     expect(mockCreate.mock.calls[0][0].scopeLabel).not.toContain("verse")
+    // AQU-1628: the count in the label is the count that gets assigned.
+    expect(mockCreate.mock.calls[0][0].scope).toEqual([
+      { fileId: "file-1", cellIds: ["cell-a", "cell-b"] },
+    ])
   })
 })
 

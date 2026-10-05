@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scoreBoundaries } from "./boundary-f1"
+import { scoreBoundaries, scoreBoundaryTimes } from "./boundary-f1"
 
 describe("boundary F1", () => {
   it("scores an exact match perfectly", () => {
@@ -50,5 +50,40 @@ describe("boundary F1", () => {
     expect(scoreBoundaries([20, 5, 12], [5, 12, 20])).toEqual(
       scoreBoundaries([5, 12, 20], [5, 12, 20]),
     )
+  })
+})
+
+describe("boundary F1 in the time domain", () => {
+  it("scores an exact match perfectly", () => {
+    expect(scoreBoundaryTimes([1_000, 60_000], [1_000, 60_000], 3_000)).toMatchObject({
+      hits: 2,
+      precision: 1,
+      recall: 1,
+      f1: 1,
+    })
+  })
+
+  it("accepts a boundary inside the tolerance and rejects one outside it", () => {
+    expect(scoreBoundaryTimes([62_500], [60_000], 3_000).hits).toBe(1)
+    expect(scoreBoundaryTimes([64_000], [60_000], 3_000).hits).toBe(0)
+    expect(scoreBoundaryTimes([64_000], [60_000], 10_000).hits).toBe(1)
+  })
+
+  it("matches one-to-one, so a cluster of guesses banks one hit", () => {
+    const score = scoreBoundaryTimes([59_000, 60_000, 61_000], [60_000], 3_000)
+    expect(score.hits).toBe(1)
+    expect(score.recall).toBe(1)
+    expect(score.precision).toBeCloseTo(1 / 3)
+  })
+
+  it("gives a true boundary to its nearest prediction", () => {
+    // 10_500 is nearer to 10_000 than 12_500 is, and both are in tolerance;
+    // claiming it for the further one would lose the second hit.
+    expect(scoreBoundaryTimes([10_500, 12_500], [10_000, 13_000], 3_000).hits).toBe(2)
+  })
+
+  it("scores zero rather than dividing by zero when a side is empty", () => {
+    expect(scoreBoundaryTimes([], [10_000], 3_000)).toMatchObject({ hits: 0, f1: 0 })
+    expect(scoreBoundaryTimes([10_000], [], 3_000)).toMatchObject({ hits: 0, f1: 0 })
   })
 })

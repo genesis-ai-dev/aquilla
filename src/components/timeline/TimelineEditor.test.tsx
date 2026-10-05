@@ -4346,3 +4346,74 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 240 })
   })
 })
+
+// ── AQU-1632: the gutter is a scrollport the browser can move on its own ────
+//
+// The header column clips with `overflow-hidden`, which still makes it a
+// scrollport — so tabbing onto a track's ⋯ button below the fold made the
+// browser scroll the HEADERS and nothing else, and the names stopped lining up
+// with their lanes for the rest of the session. The fix refuses to hold an
+// offset of its own: whatever the browser does here is handed to the track
+// column, which is the one thing that owns the vertical position.
+//
+// happy-dom supplies no layout, so it never scrolls anything to reveal a
+// focused element. The test therefore does what the browser would have done —
+// set the gutter's scrollTop and fire the scroll — and asserts on where that
+// offset ends up, which is the whole of the fix.
+describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in step", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  it("hands the browser's gutter scroll to the track column and re-zeroes itself", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+    // `role="list"` is on the inner div that carries the offset — the one
+    // `handleTrackScroll` transforms.
+    const inner = gutter.querySelector('[role="list"]') as HTMLElement
+
+    // Baseline: the track column owns y, and the headers follow it.
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-60px)")
+
+    // Now the browser reveals a focused ⋯ button by scrolling the GUTTER.
+    gutter.scrollTop = 45
+    fireEvent.scroll(gutter)
+
+    // The gutter holds no offset of its own…
+    expect(gutter.scrollTop).toBe(0)
+    // …the track column absorbed it…
+    expect(scroll.scrollTop).toBe(105)
+    // …and once that scroll lands, the headers are back beside their lanes.
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-105px)")
+  })
+
+  it("leaves everything alone when the gutter is already at the origin", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus2" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+
+    scroll.scrollTop = 30
+    fireEvent.scroll(scroll)
+    // A scroll event on a gutter sitting at 0 — the echo of our own re-zeroing
+    // — must not nudge the track column a second time.
+    fireEvent.scroll(gutter)
+    expect(scroll.scrollTop).toBe(30)
+  })
+})

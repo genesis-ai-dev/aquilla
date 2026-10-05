@@ -1813,6 +1813,64 @@ interface MirrorWindowResult {
 }
 
 /**
+ * AQU-1603: of the upstream files this window would bring in, the ones that sit
+ * in the upstream's Recently deleted AND that this link has never brought in.
+ *
+ * A whole-project link (`source_link_file_ids` NULL — what every "leave all the
+ * files checked" confirmation writes) folds the upstream's WHOLE history on its
+ * first sync, and that history still holds the `file.create` of a file the
+ * upstream has since deleted. `file.delete` is deliberately NOT a lane-relevant
+ * kind (see LANE_KINDS_SOURCE), so nothing downstream ever countered it: a file
+ * the upstream had moved to Recently deleted before the link existed arrived as
+ * an ordinary live file, with its source text, and was counted in the new
+ * project's progress — while the dialog that made the link had not even offered
+ * it. A subset link happened to escape it only because the picked list, written
+ * from that same dialog, could not contain the deleted file's id.
+ *
+ * Scoped to files NEW to the downstream on purpose. What the upstream deletes
+ * (or restores) AFTER a link exists is an open product question and is not this
+ * ticket's: a file already mirrored here keeps whatever state it has, and only
+ * one that was never brought in is withheld. That also keeps the guard a no-op
+ * for every healthy link — an upstream with an empty Recently deleted returns
+ * an empty set after one cheap read.
+ */
+async function newlyBroughtDeletedUpstreamFiles(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  downstreamProjectId: string,
+  deltaFileIds: readonly string[],
+): Promise<Set<string>> {
+  if (deltaFileIds.length === 0) return new Set()
+  const deleted = await db
+    .prepare(
+      `SELECT id FROM files
+        WHERE project_id = ? AND id IN (${deltaFileIds.map(() => '?').join(', ')})
+          AND deleted_at IS NOT NULL`,
+    )
+    .bind(upstreamProjectId, ...deltaFileIds)
+    .all<{ id: string }>()
+  const deletedUpstream = deleted.results.map((r) => r.id)
+  if (deletedUpstream.length === 0) return new Set()
+  // Already here? Then this link brought it in before the upstream deleted it,
+  // which is the out-of-scope case above. Compared by the DETERMINISTIC
+  // downstream id, never the upstream's raw id (files.id is a global PK — see
+  // deterministicDownstreamFileId).
+  const downstreamIdOf = new Map(
+    deletedUpstream.map((id) => [id, deterministicDownstreamFileId(downstreamProjectId, id)]),
+  )
+  const downstreamIds = [...downstreamIdOf.values()]
+  const present = await db
+    .prepare(
+      `SELECT id FROM files
+        WHERE project_id = ? AND id IN (${downstreamIds.map(() => '?').join(', ')})`,
+    )
+    .bind(downstreamProjectId, ...downstreamIds)
+    .all<{ id: string }>()
+  const alreadyMirrored = new Set(present.results.map((r) => r.id))
+  return new Set(deletedUpstream.filter((id) => !alreadyMirrored.has(downstreamIdOf.get(id)!)))
+}
+
+/**
  * Fold, write and commit one window of upstream lane events
  * (`sinceSeq < server_seq <= untilSeq`), then advance the link cursor to
  * `untilSeq`. Everything this holds in memory is bounded by the window.
@@ -1846,6 +1904,22 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   // windows would otherwise never get one.
   if (backfill?.final) {
     for (const fileId of backfill.fileIds) deltaFileIds.add(fileId)
+  }
+
+  // AQU-1603: a file the upstream has in Recently deleted and that this link has
+  // never brought in is withheld — neither its row nor its cells. Applied here,
+  // after both the selection filter and the backfill's additions, so it is the
+  // last word on "which upstream files may enter this project" and every pass
+  // below (file.mirror, the cell pass, localState, deletedByHead, the touched
+  // set) sees the same answer. See newlyBroughtDeletedUpstreamFiles.
+  const withheldDeleted = await newlyBroughtDeletedUpstreamFiles(
+    db, upstreamProjectId, downstreamProjectId, [...deltaFileIds],
+  )
+  if (withheldDeleted.size > 0) {
+    for (const fileId of withheldDeleted) deltaFileIds.delete(fileId)
+    for (const [key, cell] of [...folded]) {
+      if (withheldDeleted.has(cell.fileId)) folded.delete(key)
+    }
   }
 
   // Which of the delta's upstream file ids are genuinely new to the

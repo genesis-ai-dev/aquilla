@@ -122,6 +122,9 @@ export async function generateAndAttachCellVoice(
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       ...(args.label ? { label: args.label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      // AQU-1572
+      audioOrigin: "generate",
+      ttsProvider: provider,
       author: args.username,
     })
     // Round 8: shadow-inject so the sparkle chip appears at its real length
@@ -277,6 +280,9 @@ export async function generateAndAttachCellVoice(
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     ...(args.label ? { label: args.label } : {}),
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    // AQU-1572
+    audioOrigin: "generate",
+    ttsProvider: provider,
     author: args.username,
   })
   // Round 8: shadow-inject (see the hosted-TTS branch's comment).

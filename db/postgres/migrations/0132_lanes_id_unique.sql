@@ -1,4 +1,4 @@
--- 0129_lanes_id_unique.sql — AQU-1606
+-- 0132_lanes_id_unique.sql — AQU-1606
 --
 -- Lane ids are opaque 8-hex values minted by the app
 -- (src/lib/lanes/lane-id.ts). They were unique only inside a project, because

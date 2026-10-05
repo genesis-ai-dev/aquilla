@@ -28,8 +28,14 @@ const SCHEMA = readFileSync(
 export const pg = new PGlite({ parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) } })
 
 function pgliteExecutor(db: PGlite): PgExecutor {
-  const wrap = (q: { query: PGlite["query"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
+  const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
+      // postgres.js sends a parameterless unsafe() over the simple protocol,
+      // which accepts several statements (migration replays rely on it).
+      if (params.length === 0) {
+        const last = (await q.exec(sql)).at(-1)
+        return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
+      }
       const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },

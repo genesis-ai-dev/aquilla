@@ -356,14 +356,27 @@ describe("rename and archive a target lane", () => {
     expect(duplicate.status).toBe("duplicate")
   })
 
-  it("archives an extra lane and refuses the default lane", async () => {
+  // AQU-1600: the former default lane is ordinary. It archives like any other
+  // lane; the only refusal left is the project's LAST active target lane.
+  it("archives the former default lane like any other, and refuses the last active one", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
       settings: { targetLanguage: "Spanish", targetLanes: ["French"] },
     })
     const rows = await listProjectLanes(t.db, PROJECT)
     const french = rows.find((lane) => lane.legacyTag === "French")!
     const blank = rows.find((lane) => lane.legacyTag === "")!
-    expect((await setTargetLaneArchived(t.db, PROJECT, blank.id, true)).status).toBe("default_lane")
+    // The former default lane archives, and keeps its legacy tag so old
+    // events still replay through it.
+    const blankArchived = await setTargetLaneArchived(t.db, PROJECT, blank.id, true)
+    expect(blankArchived.status).toBe("ok")
+    if (blankArchived.status === "ok") {
+      expect(blankArchived.lane.archivedAt).toBeTruthy()
+      expect(blankArchived.lane.legacyTag).toBe("")
+    }
+    // French is now the only active target lane, so archiving it is refused.
+    expect((await setTargetLaneArchived(t.db, PROJECT, french.id, true)).status).toBe("last_lane")
+    // Restore the former default lane and French archives again.
+    expect((await setTargetLaneArchived(t.db, PROJECT, blank.id, false)).status).toBe("ok")
     const archived = await setTargetLaneArchived(t.db, PROJECT, french.id, true)
     expect(archived.status).toBe("ok")
     if (archived.status === "ok") expect(archived.lane.archivedAt).toBeTruthy()

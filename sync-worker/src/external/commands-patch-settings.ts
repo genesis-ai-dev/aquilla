@@ -36,6 +36,7 @@ import {
 } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { validateReferenceBibleSetting } from '../../../db/shared/reference-bible'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -276,6 +277,30 @@ async function resolveOrgRoleFloor(
   return fallback
 }
 
+/** AQU-1573: the settings key naming each lane's reference Bible. */
+export const REFERENCE_BIBLE_SETTINGS_KEY = 'referenceBibleVersions'
+
+/**
+ * AQU-1573: the live half of `referenceBibleVersions` validation — the registry
+ * only checks the shape. Every named Bible must be installed on this server and
+ * every lane key must be a lane of the project, judged against the settings as
+ * they will be AFTER these ops (so registering a lane and choosing its Bible
+ * in one write works). Null when the ops do not name the key or it is fine;
+ * otherwise the message for a validation_failed.
+ */
+export async function referenceBibleOpProblem(
+  db: AquillaDb,
+  ops: readonly PatchSettingsOp[],
+  live: Record<string, unknown>,
+): Promise<string | null> {
+  const op = ops.find((o) => o.key === REFERENCE_BIBLE_SETTINGS_KEY)
+  if (!op) return null
+  const merged: Record<string, unknown> = { ...live }
+  for (const o of ops) merged[o.key] = o.value
+  const check = await validateReferenceBibleSetting(db, op.value, merged)
+  return check.ok ? null : check.message
+}
+
 /** Max per-key floor across the ops: `terminology` → the resolved org termbase
  *  floor; a language key → the resolved org language floor; every other key →
  *  MAINTAINER (600). Taking the MAX means a mixed batch is gated by its
@@ -357,6 +382,13 @@ export async function preparePatchSettings(
       expected: cmd.ifMatchVersion,
       current: current.version,
     })
+  }
+
+  // AQU-1573: an unknown Bible id or lane is a mistake the caller can fix now;
+  // staging it would only park a setting that does nothing for a human to approve.
+  const referenceProblem = await referenceBibleOpProblem(db, cmd.ops, current.settings)
+  if (referenceProblem) {
+    return errorResponse('validation_failed', referenceProblem, { key: REFERENCE_BIBLE_SETTINGS_KEY })
   }
 
   const plannedIds: PlannedEventIds = { patchSettings: { version: cmd.ifMatchVersion } }

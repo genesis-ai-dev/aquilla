@@ -138,9 +138,9 @@ describe("AddConceptPopover", () => {
     await user.type(screen.getByLabelText(/rendering for new concept/i), "favor")
     // AQU-1271: case sensitivity now lives inside the collapsed "Matching
     // options" disclosure with the other matcher toggles, stated positively
-    // ("Match case exactly") rather than as a standalone inverted checkbox.
+    // ("Match case") rather than as a standalone inverted checkbox.
     await user.click(screen.getByRole("button", { name: /matching options/i }))
-    await user.click(screen.getByRole("checkbox", { name: /match case exactly/i }))
+    await user.click(screen.getByRole("checkbox", { name: /match case/i }))
     await user.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({

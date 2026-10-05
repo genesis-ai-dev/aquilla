@@ -633,18 +633,28 @@ projectSettings.post(
     const archived = c.req.valid("json").archived
     const result = await setTargetLaneArchived(c.env.AQUILLA_PG, projectId, laneId, archived)
     if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
-    if (result.status === "default_lane") return c.json({ error: "default_lane" }, 400)
+    // AQU-1600: the former default lane archives like any other lane. The only
+    // refusal left is the last active one — a project must keep at least one
+    // non-archived target lane.
+    if (result.status === "last_lane") return c.json({ error: "last_lane" }, 400)
     const tag = result.lane.legacyTag ?? ""
-    const synced = await mergeSettingsArray(
-      c.env.AQUILLA_PG,
-      projectId,
-      user.id,
-      "archivedLanes",
-      tag,
-      archived,
-    )
-    if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
-    if (synced === "error") return c.json({ error: "write failed" }, 500)
+    // The legacy `settings.archivedLanes` mirror holds TAGS, and the former
+    // default lane's tag is '' — which that array cannot name (every reader
+    // filters the empty string out). Its `lanes.archived_at` row is the only
+    // record of its archived state, so skip the mirror rather than push a ''
+    // entry no reader would honour.
+    if (tag !== "") {
+      const synced = await mergeSettingsArray(
+        c.env.AQUILLA_PG,
+        projectId,
+        user.id,
+        "archivedLanes",
+        tag,
+        archived,
+      )
+      if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
+      if (synced === "error") return c.json({ error: "write failed" }, 500)
+    }
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
     try {

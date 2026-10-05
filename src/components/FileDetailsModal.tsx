@@ -70,6 +70,9 @@ export function FileDetailsModal({
             {file.declaredSourceLanguage && (
               <DetailRow label={t("fileDetails.sourceLanguage")}>{file.declaredSourceLanguage}</DetailRow>
             )}
+            {file.declaredTargetLanguage && (
+              <DetailRow label={t("fileDetails.targetLanguage")}>{file.declaredTargetLanguage}</DetailRow>
+            )}
             <DetailRow label={t("fileDetails.imported")}>
               <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />
             </DetailRow>

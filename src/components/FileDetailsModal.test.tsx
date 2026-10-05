@@ -46,7 +46,7 @@ describe("FileDetailsModal", () => {
     expect(screen.getByText(fmtShortCalendarDate(usfmFile.createdAt))).toBeTruthy()
   })
 
-  it("labels the source language as declared, and never shows the file's target stamp", () => {
+  it("labels the file's declared source and target languages", () => {
     renderModal({
       file: {
         ...usfmFile,
@@ -55,13 +55,12 @@ describe("FileDetailsModal", () => {
       },
     })
 
-    // AQU-1596: this is the one surface that shows a file's language claim, and
-    // it says so — the value is what the file declared, not a language anyone
-    // configured, and the target claim is not shown at all because targets
-    // belong to lanes.
+    // AQU-1596: this surface shows what the file declared. That is import
+    // information, not a language anyone configured for a lane.
     expect(screen.getByText("Declared source language")).toBeTruthy()
     expect(screen.getByText("English")).toBeTruthy()
-    expect(screen.queryByText("Spanish")).toBeNull()
+    expect(screen.getByText("Declared target language")).toBeTruthy()
+    expect(screen.getByText("Spanish")).toBeTruthy()
   })
 
   it("does not render file actions", () => {

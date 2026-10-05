@@ -26,6 +26,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneRowLabel } from "@/lib/lanes/lane-language"
 import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
@@ -43,10 +44,13 @@ export interface MemberLaneScopeEditorProps {
   onSaved: (scopes: MemberScope[], laneNames: Record<string, string>) => void
 }
 
-/** A lane row's display string: its name, else its tag, else "main language". */
+/** A lane row's display string: its name, else its tag, else "main language".
+ *  AQU-1586: the name is read through `laneRowLabel`, so a row that names
+ *  nothing shows the language it records before its tag — a tag can be the
+ *  opaque lane id. */
 function laneOptionLabel(lane: ProjectLaneView, mainLanguageLabel: string): string {
-  const name = lane.name.trim()
-  if (name !== "") return name
+  const label = laneRowLabel(lane)
+  if (label) return label
   const tag = (lane.legacyTag ?? "").trim()
   return tag !== "" ? tag : mainLanguageLabel
 }

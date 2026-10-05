@@ -31,6 +31,7 @@ import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, write
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelsByTag } from "@/lib/lanes/lane-language"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -2165,17 +2166,6 @@ export function ProjectWorkspace() {
   // NOT consulted — it would otherwise both shadow a later Settings change and
   // surface a stamped language when the project has none set.
   const activeTargetLanguage = project?.targetLanguage
-  // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
-  // its target language, so switching lanes switches what the editor
-  // reads/writes/translates into (source stays shared). The completion path was
-  // already lane-aware; this routes the editor project + file metadata through
-  // the same rule so the target language actually changes on lane switch.
-  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
-    activeLane,
-    activeFile?.targetLanguage,
-    project?.targetLanguage,
-  )
-
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
   const targetLanes = useMemo<string[]>(() => project?.targetLanes ?? [], [project])
@@ -2183,14 +2173,23 @@ export function ProjectWorkspace() {
     () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     [project?.lanes],
   )
-  const laneLabels = useMemo(() => {
-    const labels: Record<string, string> = {}
-    for (const lane of laneRows) {
-      const key = lane.legacyTag ?? ""
-      if (lane.name.trim()) labels[key] = lane.name
-    }
-    return labels
-  }, [laneRows])
+  // AQU-1586: tag → the language the row names, never the opaque lane id a
+  // tag can be. Shared with the completion target below so the editor labels
+  // a lane with the same language it asks the model to translate into.
+  const laneLabels = useMemo(() => laneLabelsByTag(laneRows), [laneRows])
+  // AQU-602: the target language of the ACTIVE lane, so switching lanes
+  // switches what the editor reads/writes/translates into (source stays
+  // shared). The completion path was already lane-aware; this routes the
+  // editor project + file metadata through the same rule so the target
+  // language actually changes on lane switch. AQU-1586: it is resolved from
+  // the lane ROW — a lane tagged with its own id otherwise sent that hex id
+  // to the AI as the target language.
+  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
+    activeLane,
+    activeFile?.targetLanguage,
+    project?.targetLanguage,
+    laneRows,
+  )
   // Lane rows win when the project has them: order is `position`, the label
   // is `name`, and the value the editor stores is still `legacyTag` ('' for
   // the default lane) because cell rows are keyed by that tag.

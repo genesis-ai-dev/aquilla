@@ -132,4 +132,23 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
     expect(screen.getByLabelText("Lane Spanish")).toBeChecked()
     expect(screen.getByLabelText("Lane Spanish (Mexico)")).not.toBeChecked()
   })
+
+  // AQU-1586: a second lane of a language is tagged with its own opaque id, so
+  // a row that names nothing falls to the language it records — never the tag.
+  it("labels a lane tagged with its own id by the row's language, never the id", async () => {
+    vi.mocked(fetchMemberScopes).mockResolvedValue([])
+    vi.mocked(fetchProjectSettings).mockResolvedValue({
+      version: 1,
+      updatedAt: "",
+      updatedBy: null,
+      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e"] },
+      lanes: [
+        { id: "ln-main", role: "target", name: "Spanish", langCode: "es", legacyTag: "", position: 1, archivedAt: null },
+        { id: "a3f09c1e", role: "target", name: "", langCode: "es-MX", legacyTag: "a3f09c1e", position: 2, archivedAt: null },
+      ],
+    } as never)
+    await openEditor()
+    expect(screen.getByLabelText("Lane es-MX")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Lane a3f09c1e")).toBeNull()
+  })
 })

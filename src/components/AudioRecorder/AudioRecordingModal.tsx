@@ -607,7 +607,16 @@ export function AudioRecordingModal({
 
   // Recording-slot takes for the active cell — drives the takes strip. The bus
   // refetch (poked on save below) keeps this fresh as new takes land.
-  const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
+  // AQU-1591: in THIS lane. `laneTag` is omitted for the default lane, and the
+  // read's own "omitted" means every lane — so it is spelled `?? ""`, the
+  // default lane's tag, rather than passed through. Without that, the takes
+  // strip on the default lane listed every language's takes and "Take N"
+  // numbered them as one series.
+  const { byCellId } = useFileAudioAttachments(
+    open ? project.id : null,
+    open ? (activeCell?.fileId ?? null) : null,
+    laneTag ?? "",
+  )
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
   /**
    * The takes on THIS track. (AQU-646 stage 3)

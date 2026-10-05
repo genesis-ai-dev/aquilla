@@ -27,7 +27,14 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
-import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import {
+  audioLaneDualReadBinds,
+  audioLaneDualReadSql,
+  audioLaneResolveBinds,
+  audioLaneResolveSql,
+  laneIdResolveBinds,
+  laneIdResolveSql,
+} from './lane-id-sql'
 import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
@@ -161,6 +168,26 @@ export function buildBulkTargetCellCommitStmt(
  */
 export function laneOfEvent(kind: string, payload: unknown): string {
   return eventLaneTag(kind, payload)
+}
+
+/**
+ * AQU-1591: the lane tag a `cell.audio.*` event names.
+ *
+ * Its own function rather than a `kind` added to {@link laneOfEvent}, because
+ * the two answer different questions. `laneOfEvent` keys the AD-2 parent chain
+ * and the write authorization, where a non-`target.cell.*` kind deliberately
+ * has no lane; this one says which lane a TAKE lands in, and the answer for an
+ * audio event that names no lane is the default lane's tag — the `''` the
+ * backfill (AQU-1616) uses for exactly the same rows.
+ *
+ * Deliberately no `projectDefaultLane` resolver argument. `cell_audio.lane_id`
+ * is written through `public.lanes` by legacy tag, so `''` resolves to the same
+ * lane ROW the resolver would have named, and a second spelling of "the default
+ * lane" is one more thing that can disagree.
+ */
+export function laneOfAudioEvent(payload: unknown): string {
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' ? lang : ''
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -1574,16 +1601,43 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      // AQU-1591: the lane this take belongs to. A `role = 'source'` attach is
+      // the shared programme audio an import declares — it has no lane of its
+      // own and occupies the slot in every lane; anything else is a dub in the
+      // lane the event names (`targetLang`, carried since AQU-1462).
+      const audioRole = p.role === 'source' ? 'source' : 'dub'
+      const audioLane = laneOfAudioEvent(event.payload)
       // Deselect any other clip in the same slot, then upsert this one as the
       // selected, live clip. `audio_id != ?` so the deselect never touches the
       // row we're about to (re)insert as selected.
+      //
+      // AQU-1591: and only in THIS take's lane. Selection is per (cell, slot,
+      // LANE) now — recording over your own take must not silently deselect the
+      // take somebody else recorded in another language, which is exactly what
+      // an unscoped deselect did. The shared source clip stays in the predicate
+      // (`audioLaneDualReadSql` always matches `role = 'source'`) because a dub
+      // landing in the recording slot is still what takes that slot over from
+      // the programme audio; that is how `resolveTargetAudio` has always
+      // decided what sounds. A SOURCE attach keeps the unscoped form: the clip
+      // it declares is shared, so it genuinely does claim the slot in every
+      // lane.
+      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioLaneDualReadSql()}`
+      const attachDeselectLaneBinds =
+        audioRole === 'source' ? [] : audioLaneDualReadBinds(event.projectId, audioLane)
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${attachDeselectLaneSql}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.slot,
+            p.audioId,
+            ...attachDeselectLaneBinds,
+          ),
       )
       // SUB-49: a re-attach may only ADD to what is known about a clip. The
       // COALESCE'd columns describe the clip ITSELF, and producers routinely
@@ -1610,8 +1664,8 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts, role, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ${audioLaneResolveSql()})
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1642,7 +1696,14 @@ case 'cell.audio.attach': {
               -- must never demote the shared programme audio to a dub and gate
               -- every cell of that file on somebody validating it.
               role               = CASE WHEN excluded.role = 'source' THEN 'source'
-                                        ELSE cell_audio.role END`,
+                                        ELSE cell_audio.role END,
+              -- AQU-1591: FILL-ONLY, for the reason created_by is. A re-attach
+              -- is routine (the transcription lands ~800ms after every
+              -- recording, trims and timings refresh) and need not name a lane;
+              -- an absent targetLang resolves to the '' lane, so assigning it
+              -- here would quietly drag a take recorded in another language
+              -- into the default one. A take's lane is decided when it is born.
+              lane_id            = COALESCE(cell_audio.lane_id, excluded.lane_id)`,
           )
           .bind(
             event.projectId,
@@ -1666,8 +1727,10 @@ case 'cell.audio.attach': {
             // AQU-490: 'source' only when the attach says so — an import
             // declaring the shared programme audio. Everything else is a dub,
             // which is what the default and every historical row mean.
-            p.role === 'source' ? 'source' : 'dub',
+            audioRole,
             event.author,
+            // AQU-1591: the lane_id subquery's binds, at the column's position.
+            ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
           ),
       )
       // AQU-646: an attach may carry the ASR transcript of a media segment.
@@ -1695,15 +1758,23 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      // AQU-1591: a selection belongs to ONE lane. Switching the active take in
+      // your own language must leave every other lane's selection exactly where
+      // it was — unscoped, these two statements emptied the slot for all of
+      // them. The shared source clip is still in range (`audioLaneDualReadSql`
+      // always matches `role = 'source'`): handing the recording slot to a dub,
+      // or back to the programme audio, is the switch this event exists for.
+      const selectLaneSql = ` AND ${audioLaneDualReadSql()}`
+      const selectLaneBinds = audioLaneDualReadBinds(event.projectId, laneOfAudioEvent(event.payload))
       // null: empty the slot, select nothing in its place (2026-09-28).
       if (p.audioId == null) {
         stmts.push(
           db
             .prepare(
               `UPDATE cell_audio SET selected = 0
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ?${selectLaneSql}`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, p.slot),
+            .bind(event.projectId, event.fileId, event.cellId, p.slot, ...selectLaneBinds),
         )
         return ['cell_audio']
       }
@@ -1711,9 +1782,9 @@ case 'cell.audio.attach': {
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${selectLaneSql}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId, ...selectLaneBinds),
       )
       stmts.push(
         db
@@ -1999,11 +2070,22 @@ case 'cell.audio.attach': {
         stmts.push(
           db
             .prepare(
+              // AQU-1591: `lane_id` is read off the TAKE, never off the voter.
+              // A take lives in one lane, so its votes do too — and taking it
+              // from the event's own `targetLang` would put a maintainer's vote
+              // in whichever lane they happened to be looking at, which is not
+              // a fact about the take. NULL while the take itself is
+              // un-backfilled (AQU-1616); the SET below fills it on the next
+              // vote once the take has one.
               `INSERT INTO cell_audio_validators (
-                 project_id, file_id, cell_id, audio_id, username, decided_ts
-               ) VALUES (?, ?, ?, ?, ?, ?)
+                 project_id, file_id, cell_id, audio_id, username, decided_ts, lane_id
+               ) VALUES (?, ?, ?, ?, ?, ?, (
+                 SELECT lane_id FROM cell_audio
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+               ))
                ON CONFLICT(project_id, file_id, cell_id, audio_id, username)
-               DO UPDATE SET decided_ts = excluded.decided_ts
+               DO UPDATE SET decided_ts = excluded.decided_ts,
+                             lane_id = COALESCE(excluded.lane_id, cell_audio_validators.lane_id)
                  WHERE excluded.decided_ts > cell_audio_validators.decided_ts`,
             )
             .bind(
@@ -2013,6 +2095,10 @@ case 'cell.audio.attach': {
               p.audioId,
               event.author,
               event.serverTs,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.audioId,
             ),
         )
       } else {

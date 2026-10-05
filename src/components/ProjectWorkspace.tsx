@@ -3394,6 +3394,10 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
+    // AQU-1591: the heard lines performing THIS lane. A dub is a performance of
+    // one language, so a cue voiced for another lane does not make this lane's
+    // line heard.
+    activeLane,
   )
   // A dubbing file's lines are performed by heard lines, whose takes arrive by
   // three reads of their own, later than the line's own audio: the cue cells
@@ -9192,6 +9196,7 @@ export function ProjectWorkspace() {
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
     editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
+    activeLane, // AQU-1591: takes belong to a lane.
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
   /**
@@ -9217,6 +9222,9 @@ export function ProjectWorkspace() {
   const { byCellId: audioValidationByCellId } = useFileAudioAttachments(
     project?.id ?? null,
     activeFileId,
+    // AQU-1591: bulk audio validation votes on the takes of the lane you are
+    // in. Unscoped, "validate all recordings" reached into every language.
+    activeLane,
   )
 
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
@@ -9717,6 +9725,7 @@ export function ProjectWorkspace() {
   const { byCellId: timelineAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
+    activeLane, // AQU-1591: takes belong to a lane.
   )
 
   // Which cell the recorder should OPEN on, given whatever id asked for it.
@@ -12853,6 +12862,8 @@ export function ProjectWorkspace() {
                       settings: tts.settings,
                       session: frontierSession,
                       username: currentUsername,
+                      // AQU-1591: the lane this is a performance of.
+                      ...(activeLane ? { targetLang: activeLane } : {}),
                     })
                     revalidateCells()
                     // Open the manual divider editor to set per-line slices.
@@ -14051,6 +14062,7 @@ export function ProjectWorkspace() {
                   // arrangement and leaves the bar exactly as it was.
                   timelineDurationSec={timelineDurationSec}
                   virtualSoundingCellId={virtualSoundingCellId}
+                  lane={activeLane}
                   below={
                     <>
                       {syncStatus}

@@ -211,6 +211,57 @@ describe("audio counts", () => {
     expect(book.audio_validator_histogram).toEqual({})
   })
 
+  // AQU-1591. Audio used to have no lane at all, so this CTE joined on the cell
+  // alone and copied one recording onto every lane's row: a file translated into
+  // Swahili and French reported the same audio progress for both, whichever
+  // language had actually been voiced. A take belongs to one lane now.
+  it("counts a dub only on the lane it was recorded in", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "ln000000", project_id: P, role: "target", name: "Swahili", lang_code: "sw", legacy_tag: "" },
+        { id: "lnfr0000", project_id: P, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+      ],
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "", value: "neno" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "fr", value: "parole" }),
+      ],
+      cell_audio: [audioSeed({ selected: 1, validator_count: 2, lane_id: "lnfr0000" })],
+    })
+    await recompute(db)
+    const byLane = new Map((await rows(db, "book")).map((r) => [r.target_lang, r]))
+    expect(byLane.get("fr")!.audio_count).toBe(1)
+    expect(byLane.get("fr")!.audio_validated_count).toBe(1)
+    // Swahili has the same line translated and nothing recorded. Which is the
+    // whole point: it must not inherit the French performance.
+    expect(byLane.get("")!.audio_count).toBe(0)
+    expect(byLane.get("")!.audio_validated_count).toBe(0)
+  })
+
+  // Every take predating migration 0135 has lane_id NULL until the batch
+  // backfill (AQU-1616) runs, and that backfill puts a tag-less dub on the lane
+  // whose legacy_tag is ''. The CTE reads a NULL the same way, so these numbers
+  // do not move when the backfill lands — the alternative was every project's
+  // audio progress reading zero in the window between the two PRs.
+  it("counts an un-backfilled take on the default lane", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "ln000000", project_id: P, role: "target", name: "Swahili", lang_code: "sw", legacy_tag: "" },
+        { id: "lnfr0000", project_id: P, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+      ],
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "", value: "neno" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "fr", value: "parole" }),
+      ],
+      cell_audio: [audioSeed({ selected: 1, validator_count: 0, lane_id: null })],
+    })
+    await recompute(db)
+    const byLane = new Map((await rows(db, "book")).map((r) => [r.target_lang, r]))
+    expect(byLane.get("")!.audio_count).toBe(1)
+    expect(byLane.get("fr")!.audio_count).toBe(0)
+  })
+
   it("counts validated audio only when the SELECTED take has a vote", async () => {
     const { db } = await makeTestDb({
       cells: [cell({ cell_id: "g1", canonical_ref: "GEN 1:1" })],

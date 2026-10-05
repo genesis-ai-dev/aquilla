@@ -31,6 +31,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `contextual_drafts` | `rls_contextual_drafts_select` / `_insert` / `_update` | 0074 |
 | `contextual_project_leases` | `rls_contextual_project_leases_select` / `_insert` / `_update` / `_delete` | 0074 |
 | `contextual_run_events` | `rls_contextual_run_events_select` / `_insert` | 0074 |
+| `contextual_run_traces` | `rls_contextual_run_traces_select` / `_insert` / `_delete` | 0136 |
 | `contextual_runs` | `rls_contextual_runs_select` / `_insert` / `_update` | 0074 |
 | `contextual_steering` | `rls_contextual_steering_select` / `_insert` / `_update` | 0074 |
 | `events` | `rls_events_project_access` | 0034 |

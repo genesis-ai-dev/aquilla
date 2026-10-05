@@ -54,7 +54,10 @@ async function storePlanKeys(fileId: string): Promise<void> {
 // Spanish-lane ('es') targets: g1 AND g2 translated and endorsed — the lane
 // that used to double-count.
 //
-// Audio (lane-independent by construction — cell_audio has no target_lang):
+// Audio (AQU-1591: takes belong to a LANE. These carry no lane_id, which reads
+// as the default lane — the rule the batch backfill applies to a take that
+// predates the column — so they are the DEFAULT lane's takes and the Spanish
+// lane has none):
 //   g1: TWO live takes, the selected one with a vote     → recorded, validated
 //   g2: one live selected take, no votes                 → recorded only
 //   g3: one DELETED take                                 → neither
@@ -194,9 +197,44 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(spanish).toMatchObject({ cellsTotal: 3, translated: 2, validated: 2 })
 
-    // Audio has no lane to pick, so it reads the same from either.
-    expect(spanish.recorded).toBe(defaultLane.recorded)
-    expect(spanish.audioValidated).toBe(defaultLane.audioValidated)
+    // AQU-1591: and audio picks a lane now. These takes belong to the default
+    // lane, so Spanish — where nobody has recorded anything — reads zero.
+    // Before, the two lanes read the same number and the Spanish tab claimed
+    // two recorded lines that had never been voiced in Spanish.
+    expect(defaultLane).toMatchObject({ recorded: 2, audioValidated: 1 })
+    expect(spanish).toMatchObject({ recorded: 0, audioValidated: 0 })
+  })
+
+  // AQU-1591, the other direction: a take that DOES name the Spanish lane is
+  // counted there and nowhere else. Without both halves the join could be
+  // passing by filtering everything out.
+  it("counts a take recorded in a lane on that lane's row", async () => {
+    await seedUnit()
+    // The Spanish lane already exists — seeding the 'es' target cells minted it.
+    const esLane = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM lanes WHERE project_id = 'pa' AND role = 'target' AND legacy_tag = 'es'`,
+    ).first<{ id: string }>()
+    expect(esLane?.id).toBeTruthy()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, validator_count, deleted, event_id, created_ts, lane_id)
+       VALUES ('pa','f1','g2','take-es','main','r2://es',1,1,0,'e-pa',5,?)`,
+    ).bind(esLane!.id).run()
+    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
+    expect(spanish).toMatchObject({ recorded: 1, audioValidated: 1 })
+    // ...and the default lane's own numbers do not move.
+    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(defaultLane).toMatchObject({ recorded: 2, audioValidated: 1 })
+  })
+
+  // AQU-1591 meeting AQU-1609: the audio CTE names a take's lane by tag and the
+  // caller names the unit's lane by id, so the join turns one into the other.
+  // An id that names no lane — the '' an unresolvable `?lane=` tag becomes —
+  // must turn into NO tag, not the default lane's '': the default lane here
+  // holds two recorded lines, and borrowing them is the failure.
+  it("reads no audio for a lane id that names no lane", async () => {
+    await seedUnit()
+    const [none] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(none).toMatchObject({ cellsTotal: 3, translated: 0, recorded: 0, audioValidated: 0 })
   })
 
   it("honours the project's CURRENT validation threshold, not the stamped flag", async () => {
@@ -328,8 +366,11 @@ describe("per-chapter coverage on a unit's assignments", () => {
     const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(def.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 1 })
     expect(es.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 2 })
-    // Audio has no lane to pick, so it reads the same from either tab.
-    expect(def.chapters[0].recorded).toBe(es.chapters[0].recorded)
+    // AQU-1591: and audio picks a lane too. The takes are the default lane's,
+    // so the Spanish tab's chapter row reports nothing recorded, which is the
+    // truth about Spanish.
+    expect(def.chapters[0].recorded).toBe(2)
+    expect(es.chapters[0].recorded).toBe(0)
   })
 
   it("drops a chapter the headings policy empties and keeps one that is merely untyped", async () => {

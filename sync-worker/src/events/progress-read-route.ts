@@ -395,16 +395,24 @@ function chapterKeySql(alias: string): string {
  * into a column list whose binds are positional, and a `?` here would consume
  * whichever bind happened to be next. It is a clamped integer from
  * readValidationCountAudio, never user text.
+ *
+ * `laneSql` (AQU-1591) is interpolated for that same reason, and is why the
+ * caller resolves the lane to its `lanes.id` with a query of its own rather than
+ * binding the tag here: the id is an opaque value READ BACK FROM THE DATABASE
+ * and re-checked against its character class, never the caller's `?lane=` text.
+ * Without it this queue sent "go to the next unrecorded line" past every line
+ * some OTHER language had voiced.
  */
 function liveTakeSql(
   fileExpr: string,
   cellExpr: string,
   signed: boolean,
   threshold = 1,
+  laneSql = '',
 ): string {
   const dubTake = `a.project_id = s.project_id AND a.file_id = ${fileExpr}
                      AND a.cell_id = ${cellExpr} AND a.deleted = 0
-                     AND a.selected = 1 AND a.role = 'dub'`
+                     AND a.selected = 1 AND a.role = 'dub'${laneSql}`
   if (!signed) return `EXISTS (SELECT 1 FROM cell_audio a WHERE ${dubTake})`
   // ONE TAKE PER TRACK, the same rule AUDIO_CTE_SQL applies — and this is the
   // second of three readers that did not have it. A leftover generated voice
@@ -417,6 +425,39 @@ function liveTakeSql(
                             WHERE ${dubTake}
                               AND ${takeSoundsOnItsTrackSql('a')}
                               AND a.validator_count < ${Math.max(1, Math.floor(threshold))}))`
+}
+
+/**
+ * AQU-1591: the `laneSql` fragment {@link liveTakeSql} splices in, resolved
+ * once per request.
+ *
+ * It is a FRAGMENT rather than a bind because its callers interpolate the take
+ * expressions into column lists whose binds are positional — see liveTakeSql's
+ * note. So the lane tag off the wire is never spliced; it is bound HERE, in a
+ * point lookup on the lanes primary key, and only the opaque id that comes back
+ * (re-checked against the 8-hex class src/lib/lanes/lane-id.ts generates) ever
+ * reaches the SQL string.
+ *
+ * A NULL `lane_id` belongs to the DEFAULT lane, which is the batch backfill's
+ * rule for an un-backfilled dub (AQU-1616) and the rule the per-file audio read
+ * applies, so a take answers these queues the same before and after that PR.
+ *
+ * No lanes row: the project was never laned, so it has exactly one lane and
+ * there is nothing to filter — the empty fragment, i.e. pre-1591 behavior.
+ */
+async function takeLaneFilterSql(
+  db: AquillaDb,
+  projectId: string,
+  lane: string,
+): Promise<string> {
+  const row = await db
+    .prepare(`SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`)
+    .bind(projectId, lane)
+    .first<{ id: string }>()
+  const id = row?.id ?? ''
+  if (!/^[0-9a-f]{1,32}$/.test(id)) return ''
+  return `
+                     AND (a.lane_id = '${id}'${lane === '' ? ' OR a.lane_id IS NULL' : ''})`
 }
 
 interface FirstOpenRow {
@@ -540,7 +581,7 @@ export async function readFirstOpenCell(
   // fraction of it; production files are twenty times that size.
   const wantsText = kind === 'untranslated' || kind === 'unvalidated'
   const wantsAudio = kind === 'unrecorded' || kind === 'unsigned'
-  const [countStructural, validationCount, validationCountAudio, sheet] = await Promise.all([
+  const [countStructural, validationCount, validationCountAudio, sheet, takeLaneSql] = await Promise.all([
     readCountStructuralCells(db, projectId),
     // Only the unvalidated queue compares endorsements against the threshold.
     kind === 'unvalidated' ? readValidationCount(db, projectId) : Promise.resolve(1),
@@ -556,6 +597,9 @@ export async function readFirstOpenCell(
             ORDER BY id DESC LIMIT 1`,
         ).bind(projectId, fileId).first<{ id: string }>()
       : Promise.resolve(null),
+    // AQU-1591: this lane's take filter, interpolated into the fragments below.
+    // Only the audio queues ask, and it is one point lookup on the lanes PK.
+    wantsAudio ? takeLaneFilterSql(db, projectId, lane) : Promise.resolve(''),
   ])
   const sheetId = sheet?.id ?? ''
   const onSheet = sheetId !== ''
@@ -565,8 +609,8 @@ export async function readFirstOpenCell(
        WHERE l.project_id = s.project_id AND l.kind = 'text-audio' AND l.linked = 1
          AND l.from_file_id = s.file_id AND l.from_cell_id = s.cell_id AND l.to_file_id = ?
          AND ${predicate})`
-  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
-  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio)
+  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false, 1, takeLaneSql)
+  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true, validationCountAudio, takeLaneSql)
 
   const columns = [`s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms`, INHERITED_COLUMNS]
   const binds: unknown[] = []
@@ -582,8 +626,8 @@ export async function readFirstOpenCell(
         `${linkedCues(`${cueTake} AND NOT ${cueSigned}`)} AS cues_unsigned`)
       binds.push(sheetId, sheetId)
     } else {
-      columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take`,
-        `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed`)
+      columns.push(`${liveTakeSql('s.file_id', 's.cell_id', false, 1, takeLaneSql)} AS has_take`,
+        `${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio, takeLaneSql)} AS take_signed`)
     }
   }
   // AQU-1240 slice 7: the lane join dual-reads (lane_id once backfilled,
@@ -666,9 +710,9 @@ export async function handleProgressReadRequest(
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
   // AQU-730: a restricted caller may read only a lane they were granted.
-  // The unscoped `files` counter fallback below is not per-lane, so once the
-  // wall is on it must not run for a restricted caller — it would report
-  // another lane's totals. 600+ stays unrestricted (visible === null).
+  // The file-counter fallback below answers a granted lane that has no
+  // progress rows yet. It is the wrong body for a lane this caller cannot
+  // see. 600+ stays unrestricted (visible === null).
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const laneAllowed = await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane)
   if (!laneAllowed) {
@@ -730,9 +774,12 @@ export async function handleProgressReadRequest(
     // interpolated into the SQL below, so it has to exist before the string
     // does. The text threshold is only compared to a column afterwards, which
     // is why it can still ride along in the Promise.all.
-    const [countStructural, validationCountAudio] = await Promise.all([
+    const [countStructural, validationCountAudio, takeLaneSql] = await Promise.all([
       readCountStructuralCells(env.AQUILLA_PG, projectId),
       readValidationCountAudio(env.AQUILLA_PG, projectId),
+      // AQU-1591: and for the same reason — the take fragments below are
+      // interpolated, so the lane they filter on has to be resolved first.
+      takeLaneFilterSql(env.AQUILLA_PG, projectId, lane),
     ])
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
@@ -742,8 +789,8 @@ export async function handleProgressReadRequest(
                 ${INHERITED_COLUMNS},
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count,
-                ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
-                ${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio)} AS take_signed
+                ${liveTakeSql('s.file_id', 's.cell_id', false, 1, takeLaneSql)} AS has_take,
+                ${liveTakeSql('s.file_id', 's.cell_id', true, validationCountAudio, takeLaneSql)} AS take_signed
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id
@@ -878,6 +925,8 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT f.cell_count AS total_count, f.filled_count, f.approved_count,
                 f.structural_cell_count, f.structural_filled_count, f.structural_approved_count,
+                (SELECT COUNT(*) FROM lanes l
+                  WHERE l.project_id = f.project_id AND l.role = 'target') AS target_lanes,
                 GREATEST(
                   COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = f.project_id AND file_id = f.id), 0),
                   COALESCE((SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = f.project_id), 0)
@@ -888,21 +937,30 @@ export async function handleProgressReadRequest(
       .first<{
         total_count: number; filled_count: number; approved_count: number
         structural_cell_count: number; structural_filled_count: number
-        structural_approved_count: number; revision: number
+        structural_approved_count: number; target_lanes: number; revision: number
       }>()
     if (!fallback) return new Response('file not found', { status: 404 })
-    const histogram = fallback.approved_count > 0 ? { [String(validationCount)]: fallback.approved_count } : {}
-    // The fallback fakes a histogram by parking every approved cell at the
-    // threshold, so the structural one has to be faked the same way or the
-    // subtraction would not line up on a bucket.
-    const structuralHistogram = fallback.structural_approved_count > 0
+    // files.filled_count and files.approved_count sum every target lane. With
+    // at most one target lane — none yet counts as one, an archived lane
+    // still counts — that sum is the lane, and it is the only fill before
+    // the first progress row. The histogram parks every approved cell at the
+    // threshold, and the structural one the same way, so the subtraction
+    // lines up on a bucket. Two or more target lanes make the sum another
+    // lane's work, so those numerators are empty. The denominator is
+    // files.cell_count either way.
+    const singleLane = Number(fallback.target_lanes) <= 1
+    const histogram = singleLane && fallback.approved_count > 0
+      ? { [String(validationCount)]: fallback.approved_count }
+      : {}
+    const structuralHistogram = singleLane && fallback.structural_approved_count > 0
       ? { [String(validationCount)]: fallback.structural_approved_count }
       : {}
     rows = [{
       scope: 'file', section_key: '', total_count: fallback.total_count,
-      filled_count: fallback.filled_count, validator_histogram: histogram,
+      filled_count: singleLane ? fallback.filled_count : 0,
+      validator_histogram: histogram,
       structural_count: fallback.structural_cell_count,
-      structural_filled_count: fallback.structural_filled_count,
+      structural_filled_count: singleLane ? fallback.structural_filled_count : 0,
       structural_validator_histogram: structuralHistogram,
       revision: fallback.revision,
       // `files` carries no audio rollup — the projection is the only source,

@@ -39,6 +39,9 @@ import {
   useCellView,
 } from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import {
+  audioColumnFor, fileHasAudio, fileLastSeenWithAudio, rememberFileAudio, type AudioColumn,
+} from "@/lib/audio/file-has-audio"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
@@ -183,6 +186,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
@@ -213,6 +217,7 @@ import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -450,17 +455,19 @@ function areNumberArraysEqual(a: number[], b: number[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfRowRenders = rowRenders
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfDumpRowRenders = () => {
+  const perfHandles = window as typeof window & {
+    __perfRowRenders?: Map<string, number>
+    __perfDumpRowRenders?: () => void
+    __perfResetRowRenders?: () => void
+  }
+  perfHandles.__perfRowRenders = rowRenders
+  perfHandles.__perfDumpRowRenders = () => {
     const obj: Record<string, number> = {}
     for (const [k, v] of rowRenders) obj[k] = v
     // eslint-disable-next-line no-console
     console.table(obj)
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+  perfHandles.__perfResetRowRenders = () => rowRenders.clear()
 }
 
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
@@ -1074,9 +1081,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     project.id,
     project.syncRole?.level ?? null,
   )
-  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel } = useEditorCapabilities(project, {
+  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
   })
+  // AQU-1571: the reviewer banner promised "you can validate" even where the
+  // project's minimum role or named-validator list shuts this reader out of
+  // text validation, while every check below it said "unavailable" (walk
+  // 10-02). The banner now asks the same rule the checks do.
+  const readOnlyLabel =
+    roleReadOnlyLabel && !canEdit && canValidate
+    && !textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate
+      ? t("editor.readOnly.reviewerNoTextValidation")
+      : roleReadOnlyLabel
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -1356,11 +1372,32 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // AQU-1591: and in THIS lane. A take belongs to the language it performs, so
+  // the rows show the active lane's dubs plus the shared programme audio — not
+  // whatever every other language has recorded on the same lines.
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } =
+    useFileAudioAttachments(project.id, audioFileId, activeLane)
   // Until the file's recordings have been read — and in a dubbing file, its
   // heard lines' too — an empty answer means "not read yet", and each row's
   // audio check shows a placeholder instead of claiming there is no audio.
   const audioChecking = !audioLoaded || heardLinesLoading
+  // AQU-1495: the audio column is drawn only on a file that has audio (Sam,
+  // 2026-10-01) — the selection bar's rule, from the same helper. A read
+  // that has not come back says nothing either way: the map may still be the
+  // previous file's. While anything is unread the placeholder holds the slot
+  // only where audio is expected — a dubbing file, whose heard lines are still
+  // arriving, or a file last seen with audio — so a text-only file never
+  // pulses on every line.
+  const audioMemoryKey = audioFileId ? `${project.id}/${audioFileId}` : null
+  const hasAudio = fileHasAudio(audioLoaded ? audioByCellId : null, heardLinesLoading ? null : linkedTakesByCell)
+  const audioColumn = audioColumnFor({
+    hasAudio,
+    checking: audioChecking,
+    expectAudio: heardLinesLoading || (audioMemoryKey !== null && fileLastSeenWithAudio(audioMemoryKey)),
+  })
+  useEffect(() => {
+    if (audioMemoryKey && !audioChecking) rememberFileAudio(audioMemoryKey, hasAudio)
+  }, [audioMemoryKey, audioChecking, hasAudio])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -2510,7 +2547,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
-          audioChecking={audioChecking}
+          audioColumn={audioColumn}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2636,7 +2673,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClearCellErrors,
     activeLane,
     audioByCellId,
-    audioChecking,
+    audioColumn,
     audioLens,
     castGutter,
     ttsSettings,
@@ -2850,7 +2887,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
                 check in both (Sam, 2026-09-28; the Text and Audio views). */}
-            {(audioLens || !castGutter) && <CheckMarks />}
+            {(audioLens || !castGutter) && <CheckMarks audioColumn={audioColumn} />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -3538,8 +3575,8 @@ interface MemoizedRowProps {
   /** The heard lines performing this row that hold a recording — see
    *  `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet — see `audioChecking`. */
-  audioChecking: boolean
+  /** What the audio column shows — see `audioColumn` on the table. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3733,7 +3770,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, audioChecking, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3855,7 +3892,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         linkedTakes={linkedTakes}
-        audioChecking={audioChecking}
+        audioColumn={audioColumn}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3978,9 +4015,9 @@ interface EditorRowProps {
   /** The heard lines performing this row that hold a recording, in film order
    *  — see `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet: the audio check shows a
-   *  placeholder rather than "no audio". */
-  audioChecking: boolean
+  /** The file's audio column: absent on a file with no audio, a placeholder
+   *  while its recordings are read, else the line's audio check. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4979,7 +5016,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, audioChecking, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioColumn, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -5043,7 +5080,13 @@ function EditorRow({
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
-  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // AQU-1571: and the project's own text rules, which the server enforces on
+  // every vote — its minimum role and named-validator list ("policy"), and
+  // "Allow self-validation" off on a line whose latest change in this lane is
+  // the viewer's ("self"). Mirrored here so the check is greyed with the
+  // reason instead of sending a vote that comes back as a red "1 failed".
+  const textBlock = textValidationBlock(cell, project, { roleLevel: project.syncRole?.level ?? null, username })
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane) && textBlock === null
   // AQU-777: this cell's own attachments, read out of the file-wide map the
   // workspace provides. EMPTY_ATTACHMENTS is a module constant, not a fresh
   // [], so a cell with none keeps a stable identity across renders.
@@ -5712,6 +5755,7 @@ function EditorRow({
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
         roleLevel: project.syncRole?.level ?? null,
+        scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
       })) {
         void emitCellValidate({
           projectId: project.id,
@@ -5723,6 +5767,9 @@ function EditorRow({
           // landed on the MAIN language: editing Spanish silently validated the
           // German row, and a member limited to Spanish had it refused.
           targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
+          surface: "cell",
         }).then(() => {
           // AQU-1484: validated — the repetitions are owed this text. Paid
           // right here when the commit came from a settled gesture (the blur
@@ -5760,7 +5807,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6054,6 +6101,12 @@ function EditorRow({
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
       return false
     }
+    // AQU-1571: the same for the project's text rules (see `textBlock`). Only
+    // on the way in: the server never gates taking your own vote back.
+    if (validated && textBlock) {
+      console.warn("[validate] aborting: the project's validation rules refuse this vote:", textBlock)
+      return false
+    }
     // AQU-646: `getPendingTargetEventId` covers the take case. Recording emits an
     // empty target commit to create the row, and the projection has not come
     // back by the time the control appears — without this, validating a
@@ -6075,6 +6128,7 @@ function EditorRow({
         editEventId,
         author: username,
         targetLang: activeLane,
+        surface: "cell", // AQU-1572
       })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
@@ -6088,7 +6142,7 @@ function EditorRow({
       setWriteError("Couldn't save this change locally — copy your text and reload.")
       return false
     }
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, textBlock, onCellCommitted, onValidated, getPendingTargetEventId])
 
   // AQU-1333: close the activation window — always through here, so the row can
   // never be left as a stray editing host competing with the real editor.
@@ -6823,11 +6877,8 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // Human references help people and DOM agents identify a cell. Importers
-  // also store opaque UUIDs as canonical refs; those carry no useful context.
-  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
-    .map((value) => value?.trim())
-    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  // Human references help people and DOM agents identify a cell.
+  const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
@@ -6840,6 +6891,7 @@ function EditorRow({
       validationRequirement={readValidationCount(project)}
       canValidate={canValidate}
       canValidateThisCell={canValidateThisCell}
+      blockedReason={textBlock}
       onValidationChange={emitValidationChange}
     />
   )
@@ -6889,6 +6941,7 @@ function EditorRow({
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
+        surface: "cell", // AQU-1572
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
       // control paints an optimistic vote and the underlying read never moved
@@ -6903,17 +6956,18 @@ function EditorRow({
     }
   }
 
-  // AQU-490: no switch, no project setting, no file-level gate. Audio
-  // validation sits in this gutter beside text validation wherever a line has
-  // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
-  // opt-in switch he had asked for a day earlier. The control decides for
-  // itself: a line with no recording draws an empty slot, exactly as a cell
-  // with no text carries no text control.
-  const audioValidationControl = (
+  // AQU-490: no switch and no project setting. Audio validation sits in this
+  // gutter beside text validation wherever a line has a recording — Sam's
+  // ruling of 2026-09-21, replacing the opt-in switch he had asked for a day
+  // earlier. The control decides for itself: a line with no recording draws a
+  // faded mic. AQU-1495 (Sam, 2026-10-01): the column itself is drawn only on
+  // a file with audio, so removing the last recording takes it away, and a
+  // text-only file never shows one.
+  const audioValidationControl = audioColumn === "off" ? null : (
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationLine.takes}
-      checking={audioChecking}
+      checking={audioColumn === "checking"}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide

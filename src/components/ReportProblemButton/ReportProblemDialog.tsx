@@ -9,7 +9,7 @@
  * which meant the message only reached the team when the user had analytics
  * consent ON — and the stuck, frustrated user this exists for is exactly the one
  * least likely to have opted in. The report now always POSTs to the identity
- * worker (`/api/v2/feedback`), which emails the team inbox. Consent still governs
+ * worker (`/api/v2/feedback`), which posts it to the team's private Discord channel. Consent still governs
  * one thing, and the copy says only that: whether a session-replay link rides
  * along.
  *

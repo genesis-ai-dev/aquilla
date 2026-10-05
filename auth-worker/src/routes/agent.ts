@@ -868,6 +868,10 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   const meter = makeCostMeter(env, env.AQUILLA_PG)
   // PostHog events (AQU-1467): counts only, one batch POST at the end of the run.
   const telemetry = makeAgentTelemetry(env, { runId, projectId: body.projectId, userId: user.id, orgId, model })
+  // AQU-1670: every staging batch reports its cell count and duration. Wired
+  // here rather than passed down each call site, so the `draft` tool's staging
+  // is measured on the same event as a hand `emit`.
+  stageCtx.onStageOutcome = (outcome) => telemetry.stageOutcome(outcome)
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.

@@ -188,7 +188,7 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
-    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0129), by
+    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0138), by
     -- `lanes.id` (globally unique since AQU-1606). NULL = the upstream's
     -- `legacy_tag = ''` lane, which is what every link consumed before this
     -- slice, so a row that predates AQU-1616's backfill keeps today's

@@ -1,4 +1,7 @@
--- Migration 0129 (AQU-1605): which UPSTREAM LANE a source link consumes.
+-- Migration 0138 (AQU-1605): which UPSTREAM LANE a source link consumes.
+--
+-- Numbered 0138 because 0129 is contextual_run_traces on dev. The column is
+-- unchanged from the review draft that used 0129.
 --
 -- A `consumes = 'target'` link used to read the upstream's DEFAULT target lane
 -- and nothing else: the fold skipped every `target.cell.commit` whose

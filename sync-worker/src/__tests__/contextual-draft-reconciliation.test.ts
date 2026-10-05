@@ -70,6 +70,7 @@ function targetCommit(input: {
   cellId: string
   value: string
   targetLang?: string
+  laneId?: string
   parentId?: string | null
 }): PersistedEvent<"target.cell.commit"> {
   return {
@@ -84,6 +85,7 @@ function targetCommit(input: {
     payload: {
       value: input.value,
       ...(input.targetLang === undefined ? {} : { targetLang: input.targetLang }),
+      ...(input.laneId === undefined ? {} : { laneId: input.laneId }),
     },
     clientTs: COMMIT_TIME - 10,
     serverTs: COMMIT_TIME,
@@ -268,6 +270,59 @@ describe("target.cell.commit contextual draft reconciliation", () => {
         reviewed_at: null,
         reviewed_by: null,
       })
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("reconciles the lane named by payload.laneId when the tag names a sibling", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedScope(t)
+      await t.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES
+           ('eslane01', $1, 'target', 'Spanish', 'es', 'es', 1),
+           ('a3f09c1e', $1, 'target', 'Spanish team', 'Spanish', 'a3f09c1e', 2)`,
+        [PROJECT],
+      )
+      await seedDraft(t, {
+        id: "draft-tag-sibling",
+        cellId: "cell-split",
+        text: "Shared wording",
+        targetLang: "es",
+      })
+      await seedDraft(t, {
+        id: "draft-id-lane",
+        runId: "run-french",
+        cellId: "cell-split",
+        text: "Shared wording",
+        targetLang: "a3f09c1e",
+      })
+
+      await project(t, targetCommit({
+        id: "0198a123-0000-7000-8000-000000000006",
+        cellId: "cell-split",
+        value: "Shared wording",
+        targetLang: "es",
+        laneId: "a3f09c1e",
+      }))
+
+      expect(await draftRow(t, "draft-id-lane")).toMatchObject({
+        status: "applied",
+        reviewed_by: REVIEWER,
+      })
+      expect(await draftRow(t, "draft-tag-sibling")).toMatchObject({
+        status: "proposed",
+        reviewed_at: null,
+        reviewed_by: null,
+      })
+      const cell = await t.pg.query<{ lane_id: string; target_lang: string }>(
+        `SELECT lane_id, target_lang FROM cells
+          WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-split' AND side = 'target'`,
+        [PROJECT, FILE],
+      )
+      expect(cell.rows).toEqual([{ lane_id: "a3f09c1e", target_lang: "es" }])
     } finally {
       await t.close()
     }

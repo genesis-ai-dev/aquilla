@@ -28,7 +28,7 @@ import { usableCorpusMarker } from './corpus-marker'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import { laneIdResolveBinds, laneIdResolveSql, targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
-import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
+import { eventLaneIdOf, eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 
@@ -161,6 +161,20 @@ export function buildBulkTargetCellCommitStmt(
  */
 export function laneOfEvent(kind: string, payload: unknown): string {
   return eventLaneTag(kind, payload)
+}
+
+/** Draft reconciliation names the lane by `payload.laneId` when the event
+ *  carried one, and by the legacy tag otherwise. A tag can belong to a
+ *  different lane than the id (a second lane of the same language is tagged
+ *  with its id). */
+function reconciledLaneMatch(
+  alias: string,
+  projectId: string,
+  tag: string,
+  laneId: string | null,
+): { sql: string; binds: unknown[] } {
+  if (laneId) return { sql: `${alias}.lane_id = ?`, binds: [laneId] }
+  return { sql: targetLaneDualReadSql(alias), binds: targetLaneDualReadBinds(projectId, tag) }
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -884,6 +898,15 @@ export function buildEventProjectionStmts(
         // AQU-538: the lane this commit addresses ('' = default lane). Part of
         // the row key — each lane's first commit INSERTs that lane's row.
         const lane = laneOfEvent(event.kind, tp)
+        const payloadLaneId = eventLaneIdOf(tp)
+        // The cell has to land on the same lane the draft match uses, or the
+        // EXISTS below cannot see the row this statement just wrote.
+        const laneIdSql = payloadLaneId ? '?' : laneIdResolveSql('target')
+        const laneIdBinds = payloadLaneId
+          ? [payloadLaneId]
+          : laneIdResolveBinds('target', event.projectId, lane)
+        const draftLane = reconciledLaneMatch('draft', event.projectId, lane, payloadLaneId)
+        const projectedLane = reconciledLaneMatch('projected', event.projectId, lane, payloadLaneId)
 
         // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
         // *.cell.create time and never overwritten by target commits.
@@ -908,7 +931,7 @@ export function buildEventProjectionStmts(
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdSql}${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -939,7 +962,7 @@ export function buildEventProjectionStmts(
               hash,
               aiDrafted,
               aiDrafted ? JSON.stringify(tp.ai_draft ?? null) : null,
-              ...laneIdResolveBinds('target', event.projectId, lane),
+              ...laneIdBinds,
               ...gateBinds,
             ),
         )
@@ -980,7 +1003,7 @@ export function buildEventProjectionStmts(
                     AND draft.cell_id = ?
                     AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
                     AND draft.status = 'proposed'
-                    AND ${targetLaneDualReadSql('draft')}
+                    AND ${draftLane.sql}
                     AND EXISTS (
                       SELECT 1
                         FROM cells AS projected
@@ -988,7 +1011,7 @@ export function buildEventProjectionStmts(
                          AND projected.file_id = ?
                          AND projected.cell_id = ?
                          AND projected.side = 'target'
-                         AND ${targetLaneDualReadSql('projected')}
+                         AND ${projectedLane.sql}
                          AND projected.event_id = ?
                     )
                  RETURNING draft.id, draft.run_id, draft.project_id,
@@ -1022,11 +1045,11 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               event.serverTs,
-              ...targetLaneDualReadBinds(event.projectId, lane),
+              ...draftLane.binds,
               event.projectId,
               event.fileId,
               event.cellId,
-              ...targetLaneDualReadBinds(event.projectId, lane),
+              ...projectedLane.binds,
               event.id,
               event.id,
               event.serverTs,

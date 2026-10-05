@@ -21,7 +21,8 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   },
   {
     // MCP OAuth (ChatGPT plugin) shares credential validation and browser consent.
-    source: /^(?:auth-worker\/.*(?:agent-connect|mcp-oauth)|db\/shared\/api-credentials|sync-worker\/src\/external\/(?:mcp|read-auth|token-bridge|orgs-list|projects-list|changesets-route|commit)|src\/.*(?:ConnectAgent|OAuthConsent|agent-access|agent-connect|ApiTokensSection)|db\/.*(?:agent_authorizations|mcp_oauth))/i,
+    // Package changes also select this connection sentinel.
+    source: /^(?:plugins\/aquilla\/|auth-worker\/.*(?:agent-connect|mcp-oauth)|db\/shared\/api-credentials|sync-worker\/src\/external\/(?:mcp|read-auth|token-bridge|orgs-list|projects-list|changesets-route|commit)|src\/.*(?:ConnectAgent|OAuthConsent|agent-access|agent-connect|ApiTokensSection)|db\/.*(?:agent_authorizations|mcp_oauth))/i,
     sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
   },
   {
@@ -132,7 +133,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
+const PRODUCT_RUNTIME = /^(?:plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*workspace_(?:billing|checkout|subscription|plan_change|usage))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

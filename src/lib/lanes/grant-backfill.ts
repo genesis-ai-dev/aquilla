@@ -5,9 +5,11 @@
  * role with resolveProjectRoleShared, loads their kind='lane' scopes and the
  * project's target lanes, then calls planLaneGrants.
  *
- * A row is one person + one lanes.id. The UI shows lanes.name. A language
- * string must not open two lanes: a scope that matches two lanes is skipped,
- * not fanned out. Someone who can already see two lanes gets two rows.
+ * A row is one person + one lanes.id. The UI shows lanes.name. A scope is a
+ * lane id (AQU-1607) and names that lane alone; a scope still carrying a
+ * legacy language tag must not open two lanes, so one that matches two lanes
+ * is skipped, not fanned out. Someone who can already see two lanes gets two
+ * rows.
  *
  * Maintainer (600) and above see every lane through their role, so they get
  * no rows. Below Viewer (100) gets none. No lane scopes means today's
@@ -15,7 +17,8 @@
  * lane. A later lane does not pick those rows up.
  */
 
-import { lanesForRequestedTag, type LaneIdentity } from './read-wall'
+import type { LaneIdentity } from './read-wall'
+import { resolveLaneScopeValue } from './scope-ids'
 
 const MAINTAINER = 600
 const VIEWER = 100
@@ -53,15 +56,14 @@ export function planLaneGrants(input: {
   const seen = new Set<string>()
   const skipped: SkippedLaneScope[] = []
   for (const scope of input.laneScopes) {
-    const matches = lanesForRequestedTag(input.lanes, scope)
-    if (matches.length !== 1) {
-      skipped.push({
-        scope,
-        reason: matches.length === 0 ? 'unmatched' : 'ambiguous',
-      })
+    // AQU-1607: a scope is a lane id. A legacy tag still resolves, and still
+    // skips when it names zero or two lanes.
+    const resolved = resolveLaneScopeValue(scope, input.lanes)
+    if (!resolved.ok) {
+      skipped.push({ scope, reason: resolved.reason })
       continue
     }
-    const laneId = matches[0]!.id
+    const laneId = resolved.laneId
     if (seen.has(laneId)) continue
     seen.add(laneId)
     grants.push({ laneId, level: input.roleLevel })

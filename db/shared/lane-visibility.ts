@@ -102,7 +102,7 @@ export async function visibleTagsForMember(
 /**
  * Settings blob a member may be shown. Wall off, and Maintainer+, return the
  * blob unchanged. Below that, `targetLanes` / `archivedLanes` / `targetLanguage`
- * keep only the granted lanes.
+ * and the `referenceBibleVersions` map (AQU-1573) keep only the granted lanes.
  */
 export async function filterSettingsBlobForMember(
   db: AquillaDb,

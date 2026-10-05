@@ -17,6 +17,8 @@ describe("BuiltinChecksList", () => {
     expect(screen.getByText("Empty translation")).toBeInTheDocument()
     expect(screen.getByText("Identical to source")).toBeInTheDocument()
     expect(screen.getByText("Placeholder integrity")).toBeInTheDocument()
+    // AQU-1573: the eleventh check.
+    expect(screen.getByText("Reference Bible quotes")).toBeInTheDocument()
   })
 
   it("calls onSetOverride when toggle clicked", () => {

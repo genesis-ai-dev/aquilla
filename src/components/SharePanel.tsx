@@ -22,9 +22,10 @@ import {
   revokeProjectInvite,
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
-import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneLabelForTag } from "@/lib/lanes/lane-language"
+import { laneRowLabel } from "@/lib/lanes/lane-language"
+import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
@@ -222,6 +223,9 @@ function MembersTab({ projectId }: { projectId: string }) {
   const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
     { value: "", label: "Default" },
   ])
+  // AQU-1607: the project's lane rows behind those options — they turn a
+  // scope still holding a legacy tag into the lane id the checkbox uses.
+  const [scopeLaneRows, setScopeLaneRows] = useState<ProjectLaneView[]>([])
   const [scopeFiles, setScopeFiles] = useState<Array<{ id: string; name: string }>>([])
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScopeValue[]>>({})
   const [scopeOptionsError, setScopeOptionsError] = useState<string | null>(null)
@@ -241,6 +245,7 @@ function MembersTab({ projectId }: { projectId: string }) {
     setLoadedScopeOptionsKey(null)
     setScopeOptionsError(null)
     setScopeLanes([{ value: "", label: "Default" }])
+    setScopeLaneRows([])
     setScopeFiles([])
     if (!canManageScopes || !jwt) return
     let alive = true
@@ -252,18 +257,26 @@ function MembersTab({ projectId }: { projectId: string }) {
         ])
         if (!alive) return
         const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
-        // AQU-1586: the scope value is still the lane TAG (that is what a
-        // member scope stores), but the label is the lane row's language —
-        // a tag can be the opaque lane id, which named nothing to the admin
-        // choosing a scope.
-        const laneRows = settingsRes?.lanes?.filter((lane) => lane.role === "target")
-        setScopeLanes([
-          { value: "", label: defaultLabel },
-          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({
-            value: t,
-            label: laneLabelForTag(t, laneRows),
-          })),
-        ])
+        // AQU-1607: one option per lane ROW, valued by lane id, so scoping
+        // someone to one of two lanes sharing a language picks that lane.
+        // A server predating lane rows keeps the old tag-derived list.
+        const laneRows = (settingsRes?.lanes ?? []).filter(
+          (lane) => lane.role === "target" && !lane.archivedAt,
+        )
+        setScopeLaneRows(laneRows)
+        setScopeLanes(
+          laneRows.length > 0
+            ? laneRows.map((lane) => ({
+                value: lane.id,
+                // AQU-1586: the row's name or language before its tag — a
+                // tag can be the opaque lane id.
+                label: laneRowLabel(lane) ?? ((lane.legacyTag ?? "").trim() || defaultLabel),
+              }))
+            : [
+                { value: "", label: defaultLabel },
+                ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
+              ],
+        )
         if (!projectRes.ok) {
           if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
           throw new Error("Could not load project scope details.")
@@ -276,6 +289,7 @@ function MembersTab({ projectId }: { projectId: string }) {
       } catch (caught) {
         if (alive) {
           setScopeLanes([{ value: "", label: "Default" }])
+          setScopeLaneRows([])
           setScopeFiles([])
           setScopeOptionsReady(false)
           setLoadedScopeOptionsKey(null)
@@ -330,13 +344,29 @@ function MembersTab({ projectId }: { projectId: string }) {
   const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
     if (!jwt) throw new Error("Sign in to manage scopes.")
     const saved = await putMemberScopes(jwt, projectId, userId, scopes)
-    setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
+    setScopesByUser((prev) => ({ ...prev, [userId]: saved.scopes }))
   }, [jwt, projectId])
+
+  // AQU-1607: lane scopes are lane ids. A row written before the backfill
+  // still holds a legacy tag, so resolve it to its lane id for display —
+  // otherwise its checkbox reads as unticked and saving would drop it.
+  const normalizedScopesByUser = useMemo(() => {
+    if (scopeLaneRows.length === 0) return scopesByUser
+    const out: Record<number, MemberScopeValue[]> = {}
+    for (const [userId, scopes] of Object.entries(scopesByUser)) {
+      out[Number(userId)] = scopes.map((scope) => {
+        if (scope.kind !== "lane") return scope
+        const resolved = resolveLaneScopeValue(scope.value, scopeLaneRows)
+        return resolved.ok ? { kind: "lane" as const, value: resolved.laneId } : scope
+      })
+    }
+    return out
+  }, [scopesByUser, scopeLaneRows])
 
   const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes &&
     scopeOptionsReady && memberScopesReady &&
     loadedScopeOptionsKey === currentScopeKey && loadedMemberScopesKey === currentScopeKey
-    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser, onSave: handleSaveScopes }
+    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser: normalizedScopesByUser, onSave: handleSaveScopes }
     : undefined
   const scopeError = scopeOptionsError ?? memberScopesError
   const supplementalErrors = Array.from(

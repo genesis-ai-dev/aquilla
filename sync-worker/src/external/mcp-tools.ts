@@ -120,6 +120,19 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'list_reference_bibles',
+    description:
+      'List the reference Bibles installed on this server (AQU-1573): the texts a project ' +
+      'can copy quoted Scripture from when it translates sermons, devotionals or curriculum. ' +
+      'Each item has { id, name, fullName, languageCode, languageName, direction, ' +
+      'versification, printing, license, source, verseCount }. To make a target language ' +
+      'quote from one, patch_settings key referenceBibleVersions with { laneTag: id } ' +
+      '("" is the default lane), e.g. { "": "arb-vandyck" }; an id not listed here is ' +
+      'rejected. Independent of bibleResourcesEnabled. (REST: GET .../reference-bibles.) ' +
+      'Takes no arguments.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'get_project',
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
@@ -425,7 +438,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Returns not_found if the cell has no source row in this project, and ' +
       'scope_denied / permission_denied like every other read. `warnings` names anything the ' +
       'live draft call adds that a read cannot reproduce (footnote output contracts, ' +
-      'per-device provider overrides).',
+      'per-device provider overrides). parts.referenceVerses shows the verses the cell cites, ' +
+      "copied from the lane's reference Bible (PatchSettings referenceBibleVersions), and the " +
+      'MUST-copy block they become; null when the lane has no reference Bible.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1013,6 +1028,23 @@ const TOOL_SPECS: McpToolSpec[] = [
           type: 'number',
           description: 'Which parsed file to stage when the parse yields several (multi-book USFM); required in that case.',
         },
+        sourceTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file source text direction (AQU-1471). OMIT IT for an ordinary import: direction ' +
+            "resolves to the project's sourceTextDirection setting and then to the source language, " +
+            'so a whole RTL project is one patch_settings call rather than one override per file. ' +
+            'Send it only for a file that runs against its project.',
+        },
+        targetTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file target text direction (AQU-1471) — same rule as sourceTextDirection: for an ' +
+            "Arabic/Hebrew/Persian/Urdu project set the project's targetTextDirection setting once " +
+            'instead, and leave this unset.',
+        },
         excludeFrontMatter: {
           type: 'boolean',
           description:
@@ -1198,6 +1230,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_identity_and_scope: 'read',
   list_orgs: 'read',
   list_projects: 'read',
+  list_reference_bibles: 'read',
   get_project: 'read',
   get_project_settings: 'read',
   patch_settings: 'stage',

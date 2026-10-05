@@ -38,6 +38,13 @@ vi.mock("@/components/org/OrgBreadcrumb", () => ({
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
+// AQU-1573: the Reference Bible card lists the server's Bibles when the General
+// pane renders on a cloud project; answer locally (none installed).
+vi.mock("@/lib/frontier/reference-bibles", () => ({
+  fetchReferenceBibles: vi.fn(async () => []),
+  fetchReferencePassages: vi.fn(async () => null),
+}))
+
 const PROJECT_ID = "proj-language-hydration"
 
 /** Mirrors `minimalProjectRecord`: the server summary carries no languages, so

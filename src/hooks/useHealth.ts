@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react"
 import { computeDecayHealth, resolveDecayConfig, type HealthStats } from "@/lib/health/decay-engine"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import type { BuiltinCheckContext } from "@/lib/lqa/builtin-registry"
 import type { CellData } from "./useCells"
 import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 import { perfMark, memMark } from "@/lib/perf-log"
@@ -79,6 +80,20 @@ interface HealthDispatchOptions {
    * rule can lint anything".
    */
   rulesForCellSig?: string
+  /**
+   * AQU-1573: what built-in checks need beyond the cell — the active lane's
+   * reference Bible for the "Reference Bible quotes" check. Read through a ref
+   * (like `rulesForCell`), so its identity is not a memo dependency;
+   * `checkContextSig` carries the invalidation.
+   */
+  checkContext?: BuiltinCheckContext
+  /**
+   * Changes iff the context's answers may have changed (another Bible, or new
+   * verses arrived). Folded into `rulesSig`, so verses landing re-check every
+   * cell once instead of leaving a cached "clean" on a cell checked before its
+   * verse loaded.
+   */
+  checkContextSig?: string
 }
 
 const EMPTY_HEALTH_MAP: Map<string, number> = new Map()
@@ -287,6 +302,9 @@ export function useHealth(
   const rulesForCellRef = useRef(options.rulesForCell)
   rulesForCellRef.current = options.rulesForCell
   const librarySig = options.rulesForCellSig ?? ""
+  const checkContextRef = useRef(options.checkContext)
+  checkContextRef.current = options.checkContext
+  const checkContextSig = options.checkContextSig ?? ""
   // A resolver can put library rules on a cell whose project rule set is
   // empty, so the "no rules at all" early return below must account for it.
   // An explicit "" sig is the composer saying nothing in the library can lint;
@@ -301,11 +319,12 @@ export function useHealth(
   const { enabledRules, rulesSig } = useMemo(() => {
     const enabled = rules.filter((r) => r.enabled)
     const sig = JSON.stringify(enabled.map((r) => [r.id, r.name, r.check]))
+    const withLibrary = librarySig ? `${sig}|${librarySig}` : sig
     return {
       enabledRules: enabled,
-      rulesSig: librarySig ? `${sig}|${librarySig}` : sig,
+      rulesSig: checkContextSig ? `${withLibrary}|ctx:${checkContextSig}` : withLibrary,
     }
-  }, [rules, librarySig])
+  }, [rules, librarySig, checkContextSig])
 
   const infractions = useMemo(() => {
     if (!enabled) {
@@ -327,6 +346,7 @@ export function useHealth(
     }
 
     const rulesForCell = rulesForCellRef.current
+    const checkContext = checkContextRef.current
     for (const [fileId, cells] of fileCells) {
       for (const cell of cells) {
         visited++
@@ -346,6 +366,7 @@ export function useHealth(
                 cell as CellData,
                 fileId,
                 rulesForCell ? rulesForCell(cell, fileId, enabledRules) : enabledRules,
+                checkContext,
               ),
             }
         if (entry !== prev) byCell.set(cell.id, entry)

@@ -206,6 +206,9 @@ export interface Env {
    *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
    *  names as the authorization server. Falls back to the request origin. */
   MCP_OAUTH_ISSUER?: string
+  /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
+   *  client metadata documents served instead of fetching their client_id. */
+  MCP_OAUTH_PINNED_CLIENTS?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
@@ -229,6 +232,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them

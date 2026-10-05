@@ -53,6 +53,7 @@ import {
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
   getUnitAssignments,
+  resolveTargetLaneId,
 } from "../services/assignments"
 import {
   bumpOrgActivity,
@@ -88,6 +89,7 @@ import {
   MAX_INVITE_SCOPE_LANES,
   MAX_LANE_VALUE_LENGTH,
   parseScopeLanes,
+  resolveInviteLaneScopes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import {
@@ -1212,7 +1214,15 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   const fileId = c.req.query("fileId") ?? ""
   if (!fileId) return c.json({ error: "fileId required" }, 400)
   const sectionKey = c.req.query("section") ?? ""
-  const lane = c.req.query("lane") ?? ""
+  // AQU-1609: the lane is identified by `laneId`. `lane` remains accepted as
+  // the legacy target-language tag, resolved below, so a client deployed before
+  // this change keeps working — the SPA and the Worker ship separately.
+  // An EMPTY `laneId` counts as absent, not as "the lane whose id is ''": no
+  // lane carries that id, so honouring it literally would read every count as
+  // zero — and a client mid-migration that has the param wired but not yet a
+  // lane id to put in it is exactly the caller that would send it empty.
+  const laneIdParam = c.req.query("laneId")?.trim() || undefined
+  const laneTag = c.req.query("lane") ?? ""
 
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
@@ -1252,7 +1262,12 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
     return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
   }
 
-  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, lane)
+  // A `laneId` the caller sent is used as given. Otherwise resolve the legacy
+  // tag to the lane it names. An unresolvable tag yields '', which matches no
+  // lane_id, so the per-lane progress columns read zero rather than silently
+  // counting another lane's work.
+  const laneId = laneIdParam ?? (await resolveTargetLaneId(c.env, projectId, laneTag))
+  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, laneId)
   return c.json({ assignments })
 })
 
@@ -1873,7 +1888,21 @@ projects.post(
 
     // AQU-528: persist lane scopes so accept can auto-grant them. null when
     // the invite is unscoped (omitted/empty scopeLanes).
-    const scopeLanesJson = serializeScopeLanes(scopeLanes)
+    // AQU-1607: stored as lane ids. A legacy tag naming exactly one of this
+    // project's lanes is converted; one naming two lanes, or none, is refused
+    // here rather than minting a link that grants the wrong lane or no lane.
+    const laneScopes = await resolveInviteLaneScopes(c.env, [projectId], scopeLanes ?? [])
+    if (!laneScopes.ok) {
+      return c.json(
+        {
+          error: "scopeLanes must each name one lane of this project",
+          ...(laneScopes.ambiguous.length > 0 ? { ambiguous: laneScopes.ambiguous } : {}),
+          ...(laneScopes.unmatched.length > 0 ? { unmatched: laneScopes.unmatched } : {}),
+        },
+        400,
+      )
+    }
+    const scopeLanesJson = serializeScopeLanes(laneScopes.laneIds)
 
     try {
       await c.env.AQUILLA_PG.prepare(

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search as SearchIcon, X, ChevronDown, Pencil, GripVertical, RotateCcw } from "lucide-react"
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
+import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -17,6 +18,14 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useEditorScroll } from "@/context/EditorScrollContext"
+import {
+  CorpusGroupFrame,
+  FileDragPreview,
+  FileListRow,
+  FileReorderDnd,
+  GroupFileRows,
+} from "./file-list-dnd"
+import { readSidebarGroup, resolveSidebarFileDrop } from "./file-list-dnd-model"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
 import {
@@ -196,19 +205,40 @@ export function ExpandableFileList({
   // not a thing anyone means to do.
   const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
   const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
-  const [dropAt, setDropAt] = useState<{ group: string; position: number } | null>(null)
   const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
   const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
 
   function endDrag() {
     setDrag(null)
-    setDropAt(null)
     setRefusedGroup(null)
   }
 
   function submit(writes: SortIndexWrite[]) {
     if (writes.length > 0) onReorderFiles?.(writes)
   }
+
+  function handleDragStart(event: DragStartEvent) {
+    const group = readSidebarGroup(event.active.data.current)
+    if (group === null) return
+    setDrag({ fileId: String(event.active.id), group })
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const resolution = resolveSidebarFileDrop(event.active, event.over)
+    const next = resolution.kind === "refuse" ? resolution.group : null
+    setRefusedGroup((current) => current === next ? current : next)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const resolution = resolveSidebarFileDrop(event.active, event.over)
+    endDrag()
+    if (resolution.kind !== "move") return
+    const target = groups.find((group) => group.label === resolution.group)
+    if (!target) return
+    submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+  }
+
+  const draggedName = drag ? files.find((file) => file.id === drag.fileId)?.name ?? "" : ""
 
   const groupEls = useRef(new Map<string, HTMLDivElement>())
   const visibleGroupLabels = useMemo(() => new Set(groups.map((g) => g.label)), [groups])
@@ -279,6 +309,14 @@ export function ExpandableFileList({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <FileReorderDnd
+          enabled={reorderEnabled}
+          overlay={draggedName ? <FileDragPreview name={draggedName} /> : null}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={endDrag}
+        >
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
@@ -331,30 +369,16 @@ export function ExpandableFileList({
               </AppTooltip>
             )
             return (
-              <div
+              // The group is the drop boundary. Hovering its header, or any
+              // other group, is a refusal — a file does not change corpus by
+              // being dragged. That stays "Move to corpus…", which asks first.
+              <CorpusGroupFrame
                 key={group.label}
-                ref={(el) => {
+                droppable={reorderEnabled}
+                label={group.label}
+                groupRef={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
-                }}
-                // The group is the drop boundary. Hovering anywhere in a group
-                // that is not the dragged file's own — its header, the gap
-                // below its rows — has to say no, not quietly fall through to
-                // whatever row happens to be under the cursor. No
-                // preventDefault here, so the browser also shows "no drop".
-                onDragOver={(e) => {
-                  if (!drag || drag.group === group.label) return
-                  e.stopPropagation()
-                  setRefusedGroup(group.label)
-                  setDropAt(null)
-                }}
-                onDrop={(e) => {
-                  if (!drag || drag.group === group.label) return
-                  // Swallow it: nothing moves, and no corpus changes. Changing
-                  // a file's group is "Move to corpus…", which asks first.
-                  e.preventDefault()
-                  e.stopPropagation()
-                  endDrag()
                 }}
               >
                 {showHeader && (
@@ -427,73 +451,32 @@ export function ExpandableFileList({
                   </p>
                 )}
                 {!isCollapsed && (
-                  <div className="space-y-0.5">
+                  <GroupFileRows
+                    sortable={canReorderGroup}
+                    label={group.label}
+                    fileIds={group.files.map((file) => file.id)}
+                  >
                     {group.files.map((file, position) => {
                       const canExpand = fileHasSections(file)
                         || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       // Not while renaming: the row holds a text input, and a
-                      // draggable ancestor takes the pointer away from
-                      // selecting inside it.
+                      // drag ancestor takes the pointer away from selecting inside it.
                       const isDraggable = canReorderGroup && !isEditing
-                      const isDropTarget =
-                        dropAt?.group === group.label && dropAt.position === position
                       return (
-                        <div
+                        <FileListRow
                           key={file.id}
-                          onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
-                          onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          sortable={canReorderGroup}
+                          id={file.id}
+                          group={group.label}
                           draggable={isDraggable}
-                          data-reorderable={isDraggable ? "true" : undefined}
-                          onDragStart={(e) => {
-                            if (!isDraggable) return
-                            e.dataTransfer.effectAllowed = "move"
-                            // Firefox refuses to start a drag with no payload.
-                            e.dataTransfer.setData("text/plain", file.id)
-                            setDrag({ fileId: file.id, group: group.label })
-                          }}
-                          onDragEnd={endDrag}
-                          onDragOver={(e) => {
-                            if (!drag) return
-                            if (drag.group !== group.label) return  // the group wrapper answers
-                            // Dropping ON a row means taking its slot, which
-                            // is exactly what planFileMove's `toPosition` is.
-                            e.preventDefault()
-                            e.stopPropagation()
-                            e.dataTransfer.dropEffect = "move"
-                            setRefusedGroup(null)
-                            setDropAt({ group: group.label, position })
-                          }}
-                          onDrop={(e) => {
-                            if (!drag) return
-                            e.preventDefault()
-                            e.stopPropagation()
-                            const moved = drag
-                            endDrag()
-                            if (moved.group !== group.label) return
-                            submit(planFileMove(group.files, moved.fileId, position))
-                          }}
-                          className={cn(
-                            "group/file-slot relative",
-                            isDropTarget && drag?.fileId !== file.id
-                              && "rounded-md ring-1 ring-primary/60",
-                            drag?.fileId === file.id && "opacity-50",
-                          )}
+                          handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
                         >
-                          {isDraggable && (
-                            <span
-                              // Decorative for the mouse, named for the
-                              // screen reader — though the keyboard route to
-                              // the same move is Move up / Move down in the
-                              // row's menu, which is where it belongs.
-                              role="img"
-                              aria-label={t("nav.fileList.reorderHandle", { name: file.name })}
-                              className="pointer-events-none absolute -start-2 top-1/2 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover/file-slot:opacity-70"
-                            >
-                              <GripVertical className="h-3 w-3" />
-                            </span>
-                          )}
+                          <div
+                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          >
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}
@@ -558,15 +541,17 @@ export function ExpandableFileList({
                               }}
                             />
                           )}
-                        </div>
+                          </div>
+                        </FileListRow>
                       )
                     })}
-                  </div>
+                  </GroupFileRows>
                 )}
-              </div>
+              </CorpusGroupFrame>
             )
           })}
         </div>
+        </FileReorderDnd>
       </div>
       {/* AQU-1569: clearing a group's hand-placed order is shared and cannot be
           undone from here, so it asks first. */}

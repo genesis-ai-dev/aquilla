@@ -104,8 +104,12 @@ interface Props {
   targetSlot?: string
   /**
    * AQU-1462: the lane the member is recording in. A non-empty tag is stamped
-   * on the take's events so an archived lane can refuse them. Omitted for
-   * the default lane, which cannot be archived.
+   * on the take's events so an archived lane can refuse them. Omitted for the
+   * former default lane — an audio event with no tag is a SHARED write (source
+   * audio, an import), which the archive check deliberately does not freeze.
+   * So since AQU-1600 made that lane archivable, a take recorded into it is
+   * not frozen; closing that needs the event to carry a lane id (AQU-1591 /
+   * AQU-1615), not a tag.
    */
   laneTag?: string
   /** The file's tracks, so the takes list can be grouped under a heading per
@@ -1378,6 +1382,9 @@ export function AudioRecordingModal({
           ...takeTrimWindow,
           label: takeLabel,
           ...(laneTag ? { targetLang: laneTag } : {}),
+          // AQU-1572: the recorder's own save path — the heal re-attach above
+          // passes no origin, so a take counts exactly once.
+          audioOrigin: "record",
           author: username,
         })
       } catch (emitErr) {

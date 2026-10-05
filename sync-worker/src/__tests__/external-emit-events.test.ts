@@ -435,6 +435,61 @@ describe('EmitEvents — commit', () => {
     expect(acells).toHaveLength(2)
   })
 
+  it("AQU-1628: a 'cells' scope assigns only the named cells, and an empty list is refused", async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const assignee = await memberToken(tdb, 400)
+    const { body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: ['cell-1'] }],
+          scopeLabel: '1 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    expect((await commit(env, lead.token, prep.changeset.id)).res.status).toBe(200)
+
+    const assignments = await tdb.rows<{ cells_total: number; scope_kind: string }>('assignments')
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0].scope_kind).toBe('cells')
+    expect(Number(assignments[0].cells_total)).toBe(1) // not both source cells in FILE
+    expect(await tdb.rows('assignment_cells')).toHaveLength(1)
+
+    // Widening an empty selection to the whole file is the bug, so the
+    // perimeter refuses it rather than resolving it to something.
+    const { res: emptyRes, body: emptyBody } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: [] }],
+          scopeLabel: '0 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(emptyRes.status).toBe(400)
+    expect(JSON.stringify(emptyBody)).toContain('cellIds')
+
+    // And a cells scope with no list at all is not silently a book scope.
+    const { res: missingRes } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'whoops',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(missingRes.status).toBe(400)
+  })
+
   it('the perimeter is the backstop: a mid-flight role revocation rejects the events', async () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, 400)

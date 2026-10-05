@@ -1359,6 +1359,7 @@ CREATE TABLE IF NOT EXISTS api_credentials (
     mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
     org_id       TEXT,
     org_ids      JSONB,
+    oauth_resource TEXT,
     project_id   TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at   TIMESTAMPTZ,
@@ -1833,6 +1834,36 @@ CREATE INDEX IF NOT EXISTS contextual_run_events_run_time
 CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
   ON contextual_run_events(project_id, created_at DESC, id DESC);
 
+-- Autopilot model-call traces (0129_contextual_run_traces.sql): prompt and
+-- reply per call for the Team step inspector. VIEWER-readable, 30-day TTL.
+CREATE TABLE IF NOT EXISTS contextual_run_traces (
+  id                bigserial PRIMARY KEY,
+  run_id            text NOT NULL,
+  project_id        text NOT NULL,
+  span_id           text NOT NULL DEFAULT '',
+  label             text NOT NULL DEFAULT '',
+  tier              text NOT NULL,
+  model             text NOT NULL,
+  system_prompt     text NOT NULL,
+  user_prompt       text NOT NULL,
+  output            text,
+  error             text,
+  generation_id     text,
+  prompt_tokens     integer NOT NULL DEFAULT 0,
+  completion_tokens integer NOT NULL DEFAULT 0,
+  cost_cents        double precision NOT NULL DEFAULT 0,
+  latency_ms        integer NOT NULL DEFAULT 0,
+  attempts          integer NOT NULL DEFAULT 1,
+  truncated         boolean NOT NULL DEFAULT false,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS contextual_run_traces_run_span
+  ON contextual_run_traces(run_id, span_id, created_at, id);
+-- Retention sweep.
+CREATE INDEX IF NOT EXISTS contextual_run_traces_created
+  ON contextual_run_traces(created_at);
+
 -- Cross-isolate weighted capacity leases for project Autopilot waves (0074).
 -- Rows are ephemeral coordination state: every lease expires and is deleted
 -- on normal completion; project-row locking serializes capacity acquisition.
@@ -2253,6 +2284,38 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
     OR (org_ids IS NULL AND ((project_id IS NULL) <> (org_id IS NULL))))
 );
 CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at);
+
+-- 0129 (AQU-1573): reference Bibles (Van Dyck Arabic, KJV) whose verses the
+-- drafting prompt injects and the quote check compares against. Shared,
+-- public-domain text: no project_id, no RLS. org_id is reserved for partner
+-- uploads. Loaded by scripts/reference-bibles.ts (dev boot runs it).
+CREATE TABLE IF NOT EXISTS reference_bible_versions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  language_name TEXT NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'ltr' CHECK (direction IN ('ltr', 'rtl')),
+  versification TEXT NOT NULL DEFAULT 'eng',
+  printing TEXT,
+  license TEXT NOT NULL,
+  source TEXT NOT NULL,
+  org_id BIGINT,
+  verse_count INTEGER NOT NULL DEFAULT 0,
+  content_sha256 TEXT,
+  loaded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS reference_bible_verses (
+  version_id TEXT NOT NULL REFERENCES reference_bible_versions(id) ON DELETE CASCADE,
+  book TEXT NOT NULL,
+  chapter INTEGER NOT NULL CHECK (chapter > 0),
+  verse INTEGER NOT NULL CHECK (verse > 0),
+  text TEXT NOT NULL,
+  PRIMARY KEY (version_id, book, chapter, verse)
+);
 
 -- AQU-1240 slice 8: composite FK from every lane_id-bearing table to
 -- lanes(project_id, id). Declared here as trailing ALTERs (not inline) because

@@ -93,3 +93,30 @@ describe('P13: only a participant a question can name', () => {
     expect(ambiguousSubjectsIn(mentions, people('man'), text, []).map((s) => s.entity)).toEqual([ANYONE])
   })
 })
+
+// WHY: a look-alike claims a reader could take one participant for another.
+// The pack leaves some genders unknown, and guessing one would ask Jev about a
+// confusion the text may not have. So an unknown gender is never a look-alike,
+// on either side. JHN 1:42 "he brought him", with a gender left out.
+describe('P13: an unknown gender never makes a look-alike', () => {
+  const person = (label: string, gender: string | undefined) =>
+    gender ? { type: 'person', gender, labels: { eng: label } } : { type: 'person', labels: { eng: label } }
+  const people = (andrew: string | undefined, peter: string | undefined): PeopleLayerInput => ({
+    entities: { 'person:Andrew': person('Andrew', andrew), 'person:Peter': person('Peter', peter) },
+    mentions: {},
+  })
+  const text: TextLayerInput = {
+    verses: { 'JHN 1:42': ['n43001042001', 'n43001042004'] },
+    words: { n43001042001: { lemma: 'ἄγω', english: 'brought', class: 'verb', person: 'third', number: 'singular' } },
+  }
+  const mentions: MentionEntry[] = [
+    ['n43001042001', { entity: 'person:Andrew', kind: 'subject', conf: 0.9 }],
+    ['n43001042004', { entity: 'person:Peter', kind: 'pronoun', conf: 0.9 }],
+  ]
+
+  it('asks about two men, and nothing when the subject\'s or the other man\'s gender is unknown', () => {
+    expect(ambiguousSubjectsIn(mentions, people('male', 'male'), text, []).map((s) => s.entity)).toEqual(['person:Andrew'])
+    expect(ambiguousSubjectsIn(mentions, people('male', undefined), text, [])).toEqual([])
+    expect(ambiguousSubjectsIn(mentions, people(undefined, 'male'), text, [])).toEqual([])
+  })
+})

@@ -1,0 +1,68 @@
+xml:id	ref	class	text	transliteration	after	strongnumberx	stronglemma	sensenumber	greek	greekstrong	gloss	english	mandarin	stem	morph	lang	lemma	pos	person	gender	number	state	type	lexdomain	contextualdomain	coredomain	sdbh	extends	frame	subjref	participantref
+o080010010011	RUT 1:1!1	cj	וַ	wa		2050b	וְ		καὶ	2532	and	and			C	H	וְ	conjunction													
+o080010010012	RUT 1:1!1	verb	יְהִ֗י	yəhiy	 	1961	הָיָה		ἐγένετο	1096	it.was	happened	他是	qal	Vqw3ms	H	הָיָה	verb	third	masculine	singular		wayyiqtol								
+o080010010021	RUT 1:1!2	prep	בִּ	bi		0871a	בְּ		ἐν	1722	in	in	在		R	H	בְּ	preposition													
+o080010010022	RUT 1:1!2	noun	ימֵי֙	ymê	 	3117	יוֹם	1			the.days	days	日子		Ncmpc	H	יוֹם	noun		masculine	plural	construct	common								
+o080010010031	RUT 1:1!3	verb	שְׁפֹ֣ט	šəp̄ōṭ	 	8199	שָׁפַט	5	κρίνειν	2919	of.the.judging	ruled	统治	qal	Vqc	H	שָׁפַט	verb					infinitive construct						A0:080010010042;		
+o080010010041	RUT 1:1!4	art	הַ	ha		1886a	הַ		τοὺς	3588	of	the			Td	H	הַ	particle					definite article								
+o080010010042	RUT 1:1!4	verb	שֹּׁפְטִ֔ים	ššōp̄əṭiym	 	8199	שָׁפַט	1	κριτὰς	2923	the.judges	judges	士师	qal	Vqrmpa	H	שָׁפַט	verb		masculine	plural	absolute	participle active								
+o080010010051	RUT 1:1!5	cj	וַ	wa		2050b	וְ		καὶ	2532	and	that			C	H	וְ	conjunction													
+o080010010052	RUT 1:1!5	verb	יְהִ֥י	yəhiy	 	1961	הָיָה		ἐγένετο	1096	it.was	there was	发生	qal	Vqw3ms	H	הָיָה	verb	third	masculine	singular		wayyiqtol						A0:080010010061;		
+o080010010061	RUT 1:1!6	noun	רָעָ֖ב	rāʿāḇ	 	7458	רָעָב	1	λιμὸς	3042	a.famine	famine	饥荒		Ncmsa	H	רָעָב	noun		masculine	singular	absolute	common								
+o080010010071	RUT 1:1!7	prep	בָּ	bā		0871a	בְּ		ἐν	1722	in	in	中		Rd	H	בְּ	preposition													
+o080010010071ה	RUT 1:1!7	art		–		1886a	הַ				the	the			Td	H	הַ	particle					definite article								
+o080010010072	RUT 1:1!7	noun	אָ֑רֶץ	ʾāreṣ	 	0776	אֶרֶץ	1	γῇ	1093	land	land	国		Ncbsa	H	אֶרֶץ	noun		both	singular	absolute	common								
+o080010010081	RUT 1:1!8	cj	וַ	wa		2050b	וְ		καὶ	2532	and	and			C	H	וְ	conjunction													
+o080010010082	RUT 1:1!8	verb	יֵּ֨לֶךְ	yyēleḵ	 	1980	הלך	1	ἐπορεύθη	4198	he.went	went	去	qal	Vqw3ms	H	הלך	verb	third	masculine	singular		wayyiqtol						A0:080010010091;080010010162;080010010181;		
+o080010010091	RUT 1:1!9	noun	אִ֜ישׁ	ʾiyš	 	0376	אִישׁ	1	ἀνὴρ	435	a.man	man	人		Ncmsa	H	אִישׁ	noun		masculine	singular	absolute	common								
+o080010010101	RUT 1:1!10	prep	מִ	mi		4480	מִן		ἀπὸ	575	from	of	从		R	H	מִן	preposition													
+o080010010102	RUT 1:1!10	noun	בֵּ֧ית		 	1035	בֵּית לֶחֶם		βαιθλεεμ	965	Bethlehem				Np	H	בֵּית לֶחֶם	noun					proper								
+o080010010111	RUT 1:1!11	noun	לֶ֣חֶם		 	1035	בֵּית לֶחֶם		βαιθλεεμ	965	Bethlehem				Np	H	בֵּית לֶחֶם	noun					proper								
+o080010010121	RUT 1:1!12	noun	יְהוּדָ֗ה	yəhûḏāh	 	3063	יְהוּדָה		ιουδα	2448	Judah	Judah	犹大		Np	H	יְהוּדָה	noun					proper								
+o080010010131	RUT 1:1!13	prep	לָ	lā		3807a	לְ		τοῦ	3588	to	to			R	H	לְ	preposition													
+o080010010132	RUT 1:1!13	verb	גוּר֙	ḡûr	 	1481	גּוּר	1	παροικῆσαι	3939	sojourn	sojourn	寄居	qal	Vqc	H	גּוּר	verb					infinitive construct						A0:080010010091;080010010162;080010010181;	080010010091 080010010162 080010010181	
+o080010010141	RUT 1:1!14	prep	בִּ	bi		0871a	בְּ		ἐν	1722	in	in	往		R	H	בְּ	preposition													
+o080010010142	RUT 1:1!14	noun	שְׂדֵ֣י	śəḏēy	 	7704	שָׂדֶה	3	ἀγρῷ	68	the.region(s)	country	地		Ncmpc	H	שָׂדֶה	noun		masculine	plural	construct	common								
+o080010010151	RUT 1:1!15	noun	מוֹאָ֔ב	môʾāḇ	 	4124	מוֹאָב		μωαβ		of.Moab	Moab	摩押		Np	H	מוֹאָב	noun					proper								
+o080010010161	RUT 1:1!16	pron	ה֥וּא	hûʾ	 	1931	הוּא		αὐτὸς	846	he	he	他		Pp3ms	H	הוּא	pronoun	third	masculine	singular		personal								080010010091
+o080010010171	RUT 1:1!17	cj	וְ	wə		2050b	וְ		καὶ	2532	and	and	和		C	H	וְ	conjunction													
+o080010010172	RUT 1:1!17	noun	אִשְׁתּ֖			0802	אִשָּׁה	1	γυνὴ	1135	wife	wife	妻子		Ncfsc	H	אִשָּׁה	noun		feminine	singular	construct	common								
+o080010010173	RUT 1:1!17	pron	וֹ		 	2050c	הוּא		αὐτοῦ	846	his	his	他		Sp3ms	H	הוּא	suffix	third	masculine	singular		pronominal								080010010091
+o080010010181	RUT 1:1!18	cj	וּ	û		2050b	וְ		καὶ	2532	and	and	和		C	H	וְ	conjunction													
+o080010010182	RUT 1:1!18	num	שְׁנֵ֥י	šənēy	 	8147	שְׁנַיִם				the.two	two	两		Acmdc	H	שְׁנַיִם	adjective		masculine	dual	construct	cardinal number								
+o080010010191	RUT 1:1!19	noun	בָנָֽי			1121	בֵּן	1	υἱοὶ	5207	sons	sons	儿子		Ncmpc	H	בֵּן	noun		masculine	plural	construct	common								
+o080010010192	RUT 1:1!19	pron	ו		׃	2050c	הוּא		αὐτοῦ	846	his	his	他		Sp3ms	H	הוּא	suffix	third	masculine	singular		pronominal								080010010091
+o080010160011	RUT 1:16!1	cj	וַ	wa		2050b	וְ		δὲ	1161	and	but	但		C	H	וְ	conjunction													
+o080010160012	RUT 1:16!1	verb	תֹּ֤אמֶר	tōʾmer	 	0559	אָמַר	1	εἶπεν	2036	she.said	said	说	qal	Vqw3fs	H	אָמַר	verb	third	feminine	singular		wayyiqtol						A0:080010160021;		
+o080010160021	RUT 1:16!2	noun	רוּת֙	rûṯ	 	7327	רוּת		ρουθ		Ruth	Ruth	路得		Np	H	רוּת	noun					proper								
+o080010160031	RUT 1:16!3	adv	אַל	ʾal-	־	0408	אַל		μὴ	3361	do.not	not	不		Tn	H	אַל	particle					negative								
+o080010160041	RUT 1:16!4	verb	תִּפְגְּעִי	tip̄gəʿî-	־	6293	פָּגַע	7	ἀπαντήσαι	528	entreat	urge	催	qal	Vqj2fs	H	פָּגַע	verb	second	feminine	singular		jussive						A0:080010140072;	080010140072	
+o080010160051	RUT 1:16!5	prep	בִ֔			0871a	בְּ				(on)	to	对		R	H	בְּ	preposition													
+o080010160052	RUT 1:16!5	pron	י		 	2967a	הוּא		ἐμοὶ	1698	me	me	我		Sp1cs	H	הוּא	suffix	first	common	singular		pronominal								080010160021
+o080010160061	RUT 1:16!6	prep	לְ	lə		3807a	לְ		τοῦ	3588	to	to			R	H	לְ	preposition													
+o080010160062	RUT 1:16!6	verb	עָזְבֵ֖			5800	עָזַב	2	καταλιπεῖν		abandon	leave	离开	qal	Vqc	H	עָזַב	verb					infinitive construct						A0:080010160021; A1:080010160063;	080010160021	
+o080010160063	RUT 1:16!6	pron	ךְ		 	3509c	הוּא		σε	4571	you	you	你		Sp2fs	H	הוּא	suffix	second	feminine	singular		pronominal								080010140072
+o080010160071	RUT 1:16!7	prep	לָ	lā		3807a	לְ		ἢ	2228	to	to			R	H	לְ	preposition													
+o080010160072	RUT 1:16!7	verb	שׁ֣וּב	šûḇ	 	7725	שׁוּב	1	ἀποστρέψαι	654	turn.back	turn back	回去	qal	Vqc	H	שׁוּב	verb					infinitive construct						A0:080010160021;	080010160021	
+o080010160081	RUT 1:16!8	prep	מֵ	mē		4480	מִן				from	from	不		R	H	מִן	preposition													
+o080010160082	RUT 1:16!8	prep	אַחֲרָ֑יִ			0310	אַחַר				after	following	跟随		R	H	אַחַר	preposition													
+o080010160083	RUT 1:16!8	pron	ךְ		 	3509c	הוּא		σου	4675	you	you	你		Sp2fs	H	הוּא	suffix	second	feminine	singular		pronominal								080010140072
+o080010160091	RUT 1:16!9	cj	כִּ֠י	kî	 	3588	כִּי		ὅτι	3754	(dm)	for	因为		C	H	כִּי	conjunction													
+o080010160101	RUT 1:16!10	prep	אֶל	ʾel-	־	0413	אֶל		ὅπου	3699	to	to	往		R	H	אֶל	preposition													
+o080010160111	RUT 1:16!11	rel	אֲשֶׁ֨ר	ʾăšer	 	0834	אֲשֶׁר		ἐὰν	1437	where	where	哪里		Tr	H	אֲשֶׁר	particle					relative								
+o080010160121	RUT 1:16!12	verb	תֵּלְכִ֜י	tēləḵiy	 	1980	הלך	1	πορευθῇς		you.will.go	go	去	qal	Vqi2fs	H	הלך	verb	second	feminine	singular		yiqtol						A0:080010140072;	080010140072	
+o080010160131	RUT 1:16!13	verb	אֵלֵ֗ךְ	ʾēlēḵ	 	1980	הלך	1	πορεύσομαι	4198	I.will.go	go	去	qal	Vqi1cs	H	הלך	verb	first	common	singular		yiqtol						A0:080010160021;	080010160021	
+o080010160141	RUT 1:16!14	cj	וּ	û		2050b	וְ		καὶ	2532	and	and			C	H	וְ	conjunction													
+o080010160142	RUT 1:16!14	prep	בַ	ḇa		0871a	בְּ		οὗ	3739	at	at	在		R	H	בְּ	preposition													
+o080010160143	RUT 1:16!14	rel	אֲשֶׁ֤ר	ʾăšer	 	0834	אֲשֶׁר		ἐὰν	1437	where	where	哪里		Tr	H	אֲשֶׁר	particle					relative								
+o080010160151	RUT 1:16!15	verb	תָּלִ֨ינִי֙	tāliynî	 	3885a	לין	2	αὐλισθῇς	835	you.will.lodge	lodge	住	qal	Vqi2fs	H	לין	verb	second	feminine	singular		yiqtol						A0:080010140072;	080010140072	
+o080010160161	RUT 1:16!16	verb	אָלִ֔ין	ʾāliyn	 	3885a	לין	2	αὐλισθήσομαι	835	I.will.lodge	lodge	住	qal	Vqi1cs	H	לין	verb	first	common	singular		yiqtol						A0:080010160021;	080010160021	
+o080010160171	RUT 1:16!17	noun	עַמֵּ֣			5971	עַם	1	λαός	2992	people	people	同胞		Ncmsc	H	עַם	noun		masculine	singular	construct	common								
+o080010160172	RUT 1:16!17	pron	ךְ		 	3509c	הוּא		σου	4675	your	your	你		Sp2fs	H	הוּא	suffix	second	feminine	singular		pronominal								080010140072
+o080010160181	RUT 1:16!18	noun	עַמִּ֔			5971	עַם	1	λαός	2992	people	people	同胞		Ncmsc	H	עַם	noun		masculine	singular	construct	common								
+o080010160182	RUT 1:16!18	pron	י		 	2967a	הוּא		μου	3450	my	my	我		Sp1cs	H	הוּא	suffix	first	common	singular		pronominal								080010160021
+o080010160191	RUT 1:16!19	cj	וֵ	wē		2050b	וְ		καὶ	2532	and	and			C	H	וְ	conjunction													
+o080010160192	RUT 1:16!19	noun	אלֹהַ֖יִ			0430	אֱלֹהִים	1	θεός	2316	God	God	神/上帝		Ncmpc	H	אֱלֹהִים	noun		masculine	plural	construct	common								
+o080010160193	RUT 1:16!19	pron	ךְ		 	3509c	הוּא		σου	4675	your	your	你		Sp2fs	H	הוּא	suffix	second	feminine	singular		pronominal								080010140072
+o080010160201	RUT 1:16!20	noun	אֱלֹהָֽ			0430	אֱלֹהִים	1	θεός	2316	God	God	神/上帝		Ncmpc	H	אֱלֹהִים	noun		masculine	plural	construct	common								
+o080010160202	RUT 1:16!20	pron	י		׃	2967a	הוּא		μου	3450	my	my	我		Sp1cs	H	הוּא	suffix	first	common	singular		pronominal								080010160021

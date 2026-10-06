@@ -3285,7 +3285,6 @@ export const ar: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "يمكن للمشرفين فقط تحديد التواريخ المستهدفة.",
   "org.projectOverview.plan.completion": "الإنجاز",
   "org.projectOverview.plan.markDone": "وضع علامة «منجز»",
-  "org.projectOverview.plan.markDoneHint": "يمكن التراجع عنه.",
   "org.projectOverview.plan.markDoneAnyway": "وضع علامة «منجز» على أي حال",
   "org.projectOverview.plan.unmarkDone": "إزالة العلامة",
   "org.projectOverview.plan.notMarkedDone": "لم توضع عليه علامة «منجز».",

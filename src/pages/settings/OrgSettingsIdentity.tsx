@@ -1,4 +1,13 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
@@ -6,20 +15,26 @@ import { toast } from "@/components/ui/toast"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { renameOrg } from "@/lib/frontier/orgs"
+import { deleteOrg, OrgHasProjectsError, renameOrg } from "@/lib/frontier/orgs"
+import { ROLE } from "@/lib/frontier/roles"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import { orgHomePath, orgOverviewPath } from "@/lib/navigation/org-paths"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsIdentity() {
   const { t } = useI18n()
-  const { activeOrg, activeOrgId, refresh } = useActiveOrg()
+  const navigate = useNavigate()
+  const { activeOrg, activeOrgId, refresh, setActiveOrg, setAllOrgs } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const canEdit = (activeOrg?.role.level ?? 0) >= 600
+  const canEdit = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
+  const canDelete = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
 
   const [name, setName] = useState(activeOrg?.name ?? "")
   const [nameError, setNameError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   useEffect(() => {
@@ -47,6 +62,38 @@ export function OrgSettingsIdentity() {
       setName(activeOrg.name ?? "")
     }
   }
+
+  async function handleDelete() {
+    if (!canDelete || !jwt || activeOrgId == null) return
+    const deletedId = activeOrgId
+    setDeleting(true)
+    clearSubmitError()
+    try {
+      await deleteOrg(jwt, deletedId)
+      const list = await refresh()
+      const next = list.find((org) => org.id !== deletedId)
+      if (next) {
+        setActiveOrg(next.id)
+        navigate(orgOverviewPath(next.id))
+      } else {
+        setAllOrgs()
+        navigate(orgHomePath("all"))
+      }
+    } catch (err) {
+      setSubmitError(
+        err instanceof OrgHasProjectsError
+          ? t("settings.orgIdentity.deleteBlockedProjects")
+          : err instanceof Error
+            ? err.message
+            : t("settings.orgIdentity.deleteFailed"),
+      )
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
+
+  const orgName = activeOrg?.name ?? ""
 
   return (
     <OrgSettingsDetailPage
@@ -87,7 +134,56 @@ export function OrgSettingsIdentity() {
         />
       </SettingsGroup>
 
+      {canDelete ? (
+        <SettingsGroup label={t("settings.teamSettings.dangerZoneLabel")}>
+          <SettingsRow
+            label={t("settings.orgIdentity.deleteOrganization")}
+            description={t("settings.orgIdentity.deleteRowDescription")}
+            control={
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setConfirmDelete(true)}
+              >
+                {t("settings.orgIdentity.deleteOrganization")}
+              </Button>
+            }
+          />
+        </SettingsGroup>
+      ) : null}
+
       {submitError ? <FieldError role="alert">{submitError}</FieldError> : null}
+
+      {canDelete ? (
+        <Dialog open={confirmDelete} onOpenChange={(open) => { if (!open) setConfirmDelete(false) }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("org.teamDetail.deleteConfirmTitle", { name: orgName })}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {t("settings.orgIdentity.deleteConfirmBody", { name: orgName })}
+            </p>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => { void handleDelete() }}
+                disabled={deleting}
+              >
+                {deleting ? t("org.teamDetail.deletingButton") : t("common.confirm")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </OrgSettingsDetailPage>
   )
 }

@@ -302,7 +302,22 @@ CREATE TABLE project_settings (
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
-      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
+    -- 0141 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- gate on every Bible request and agent run, and autopilot per run. NULL
+    -- means no explicit choice, which the gate derives from scripture files
+    -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
+    -- count too.
+    bible_resources_enabled BOOLEAN
+      GENERATED ALWAYS AS (
+        CASE (settings::jsonb) ->> 'bibleResourcesEnabled'
+          WHEN 'true' THEN TRUE
+          WHEN 'false' THEN FALSE
+        END
+      ) STORED,
+    -- One boolean per Bible data enrichment; readers validate it
+    -- (db/shared/bible-enrichments.ts readBibleEnrichments).
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

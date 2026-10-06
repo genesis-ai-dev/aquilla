@@ -5,7 +5,8 @@
 //     while the Bible data experiment is on, a Bible is open (AQU-1685), the
 //     project's Voices enrichment is on and the person shows chips or rails
 //     (View settings → Bible data);
-//   • builds the index once per (pack version, book);
+//   • builds the index once per (pack version, book, the project's voice
+//     corrections, AQU-1692);
 //   • resolves names through the label chain (project names → interface
 //     language → English, as the person chose).
 // "Show every line by …" is one kind of Bible data cell filter, which
@@ -17,6 +18,7 @@ import { useEffect, useMemo, useState } from "react"
 import { loadLayer, loadManifest, type BkpFailureReason } from "@/lib/bible-data/pack-client"
 import type { BkpEntityId, BkpPeopleLayer, BkpRef, BkpVoicesLayer } from "@/lib/bible-data/pack-types"
 import { mapLayerToProject } from "@/lib/bible-data/versification"
+import { readBibleVoiceOverrides } from "../../../db/shared/bible-voice-overrides"
 import { firstVerseBook, voiceIndexFor, type VoiceCellInput } from "@/lib/bible-data/voice-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
@@ -92,7 +94,13 @@ export function useBibleVoices({
   const book = useMemo(() => (enabled ? firstVerseBook(cells) : null), [enabled, cells])
   const pack = useVoicesPack(book)
 
-  const index = useMemo(() => (pack?.ok ? voiceIndexFor(pack.version, pack.voices) : null), [pack])
+  // AQU-1692: the project's corrections. A refetched but equal map keeps the
+  // same index (voiceIndexFor keys on their hash), so rows stay memoized.
+  const overrides = project.bibleVoiceOverrides
+  const index = useMemo(
+    () => (pack?.ok ? voiceIndexFor(pack.version, pack.voices, readBibleVoiceOverrides(overrides)) : null),
+    [pack, overrides],
+  )
   const labelFor = useEntityLabels(project, pack?.ok ? pack.people.entities : null)
 
   return useMemo<BibleVoicesContextValue | null>(

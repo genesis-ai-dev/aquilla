@@ -58,8 +58,8 @@ import { openRouterExtras } from "../llm-vendor"
 import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
-import { runSpan, EXAMPLES_TARGET } from "./pipeline"
-import type { ExamplePair } from "./draft"
+import { runSpan, spanPairs, EXAMPLES_TARGET } from "./pipeline"
+import { examplesForSpan } from "./bible-examples"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
 import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
@@ -814,13 +814,6 @@ export async function resolveSpanSeeds(
   return deriveAutoSeeds(db, projectId, fileId, pairs)
 }
 
-function validatedExamples(pairs: CellPair[]): ExamplePair[] {
-  return pairs
-    .filter((p) => p.validated && p.target.trim())
-    .slice(0, EXAMPLES_TARGET)
-    .map((p) => ({ cellId: p.cellId, source: p.source, target: p.target, validated: true }))
-}
-
 // ── Steering ────────────────────────────────────────────────────────────────
 
 interface SteeringOutcome {
@@ -1019,7 +1012,14 @@ async function processSpan(
       excludedCellIds: shared.excludedCellIds,
       neighborBriefs,
       layerAbove: shared.layerAbove,
-      examples: validatedExamples(shared.pairs),
+      // AQU-1690: validated pairs like this span first (speaker, quote shape,
+      // participants); without Bible data, the first ones in file order.
+      examples: examplesForSpan(
+        shared.pairs,
+        spanPairs(seed, shared.pairs),
+        EXAMPLES_TARGET,
+        shared.bible.state === "ready" ? shared.bible.data.facts : undefined,
+      ),
       ...(shared.ctx.projectBriefL1 ? { projectBriefL1: shared.ctx.projectBriefL1 } : {}),
       // The brief's own answers carry when nobody generated an L1 summary, and
       // the concepts get scoped to this span's source text inside runSpan.

@@ -95,7 +95,7 @@ export interface RunSpanDeps {
   onPhase?: (phase: SpanPhase) => void
 }
 
-function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
+export function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
   const start = pairs.findIndex((p) => p.cellId === seed.startCellId)
   const end = pairs.findIndex((p) => p.cellId === seed.endCellId)
   if (start === -1 || end === -1 || end < start) return []
@@ -141,7 +141,14 @@ async function runVerifiers(
 ): Promise<VerifyPhaseResult> {
   const settled = await Promise.all(
     verifiers.map(async (key) => {
-      const args = { sceneBrief: brief, draft, pairs, llm: deps.llm, budget }
+      const args = {
+        sceneBrief: brief,
+        draft,
+        pairs,
+        ...(deps.bible ? { facts: deps.bible.draftFacts } : {}),
+        llm: deps.llm,
+        budget,
+      }
       let result = await verifySpan(key, args)
       // Barrier on_partial: retry, retries: 1.
       if (!result.ok) result = await verifySpan(key, args)
@@ -306,6 +313,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       ...(spanDecisions.length > 0 ? { decisions: spanDecisions } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
       ...(carriedConstraints.length > 0 ? { constraints: carriedConstraints } : {}),
+      ...(deps.bible ? { facts: deps.bible.draftFacts } : {}),
       ...(deps.sourceLanguage ? { sourceLanguage: deps.sourceLanguage } : {}),
       ...(deps.targetLanguage ? { targetLanguage: deps.targetLanguage } : {}),
       llm: deps.llm,

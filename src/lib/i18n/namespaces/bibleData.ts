@@ -4,7 +4,10 @@ import { defineNamespace } from "./types"
  * `bibleData` namespace (AQU-1686): the Bible data enrichments inside the
  * "Bible data" card in Settings → General, and its Data sources dialog.
  *
- * The card's own title, switch and hints stay in `projectSettings.bible.*`.
+ * The card's title, switch label and description are `bibleData.card.*` while
+ * the experimental switch is on, and the old `projectSettings.bible.*`
+ * "Bible resources" strings while it is off (src/lib/bible-data/experiment.ts).
+ * The hints under the switch stay in `projectSettings.bible.*` either way.
  * Enrichment ids map to these keys through the typed tables in
  * src/lib/bible-data/enrichment-labels.ts.
  *
@@ -15,6 +18,17 @@ import { defineNamespace } from "./types"
  */
 export const bibleData = defineNamespace({
   keys: {
+    // ── Experimental switch (Project settings → Experimental, AQU-1685) ──
+    "bibleData.experiment.label": "Bible data enrichments",
+    "bibleData.experiment.description":
+      "Shows Bible data while a Bible book is open: who speaks to whom, who is who, original-language context, translation helps and Bible data checks. Only on this device.",
+
+    // ── Card heading and main switch, while the experimental switch is on ──
+    "bibleData.card.title": "Bible data",
+    "bibleData.card.enableLabel": "Enable Bible data",
+    "bibleData.card.description":
+      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and unfoldingWord. It powers Verse Resources, Bible search, the agent's Bible lookups and the enrichments below.",
+
     // ── Enrichment rows (one label + one sentence each) ──
     "bibleData.enrichment.voices.label": "Voices",
     "bibleData.enrichment.voices.description":
@@ -168,6 +182,38 @@ export const bibleData = defineNamespace({
         "quotation marks, that the checks need.",
     },
     keys: {
+      "bibleData.experiment.label": {
+        description:
+          "Name of a switch in Project settings → Experimental. It shows the Bible " +
+          "data features (the enrichments) on this device only. 'Enrichments' are " +
+          "optional extra Bible data features, not a financial or chemical term.",
+      },
+      "bibleData.experiment.description": {
+        description:
+          "Explanation under the Bible data enrichments switch in Project settings → " +
+          "Experimental. 'A Bible book is open' means a Bible book file is open in " +
+          "the editor. 'Only on this device' means collaborators are not affected.",
+      },
+      "bibleData.card.title": {
+        description:
+          "Title of the settings card that turns Bible reference data on or off for " +
+          "the project, shown while the Bible data enrichments experiment is on. " +
+          "Without the experiment the same card is titled 'Bible resources' " +
+          "(projectSettings.section.bibleResources).",
+      },
+      "bibleData.card.enableLabel": {
+        description:
+          "Label of the main switch in the Bible data card. Turning it off turns off " +
+          "every Bible data feature listed under it.",
+      },
+      "bibleData.card.description": {
+        description:
+          "Explanation under the Bible data switch. bibletranslation.org, Macula, " +
+          "OpenText, ACAI and unfoldingWord are proper names: keep them untranslated. " +
+          "Verse Resources is the name of a side panel; 'Bible search' is the Bible " +
+          "mode of the Search panel; 'the enrichments below' are the switches listed " +
+          "under this one.",
+      },
       "bibleData.enrichment.voices.label": {
         description:
           "Name of the enrichment that labels each Bible cell with its speaker and " +

@@ -397,6 +397,8 @@ export function applyRowOverlays(
     audioEntry?: CellAudioEntry
     backtranslation?: BacktranslationRecord
     projectId?: string | null
+    /** Legacy tag of the lane on screen. '' is the default lane. */
+    lane?: string
   },
 ): CellData {
   let next = cell
@@ -447,7 +449,7 @@ export function applyRowOverlays(
     }
   }
 
-  return overlayBacktranslation(next, options.backtranslation, options.projectId)
+  return overlayBacktranslation(next, options.backtranslation, options.projectId, options.lane ?? "")
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -2404,6 +2406,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         audioEntry={audioEntry}
         backtranslation={backtranslation}
         projectId={project.id}
+        lane={activeLane}
       >
         {(cell) => {
           const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
@@ -3528,6 +3531,7 @@ interface CellStoreRowProps {
   audioEntry?: CellAudioEntry
   backtranslation?: BacktranslationRecord
   projectId?: string | null
+  lane?: string
   children: (cell: CellData) => React.ReactNode
 }
 
@@ -3537,13 +3541,14 @@ function CellStoreRow({
   audioEntry,
   backtranslation,
   projectId,
+  lane,
   children,
 }: CellStoreRowProps) {
   const cell = useCellView(cellStore, cellId)
   const hydratedCell = useMemo(() => {
     if (!cell) return null
-    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId })
-  }, [audioEntry, backtranslation, cell, projectId])
+    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId, lane })
+  }, [audioEntry, backtranslation, cell, lane, projectId])
 
   if (!hydratedCell) return null
   return <>{children(hydratedCell)}</>

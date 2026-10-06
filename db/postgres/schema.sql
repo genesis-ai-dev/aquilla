@@ -922,6 +922,10 @@ CREATE TABLE cell_backtranslations (
     event_id        TEXT NOT NULL,
     server_seq      BIGINT,
     created_at      BIGINT NOT NULL,
+    -- AQU-1589: lanes.id of this reading. Nullable until the AQU-1616 backfill.
+    -- NULL belongs to the target lane whose legacy_tag is '' — rows written
+    -- before this column. Writers resolve the event's tag, never a lane name.
+    lane_id         TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
@@ -1106,6 +1110,9 @@ CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
+-- AQU-1589: latest reading per cell within one lane. NULL lane_id stays in the
+-- index so the pre-backfill default-lane read is covered too.
+CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
 CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
@@ -2354,6 +2361,8 @@ ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey 
 ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+-- AQU-1589: nullable until AQU-1616. Enforced on new writes; a NULL member is exempt.
+ALTER TABLE cell_backtranslations ADD CONSTRAINT cell_backtranslations_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
 
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.

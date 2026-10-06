@@ -21,6 +21,7 @@
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
 import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
+import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -42,10 +43,11 @@ export interface SettingsKeySpec {
    */
   booleanFlags?: readonly string[]
   /**
-   * AQU-1688: when `kind` is 'object', a structural check the value must also
-   * pass. Returns null when it is fine, else what is wrong.
+   * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'), a
+   * structural check the value must also pass. Returns null when it is fine,
+   * else what is wrong.
    */
-  problem?: (value: Record<string, unknown>) => string | null
+  problem?: (value: unknown) => string | null
   /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
   typeName?: string
 }
@@ -84,7 +86,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       )
     }
     case 'object[]':
-      return Array.isArray(value) && value.every(isPlainObject)
+      return Array.isArray(value) && value.every(isPlainObject) && (!spec.problem || spec.problem(value) === null)
     case 'enum':
       return typeof value === 'string' && (spec.values ?? []).includes(value)
   }
@@ -127,6 +129,14 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     kind: 'object',
     problem: (value) => languageProfileProblem(value),
     typeName: LANGUAGE_PROFILE_TYPE_NAME,
+  },
+  // AQU-1691: the decision log — answers to one-off questions that later
+  // drafts must honour (db/shared/project-facts.ts). One entry per key; a key
+  // that names a Language-profile slot belongs in languageProfile instead.
+  projectFacts: {
+    kind: 'object[]',
+    problem: (value) => projectFactsProblem(value),
+    typeName: PROJECT_FACTS_TYPE_NAME,
   },
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
@@ -210,7 +220,7 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
     // A structural problem names the field at fault, not only the expected type.
-    const detail = spec.problem && isPlainObject(value) ? spec.problem(value) : null
+    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value)) ? spec.problem(value) : null
     return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null

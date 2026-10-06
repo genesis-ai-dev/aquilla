@@ -346,6 +346,8 @@ export const rules = defineNamespace({
     "rules.suggestFromEdits.noTestablePatterns":
       "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
     "rules.suggestFromEdits.analysisFailed": "Analysis failed",
+    "rules.suggestFromEdits.corpusLoading": "Loading your translations…",
+    "rules.suggestFromEdits.corpusLoadFailed": "Couldn't load your translations: {message}",
     "rules.suggestFromEdits.stats.repeated": "{count} repeated",
     "rules.suggestFromEdits.stats.recent": "{count} recent",
     "rules.suggestFromEdits.stats.pairs": "{count} from pairs",
@@ -906,6 +908,12 @@ export const rules = defineNamespace({
       },
       "rules.page.heading": {
         description: "Header title of the standalone Rules page.",
+      },
+      "rules.suggestFromEdits.corpusLoadFailed": {
+        description:
+          "Inline error in the 'Suggest rules from your edits' dialog when the " +
+          "project's translations couldn't be read, so Analyze is disabled.",
+        placeholders: { message: "The underlying fetch error's own message, verbatim (not translated)." },
       },
       "rules.page.corpusLoadErrorPrefix": {
         description:

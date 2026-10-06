@@ -51,6 +51,10 @@ interface Props {
    * just only see validated if that's all we get.
    */
   cells?: { id?: string; original: string; translated: string; status: "empty" | "unvalidated" | "validated"; hasPendingEdit?: boolean; aiDrafted?: boolean }[]
+  /** The cells are still being read — Analyze waits instead of mining `[]`. */
+  cellsLoading?: boolean
+  /** The cells read failed — surfaced instead of a misleading "no patterns". */
+  cellsError?: Error
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
 }
@@ -60,6 +64,8 @@ type Stage = "idle" | "loading" | "review"
 export function RuleSuggestFromEditsDialog({
   completionSettings,
   cells,
+  cellsLoading = false,
+  cellsError,
   onAdd,
   projectId,
 }: Props) {
@@ -82,7 +88,7 @@ export function RuleSuggestFromEditsDialog({
       : Boolean(completionSettings?.endpoint && completionSettings?.model)
 
   async function handleAnalyze() {
-    if (!isConfigured) return
+    if (!isConfigured || cellsLoading || cellsError) return
     const effectiveSettings = completionSettings ?? FALLBACK_SETTINGS
     setStage("loading")
     setError(null)
@@ -231,12 +237,26 @@ export function RuleSuggestFromEditsDialog({
               {t("rules.suggestFromEdits.description")}
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {cellsError && (
+              <p className="text-sm text-destructive" role="alert">
+                {t("rules.suggestFromEdits.corpusLoadFailed", { message: cellsError.message })}
+              </p>
+            )}
+            {cellsLoading && (
+              <p className="text-xs text-muted-foreground">
+                {t("rules.suggestFromEdits.corpusLoading")}
+              </p>
+            )}
             {!isConfigured && (
               <p className="text-xs text-muted-foreground">
                 {t("rules.importDialog.configureLlmFirst")}
               </p>
             )}
-            <Button onClick={handleAnalyze} disabled={!isConfigured} className="w-full">
+            <Button
+              onClick={handleAnalyze}
+              disabled={!isConfigured || cellsLoading || Boolean(cellsError)}
+              className="w-full"
+            >
               <Sparkles className="me-1 h-4 w-4" />
               {t("rules.suggestFromEdits.analyzeButton")}
             </Button>

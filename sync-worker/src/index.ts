@@ -33,6 +33,7 @@ import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
+import { handleSourceWordAlignmentRequest } from "./events/source-word-alignment-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -394,6 +395,9 @@ const worker = {
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
     if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
+    // AQU-1694: Bridge 1 links (pack word ↔ source token), read and written.
+    const sourceAlignmentResponse = await handleSourceWordAlignmentRequest(request, env)
+    if (sourceAlignmentResponse) return withCors(sourceAlignmentResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)

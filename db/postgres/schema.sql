@@ -1087,6 +1087,27 @@ CREATE TABLE cell_word_morph (
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
 );
 
+-- Migration 0143: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- link between a Bible Knowledge Pack word (Macula id) and a token of a
+-- gateway-language source cell, computed in the browser and uploaded through
+-- the sync-worker's source-word-alignment route. Derived data: rows are valid
+-- only while source_hash equals the source row's cells.content_hash, and the
+-- read route returns nothing else. Keep each column on one line (the dev-stack
+-- schema reconciler drops lines nested in a column's parentheses).
+CREATE TABLE source_word_alignment (
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    src_word_id   TEXT NOT NULL,      -- pack word id, e.g. n43004007009
+    tgt_token_idx INTEGER NOT NULL CHECK (tgt_token_idx >= 0),   -- token of the source cell's text (tokenize order)
+    conf          REAL NOT NULL CHECK (conf >= 0 AND conf <= 1),
+    method        TEXT NOT NULL,      -- recipe, e.g. ibm1-gdfa-names/1
+    source_hash   TEXT NOT NULL,      -- cells.content_hash of the text that was aligned
+    trained_pairs INTEGER NOT NULL CHECK (trained_pairs >= 0),   -- verse cells the run trained on
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, file_id, cell_id, src_word_id, tgt_token_idx)
+);
+
 -- ────────────────────────────── indexes ─────────────────────────────────
 
 CREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);

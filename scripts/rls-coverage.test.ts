@@ -100,6 +100,8 @@ const UNCOVERED: Record<string, string> = {
   project_member_scopes: "never granted to app_runtime",
   project_seq_counters: "never granted to app_runtime",
   seq_allocations: "never granted to app_runtime",
+  // AQU-1694 (0143): derived word links, written like cell_word_morph.
+  source_word_alignment: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
 }

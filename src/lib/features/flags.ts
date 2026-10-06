@@ -76,6 +76,15 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     // it gates are the edit memory (free) and a Jev check (fractions of a cent).
     default: false,
   },
+  harmonizer: {
+    labelKey: "harmonizer.flagLabel",
+    descriptionKey: "harmonizer.flagDescription",
+    // Off until checked against real passages: it asks Jev about every passage
+    // where a quotation is left open, and its suggestions sit beside smart
+    // edits in the editor (it rides the same passage request, so it also needs
+    // `smartEdits` on).
+    default: false,
+  },
   smartEditsLlm: {
     labelKey: "smartEdits.llmFlagLabel",
     descriptionKey: "smartEdits.llmFlagDescription",

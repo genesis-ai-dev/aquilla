@@ -181,6 +181,9 @@ export interface Env {
   /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
    *  every suggest request with no suggestions. Unset = on. */
   SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string

@@ -28,9 +28,12 @@ export interface SmartEditSuggestion {
   new: string
   newNorm: string
   confidence: number
-  tier: "memory" | "jev" | "llm"
+  tier: "memory" | "jev" | "llm" | "harmonize"
   /** LLM tier only: the model's one-sentence reason. */
   reason?: string
+  /** Harmonize tier only (AQU-1657): i18n key + values explaining the check. */
+  reasonKey?: string
+  reasonValues?: Record<string, string>
   support: { strong: number; weak: number; keeps: number }
   examples: SmartEditExample[]
 }
@@ -40,6 +43,10 @@ export interface SmartEditPassageCell {
   cellId: string
   source: string
   target: string
+  /** Verse reference — the harmonizer names cells by it in its reasons. */
+  ref?: string
+  /** Validated cells teach the harmonizer how this project writes. */
+  validated?: boolean
 }
 
 function isSuggestion(v: unknown): v is SmartEditSuggestion {
@@ -109,6 +116,9 @@ export function sendSmartEditFeedback(
   identityToken: string,
 ): void {
   const { suggestion: s } = input
+  // Harmonizer suggestions are not edit-memory evidence; the memory's
+  // feedback table only knows its own tiers.
+  if (s.tier === "harmonize") return
   void fetch(SMART_EDITS_FEEDBACK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${identityToken}` },

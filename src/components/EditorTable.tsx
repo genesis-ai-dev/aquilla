@@ -2830,6 +2830,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const smartEditsContext = useSmartEditsPassage({
     enabled: isFlagEnabled(project, "smartEdits"),
     llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
+    harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
     projectId: project.id,
     lane: activeLane,
     cellIds: displayCellIds,
@@ -2838,7 +2839,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       activeEditorCellId ? cellStore.getCellView(activeEditorCellId)?.translated : undefined),
     getCell: (id) => {
       const view = cellStore.getCellView(id)
-      return view ? { fileId: view.fileId, cellId: id, source: effectiveSourceText(view), target: view.translated } : null
+      return view
+        ? {
+            fileId: view.fileId,
+            cellId: id,
+            source: effectiveSourceText(view),
+            target: view.translated,
+            ...(view.context ? { ref: view.context } : {}),
+            validated: view.status === "validated",
+          }
+        : null
     },
   })
 

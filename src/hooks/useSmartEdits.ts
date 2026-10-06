@@ -17,6 +17,7 @@ import {
   type SmartEditSuggestion,
 } from "@/lib/smart-edits/client"
 import { SmartEditStore } from "@/lib/smart-edits/store"
+import { fetchHarmonizerSuggestions } from "@/lib/harmonizer/client"
 
 /** Cells either side of the active one sent as its passage. */
 export const PASSAGE_RADIUS = 10
@@ -51,6 +52,9 @@ export function passageWindow(cellIds: readonly string[], activeId: string, radi
 export function useSmartEditsPassage(options: {
   enabled: boolean
   llmEnabled: boolean
+  /** AQU-1657: cross-cell harmonizer checks (flag `harmonizer`). Its
+   *  suggestions share this store, underline and popover. */
+  harmonizerEnabled?: boolean
   projectId: string
   lane: string
   cellIds: readonly string[]
@@ -60,6 +64,7 @@ export function useSmartEditsPassage(options: {
   getCell: (cellId: string) => SmartEditPassageCell | null
 }): SmartEditsContextValue | null {
   const { enabled, llmEnabled, projectId, lane, cellIds, activeCellId, activeText } = options
+  const harmonizerEnabled = options.harmonizerEnabled ?? false
   const { session } = useFrontierSession()
   const token = session?.jwt
   const store = useMemo(() => new SmartEditStore(), [])
@@ -76,15 +81,22 @@ export function useSmartEditsPassage(options: {
         .map((id) => getCellRef.current(id))
         .filter((c): c is SmartEditPassageCell => c !== null && c.target.trim().length > 0)
       if (cells.length === 0 || store.isFresh(cells)) return
-      void fetchSmartEdits({ projectId, lane, cells }, token, controller.signal).then((suggestions) => {
-        if (!controller.signal.aborted) store.setPassage(cells, suggestions)
+      // One passage, both sources, one store write: two writes would let the
+      // second wipe the first's suggestions for the same cells.
+      void Promise.all([
+        fetchSmartEdits({ projectId, lane, cells }, token, controller.signal),
+        harmonizerEnabled
+          ? fetchHarmonizerSuggestions({ projectId, lane, cells }, token, controller.signal)
+          : Promise.resolve([]),
+      ]).then(([edits, harmonies]) => {
+        if (!controller.signal.aborted) store.setPassage(cells, [...edits, ...harmonies])
       })
     }, DEBOUNCE_MS)
     return () => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [enabled, token, projectId, lane, cellIds, activeCellId, activeText, store])
+  }, [enabled, harmonizerEnabled, token, projectId, lane, cellIds, activeCellId, activeText, store])
 
   const cellIdsRef = useRef(cellIds)
   useEffect(() => {

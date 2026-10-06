@@ -189,6 +189,20 @@ describe("resolveFileTimingMode", () => {
     },
   )
 
+  // The AQU-646 guard, kept for files with footage: the picker is hidden for
+  // them, so a stored audioFirst must be inert. Covers a value written before
+  // AQU-646 or by an older client, AND the AQU-1704 flow where a maintainer
+  // picks Free timing on a video-less SRT and then links a video (which leaves
+  // the stored mode in place).
+  it.each(["vtt", "srt", "sbv"] as const)(
+    "%s with footage linked ignores its own stored audioFirst, whoever wrote it",
+    (type) => {
+      expect(
+        resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4", timingMode: "audioFirst" }, null),
+      ).toBe("dubbing")
+    },
+  )
+
   // AQU-1704 regression guard. The audio-only dubbing case: an SRT source, no
   // video, project set to audioFirst through the API. Before the rescope this
   // read "dubbing", which is why playback kept fitting clips into the imported

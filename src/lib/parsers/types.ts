@@ -946,9 +946,9 @@ export function isVideoTimedSubtitleFile(
 }
 
 /**
- * Resolve a file's audio timing mode: the file's own choice, else Original
- * timing for a subtitle import with footage linked (see
- * `isVideoTimedSubtitleFile`), else the project-level value (the legacy Project
+ * Resolve a file's audio timing mode: Original timing for a subtitle import
+ * with footage linked (see `isVideoTimedSubtitleFile`), else the file's own
+ * choice, else the project-level value (the legacy Project
  * Settings field, kept as a read-only fallback so pre-existing projects keep
  * the mode they had chosen), else Original timing. Mixed-mode projects are
  * allowed by design.
@@ -957,22 +957,19 @@ export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
-  // AQU-1704: the file's own choice is read FIRST, so that the picker the
-  // workspace now shows a video-less subtitle file is not inert, and so that
-  // declining the "linking a video switches you back" prompt (Flow B in
-  // ProjectWorkspace) still leaves the file where the user left it rather than
-  // promising a state the resolver would not deliver.
-  if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
-  // import whose video is linked here. Withdrawing it at RESOLUTION rather than
-  // from the picker is still the point — hiding the control alone would leave a
-  // way back in: inheritance from the LEGACY project-level `audioTimingMode`
-  // below, so a film's VTT nobody has ever touched resolves to Free timing off
-  // a project setting made back when the control lived in Project Settings.
-  // (A `file.timing.set` from an OLDER client that still offers the mode is no
-  // longer overridden — the server deliberately keeps accepting those, and an
-  // explicit per-file value is now exactly what the picker writes.)
+  // import whose video is linked here. This check runs BEFORE the file's own
+  // choice, and withdrawing the mode at RESOLUTION rather than from the picker
+  // is still the point: the picker is hidden for these files, so any stored
+  // value would otherwise be one nobody can change back. That covers (a) a
+  // Free timing the user picked while the file had no video, followed by
+  // linking one (file.video.set leaves timingMode untouched), (b) a value
+  // written before AQU-646 or by an OLDER client that still offers the mode,
+  // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
   if (isVideoTimedSubtitleFile(file)) return "dubbing"
+  // AQU-1704: every other file reads its own choice next, so the picker the
+  // workspace now shows a video-less subtitle file is not inert.
+  if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization

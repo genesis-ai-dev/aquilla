@@ -18,7 +18,7 @@ import { ROLE } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { selectCellPairs } from "../lib/agent/tools/select-cells"
 import { loadProjectContext } from "../lib/contextual/project-context"
-import { prepareBibleRun } from "../lib/contextual/bible-run"
+import { prepareBibleWave } from "../lib/contextual/bible-run"
 import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { raiseBibleFactQuestions } from "../lib/contextual/bible-fact-questions"
 import { checkTranslatedCells } from "../lib/contextual/bible-check-mode"
@@ -62,13 +62,11 @@ bibleCheck.post(
       loadProjectContext(db, projectId),
       selectCellPairs(db, projectId, { fileId: body.fileId, targetLang: body.targetLang ?? "" }),
     ])
-    const bible = await prepareBibleRun({
-      pairs,
-      profile: ctx.languageProfile,
-      concepts: ctx.concepts,
-      flags,
-      loadPack: deps.loadPack,
-    })
+    // The wave's own loader: a layer whose insides do not compile is `invalid`, not a 500.
+    const bible = await prepareBibleWave(
+      { flags: async () => flags, loadPack: deps.loadPack },
+      { pairs, profile: ctx.languageProfile, concepts: ctx.concepts },
+    )
     if (bible.state === "off") {
       const { body: err, status } = errorJson("no_bible_refs", "This file has no verse references to check.", 422)
       return c.json(err, status)

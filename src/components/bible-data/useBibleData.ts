@@ -30,7 +30,7 @@ import type { TargetCorpusCell } from "./target-bridge"
 import { useBibleVoices } from "./useBibleVoices"
 import { useWhosWho } from "./useWhosWho"
 import { useVerseCells } from "./verse-cells"
-import type { BibleVoicesContextValue } from "./voices-context"
+import type { BibleVoicesContextValue, VoiceMaintainerActions } from "./voices-context"
 import type { WhosWhoContextValue } from "./whos-who-context"
 
 export interface BibleDataOptions {
@@ -47,6 +47,8 @@ export interface BibleDataOptions {
   jumpToCell: (cellId: string) => void
   /** Sync tokens, for the stored word alignment (AQU-1694). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** AQU-1692: the person may correct voices (a maintainer, with somewhere to save). */
+  canCorrectVoices?: boolean
 }
 
 /** The filter as the bar above the list shows it. */
@@ -69,6 +71,9 @@ export interface BibleData {
   /** True when the filter is hiding this cell of the file. */
   filterHides: (cellId: string) => boolean
   clearFilter: () => void
+  /** AQU-1692: the speech a maintainer is correcting, or null. */
+  correcting: string | null
+  closeCorrection: () => void
 }
 
 /** The cells a filter keeps, or null when it cannot apply (its data is not loaded). */
@@ -114,6 +119,7 @@ export function useBibleData({
   fileId,
   jumpToCell,
   getTokenForFile,
+  canCorrectVoices = false,
 }: BibleDataOptions): BibleData {
   const prefs = useBibleDataViewPrefs()
   const hasScripture = projectHasScriptureFiles(project.files)
@@ -144,7 +150,20 @@ export function useBibleData({
   const showLinesBy = useCallback((entity: BkpEntityId) => setFilter({ kind: "speaker", entity }), [setFilter])
   const showMentionsOf = useCallback((entity: BkpEntityId) => setFilter({ kind: "mentions", entity }), [setFilter])
 
-  const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy })
+  // AQU-1692: the speech a maintainer is correcting. It belongs to one file, like the filter.
+  const [correction, setCorrection] = useState<{ fileId: string; speechId: string } | null>(null)
+  if (correction && correction.fileId !== fileId) setCorrection(null)
+  const correcting = correction && correction.fileId === fileId ? correction.speechId : null
+  const closeCorrection = useCallback(() => setCorrection(null), [])
+  const maintainer = useMemo<VoiceMaintainerActions | null>(
+    () =>
+      canCorrectVoices && fileId
+        ? { correct: (speechId: string) => setCorrection({ fileId, speechId }) }
+        : null,
+    [canCorrectVoices, fileId],
+  )
+
+  const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy, maintainer })
   // AQU-1694: Bridge 2 trains on the file's cells as they are when it runs.
   const targetCorpus = useCallback(() => targetCorpusOf(cellStore.getAllSummaries()), [cellStore])
   const whosWho = useWhosWho({
@@ -198,5 +217,14 @@ export function useBibleData({
     return { kind: applied.kind, entity: applied.entity, name, count: filteredCellIds.length }
   }, [applied, filteredCellIds, voiceLabelFor, nameOf])
 
-  return { voices, whosWho: whosWho.context, filteredCellIds, filter, filterHides, clearFilter }
+  return {
+    voices,
+    whosWho: whosWho.context,
+    filteredCellIds,
+    filter,
+    filterHides,
+    clearFilter,
+    correcting: voices ? correcting : null,
+    closeCorrection,
+  }
 }

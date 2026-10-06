@@ -7,7 +7,7 @@
 // cross-row overlay, which keeps the virtualized list honest.
 
 import { createContext, useContext, useMemo } from "react"
-import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import type { BkpEntity, BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
 import { railSegments, type RailSegment } from "@/lib/bible-data/speech-rails"
 import {
   cellVoicesFor,
@@ -28,6 +28,16 @@ export interface BibleVoicesContextValue {
   showRails: boolean
   /** Filter the editor to the cells where `speaker` speaks. */
   showLinesBy: (speaker: BkpEntityId) => void
+  /** AQU-1692: the book's participants (the pack's `people` layer), for a maintainer's picker. */
+  entities: Readonly<Record<BkpEntityId, BkpEntity>>
+  /** AQU-1692: what a maintainer may do from the voice details; null for everyone else. */
+  maintainer: VoiceMaintainerActions | null
+}
+
+/** AQU-1692: a maintainer's actions on the voices. Stable callbacks, so rows stay memoized. */
+export interface VoiceMaintainerActions {
+  /** Open the correction dialog for one speech. */
+  correct: (speechId: string) => void
 }
 
 export const BibleVoicesContext = createContext<BibleVoicesContextValue | null>(null)

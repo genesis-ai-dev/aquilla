@@ -6,7 +6,8 @@
 // where each name came from. Shown in the chip's popover on hover and on
 // keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
 // marks disputed (slice 3). AQU-1692: a "Check" badge where the data is unsure
-// who speaks.
+// who speaks, and a maintainer's correction ("Corrected by …") with the
+// action that opens the correction dialog.
 
 import { Fragment } from "react"
 import { AlertTriangle, CircleHelp } from "lucide-react"
@@ -22,6 +23,7 @@ import {
 } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import type { AppliedVoiceOverride } from "@/lib/bible-data/voice-overrides"
 import type { CellVoiceView } from "./voices-context"
 import { evidenceSourceKey, labelSourceKey, narratorKey, speechTypeKey } from "./voice-text"
 
@@ -76,6 +78,8 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
                 nameOf={nameOf}
                 hasAddresseeName={Boolean(voice.speech.addressee && context.labelFor(voice.speech.addressee))}
                 onShowLines={offersFilter(voice.speech) ? context.showLinesBy : undefined}
+                applied={context.index.overrides.get(voice.speech.id)}
+                onCorrect={context.maintainer?.correct}
               />
             )}
           </li>
@@ -122,11 +126,17 @@ function SpeechDetails({
   nameOf,
   hasAddresseeName,
   onShowLines,
+  applied,
+  onCorrect,
 }: {
   speech: BkpSpeech
   nameOf: (entityId: BkpEntityId | undefined) => string
   hasAddresseeName: boolean
   onShowLines?: (speaker: BkpEntityId) => void
+  /** AQU-1692: the project's correction of this speech, if any. */
+  applied?: AppliedVoiceOverride
+  /** AQU-1692: a maintainer opens the correction dialog. */
+  onCorrect?: (speechId: string) => void
 }) {
   const t = useT()
   const fmt = useFormat()
@@ -193,13 +203,16 @@ function SpeechDetails({
           )}
         </>
       )}
-      <span className="text-muted-foreground">
-        {t("bibleData.voices.speakerEvidence", {
-          confidence: fmt.isolate(fmt.percent(speech.speakerConf)),
-          sources: sourcesOf(speech.speakerSources),
-        })}
-      </span>
-      {addressee !== null && speech.addresseeConf !== undefined && (
+      {applied && <CorrectionDetails applied={applied} nameOf={nameOf} />}
+      {!applied?.override.speaker && (
+        <span className="text-muted-foreground">
+          {t("bibleData.voices.speakerEvidence", {
+            confidence: fmt.isolate(fmt.percent(speech.speakerConf)),
+            sources: sourcesOf(speech.speakerSources),
+          })}
+        </span>
+      )}
+      {addressee !== null && speech.addresseeConf !== undefined && !applied?.override.addressee && (
         <span className="text-muted-foreground">
           {t("bibleData.voices.addresseeEvidence", {
             confidence: fmt.isolate(fmt.percent(speech.addresseeConf)),
@@ -220,6 +233,45 @@ function SpeechDetails({
           {t("bibleData.voices.showLinesBy", { speaker: fmt.isolate(speaker) })}
         </Button>
       )}
+      {onCorrect && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto self-start px-0 py-0.5 text-xs"
+          onClick={() => onCorrect(speech.id)}
+        >
+          {t(applied ? "bibleVoices.override.edit" : "bibleVoices.override.correct")}
+        </Button>
+      )}
     </div>
+  )
+}
+
+/** AQU-1692: who corrected the speech, when, why, and what the Bible data said. */
+function CorrectionDetails({
+  applied,
+  nameOf,
+}: {
+  applied: AppliedVoiceOverride
+  nameOf: (entityId: BkpEntityId | undefined) => string
+}) {
+  const t = useT()
+  const fmt = useFormat()
+  const { override, original } = applied
+  const speaker = fmt.isolate(nameOf(original.speaker))
+  const reading = original.addressee
+    ? t("bibleData.voices.speaksTo", { speaker, addressee: fmt.isolate(nameOf(original.addressee)) })
+    : speaker
+  return (
+    <>
+      <span data-testid="voice-corrected" className="font-medium">
+        {t("bibleVoices.override.correctedBy", { name: fmt.isolate(override.by), date: fmt.date(override.at) })}
+      </span>
+      <span dir="auto" className="text-muted-foreground">
+        {override.note}
+      </span>
+      <span className="text-muted-foreground">{t("bibleVoices.override.original", { reading })}</span>
+    </>
   )
 }

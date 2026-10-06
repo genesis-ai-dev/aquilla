@@ -23,7 +23,7 @@ import { firstVerseBook, voiceIndexFor, type VoiceCellInput } from "@/lib/bible-
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { useEntityLabels } from "./useEntityLabels"
-import type { BibleVoicesContextValue } from "./voices-context"
+import type { BibleVoicesContextValue, VoiceMaintainerActions } from "./voices-context"
 
 export type VoicesPack =
   | { ok: true; book: string; version: string; voices: BkpVoicesLayer; people: BkpPeopleLayer }
@@ -80,6 +80,8 @@ export interface BibleVoicesOptions {
   enabled: boolean
   /** Filter the editor to the cells where `speaker` speaks. */
   showLinesBy: (speaker: BkpEntityId) => void
+  /** AQU-1692: a maintainer's actions, or null when the person may not correct voices. */
+  maintainer: VoiceMaintainerActions | null
 }
 
 /** What rows read through BibleVoicesContext; null while Voices shows nothing. */
@@ -89,6 +91,7 @@ export function useBibleVoices({
   shared,
   enabled,
   showLinesBy,
+  maintainer,
 }: BibleVoicesOptions): BibleVoicesContextValue | null {
   const prefs = useBibleDataViewPrefs()
   const book = useMemo(() => (enabled ? firstVerseBook(cells) : null), [enabled, cells])
@@ -103,11 +106,21 @@ export function useBibleVoices({
   )
   const labelFor = useEntityLabels(project, pack?.ok ? pack.people.entities : null)
 
+  const entities = pack?.ok ? pack.people.entities : null
   return useMemo<BibleVoicesContextValue | null>(
     () =>
-      index && labelFor
-        ? { index, shared, labelFor, showChips: prefs.voiceChips, showRails: prefs.speechRails, showLinesBy }
+      index && labelFor && entities
+        ? {
+            index,
+            shared,
+            labelFor,
+            showChips: prefs.voiceChips,
+            showRails: prefs.speechRails,
+            showLinesBy,
+            entities,
+            maintainer,
+          }
         : null,
-    [index, shared, labelFor, prefs.voiceChips, prefs.speechRails, showLinesBy],
+    [index, shared, labelFor, prefs.voiceChips, prefs.speechRails, showLinesBy, entities, maintainer],
   )
 }

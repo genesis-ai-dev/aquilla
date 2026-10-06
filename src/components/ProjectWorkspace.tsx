@@ -326,6 +326,7 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { useVoiceOverrideWriter } from "./bible-data/use-voice-override-writer"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -7065,6 +7066,16 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // AQU-1692: a maintainer's voice corrections, saved against the latest map
+  // (see use-voice-override-writer.ts). EditorTable gets the writer only while
+  // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
+  const saveVoiceOverride = useVoiceOverrideWriter(
+    projectSettings.refresh,
+    patchSettings,
+    project?.bibleVoiceOverrides,
+    currentUsername,
+  )
+  const bibleDataShown = !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
@@ -13710,6 +13721,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
+            onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

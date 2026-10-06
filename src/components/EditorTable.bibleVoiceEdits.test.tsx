@@ -7,14 +7,20 @@
  *     the chip marks the speaker "check" and the popover says why; a sure
  *     speaker (RUT 1:8) is not marked, or the marker would mean nothing;
  *   • a speech whose boundary scholars dispute is marked on the chip itself,
- *     not only in the popover.
+ *     not only in the popover;
+ *   • a maintainer's correction is what the chip shows, says who made it and
+ *     what the Bible data said; only a maintainer is offered "Correct …", and
+ *     the dialog saves exactly the choice made;
+ *   • none of it shows, and nothing is fetched, without the Bible data
+ *     experiment (AQU-1685), even for a maintainer.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
+import type { SaveVoiceOverride } from "./bible-data/use-voice-override-writer"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { OT_PACK12_FILES, OT_PACK12_MANIFEST, RUTH_SPEECH_1_16 } from "@/lib/bible-data/__fixtures__/ot-pack12"
@@ -99,17 +105,24 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   }
 }
 
+const MAINTAINER = { level: 600, name: "maintainer", source: "test", fetchedAt: "2026-10-06T00:00:00Z" }
+const CONTRIBUTOR = { ...MAINTAINER, level: 400, name: "contributor" }
+
+/** RUT 1:10, "No, we will return with you": FCBH says Orpah, Macula disagrees. */
+const ORPAH_1_10 = "sp:o080010100041-o080010100063"
+
 interface RenderOptions {
   project?: ProjectRecord
   bibleOpen?: boolean
   metadata?: Record<string, Record<string, unknown>>
+  onSaveVoiceOverride?: SaveVoiceOverride
 }
 
-function renderRuth({ project = makeProject(), bibleOpen = true, metadata = {} }: RenderOptions = {}) {
+function renderRuth({ project = makeProject(), bibleOpen = true, metadata = {}, onSaveVoiceOverride }: RenderOptions = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: "file-RUT", username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(makeRows(metadata), { full: true, maxServerSeq: 1 })
-  render(
+  return render(
     <QueryClientProvider client={new QueryClient()}>
       <EditorActionsProvider value={{}}>
         <EditorTable
@@ -130,6 +143,7 @@ function renderRuth({ project = makeProject(), bibleOpen = true, metadata = {} }
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           bibleOpen={bibleOpen}
+          onSaveVoiceOverride={onSaveVoiceOverride}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -217,3 +231,76 @@ describe("a disputed speech boundary", () => {
     expect((await chip(rut("1:8"))).getAttribute("data-voice-disputed")).toBeNull()
   })
 })
+
+describe("a maintainer's correction", () => {
+  const corrected = {
+    [ORPAH_1_10]: { speaker: "person:Ruth", note: "Both daughters-in-law answer; we follow Ruth.", by: "mara", at: "2026-10-06T12:00:00Z" },
+  }
+
+  it("is what the chip shows, and the popover says who made it, why, and what the Bible data said", async () => {
+    renderRuth({ project: makeProject({ bibleVoiceOverrides: corrected }) })
+    const marked = await chip(rut("1:10"))
+    await waitFor(() => expect(visible(marked.textContent)).toContain("Ruth"))
+    expect(marked.querySelector("[data-voice-check]")).toBeNull()
+
+    const details = await openDetails(rut("1:10"))
+    expect(visible(within(details).getByTestId("voice-corrected").textContent)).toMatch(/^Corrected by mara on /)
+    expect(details.textContent).toContain("Both daughters-in-law answer; we follow Ruth.")
+    expect(visible(details.textContent)).toContain("Bible data: Orpah to Naomi")
+  })
+
+  it("is offered to a maintainer, and not to a contributor or where there is nowhere to save it", async () => {
+    const save: SaveVoiceOverride = vi.fn(async () => ({ kind: "ok" as const }))
+    const contributor = renderRuth({ project: makeProject({ syncRole: CONTRIBUTOR }), onSaveVoiceOverride: save })
+    expect(within(await openDetails(rut("1:10"))).queryByRole("button", { name: "Correct speaker or listener" })).toBeNull()
+    contributor.unmount()
+
+    const nowhere = renderRuth({ project: makeProject({ syncRole: MAINTAINER }) })
+    expect(within(await openDetails(rut("1:10"))).queryByRole("button", { name: "Correct speaker or listener" })).toBeNull()
+    nowhere.unmount()
+
+    renderRuth({ project: makeProject({ syncRole: MAINTAINER }), onSaveVoiceOverride: save })
+    expect(within(await openDetails(rut("1:10"))).getByRole("button", { name: "Correct speaker or listener" })).toBeTruthy()
+  })
+
+  it("saves the maintainer's choice and reason for that speech, and closes", async () => {
+    const save = vi.fn<SaveVoiceOverride>(async () => ({ kind: "ok" as const }))
+    renderRuth({ project: makeProject({ syncRole: MAINTAINER }), onSaveVoiceOverride: save })
+    fireEvent.click(within(await openDetails(rut("1:10"))).getByRole("button", { name: "Correct speaker or listener" }))
+
+    const dialog = await screen.findByTestId("voice-override-dialog")
+    const saveButton = within(dialog).getByRole("button", { name: "Save correction" }) as HTMLButtonElement
+    fireEvent.change(within(dialog).getByLabelText("Speaker"), { target: { value: "person:Ruth" } })
+    // No reason yet: a correction nobody can review later is not saved.
+    expect(saveButton.disabled).toBe(true)
+    fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "  We follow Ruth.  " } })
+    fireEvent.click(saveButton)
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith(ORPAH_1_10, { speaker: "person:Ruth", note: "We follow Ruth." }))
+    await waitFor(() => expect(screen.queryByTestId("voice-override-dialog")).toBeNull())
+  })
+
+  it("stays open and says why when the server refuses", async () => {
+    const save = vi.fn<SaveVoiceOverride>(async () => ({ kind: "blocked" as const, reason: "role" as const }))
+    renderRuth({ project: makeProject({ syncRole: MAINTAINER, bibleVoiceOverrides: corrected }), onSaveVoiceOverride: save })
+    fireEvent.click(within(await openDetails(rut("1:10"))).getByRole("button", { name: "Edit correction" }))
+
+    const dialog = await screen.findByTestId("voice-override-dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove correction" }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith(ORPAH_1_10, null))
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("Only maintainers can correct who is speaking.")
+  })
+})
+
+describe("the Bible data experiment (AQU-1685)", () => {
+  it("shows no chip and fetches nothing while it is off, even for a maintainer who could correct", async () => {
+    const save: SaveVoiceOverride = vi.fn(async () => ({ kind: "ok" as const }))
+    renderRuth({ project: makeProject({ syncRole: MAINTAINER, experimentalFlags: {} }), onSaveVoiceOverride: save })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(chipIn(rut("1:10"))).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+

@@ -115,6 +115,7 @@ import {
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
 import { decide } from "../lib/jev/decide"
+import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -375,6 +376,8 @@ async function selfTickLoop(
   const meter = makeCostMeter(env, db)
   // Prompt/reply per call for the Team step inspector; flushed with the meter.
   const traces = makeTraceRecorder(env, db, { runId, projectId })
+  // AQU-1690: Bible data for the run; its caches last across waves.
+  const bible = makeBibleTickDeps(env, db, { projectId, runId }, { traces, meter })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -433,6 +436,7 @@ async function selfTickLoop(
             notify,
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            bible,
           })
         } finally {
           await guarded.stop()
@@ -1266,6 +1270,12 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     return c.json(body, status)
   }
   const spanId = c.req.query("spanId") || undefined
+  // AQU-1690: ?label=bible-facts lists one kind of row (the inspector's facts).
+  const label = c.req.query("label") || undefined
+  if (label !== undefined && !/^[a-z0-9:_-]{1,64}$/.test(label)) {
+    const { body, status } = errorJson("validation_failed", "label must be 1 to 64 of a-z 0-9 : _ -", 400)
+    return c.json(body, status)
+  }
   const limitRaw = c.req.query("limit")
   const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
   if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
@@ -1276,7 +1286,15 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     )
     return c.json(body, status)
   }
-  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  const result = await listRunTraces(c.env.AQUILLA_PG, {
+    projectId,
+    runId,
+    limit,
+    ...(spanId ? { spanId } : {}),
+    ...(label ? { label } : {}),
+    // AQU-1690: shadow-mode Jev answers (Jev and metrics rows) are for maintainers only.
+    maintainer: gate.level >= ROLE.MAINTAINER,
+  })
   return c.json(result)
 })
 

@@ -52,6 +52,9 @@ vi.mock("@/lib/contextual/transport", () => ({
 // from the IDB project record, so the flag is controlled here rather than
 // through a prop.
 vi.mock("@/lib/store/project-index", () => ({ getProject: vi.fn() }))
+// The device-local Bible data experiment (AQU-1685) reads the project index
+// mocked above; these tests are about the Team surface, with the experiment off.
+vi.mock("@/hooks/useBibleDataExperiment", () => ({ useBibleDataExperiment: () => false }))
 
 // The mode dial reads the shared settings row; stub the read so these tests
 // stay about the Team surface rather than the settings wire.

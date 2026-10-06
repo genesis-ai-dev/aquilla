@@ -18,7 +18,8 @@ import {
 import { chargeBudget, type AmbiguityEntry, type LlmCall, type RunBudget, type SpanDraft } from "./types"
 
 // v3 (AQU-1691): the "Project decisions" block.
-export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v3"
+// v4 (AQU-1690): per-cell Bible facts lines, and examples chosen by pack features.
+export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v4"
 
 export interface ExamplePair {
   cellId?: string
@@ -51,6 +52,9 @@ export interface PerformSpanDeps {
   /** Per-cell constraints from a previous quorum rejection (redraft loop —
    *  losing verdicts, never "improve this"). */
   constraints?: { cellId: string; constraints: string[] }[]
+  /** AQU-1690: one Bible facts line per cell id (who speaks to whom, quote
+   *  levels, participants, "you"), shown under its segment. */
+  facts?: ReadonlyMap<string, string>
   sourceLanguage?: string
   targetLanguage?: string
   llm: LlmCall
@@ -147,11 +151,16 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
       ? `\nActive directions from the human team (honour them):\n${deps.steeringDirections.map((d) => `- ${d}`).join("\n")}\n`
       : ""
 
+  // AQU-1690: the facts lines are pack data, not guesses — say so once.
+  const factsBlock = deps.pairs.some((p) => deps.facts?.has(p.cellId))
+    ? `\nBible data — given facts. A segment may carry a "Facts:" line: who speaks to whom, where each quotation opens and closes (level 1 is the outer quotation, level 2 a quotation inside it), who is named, and whether "you" is singular or plural. Treat these as true. Mark each quotation with the project's quotation marks for its level.\n`
+    : ""
+
   // [[ctx:draft]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
   return `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
 ${deps.projectBriefL1 ? `\nProject brief (honour it): ${deps.projectBriefL1}\n` : briefFallbackBlock}
 Scene brief: ${deps.sceneBrief.l1Summary}
-${registerBlock}${termsBlock}${decisionsBlock}${rulesBlock}${steeringBlock}
+${registerBlock}${termsBlock}${decisionsBlock}${rulesBlock}${factsBlock}${steeringBlock}
 Rules:
 1. Translate segment by segment; do not merge, split, or reorder segments.
 2. Keep names, numbers, and punctuation conventions consistent with the example pairs.
@@ -177,8 +186,10 @@ function userPrompt(deps: PerformSpanDeps): string {
   const numbered = deps.pairs
     .map((p, i) => {
       const cs = constraintsById.get(p.cellId)
+      const facts = deps.facts?.get(p.cellId)
       const constraintNote =
-        cs && cs.length > 0 ? `\n   Constraints from review (satisfy each): ${cs.join("; ")}` : ""
+        (facts ? `\n   Facts: ${facts}` : "") +
+        (cs && cs.length > 0 ? `\n   Constraints from review (satisfy each): ${cs.join("; ")}` : "")
       return `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${p.source}${constraintNote}`
     })
     .join("\n")

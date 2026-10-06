@@ -78,8 +78,8 @@ describe("the draft prompt", () => {
     expect(withBlock.system).toContain("Project decisions — HARD constraints")
     expect(withBlock.system).toContain('clusivity.ACT.16.10-17 = "exclusive"')
     expect(withBlock.system).not.toContain("render.legion")
-    expect(CONTEXTUAL_PROMPT_VERSION).toBe("contextual-draft-v3")
-    expect(withBlock.promptVersion).toBe(`contextual-draft-v3:${promptFingerprint(withBlock.system)}`)
+    expect(CONTEXTUAL_PROMPT_VERSION).toBe("contextual-draft-v4")
+    expect(withBlock.promptVersion).toBe(`contextual-draft-v4:${promptFingerprint(withBlock.system)}`)
 
     // No decisions, no block: a project that decided nothing keeps the old wording.
     const without = await systemPromptFor()

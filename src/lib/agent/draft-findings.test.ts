@@ -20,6 +20,21 @@ describe("findingsFromVerdicts", () => {
     })
   })
 
+  // AQU-1690: autopilot stores a Bible data finding as bkp:<check>, with the
+  // finding's reason and pack evidence as encoded params in the value.
+  it("reads a Bible data finding with its reason and evidence params", () => {
+    const value = "kind=close-after-aside&level=1&evidence=speech&startRef=JHN+4%3A9&startWord=8"
+    expect(findingsFromVerdicts({ "bkp:V2": value, "bkp:V13": "flag", _triage: "human", _severity: "3" }).findings).toEqual([
+      {
+        code: "bkp:V2",
+        kind: "bkp",
+        detail: "V2",
+        params: { kind: "close-after-aside", level: "1", evidence: "speech", startRef: "JHN 4:9", startWord: "8" },
+      },
+      { code: "bkp:V13", kind: "bkp", detail: "V13" },
+    ])
+  })
+
   it("treats a draft staged before findings existed as clean", () => {
     expect(findingsFromVerdicts(null)).toEqual({ findings: [], triage: null, severity: 0 })
     expect(findingsFromVerdicts({})).toEqual({ findings: [], triage: null, severity: 0 })

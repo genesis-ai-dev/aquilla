@@ -660,6 +660,12 @@ export const agent = defineNamespace({
     "agent.finding.lint": "Project rule: {rule}",
     "agent.finding.unsupported": "Wording not found in the sources",
     "agent.finding.redrafted": "Redrafted after review",
+    // AQU-1690: Bible data findings on autopilot drafts.
+    "agent.finding.bible": "Bible data: {check}",
+    "agent.finding.bibleUnknown": "Bible data check {code}",
+    "agent.finding.bibleCheck.speaker": "Speaker named",
+    "agent.finding.bibleCheck.negation": "Negation kept",
+    "agent.finding.bibleCheck.youNumber": "Singular or plural “you”",
     "agent.finding.needsYou": "Needs you",
     "agent.finding.advisory": "Advisory",
   },
@@ -1443,6 +1449,23 @@ export const agent = defineNamespace({
       },
       "agent.finding.redrafted": {
         description: "Verifier finding on a draft: the first attempt was rejected and this is the redraft.",
+      },
+      "agent.finding.bible": {
+        description: "Finding on an autopilot draft: a Bible data check (from the Bible Knowledge Pack) does not hold for the draft text.",
+        placeholders: { check: "The check's name, already translated, such as 'Quotation closes'." },
+      },
+      "agent.finding.bibleUnknown": {
+        description: "Finding on an autopilot draft from a Bible data check this version of the app has no name for.",
+        placeholders: { code: "The check's code, such as 'V4' — not translated." },
+      },
+      "agent.finding.bibleCheck.speaker": {
+        description: "Name of an autopilot Bible data check: the draft makes clear who speaks the quoted words. Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.negation": {
+        description: "Name of an autopilot Bible data check: the draft keeps the source's negation ('not', 'never'). Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.youNumber": {
+        description: "Name of an autopilot Bible data check: the draft's 'you' is singular or plural as in the source. Shown as {check} in 'Bible data: {check}'.",
       },
       "agent.finding.needsYou": {
         description: "Badge on a draft whose findings were triaged as needing a person before approval.",

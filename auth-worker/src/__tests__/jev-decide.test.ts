@@ -6,8 +6,8 @@
 
 import { env } from "cloudflare:test"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { decide, JEV_PROJECT_CAP_PER_WINDOW, type JevAnswer } from "../lib/jev/decide"
-import { recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { decide, JEV_BIBLE_QA_CAP_PER_WINDOW, JEV_PROJECT_CAP_PER_WINDOW, type JevAnswer, type JevPurpose } from "../lib/jev/decide"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 
 const QUESTIONS = {
   substantive: { type: "noul" as const, instructions: { question: "Is it substantive?" } },
@@ -31,7 +31,7 @@ function jevReply(answers: Record<string, unknown>, status = 200): Response {
 }
 
 let projectSeq = 0
-function input(purpose: "react" | "triage" = "react") {
+function input(purpose: JevPurpose = "react") {
   projectSeq += 1
   return {
     purpose,
@@ -111,5 +111,42 @@ describe("decide()", () => {
     const out = await decide(testEnv(), { ...input(), deadline: Date.now() - 1 })
     expect(out).toMatchObject({ decidedBy: "heuristic", reason: "timeout" })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1690: autopilot's Bible data questions run on every span of a run. They
+// must never use up the cap react and triage share, and they need their own
+// off switch.
+describe("decide() — purpose bible-qa", () => {
+  it("counts against its own bucket: triage's cap is not consumed", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => jevReply({ substantive: { type: "noul", noul: 0.8 } }))
+    const req = input("bible-qa")
+    const identifier = `project:${req.projectId}`
+    for (let i = 0; i < 3; i++) await decide(testEnv(), req)
+    expect(await countRecentRateLimitEvents(env.AQUILLA_PG, "jev_decisions", identifier)).toBe(0)
+    expect(await countRecentRateLimitEvents(env.AQUILLA_PG, "jev_bible_qa", identifier)).toBe(3)
+  })
+
+  it("still calls Jev when triage's shared cap is spent, and stops at its own", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jevReply({ substantive: { type: "noul", noul: 0.8 } }))
+    const req = input("bible-qa")
+    for (let i = 0; i < JEV_PROJECT_CAP_PER_WINDOW; i++) {
+      await recordRateLimitEvent(env.AQUILLA_PG, "jev_decisions", `project:${req.projectId}`)
+    }
+    expect((await decide(testEnv(), req)).decidedBy).not.toBe("heuristic")
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    for (let i = 0; i < JEV_BIBLE_QA_CAP_PER_WINDOW; i++) {
+      await recordRateLimitEvent(env.AQUILLA_PG, "jev_bible_qa", `project:${req.projectId}`)
+    }
+    expect(await decide(testEnv(), req)).toMatchObject({ decidedBy: "heuristic", reason: "capped" })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("JEV_BIBLE_QA=off keeps every Bible data question unasked; react and triage are untouched", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jevReply({ substantive: { type: "noul", noul: 0.8 } }))
+    expect(await decide(testEnv({ JEV_BIBLE_QA: "off" }), input("bible-qa"))).toMatchObject({ decidedBy: "heuristic", reason: "disabled" })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect((await decide(testEnv({ JEV_BIBLE_QA: "off" }), input("triage"))).decidedBy).not.toBe("heuristic")
   })
 })

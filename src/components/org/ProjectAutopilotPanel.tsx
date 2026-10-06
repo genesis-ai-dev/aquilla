@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { AutopilotActivityInspector, type AutopilotInspectorSection } from "@/components/contextual/AutopilotActivityInspector"
 import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -436,6 +437,8 @@ export function ProjectAutopilotPanel({
   laneLabels,
 }: ProjectAutopilotPanelProps) {
   const { locale, t } = useI18n()
+  // AQU-1685: the graph's Bible data steps, only with the experiment on here.
+  const bibleData = useBibleDataExperiment(projectId)
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -613,7 +616,7 @@ export function ProjectAutopilotPanel({
           {showStart && startBlocked && (
             <StartGateNotice projectId={projectId} blockers={startBlockers} t={t} />
           )}
-          {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact />}
+          {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact bibleData={bibleData} />}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
             <Progress
               value={(workingDone / workingTotal) * 100}

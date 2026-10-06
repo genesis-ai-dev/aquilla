@@ -114,7 +114,7 @@ describe("runSpan — happy path (low risk)", () => {
     // Staged draft carries provenance: sceneBriefId + hashed promptVersion + exampleIds.
     expect(captured.staged).toHaveLength(1)
     expect(captured.staged[0].sceneBriefId).toBe("sb1")
-    expect(captured.staged[0].promptVersion).toMatch(/^contextual-draft-v3:[0-9a-f]{8}$/)
+    expect(captured.staged[0].promptVersion).toMatch(/^contextual-draft-v4:[0-9a-f]{8}$/)
     expect(captured.staged[0].exampleIds).toEqual(["ex1", "ex2", "ex3", "ex4", "ex5"])
 
     // Low risk → the panel never engaged: exactly one deep call (ambiguity).

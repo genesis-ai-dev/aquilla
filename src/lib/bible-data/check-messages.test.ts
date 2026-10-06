@@ -22,6 +22,8 @@ const profile = {
     levels: [{ open: "“", close: "”" }, { open: "‘", close: "’" }],
     continuation: "reopen-each-paragraph" as const,
   },
+  // AQU-1691: M1 runs only once its own slot is saved; English asks with "?" alone.
+  questionMarkers: {},
 }
 const cells = ["JHN 4:8", "JHN 4:9", "JHN 4:10", "JHN 4:11", "JHN 4:12"].map((ref) => ({ id: ref, globalReferences: [ref] }))
 const contexts = buildCellCheckContexts(cells, JHN4_VOICES, JHN4_STRUCTURE, profile)

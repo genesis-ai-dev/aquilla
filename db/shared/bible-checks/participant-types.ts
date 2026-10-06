@@ -151,6 +151,24 @@ export interface DivineMention {
   kind: DivineNameKind
 }
 
+/** AQU-1701 (P11): a participant's first mention in its pericope, where the Greek uses a name. */
+export interface ParticipantIntroduction {
+  entity: string
+  /** The Macula word of the name. */
+  word: string
+}
+
+/** AQU-1701 (P13): a participant the cell refers to only as a verb's implied subject, with look-alikes beside it. */
+export interface AmbiguousSubject {
+  entity: string
+  /** The verb whose subject it is. */
+  word: string
+  /** The verb's English gloss ("answered"), for the question. */
+  gloss: string
+  /** The cell's other active participants of the same gender and number. */
+  peers: readonly string[]
+}
+
 export interface CellParticipants {
   names: NameTable
   /** The cell's names, in reading order. Empty without the text layer, which says which words are names. */
@@ -173,4 +191,8 @@ export interface CellParticipants {
   divine: readonly DivineMention[]
   /** P15: target spans of the pronouns that refer to God, Jesus or the Spirit, from a word alignment. */
   deityPronounSpans?: readonly BibleCheckSpan[]
+  /** AQU-1701 (P11): first mentions after a pericope boundary that are names. Empty without segments or the text layer. */
+  introduced: readonly ParticipantIntroduction[]
+  /** AQU-1701 (P13): implied subjects another active participant could be mistaken for. Empty without the text layer. */
+  ambiguousSubjects: readonly AmbiguousSubject[]
 }

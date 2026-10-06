@@ -19,6 +19,7 @@
 
 import { isNameWord } from './agreed-names'
 import { nameFormKey } from './name-forms'
+import { ambiguousSubjectsIn, introductionsIn, type SegmentInput } from './reference-tracking'
 import type {
   CellParticipants,
   Clusivity,
@@ -46,6 +47,8 @@ export interface ParticipantCompileInput {
   verseKey: (ref: string) => string | null
   /** The speeches touching the cell, with speaker and addressee. */
   speeches: readonly SpeechInput[]
+  /** AQU-1701: the book's pericopes (the structure layer's segments), for P11. */
+  segments?: readonly SegmentInput[]
 }
 
 /** A mention of one of these can stand for several people. */
@@ -215,13 +218,14 @@ export function compileParticipants(input: ParticipantCompileInput): CellPartici
     if (mention?.entity === HOLY_SPIRIT && word.lemma === 'πνεῦμα') divine.push({ word: wordId, kind: 'holy-spirit' })
   }
 
+  const voices = dedupe(input.speeches.flatMap((s) => [s.speaker, s.addressee]).filter((id): id is string => !!id))
   return {
     names,
     named,
     mentioned: [...withMembers(entities, cellMentions.map(([, m]) => m.entity))],
     impliedSubjects,
     nearbySubjects: [...withMembers(entities, nearby.map(([, m]) => m.entity))],
-    voices: dedupe(input.speeches.flatMap((s) => [s.speaker, s.addressee]).filter((id): id is string => !!id)),
+    voices,
     secondPerson:
       numbers.size === 0
         ? null
@@ -229,6 +233,8 @@ export function compileParticipants(input: ParticipantCompileInput): CellPartici
     firstPlural,
     groups,
     divine,
+    introduced: introductionsIn(cellMentions, people, text, input.segments),
+    ambiguousSubjects: ambiguousSubjectsIn(cellMentions, people, text, voices),
   }
 }
 

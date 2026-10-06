@@ -224,6 +224,11 @@ import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import { SpeechRails } from "./bible-data/SpeechRails"
+import { useBibleVoices } from "./bible-data/useBibleVoices"
+import { VoiceChip } from "./bible-data/VoiceChip"
+import { VoiceFilterBanner } from "./bible-data/VoiceFilterBanner"
+import { BibleVoicesContext, useCellVoices } from "./bible-data/voices-context"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -1018,6 +1023,11 @@ interface EditorTableProps {
   onFootnoteCreated?: () => void
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
+  /**
+   * ProjectWorkspace's parallelBiblesPanelActive: the editor, on a scripture
+   * file. Bible data shows only then (AQU-1685).
+   */
+  bibleOpen?: boolean
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1066,6 +1076,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  bibleOpen = false,
 }, ref) {
   const t = useT()
   // The switcher trigger and the closed pill name the lane the same way.
@@ -1176,6 +1187,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
+  // AQU-1687: Bible voices (chips, rails, "Show every line by …"). Null
+  // context and no filter unless the project's Voices enrichment is on, the
+  // Bible data experiment is on and a Bible is open (AQU-1685).
+  const bibleVoices = useBibleVoices({
+    project,
+    bibleOpen,
+    cellStore,
+    cellIds: fileCellIds,
+    version: cellStoreVersion,
+    fileId: audioFileId,
+  })
+  const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleVoices
+  const voiceFilterActive = bibleVoices.filteredCellIds !== null
   const splitByMilestone = useMilestoneSplit()
   const pendingJumpCellIdRef = useRef<string | null>(null)
   const milestoneNavigation = useMemo(() =>
@@ -1205,6 +1229,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return map
   }, [idmlMilestoneNavigation, milestoneNavigation])
   const displayCellIds = useMemo(() => {
+    // AQU-1687: "Show every line by …" lists the speaker's lines across the
+    // whole file, so it outranks the milestone page.
+    if (bibleVoices.filteredCellIds) return bibleVoices.filteredCellIds
     if (!splitByMilestone) return fileCellIds
     const selected = chapterNavigationSelection?.fileId === audioFileId
       ? chapterNavigationSelection
@@ -1218,6 +1245,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellIdsForMilestonePage(milestoneNavigation, key) ?? fileCellIds
   }, [
     audioFileId,
+    bibleVoices.filteredCellIds,
     chapterNavigationSelection,
     fileCellIds,
     milestoneNavigation,
@@ -1338,7 +1366,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
   const revealCellPage = useCallback((cellId: string): boolean => {
     if (displayCellIdsRef.current.includes(cellId)) return true
-    if (!splitByMilestone) return false
+    // AQU-1687: a jump (search hit, comment, finding) to a line that "Show
+    // every line by …" hides drops the filter; the pending-jump effect below
+    // lands on the cell once it is listed again.
+    const hiddenByVoiceFilter = voiceFilterHides(cellId)
+    if (hiddenByVoiceFilter) {
+      clearVoiceFilter()
+      pendingJumpCellIdRef.current = cellId
+    }
+    if (!splitByMilestone) return hiddenByVoiceFilter
     const key = milestoneKeyByCellId.get(cellId)
     if (!key) return false
     const subsectionKey = idmlMilestoneNavigation
@@ -1353,10 +1389,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return true
   }, [
     audioFileId,
+    clearVoiceFilter,
     idmlMilestoneNavigation,
     milestoneKeyByCellId,
     splitByMilestone,
     subsectionKeyByCellId,
+    voiceFilterHides,
   ])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
@@ -2176,7 +2214,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       label: key,
       ...(subsection ? { subsectionKey: subsection.key } : {}),
     })
-    if (splitByMilestone) {
+    // AQU-1687: picking a chapter also leaves "Show every line by …"; the
+    // pending-jump effect lands once the chapter is listed again.
+    if (voiceFilterActive) clearVoiceFilter()
+    if (splitByMilestone || voiceFilterActive) {
       pendingJumpCellIdRef.current = targetCellId
       return
     }
@@ -2188,7 +2229,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone])
+  }, [audioFileId, clearVoiceFilter, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
 
   /**
    * Open a suggested passage (AQU-515) — land on the first cell inside the
@@ -2210,7 +2251,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (milestoneKey) {
       setChapterNavigationSelection({ fileId: audioFileId, label: milestoneKey })
     }
-    if (splitByMilestone) {
+    // AQU-1687: as for a chapter pick, a passage pick leaves the voice filter.
+    if (voiceFilterActive) clearVoiceFilter()
+    if (splitByMilestone || voiceFilterActive) {
       pendingJumpCellIdRef.current = targetCellId
       return
     }
@@ -2223,10 +2266,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     audioFileId,
     cellStore,
     cellStoreVersion,
+    clearVoiceFilter,
     fileCellIds,
     milestoneKeyByCellId,
     programmaticListScroll,
     splitByMilestone,
+    voiceFilterActive,
   ])
 
   // Settings can flip the split pref while this table is still mounted
@@ -3020,6 +3065,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         </div>
       </div>
 
+      {/* AQU-1687: outside the list conditional, so the way back stays on
+          screen even when the filter leaves no rows. */}
+      {bibleVoices.filter && <VoiceFilterBanner filter={bibleVoices.filter} onClear={clearVoiceFilter} />}
       {displayCellIds.length > 0 ? (
         <div
           ref={listRootRef}
@@ -3038,25 +3086,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onFollowRest={handleFollowRest}
             />
           )}
-          <LegendList
-            ref={listRef}
-            refScrollView={setListScrollElement}
-            data={displayCellIds}
-            dataVersion={cellStoreVersion}
-            renderItem={renderListItem}
-            extraData={listExtraData}
-            keyExtractor={(cellId) => cellId}
-            estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
-            drawDistance={lowMemoryActive ? LOW_MEMORY_DRAW_DISTANCE_PX : LEGEND_LIST_DRAW_DISTANCE_PX}
-            recycleItems
-            maintainVisibleContentPosition
-            onScroll={handleListScroll}
-            onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
-            onViewableItemsChanged={handleViewableItemsChanged}
-            viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
-            style={{ flex: 1, minHeight: 0 }}
-            contentContainerStyle={{ width: "100%" }}
-          />
+          <BibleVoicesContext.Provider value={bibleVoices.context}>
+            <LegendList
+              ref={listRef}
+              refScrollView={setListScrollElement}
+              data={displayCellIds}
+              dataVersion={cellStoreVersion}
+              renderItem={renderListItem}
+              extraData={listExtraData}
+              keyExtractor={(cellId) => cellId}
+              estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
+              drawDistance={lowMemoryActive ? LOW_MEMORY_DRAW_DISTANCE_PX : LEGEND_LIST_DRAW_DISTANCE_PX}
+              recycleItems
+              maintainVisibleContentPosition
+              onScroll={handleListScroll}
+              onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
+              onViewableItemsChanged={handleViewableItemsChanged}
+              viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
+              style={{ flex: 1, minHeight: 0 }}
+              contentContainerStyle={{ width: "100%" }}
+            />
+          </BibleVoicesContext.Provider>
         </div>
       ) : isTimeOrdered ? (
         // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
@@ -6549,7 +6599,16 @@ function EditorRow({
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
   const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
-  const showCellLabel = cellLabelsEnabled && labelText
+  // AQU-1687: Bible voices. The voice chip outranks only the cell's own
+  // label: an assigned voice or a `cast_name` keeps the slot whether or not
+  // cell labels are shown, because dubbing projects already name their
+  // speakers there. The chip has its own switch (View settings → Bible data).
+  const cellVoices = useCellVoices(cell.group, cell.type)
+  const castHoldsSlot =
+    ownCastName(cell) !== null ||
+    Boolean(findVoice(project.ttsSettings, assignedCastVoiceId(project.ttsSettings, cell.id)))
+  const showVoiceChip = Boolean(cellVoices?.chip) && !castHoldsSlot
+  const showCellLabel = cellLabelsEnabled && Boolean(labelText) && !showVoiceChip
 
   // The cell number tints by worst severity. That's the whole signal — the
   // concrete issue list lives in the expansion's Issues tab, not in a hover
@@ -7189,6 +7248,9 @@ function EditorRow({
           aria-hidden="true"
           className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
         />
+        {/* AQU-1687: this row's own segment of each open quotation's rail,
+            in the row's start padding. No cross-row overlay. */}
+        {cellVoices && <SpeechRails view={cellVoices} />}
         {healthCalculationsEnabled && (
           <HealthRibbon
             point={healthRibbonPoint}
@@ -7480,7 +7542,7 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel || showVoiceChip ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
               {/* AQU-646: the character, on the SOURCE side too (Sam,
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
@@ -7505,6 +7567,10 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
+              {/* AQU-1687: the Bible voice chip, in the same slot. One per row:
+                  here in the Text view, in the target corner in the Audio view
+                  (which replaces this column). */}
+              {showVoiceChip && cellVoices && <VoiceChip view={cellVoices} className="max-w-[45%] shrink-0" />}
               {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
                   relaying the client): it moved to the foot of the cell — see
                   `source-timing-line` — so the character label has this corner
@@ -7684,6 +7750,7 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
+            {showVoiceChip && cellVoices && audioLens && <VoiceChip view={cellVoices} className="max-w-[60%]" />}
             <CellPresenceBadges peers={remoteCellPresence} />
             {/* AQU-1191: low-memory mode drops the presence badges above, which
                 were the ONLY thing naming who holds a cell — `heldByLabel` just

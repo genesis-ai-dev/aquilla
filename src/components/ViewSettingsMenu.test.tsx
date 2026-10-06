@@ -18,6 +18,10 @@ import {
   isLowMemoryActive,
   setLowMemoryMode,
 } from "@/lib/perf/low-memory"
+import {
+  getBibleDataViewPrefs,
+  resetBibleDataViewPrefsCacheForTests,
+} from "@/lib/store/bible-data-view-prefs"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -379,5 +383,47 @@ describe("ViewSettingsMenu — highlight open comments", () => {
     fireEvent.click(toggle)
 
     expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+})
+
+// AQU-1687: each person's options for the Voices enrichment. They exist only
+// where the project has Voices on, and they are device preferences, like the
+// milestone split: what one person likes to see while reading.
+describe("ViewSettingsMenu — Bible data", () => {
+  beforeEach(() => {
+    resetBibleDataViewPrefsCacheForTests()
+  })
+
+  it("has no Bible data section when the project does not show Voices", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+    expect(screen.queryByRole("switch", { name: "Voice chips" })).toBeNull()
+  })
+
+  it("switches voice chips and speech rails, and picks the label language, for this device", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).getByText("Bible data")).toBeTruthy()
+
+    // Both on by default, and the label chain starts at the project's names.
+    const chips = within(section).getByRole("switch", { name: "Voice chips" })
+    const rails = within(section).getByRole("switch", { name: "Speech rails" })
+    expect(chips.getAttribute("aria-checked")).toBe("true")
+    expect(rails.getAttribute("aria-checked")).toBe("true")
+    expect(within(section).getByRole("radio", { name: "Project names" }).getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(chips)
+    fireEvent.click(within(section).getByRole("radio", { name: "English names" }))
+
+    expect(getBibleDataViewPrefs()).toEqual({ voiceChips: false, speechRails: true, labelMode: "english" })
+    // Survives a reload: stored on this device.
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toEqual({ voiceChips: false, speechRails: true, labelMode: "english" })
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 })

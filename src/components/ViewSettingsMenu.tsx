@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
+import { BibleDataViewSettings } from "@/components/bible-data/BibleDataViewSettings"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -71,6 +72,8 @@ interface ViewSettingsMenuProps {
   footnoteViewMode?: FootnoteViewMode
   /** When approved target renderings receive the quiet key-term highlight. */
   targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
+  /** AQU-1687: the project has the Voices enrichment on, so the Bible data options apply. */
+  bibleDataVoicesEnabled?: boolean
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
@@ -113,6 +116,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   healthCalculationsEnabled = true,
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
+  bibleDataVoicesEnabled = false,
   sourceFontSize,
   targetFontSize,
   sourceFontSizeExplicit = false,
@@ -409,6 +413,15 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                   })}
                 </RadioGroup>
               </div>
+            </>
+          )}
+
+          {/* AQU-1687: personal options for the Voices enrichment, shown only
+              where the project has it on. Device settings, like low memory. */}
+          {bibleDataVoicesEnabled && (
+            <>
+              <Separator />
+              <BibleDataViewSettings />
             </>
           )}
 

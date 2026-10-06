@@ -6,8 +6,8 @@
 // where each name came from. Shown in the chip's popover on hover and on
 // keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
 // marks disputed (slice 3). AQU-1692: a "Check" badge where the data is unsure
-// who speaks, and a maintainer's correction ("Corrected by …") with the
-// action that opens the correction dialog.
+// who speaks, a maintainer's correction ("Corrected by …") with the action
+// that opens the correction dialog, and "Adopt voices as cast".
 
 import { Fragment } from "react"
 import { AlertTriangle, CircleHelp } from "lucide-react"
@@ -23,6 +23,7 @@ import {
 } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import { chapterOf } from "@/lib/bible-data/voice-cast"
 import type { AppliedVoiceOverride } from "@/lib/bible-data/voice-overrides"
 import type { CellVoiceView } from "./voices-context"
 import { evidenceSourceKey, labelSourceKey, narratorKey, speechTypeKey } from "./voice-text"
@@ -44,6 +45,7 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
   const t = useT()
   const { context, voices } = view
   const shown = distinctVoices(voiceSequence(context.index, voices))
+  const adoptCast = context.maintainer?.adoptCast
 
   // One "Show every line by …" per speaker, on that speaker's first speech.
   const offered = new Set<BkpEntityId>()
@@ -79,7 +81,7 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
                 hasAddresseeName={Boolean(voice.speech.addressee && context.labelFor(voice.speech.addressee))}
                 onShowLines={offersFilter(voice.speech) ? context.showLinesBy : undefined}
                 applied={context.index.overrides.get(voice.speech.id)}
-                onCorrect={context.maintainer?.correct}
+                onCorrect={context.maintainer?.correct ?? undefined}
               />
             )}
           </li>
@@ -108,6 +110,17 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
             })}
           </dl>
         </div>
+      )}
+      {adoptCast && voices.refs[0] && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto self-start border-t border-border/60 px-0 pt-2 pb-0.5 text-xs"
+          onClick={() => adoptCast(chapterOf(voices.refs[0]))}
+        >
+          {t("bibleVoices.cast.adopt")}
+        </Button>
       )}
     </div>
   )

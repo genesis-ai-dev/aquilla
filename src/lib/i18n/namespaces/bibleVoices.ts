@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /**
  * `bibleVoices.*` (AQU-1692): the Voices follow-ups, in their own module
@@ -38,6 +38,39 @@ export const bibleVoices = defineNamespace({
     "bibleVoices.override.failed.role": "Only maintainers can correct who is speaking.",
     "bibleVoices.override.failed.conflict": "Someone changed the project settings at the same time. Try again.",
     "bibleVoices.override.failed.error": "The correction could not be saved. Try again.",
+
+    // ── Adopt as cast ──
+    "bibleVoices.cast.adopt": "Adopt voices as cast",
+    "bibleVoices.cast.dialogTitle": "Adopt the voices as the cast?",
+    "bibleVoices.cast.dialogDescription":
+      "Each line that one voice reads gets that voice's name as its character. The narrator counts as a voice. Lines with more than one voice are left for you to assign.",
+    "bibleVoices.cast.scope": "Lines to adopt",
+    "bibleVoices.cast.scopeChapter": "Only {chapter}",
+    "bibleVoices.cast.scopeFile": "The whole file",
+    "bibleVoices.cast.willAssign": plural({
+      one: "{count} line gets a character.",
+      other: "{count} lines get a character.",
+    }),
+    "bibleVoices.cast.skippedSeveral": plural({
+      one: "{count} line has more than one voice:",
+      other: "{count} lines have more than one voice:",
+    }),
+    "bibleVoices.cast.skippedUnnamed": plural({
+      one: "{count} line's voice has no name in the Bible data:",
+      other: "{count} lines' voices have no name in the Bible data:",
+    }),
+    "bibleVoices.cast.skippedApproximate": plural({
+      one: "{count} line shares its verse with another line:",
+      other: "{count} lines share their verse with another line:",
+    }),
+    "bibleVoices.cast.keptExisting": plural({
+      one: "{count} line already has a character, which stays:",
+      other: "{count} lines already have a character, which stays:",
+    }),
+    "bibleVoices.cast.confirm": plural({
+      one: "Adopt {count} line",
+      other: "Adopt {count} lines",
+    }),
   },
   context: {
     _context: {
@@ -121,6 +154,48 @@ export const bibleVoices = defineNamespace({
         description: "In the correction dialog when another person saved project settings at the same moment.",
       },
       "bibleVoices.override.failed.error": { description: "In the correction dialog when saving failed for another reason." },
+      "bibleVoices.cast.adopt": {
+        description:
+          "Link in the voice popover, for maintainers of dubbing projects: use the Bible data's speakers as " +
+          "the characters ('cast') of the lines, as a character sheet would.",
+      },
+      "bibleVoices.cast.dialogTitle": { description: "Title of the confirm dialog for adopting the voices as the cast." },
+      "bibleVoices.cast.dialogDescription": {
+        description: "Under the title: which lines get a character name, and that lines with several speakers are skipped.",
+      },
+      "bibleVoices.cast.scope": { description: "Screen-reader name of the choice between one chapter and the whole file." },
+      "bibleVoices.cast.scopeChapter": {
+        description: "Choice: adopt only this chapter's lines.",
+        placeholders: { chapter: "A book and chapter, e.g. 'RUT 1'." },
+      },
+      "bibleVoices.cast.scopeFile": { description: "Choice: adopt the lines of the whole open file (a Bible book)." },
+      "bibleVoices.cast.willAssign": {
+        description: "How many lines will get a character name.",
+        placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.cast.skippedSeveral": {
+        description: "Heading of a list of skipped lines: more than one person speaks in each. Ends with a colon before the list.",
+        placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.cast.skippedUnnamed": {
+        description: "Heading of a list of skipped lines: the data does not say who speaks them.",
+        placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.cast.skippedApproximate": {
+        description:
+          "Heading of a list of skipped lines: each holds part of a verse that another line also covers, so " +
+          "who speaks in that line is not known exactly.",
+        placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.cast.keptExisting": {
+        description: "Heading of a list of lines that already have a character name; adopting does not change them.",
+        placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.cast.confirm": {
+        description: "Confirm button: write the character names.",
+        placeholders: { count: "A number of lines." },
+        maxLength: 32,
+      },
     },
   },
   surfaces: [],

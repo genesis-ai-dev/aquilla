@@ -11,6 +11,8 @@
  *   • a maintainer's correction is what the chip shows, says who made it and
  *     what the Bible data said; only a maintainer is offered "Correct …", and
  *     the dialog saves exactly the choice made;
+ *   • "Adopt voices as cast" shows its counts before writing, sends only the
+ *     lines one voice reads, and keeps a cast name the project already set;
  *   • none of it shows, and nothing is fetched, without the Bible data
  *     experiment (AQU-1685), even for a maintainer.
  */
@@ -21,6 +23,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import type { SaveVoiceOverride } from "./bible-data/use-voice-override-writer"
+import type { VoiceCastAssignment } from "./bible-data/AdoptCastDialog"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { OT_PACK12_FILES, OT_PACK12_MANIFEST, RUTH_SPEECH_1_16 } from "@/lib/bible-data/__fixtures__/ot-pack12"
@@ -116,9 +119,16 @@ interface RenderOptions {
   bibleOpen?: boolean
   metadata?: Record<string, Record<string, unknown>>
   onSaveVoiceOverride?: SaveVoiceOverride
+  onAdoptVoicesAsCast?: (assignments: readonly VoiceCastAssignment[]) => void
 }
 
-function renderRuth({ project = makeProject(), bibleOpen = true, metadata = {}, onSaveVoiceOverride }: RenderOptions = {}) {
+function renderRuth({
+  project = makeProject(),
+  bibleOpen = true,
+  metadata = {},
+  onSaveVoiceOverride,
+  onAdoptVoicesAsCast,
+}: RenderOptions = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: "file-RUT", username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(makeRows(metadata), { full: true, maxServerSeq: 1 })
@@ -144,6 +154,7 @@ function renderRuth({ project = makeProject(), bibleOpen = true, metadata = {}, 
           targetTextDirection="ltr"
           bibleOpen={bibleOpen}
           onSaveVoiceOverride={onSaveVoiceOverride}
+          onAdoptVoicesAsCast={onAdoptVoicesAsCast}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -289,6 +300,38 @@ describe("a maintainer's correction", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove correction" }))
     await waitFor(() => expect(save).toHaveBeenCalledWith(ORPAH_1_10, null))
     expect((await within(dialog).findByRole("alert")).textContent).toBe("Only maintainers can correct who is speaking.")
+  })
+})
+
+describe("adopting the voices as the cast", () => {
+  it("counts first, then sends only the lines one voice reads, keeping a cast name already set", async () => {
+    const adopt = vi.fn<(assignments: readonly VoiceCastAssignment[]) => void>()
+    renderRuth({
+      project: makeProject({ syncRole: MAINTAINER }),
+      // RUT 1:9 already has a character; it keeps the row-corner slot, so it has no chip.
+      metadata: { [rut("1:9")]: { cast_name: "Naomi (older)" } },
+      onAdoptVoicesAsCast: adopt,
+    })
+    fireEvent.click(within(await openDetails(rut("1:17"))).getByRole("button", { name: "Adopt voices as cast" }))
+
+    const dialog = await screen.findByTestId("adopt-cast-dialog")
+    // RUT 1 here: 1:17 is Ruth alone; 1:8, 1:10 and 1:16 have the narrator and a speaker.
+    expect(within(dialog).getByTestId("adopt-cast-count").textContent).toBe("1 line gets a character.")
+    expect(visible(within(dialog).getByTestId("bibleVoices.cast.skippedSeveral").textContent)).toContain(
+      "RUT 1:16: Narrator, Ruth",
+    )
+    expect(visible(within(dialog).getByTestId("bibleVoices.cast.keptExisting").textContent)).toContain(
+      "RUT 1:9: Naomi (older)",
+    )
+    expect(adopt).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Adopt 1 line" }))
+    expect(adopt).toHaveBeenCalledWith([{ cellId: rut("1:17"), castName: "Ruth" }])
+  })
+
+  it("is not offered below maintainer, the floor of a cast assignment", async () => {
+    renderRuth({ project: makeProject({ syncRole: CONTRIBUTOR }), onAdoptVoicesAsCast: vi.fn() })
+    expect(within(await openDetails(rut("1:17"))).queryByRole("button", { name: "Adopt voices as cast" })).toBeNull()
   })
 })
 

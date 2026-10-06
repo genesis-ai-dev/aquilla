@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { CellStore, CellSummary } from "@/hooks/useActiveCellStore"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import type { VoiceCastCell } from "@/lib/bible-data/voice-cast"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { mentionsEntity, type PeopleIndex } from "@/lib/bible-data/people-index"
 import {
@@ -23,6 +24,7 @@ import {
   type VoiceIndex,
 } from "@/lib/bible-data/voice-index"
 import { projectHasScriptureFiles, type ProjectRecord } from "@/lib/parsers/types"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
 import { onBibleFilterRequest, publishBibleFilter, type BibleFilterKind, type BibleFilterSpec } from "./bible-data-bus"
@@ -49,6 +51,8 @@ export interface BibleDataOptions {
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** AQU-1692: the person may correct voices (a maintainer, with somewhere to save). */
   canCorrectVoices?: boolean
+  /** AQU-1692: the person may adopt the voices as the cast (a maintainer, with somewhere to send it). */
+  canAdoptVoiceCast?: boolean
 }
 
 /** The filter as the bar above the list shows it. */
@@ -74,6 +78,11 @@ export interface BibleData {
   /** AQU-1692: the speech a maintainer is correcting, or null. */
   correcting: string | null
   closeCorrection: () => void
+  /** AQU-1692: the chapter whose voices a maintainer is adopting as the cast, or null. */
+  adoptingCast: string | null
+  closeAdoptCast: () => void
+  /** AQU-1692: the file's cells as adopting reads them, with the cast names they have now. */
+  voiceCastCells: () => VoiceCastCell[]
 }
 
 /** The cells a filter keeps, or null when it cannot apply (its data is not loaded). */
@@ -120,6 +129,7 @@ export function useBibleData({
   jumpToCell,
   getTokenForFile,
   canCorrectVoices = false,
+  canAdoptVoiceCast = false,
 }: BibleDataOptions): BibleData {
   const prefs = useBibleDataViewPrefs()
   const hasScripture = projectHasScriptureFiles(project.files)
@@ -150,17 +160,26 @@ export function useBibleData({
   const showLinesBy = useCallback((entity: BkpEntityId) => setFilter({ kind: "speaker", entity }), [setFilter])
   const showMentionsOf = useCallback((entity: BkpEntityId) => setFilter({ kind: "mentions", entity }), [setFilter])
 
-  // AQU-1692: the speech a maintainer is correcting. It belongs to one file, like the filter.
-  const [correction, setCorrection] = useState<{ fileId: string; speechId: string } | null>(null)
-  if (correction && correction.fileId !== fileId) setCorrection(null)
-  const correcting = correction && correction.fileId === fileId ? correction.speechId : null
-  const closeCorrection = useCallback(() => setCorrection(null), [])
-  const maintainer = useMemo<VoiceMaintainerActions | null>(
-    () =>
-      canCorrectVoices && fileId
-        ? { correct: (speechId: string) => setCorrection({ fileId, speechId }) }
-        : null,
-    [canCorrectVoices, fileId],
+  // AQU-1692: a maintainer's dialogs: correcting a speech, and adopting a
+  // chapter's voices as the cast. Each belongs to one file, like the filter.
+  const [dialog, setDialog] = useState<{ fileId: string; correct?: string; adoptCast?: string } | null>(null)
+  if (dialog && dialog.fileId !== fileId) setDialog(null)
+  const open = dialog && dialog.fileId === fileId ? dialog : null
+  const closeDialog = useCallback(() => setDialog(null), [])
+  const maintainer = useMemo<VoiceMaintainerActions | null>(() => {
+    if (!fileId || (!canCorrectVoices && !canAdoptVoiceCast)) return null
+    return {
+      correct: canCorrectVoices ? (speechId: string) => setDialog({ fileId, correct: speechId }) : null,
+      adoptCast: canAdoptVoiceCast ? (chapter: string) => setDialog({ fileId, adoptCast: chapter }) : null,
+    }
+  }, [canCorrectVoices, canAdoptVoiceCast, fileId])
+  const voiceCastCells = useCallback(
+    (): VoiceCastCell[] =>
+      cellIds.map((cellId, position) => {
+        const view = cellStore.getCellView(cellId)
+        return { ...cells[position], cellId, castName: view ? ownCastName(view) : null }
+      }),
+    [cellIds, cells, cellStore],
   )
 
   const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy, maintainer })
@@ -224,7 +243,10 @@ export function useBibleData({
     filter,
     filterHides,
     clearFilter,
-    correcting: voices ? correcting : null,
-    closeCorrection,
+    correcting: voices ? (open?.correct ?? null) : null,
+    closeCorrection: closeDialog,
+    adoptingCast: voices ? (open?.adoptCast ?? null) : null,
+    closeAdoptCast: closeDialog,
+    voiceCastCells,
   }
 }

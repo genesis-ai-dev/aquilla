@@ -4120,6 +4120,24 @@ export function ProjectWorkspace() {
     ],
   )
 
+  // AQU-1692: "Adopt voices as cast" in the Bible voice details. The same
+  // write as a character sheet's: the names, then one voice per character so
+  // the cast gutter draws them.
+  const adoptVoicesAsCast = useCallback(
+    (assignments: readonly { cellId: string; castName: string }[]) => {
+      void handleImportCharacters({
+        assignments: assignments.map((a, i) => ({ ...a, cameraState: undefined, rowNumber: i + 1 })),
+        blankRows: 0,
+        unmatchedRows: [],
+        cellsWithoutRow: 0,
+        cameraDisagreements: 0,
+        filledByPosition: 0,
+        distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
+      })
+    },
+    [handleImportCharacters],
+  )
+
   /**
    * The same import, for the sheet keyed to the HEARD lines.
    *
@@ -13722,6 +13740,7 @@ export function ProjectWorkspace() {
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
             onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
+            onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

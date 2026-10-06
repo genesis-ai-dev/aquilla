@@ -36,8 +36,10 @@ export interface BibleVoicesContextValue {
 
 /** AQU-1692: a maintainer's actions on the voices. Stable callbacks, so rows stay memoized. */
 export interface VoiceMaintainerActions {
-  /** Open the correction dialog for one speech. */
-  correct: (speechId: string) => void
+  /** Open the correction dialog for one speech; null when there is nowhere to save it. */
+  correct: ((speechId: string) => void) | null
+  /** Open "Adopt voices as cast" for a chapter ("RUT 1"); null when the project cannot take a cast. */
+  adoptCast: ((chapter: string) => void) | null
 }
 
 export const BibleVoicesContext = createContext<BibleVoicesContextValue | null>(null)

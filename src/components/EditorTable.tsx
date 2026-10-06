@@ -234,6 +234,7 @@ import { useBibleData } from "./bible-data/useBibleData"
 import { VoiceChip } from "./bible-data/VoiceChip"
 import { VoiceFilterBanner } from "./bible-data/VoiceFilterBanner"
 import { VoiceOverrideDialog } from "./bible-data/VoiceOverrideDialog"
+import { AdoptCastDialog, type VoiceCastAssignment } from "./bible-data/AdoptCastDialog"
 import type { SaveVoiceOverride } from "./bible-data/use-voice-override-writer"
 import { useCellVoices } from "./bible-data/voices-context"
 import { useCellContext, useCellMentionWords, useCellTargetTints } from "./bible-data/whos-who-context"
@@ -1041,6 +1042,12 @@ interface EditorTableProps {
    * maintainer) the voice details offer no "Correct…".
    */
   onSaveVoiceOverride?: SaveVoiceOverride
+  /**
+   * AQU-1692: writes the adopted voices as the lines' cast names (and mints
+   * the cast). Without it (or below maintainer, `cast.assign`'s floor) the
+   * voice details offer no "Adopt voices as cast".
+   */
+  onAdoptVoicesAsCast?: (assignments: readonly VoiceCastAssignment[]) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1091,6 +1098,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
   bibleOpen = false,
   onSaveVoiceOverride,
+  onAdoptVoicesAsCast,
 }, ref) {
   const t = useT()
   // The switcher trigger and the closed pill name the lane the same way.
@@ -1218,7 +1226,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     fileId: audioFileId,
     jumpToCell: jumpToBibleCell,
     getTokenForFile,
+    // AQU-1692: maintainer (600) is both the settings floor and `cast.assign`'s.
     canCorrectVoices: Boolean(onSaveVoiceOverride) && (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER,
+    canAdoptVoiceCast: Boolean(onAdoptVoicesAsCast) && (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER,
   })
   const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleData
   const voiceFilterActive = bibleData.filteredCellIds !== null
@@ -3111,6 +3121,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           voices={bibleData.voices}
           onSave={onSaveVoiceOverride}
           onClose={bibleData.closeCorrection}
+        />
+      )}
+      {bibleData.adoptingCast && bibleData.voices && onAdoptVoicesAsCast && (
+        <AdoptCastDialog
+          key={bibleData.adoptingCast}
+          chapter={bibleData.adoptingCast}
+          voices={bibleData.voices}
+          cells={bibleData.voiceCastCells}
+          onAdopt={onAdoptVoicesAsCast}
+          onClose={bibleData.closeAdoptCast}
         />
       )}
       {displayCellIds.length > 0 ? (

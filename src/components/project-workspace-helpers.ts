@@ -228,6 +228,7 @@ export function buildGlosserSeeds(args: {
       source: record.btText,
       target: record.forText || cell.translated,
       weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
     })
   }
 

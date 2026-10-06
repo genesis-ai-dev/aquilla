@@ -12602,7 +12602,9 @@ export function ProjectWorkspace() {
             && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
           }
           bibleDataWhosWhoEnabled={
-            !!project && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
           }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
@@ -12651,9 +12653,11 @@ export function ProjectWorkspace() {
         projectHasScriptureFiles(project.files),
       ),
     // AQU-1689: Who's Who rides the same editor condition plus its own
-    // enrichment, which is off whenever Bible data is.
+    // enrichment, which is off whenever Bible data is, and (AQU-1685) this
+    // device's Bible data experiment.
     whosWhoAvailable:
-      !!project && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
+      !!project && isBibleDataExperimentOn(project)
+      && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
     parallelBiblesOpen,
     verseResourcesOpen,
     whosWhoOpen,

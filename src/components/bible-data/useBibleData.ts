@@ -100,8 +100,8 @@ export function useBibleData({ project, bibleOpen, cellStore, cellIds, version, 
   const shown = bibleOpen && isBibleDataExperimentOn(project)
   const voicesWanted =
     shown && resolveBibleEnrichment(project, "voices", hasScripture) && (prefs.voiceChips || prefs.speechRails)
-  const whosWhoOn = resolveBibleEnrichment(project, "whos-who", hasScripture)
-  const contextOn = resolveBibleEnrichment(project, "original-context", hasScripture)
+  const whosWhoOn = shown && resolveBibleEnrichment(project, "whos-who", hasScripture)
+  const contextOn = shown && resolveBibleEnrichment(project, "original-context", hasScripture)
 
   const cells = useVerseCells(cellStore, cellIds, version, voicesWanted || whosWhoOn || contextOn)
   const shared = useMemo(() => sharedVerseRefs(cells), [cells])

@@ -15,7 +15,9 @@
  *     the participant's word in the next verse;
  *   • filter to the cells that mention a participant, with the same bar and
  *     way back as "Show every line by …";
- *   • show none of it when the project turns the enrichment off.
+ *   • show none of it when the project turns the enrichment off, and none of
+ *     it, with nothing fetched, unless this device has the Bible data
+ *     experiment on and a Bible is open (AQU-1685).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -168,14 +170,18 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     // A scripture file: Bible data is on by its derived default.
     files: [{ id: FILE_ID, name: "JHN", type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    // AQU-1685: this device switched on the Bible data experiment.
+    experimentalFlags: { bibleData: true },
     ...overrides,
   }
 }
 
+/** `bibleOpen` is what ProjectWorkspace passes: true while the editor shows a scripture file. */
 function renderTable(
   project: ProjectRecord,
   source: (verse: string) => string = greekSource,
   rows: CellRow[] = makeRows(source),
+  bibleOpen = true,
 ) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: FILE_ID, username: "tester", requiredValidations: 1, auditStats: new Map() })
@@ -201,6 +207,7 @@ function renderTable(
           cellLabelsEnabled
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          bibleOpen={bibleOpen}
         />
       </EditorActionsProvider>
     </QueryClientProvider>
@@ -500,6 +507,24 @@ describe("off means off", () => {
     })
     expect(allMentions()).toEqual([])
     expect(row(cellIdFor("4:10")).textContent).toContain("αὐτὸν")
+  })
+
+  // AQU-1685: the experiment is device-local and off by default, and any
+  // other EditorTable mount passes no `bibleOpen`. Either way the editor is as
+  // it was before the pack, and the pack's servers see no request.
+  it.each([
+    ["with the Bible data experiment off", { experimentalFlags: {} }, true],
+    ["when no Bible is open", {}, false],
+  ] as const)("shows no tints and no Context tab, and fetches nothing, %s", async (_, overrides, bibleOpen) => {
+    renderTable(makeProject(overrides), greekSource, makeRows(greekSource), bibleOpen)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(allMentions()).toEqual([])
+    fireEvent.click(within(row(cellIdFor("4:10"))).getByRole("button", { name: "Open cell details" }))
+    await waitFor(() => expect(within(row(cellIdFor("4:10"))).getAllByRole("tab").length).toBeGreaterThan(0))
+    expect(within(row(cellIdFor("4:10"))).queryByRole("tab", { name: /Context/ })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("fetches no people data when Bible data itself is off", async () => {

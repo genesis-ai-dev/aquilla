@@ -88,11 +88,21 @@ Status: **built** = in a PR; otherwise ordered by value ÷ cost.
    draft's rate.
 
 ### Sentence and paragraph continuity
-10. **Sentence continuity at a seam.** When the source sentence runs on into
-    the next cell (the `continues_sentence` seam answer already computed by
-    AQU-1386), the target must not end cell a with sentence-final punctuation
-    or begin cell b as a new sentence. This is cheap: it reuses the seam
-    answers and needs no new Jev questions.
+10. **Sentence continuity at a seam.** *Built*: `textual.sentence`, AQU-1659.
+    Splitting a long source sentence is often good translation, so a split
+    alone is never flagged. What is flagged is a target that does not hold
+    together:
+    - **Full stop then lowercase.** Deterministic, no Jev.
+    - **Full stop mid-sentence.** The source runs on, and Jev judges that
+      the target sentence is incomplete.
+    - **No closing punctuation.** The source sentence ends here and the
+      target does not carry it on. The fix adds the project's own
+      terminator, learned from its validated cells.
+
+    The source question is the seam classifier's `continues_sentence`, word
+    for word, so the two features can be measured together. It cannot reuse
+    cached seams: they store only the combined join decision, and seam
+    classification is off by default.
 11. **Paragraph and section openings** use the project's
     point-of-departure style ("After this,", "Then") and heading
     conventions.

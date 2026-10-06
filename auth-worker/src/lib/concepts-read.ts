@@ -19,10 +19,10 @@
 // Database errors propagate. The caller decides whether a failed read is a 500
 // or a warning, so an empty result only ever means an empty termbase.
 //
-// Every server reader of a termbase that applies its terms goes through here:
-// the subscription route (routes/termbase-subscriptions.ts) and autopilot's own
-// and subscribed concepts (lib/contextual/project-context.ts). They cannot read
-// different termbases.
+// Every auth-worker reader of a termbase goes through here: the subscription
+// route (routes/termbase-subscriptions.ts), autopilot's own and subscribed
+// concepts (lib/contextual/project-context.ts) and the in-app agent's term
+// search (lib/agent/tools/search.ts). They cannot read different termbases.
 
 import { coerceMatchOptions } from "../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermRendering } from "../../../src/lib/terminology/model"

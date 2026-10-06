@@ -133,11 +133,10 @@ export interface SettingsReadDb {
  * Read-only. Used by the concepts read route as a fallback while a project is
  * still unmigrated, so nobody ever sees an empty termbase — see the long note
  * at that call site for why a fallback exists at all and why it does not
- * reopen the concurrent-add bug (the blob is never WRITTEN any more). The
- * in-app agent's term search (auth-worker/src/lib/agent/tools/search.ts) and
- * auth-worker's readProjectConcepts (lib/concepts-read.ts: subscribed
- * termbases and autopilot) import it for the same fallback, so they see what
- * the editor shows.
+ * reopen the concurrent-add bug (the blob is never WRITTEN any more).
+ * auth-worker's readProjectConcepts (auth-worker/src/lib/concepts-read.ts)
+ * imports it for the same fallback, so subscribed termbases, autopilot and the
+ * in-app agent's term search see what the editor shows.
  *
  * Shares `loadBlobConcepts` with the migration itself, so what a user sees
  * before migration and what lands after it cannot drift apart.

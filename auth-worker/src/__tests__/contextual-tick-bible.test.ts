@@ -15,7 +15,8 @@ import { JHN4_PEOPLE, JHN4_TEXT } from "../../../db/shared/bible-facts/__fixture
 import { runOneTick, makeLlmCall } from "../lib/contextual/tick"
 import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { __resetBkpServerMemory } from "../lib/bkp/pack-loader"
-import { JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
+import { JHN4_QUESTIONS, JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
+import type { BibleJudgeDeps } from "../lib/contextual/bible-span"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
 import { listRunTraces, makeTraceRecorder } from "../lib/contextual/traces"
 import { decodeBibleParams } from "../../../db/shared/bible-checks/params"
@@ -113,7 +114,7 @@ async function seedProject(settings: Record<string, unknown>): Promise<void> {
   }
 }
 
-async function tickOnce(opts: { withTraces?: boolean } = {}) {
+async function tickOnce(opts: { withTraces?: boolean; modes?: BibleJudgeDeps["modes"] } = {}) {
   const created = await createRun(db, {
     projectId: PROJECT,
     fileId: FILE,
@@ -125,12 +126,14 @@ async function tickOnce(opts: { withTraces?: boolean } = {}) {
   if (created.status !== "ok") throw new Error("run not created")
   const llm = makeLlmCall({ url: MOCK_URL, apiKey: "mock", models: { fast: "m/f", mid: "m/m", deep: "m/d" } })
   const traces = opts.withTraces ? makeTraceRecorder({}, db, { runId: created.run.id, projectId: PROJECT }) : undefined
-  const bible = makeBibleTickDeps(
+  const deps = makeBibleTickDeps(
     { ...env, BKP_BASE: PACK, OPENROUTER_API_KEY: "test-key" },
     db,
     { projectId: PROJECT, runId: created.run.id },
     traces ? { traces } : {},
   )
+  // AQU-1701: the judge's test seam over BIBLE_QA_MODES; the run driver never sets it.
+  const bible = opts.modes && deps.judge ? { ...deps, judge: { ...deps.judge, modes: opts.modes } } : deps
   await runOneTick({ db, runId: created.run.id, llm, bible })
   await traces?.flush()
   return created.run.id
@@ -208,6 +211,41 @@ describe("Jev questions, traced", () => {
     // Maintainers only: other roles do not get the row.
     const viewer = await listRunTraces(db, { projectId: PROJECT, runId })
     expect(viewer.traces.some((trace) => trace.label === "jev:bible-qa")).toBe(false)
+  })
+})
+
+// AQU-1701: C1 through the real tick, stage and draft store. WHY: C1 is shadow
+// in production, so nothing yet writes its finding; this pins the path the
+// reviewed switch to "active" will rely on. A "no" must reach the stored draft
+// as bkp:C1 with its Translation Question as evidence, advisory for the
+// reviewer, and must never cost a redraft.
+describe("C1 through the real tick", () => {
+  it("stores an ACTIVE 'no' on the staged draft as bkp:C1 with the question and answer, advisory, with no redraft", async () => {
+    packFiles = {
+      ...goodPack(),
+      "/manifest.json": () =>
+        json({
+          pack: "bkp",
+          version: "1.2.0",
+          builtAt: "2026-10-06T00:00:00Z",
+          versification: "org",
+          sources: [],
+          layers: {},
+          books: { JHN: { layers: ["text", "structure", "voices", "people", "notes"], bytes: {} } },
+        }),
+      "/notes/JHN.json": () => json({ book: "JHN", notes: [], questions: JHN4_QUESTIONS }),
+    }
+    jevP = 0.1
+    await tickOnce({ modes: { tq: "active" } })
+
+    expect(captured.filter((call) => call.system.includes("[[ctx:draft]]"))).toHaveLength(1)
+    const c9 = (await listDrafts(db, PROJECT, FILE, "proposed", "")).find((d) => d.cellId === "c9")
+    expect(decodeBibleParams(c9?.verdicts?.["bkp:C1"])).toMatchObject({
+      tq: "tq:172802",
+      refs: "JHN 4:9",
+      answer: "She was surprised because Jews had no dealings with the Samaritans.",
+    })
+    expect(c9?.verdicts?._triage).toBe("advisory")
   })
 })
 

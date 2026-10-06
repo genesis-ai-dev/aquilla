@@ -494,23 +494,44 @@ describe("createProjectShared seeds lanes atomically", () => {
   })
 })
 
-describe("updateProjectSettingsShared does not create lanes", () => {
-  it("stores the blob and leaves the lane rows untouched", async () => {
+describe("updateProjectSettingsShared creates the lanes the blob names", () => {
+  const SETTINGS = {
+    sourceLanguage: "English",
+    targetLanguage: "Spanish",
+    targetLanes: ["French"],
+  }
+
+  async function writeSettings(ifMatchVersion: number) {
+    return updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: SETTINGS,
+      ifMatchVersion,
+      updatedBy: 1,
+    })
+  }
+
+  it("creates the named target rows, tagged with the language, and a repeat does not add rows", async () => {
     await createProjectShared(t.db, {
       projectId: PROJECT,
       name: "P",
       orgId: null,
       createdBy: 1,
     })
-    const before = await lanes(t)
-    const result = await updateProjectSettingsShared(t.db, {
-      projectId: PROJECT,
-      settings: { sourceLanguage: "English", targetLanguage: "Spanish", targetLanes: ["French"] },
-      ifMatchVersion: 0,
-      updatedBy: 1,
-    })
-    expect(result.status).toBe("ok")
-    expect(await lanes(t)).toEqual(before)
+    expect(await lanes(t)).toEqual([
+      { role: "source", language: "", name: null, lang_code: null, legacy_tag: null },
+    ])
+    const first = await writeSettings(0)
+    expect(first.status).toBe("ok")
+    const created = await lanes(t)
+    expect(created).toEqual([
+      { role: "source", language: "English", name: null, lang_code: null, legacy_tag: null },
+      { role: "target", language: "French", name: null, lang_code: null, legacy_tag: "French" },
+      { role: "target", language: "Spanish", name: null, lang_code: null, legacy_tag: "Spanish" },
+    ])
+    expect(created.find((row) => row.role === "target")?.legacy_tag).not.toBe("")
+    const second = await writeSettings(1)
+    expect(second.status).toBe("ok")
+    expect(await lanes(t)).toEqual(created)
   })
 })
 
@@ -626,8 +647,9 @@ describe("readers that select lane rows directly see the display name", () => {
   })
 })
 
-// AQU-1585: editing a lane's language must not insert another lane, and a
-// settings write must not mint lanes either (AQU-1594).
+// AQU-1585: editing a lane's language (updateTargetLane) must not insert
+// another lane. A settings write still materializes a lane that was asked for
+// and does not already exist; existingLanes is what stops the duplicate.
 describe("AQU-1585 editing a lane language", () => {
   async function createEnglishSpanishPlusFrench() {
     await createProjectShared(t.db, {
@@ -661,7 +683,7 @@ describe("AQU-1585 editing a lane language", () => {
     expect(after.filter((row) => row.role === "target")).toHaveLength(2)
   })
 
-  it("does not register a lane declared only in the settings blob", async () => {
+  it("registers a brand-new lane named in the settings blob, without duplicating lanes that exist", async () => {
     await createEnglishSpanishPlusFrench()
     const before = await lanes(t)
     const added = await updateProjectSettingsShared(t.db, {
@@ -674,7 +696,15 @@ describe("AQU-1585 editing a lane language", () => {
       updatedBy: 1,
     })
     expect(added.status).toBe("ok")
-    expect(await lanes(t)).toEqual(before)
+    const after = await lanes(t)
+    expect(after.filter((row) => row.role === "source")).toEqual(before.filter((row) => row.role === "source"))
+    expect(after.filter((row) => row.role === "target").map((row) => row.legacy_tag).sort()).toEqual(
+      ["French", "Spanish", "Yoruba", "fr-CA"],
+    )
+    expect(after.some((row) => row.legacy_tag === "")).toBe(false)
+    for (const tag of ["French", "Spanish"]) {
+      expect(after.filter((row) => row.legacy_tag === tag)).toHaveLength(1)
+    }
   })
 
   it("keeps a lane added through the lanes route when settings are written", async () => {

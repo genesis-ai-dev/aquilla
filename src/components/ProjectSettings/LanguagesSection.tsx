@@ -150,14 +150,20 @@ export function LanguagesSection({
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
 
-  const targetRows = (laneRecords ?? []).filter((lane) => lane.role === "target")
-  const sourceRow = (laneRecords ?? []).find((lane) => lane.role === "source")
-  const rowMode = targetRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
+  const laneRows = laneRecords ?? []
+  const targetRows = laneRows.filter((lane) => lane.role === "target")
+  const sourceRow = laneRows.find((lane) => lane.role === "source")
+  // A new project has a source lane and no target row. Row mode is on as soon
+  // as any lane row exists and the lane callbacks are wired, so the first
+  // target is created with onCreateLane. The settings-blob path stays only
+  // for a project that has no lane rows at all (pre-backfill).
+  const rowMode =
+    laneRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
   const defaultRow = targetRows.find((lane) => lane.legacyTag === "")
-  // The former default lane is listed in its own block above (it is still the
-  // project's default-language row until AQU-1594 moves language editing onto
-  // the lane), so it is kept out of the "additional lanes" list — but it is no
-  // longer kept out of ARCHIVING — it carries its own archive control.
+  // A legacy_tag '' row, when one exists, is listed in its own block and kept
+  // out of the additional-lanes list. It still archives like any other target.
+  // A new project's first target has no '' row; it is created through
+  // onCreateLane and listed with the other targets.
   const activeRows = targetRows
     .filter((lane) => (lane.legacyTag ?? "") !== "" && !lane.archivedAt)
     .slice()

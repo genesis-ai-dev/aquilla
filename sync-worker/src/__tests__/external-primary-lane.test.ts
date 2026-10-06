@@ -2,9 +2,11 @@
 // primary target language returned 500 "DB batch failed".
 //
 // AQU-1594: CreateProject writes a target lane tagged with the language. It does
-// not write `legacy_tag ''`, and PatchSettings no longer creates lanes. A write
-// that names that tag lands on the lane. A write that omits laneId still
-// addresses `''` (canonicalLaneId) and fails on a new project — AQU-1615.
+// not write `legacy_tag ''`. PatchSettings of sourceLanguage / targetLanguage /
+// targetLanes creates the rows that are not already there, in the same batch,
+// and a second insert of the same tags must not duplicate them. A write that
+// names that tag lands on the lane. A write that omits laneId still addresses
+// `''` (canonicalLaneId) and fails on a new project — AQU-1615.
 //
 // CI missed the original 500 because the PGlite harness installs a test-only
 // trigger that mints any missing lane (db/shared/test-lane-fill.ts). Every test
@@ -22,8 +24,6 @@ vi.mock('partyserver', () => ({
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
-import { ensureProjectLanes } from '../../../db/shared/lanes'
-import { isPrimaryRegistryLane } from '../../../src/lib/lanes/registry-lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -146,13 +146,6 @@ async function setUpProject(
       ifMatchVersion: rows[0]?.version ?? 0,
     },
   ])
-  // PatchSettings stores the blob and does not create lanes. Extra lanes are rows.
-  const extras = targetLanes.filter((tag) => !isPrimaryRegistryLane(tag, targetLanguage))
-  if (extras.length > 0) {
-    await ensureProjectLanes(tdb.db, PROJECT, {
-      lanes: extras.map((tag) => ({ role: 'target' as const, language: tag, legacyTag: tag })),
-    })
-  }
   const imported = await apply([
     {
       kind: 'PlanImport',

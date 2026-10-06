@@ -397,9 +397,22 @@ export async function updateProjectSettingsShared(
   const oldThreshold = validationThreshold(current.settings)
   const newThreshold = validationThreshold(normalizedSettings)
   const thresholdChanged = oldThreshold !== newThreshold
-  // AQU-1594: a settings write does not create or edit lanes. Lanes are
-  // created and edited only by the lane routes (and by create / seed / migrate).
-  // Editing a lane's language therefore cannot mint another lane (AQU-1585).
+  // Lane ids are minted inside the attempt. The settings write is in the same
+  // transaction, so a uq_lanes_id collision rolls the version change back too.
+  // Passing the existing lane rows stops a stale targetLanes entry minting a
+  // second lane for one that already exists (AQU-1585). A language named here
+  // that has no row yet still becomes a lane — PatchSettings is how the
+  // external API registers one until AQU-1615.
+  const batchWithLanes = (head: AquillaStatement[]) =>
+    retryingLaneIdCollision(() =>
+      db.batch([
+        ...head,
+        ...ensureProjectLaneStmts(db, input.projectId, {
+          settings: normalizedSettings,
+          existingLanes: current.lanes ?? [],
+        }),
+      ]),
+    )
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a
   // racing writer can't sneak past us.
@@ -417,7 +430,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
-      await db.batch(stmts)
+      await batchWithLanes(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
       // return conflict only if another writer actually won. A projection /
@@ -455,7 +468,7 @@ export async function updateProjectSettingsShared(
     // returns `conflict` (0-row guard below); only real failures are `error`.
     let result: Awaited<ReturnType<typeof db.batch>>[number]
     try {
-      ;[result] = await db.batch(stmts)
+      ;[result] = await batchWithLanes(stmts)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error("project_settings update failed:", err)

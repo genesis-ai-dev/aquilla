@@ -27,7 +27,13 @@ import { projectHasScriptureFiles, type ProjectRecord } from "@/lib/parsers/type
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
-import { onBibleFilterRequest, publishBibleFilter, type BibleFilterKind, type BibleFilterSpec } from "./bible-data-bus"
+import {
+  onBibleFilterRequest,
+  publishBibleFilter,
+  publishBiblePackStatus,
+  type BibleFilterKind,
+  type BibleFilterSpec,
+} from "./bible-data-bus"
 import type { TargetCorpusCell } from "./target-bridge"
 import { useBibleVoices } from "./useBibleVoices"
 import { useWhosWho } from "./useWhosWho"
@@ -84,6 +90,8 @@ export interface BibleData {
   /** AQU-1692: the file's cells as adopting reads them, with the cast names they have now. */
   voiceCastCells: () => VoiceCastCell[]
 }
+
+const NO_CORRECTIONS: readonly string[] = []
 
 /** The cells a filter keeps, or null when it cannot apply (its data is not loaded). */
 export function filterCells(
@@ -182,7 +190,14 @@ export function useBibleData({
     [cellIds, cells, cellStore],
   )
 
-  const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy, maintainer })
+  const { context: voices, failure: voicesFailure } = useBibleVoices({
+    project,
+    cells,
+    shared,
+    enabled: voicesWanted,
+    showLinesBy,
+    maintainer,
+  })
   // AQU-1694: Bridge 2 trains on the file's cells as they are when it runs.
   const targetCorpus = useCallback(() => targetCorpusOf(cellStore.getAllSummaries()), [cellStore])
   const whosWho = useWhosWho({
@@ -209,6 +224,18 @@ export function useBibleData({
     [spec, cells, cellIds, shared, voiceIndex, peopleIndex],
   )
   const applied = filteredCellIds ? spec : null
+
+  // AQU-1692: View settings → Bible data says how the open book's data loaded,
+  // and lists this book's corrections whose speech a rebuilt pack no longer has.
+  const failure = voicesFailure ?? whosWho.failure
+  const statusBook = voices?.index.book ?? failure?.book ?? null
+  const failureReason = failure?.reason ?? null
+  const orphanedCorrections = voices?.index.orphanedOverrides ?? NO_CORRECTIONS
+  useEffect(() => {
+    if (!fileId || !statusBook) return
+    publishBiblePackStatus(fileId, { book: statusBook, failure: failureReason, orphanedCorrections })
+    return () => publishBiblePackStatus(fileId, null)
+  }, [fileId, statusBook, failureReason, orphanedCorrections])
 
   // The Who's Who panel sets the filter for this file, and shows which one applies.
   useEffect(() => {

@@ -20,28 +20,16 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useOnline } from "@/hooks/useOnline"
-import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import type { BkpEntityId, BkpEntityType } from "@/lib/bible-data/pack-types"
 import { refOfWord } from "@/lib/bible-data/versification"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { SaveVoiceOverride, VoiceOverrideChange } from "./use-voice-override-writer"
+import { voiceOverrideFailureKey, type SaveVoiceOverride, type VoiceOverrideChange } from "./use-voice-override-writer"
 import type { BibleVoicesContextValue } from "./voices-context"
 
 /** Who can speak or be spoken to. Places and unnamed things cannot. */
 const PARTICIPANT_TYPES: ReadonlySet<BkpEntityType> = new Set(["person", "group", "deity", "local-person", "local-group"])
-
-const FAILURE_KEYS: Readonly<Record<Exclude<PatchOutcome["kind"], "ok">, MessageKey>> = {
-  blocked: "bibleVoices.override.failed.role",
-  conflict: "bibleVoices.override.failed.conflict",
-  error: "bibleVoices.override.failed.error",
-}
-
-function failureKey(outcome: Exclude<PatchOutcome, { kind: "ok" }>): MessageKey {
-  if (outcome.kind === "blocked" && outcome.reason === "offline") return "bibleVoices.override.failed.offline"
-  return FAILURE_KEYS[outcome.kind]
-}
 
 interface VoiceOverrideDialogProps {
   speechId: string
@@ -84,7 +72,7 @@ export function VoiceOverrideDialog({ speechId, voices, onSave, onClose }: Voice
     const outcome = await onSave(speechId, change)
     setBusy(false)
     if (outcome.kind === "ok") onClose()
-    else setError(failureKey(outcome))
+    else setError(voiceOverrideFailureKey(outcome))
   }
 
   const select = (

@@ -71,6 +71,16 @@ export const bibleVoices = defineNamespace({
       one: "Adopt {count} line",
       other: "Adopt {count} lines",
     }),
+
+    // ── View settings → Bible data ──
+    "bibleVoices.pack.offline": "The Bible data for this book isn't downloaded yet. It loads when you're back online.",
+    "bibleVoices.pack.notFound": "The Bible data does not cover this book yet.",
+    "bibleVoices.pack.invalid": "The Bible data for this book could not be read.",
+    "bibleVoices.orphaned.heading": plural({
+      one: "{count} voice correction no longer matches the Bible data:",
+      other: "{count} voice corrections no longer match the Bible data:",
+    }),
+    "bibleVoices.orphaned.remove": "Remove",
   },
   context: {
     _context: {
@@ -190,6 +200,26 @@ export const bibleVoices = defineNamespace({
       "bibleVoices.cast.keptExisting": {
         description: "Heading of a list of lines that already have a character name; adopting does not change them.",
         placeholders: { count: "A number of lines." },
+      },
+      "bibleVoices.pack.offline": {
+        description:
+          "In View settings, Bible data section: no voices or people show because this book's data has not been " +
+          "downloaded and there is no connection. It loads by itself when the connection is back.",
+      },
+      "bibleVoices.pack.notFound": { description: "In View settings, Bible data section: the data has nothing for the open book." },
+      "bibleVoices.pack.invalid": {
+        description: "In View settings, Bible data section: the book's data was downloaded but is damaged or not data at all.",
+      },
+      "bibleVoices.orphaned.heading": {
+        description:
+          "In View settings, Bible data section: corrections a maintainer made to who speaks a quotation, " +
+          "whose quotation the newer Bible data no longer has (its start or end moved). Each is listed with its " +
+          "reference, its author and its reason. Ends with a colon before the list.",
+        placeholders: { count: "A number of corrections." },
+      },
+      "bibleVoices.orphaned.remove": {
+        description: "Link after one of those corrections, for maintainers: delete it.",
+        maxLength: 16,
       },
       "bibleVoices.cast.confirm": {
         description: "Confirm button: write the character names.",

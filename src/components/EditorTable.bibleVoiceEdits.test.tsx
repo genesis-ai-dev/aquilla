@@ -13,17 +13,22 @@
  *     the dialog saves exactly the choice made;
  *   • "Adopt voices as cast" shows its counts before writing, sends only the
  *     lines one voice reads, and keeps a cast name the project already set;
+ *   • a book opened offline, with nothing cached, loads once the connection
+ *     is back (it used to stay empty until the file was reopened), and View
+ *     settings is told why it is empty meanwhile; a loaded book is not fetched
+ *     again; a correction whose speech the pack no longer has is reported;
  *   • none of it shows, and nothing is fetched, without the Bible data
  *     experiment (AQU-1685), even for a maintainer.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import type { SaveVoiceOverride } from "./bible-data/use-voice-override-writer"
 import type { VoiceCastAssignment } from "./bible-data/AdoptCastDialog"
+import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { OT_PACK12_FILES, OT_PACK12_MANIFEST, RUTH_SPEECH_1_16 } from "@/lib/bible-data/__fixtures__/ot-pack12"
@@ -332,6 +337,47 @@ describe("adopting the voices as the cast", () => {
   it("is not offered below maintainer, the floor of a cast assignment", async () => {
     renderRuth({ project: makeProject({ syncRole: CONTRIBUTOR }), onAdoptVoicesAsCast: vi.fn() })
     expect(within(await openDetails(rut("1:17"))).queryByRole("button", { name: "Adopt voices as cast" })).toBeNull()
+  })
+})
+
+describe("loading after reconnecting", () => {
+  it("loads a book opened offline once the connection is back, and says why it is empty meanwhile", async () => {
+    offline = true
+    renderRuth()
+    const status = renderHook(() => useBiblePackStatus("file-RUT"))
+    await waitFor(() => expect(status.result.current?.failure).toBe("offline"))
+    expect(chipIn(rut("1:8"))).toBeNull()
+
+    offline = false
+    act(() => {
+      window.dispatchEvent(new Event("online"))
+    })
+    await chip(rut("1:8"))
+    await waitFor(() => expect(status.result.current?.failure).toBeNull())
+  })
+
+  it("does not fetch a loaded book again", async () => {
+    renderRuth()
+    await chip(rut("1:8"))
+    fetchMock.mockClear()
+    act(() => {
+      window.dispatchEvent(new Event("online"))
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("reports a correction whose speech the pack no longer has", async () => {
+    const moved = "sp:o080010100041-o080010100070"
+    renderRuth({
+      project: makeProject({
+        bibleVoiceOverrides: { [moved]: { speaker: "person:Ruth", note: "Ours.", by: "mara", at: "2026-10-06T12:00:00Z" } },
+      }),
+    })
+    const status = renderHook(() => useBiblePackStatus("file-RUT"))
+    await waitFor(() => expect(status.result.current?.orphanedCorrections).toEqual([moved]))
   })
 })
 

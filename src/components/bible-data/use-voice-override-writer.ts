@@ -12,6 +12,7 @@
 
 import { useCallback } from "react"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ProjectSettingsResponse, ProjectWideSettings } from "@/lib/sync/project-settings"
 import {
   readBibleVoiceOverrides,
@@ -24,6 +25,18 @@ export type VoiceOverrideChange = Pick<BibleVoiceOverride, "speaker" | "addresse
 
 /** Save (or, with null, remove) the correction of one speech. */
 export type SaveVoiceOverride = (speechId: string, change: VoiceOverrideChange | null) => Promise<PatchOutcome>
+
+const FAILURE_KEYS: Readonly<Record<Exclude<PatchOutcome["kind"], "ok">, MessageKey>> = {
+  blocked: "bibleVoices.override.failed.role",
+  conflict: "bibleVoices.override.failed.conflict",
+  error: "bibleVoices.override.failed.error",
+}
+
+/** What to tell the maintainer when a save did not go through. */
+export function voiceOverrideFailureKey(outcome: Exclude<PatchOutcome, { kind: "ok" }>): MessageKey {
+  if (outcome.kind === "blocked" && outcome.reason === "offline") return "bibleVoices.override.failed.offline"
+  return FAILURE_KEYS[outcome.kind]
+}
 
 /** The map with one speech's correction set, or removed with null. */
 export function withVoiceOverride(

@@ -326,7 +326,8 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
-import { useVoiceOverrideWriter } from "./bible-data/use-voice-override-writer"
+import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
+import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -7094,6 +7095,16 @@ export function ProjectWorkspace() {
     currentUsername,
   )
   const bibleDataShown = !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+  // AQU-1692: how the open book's Bible data loaded, for View settings → Bible data.
+  const biblePackStatus = useBiblePackStatus(bibleDataShown ? (activeFile?.id ?? null) : null)
+  const removeVoiceCorrection = useCallback(
+    (speechId: string) => {
+      void saveVoiceOverride(speechId, null).then((outcome) => {
+        if (outcome.kind !== "ok") toast.add({ type: "error", title: t(voiceOverrideFailureKey(outcome)) })
+      })
+    },
+    [saveVoiceOverride, t],
+  )
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
@@ -12634,6 +12645,11 @@ export function ProjectWorkspace() {
             // AQU-1685: only with the Bible data experiment on and a Bible open.
             !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
             && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+          }
+          bibleDataStatus={biblePackStatus}
+          bibleVoiceCorrections={project?.bibleVoiceOverrides}
+          onRemoveVoiceCorrection={
+            (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER ? removeVoiceCorrection : undefined
           }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}

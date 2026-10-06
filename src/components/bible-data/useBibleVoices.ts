@@ -23,6 +23,7 @@ import { firstVerseBook, voiceIndexFor, type VoiceCellInput } from "@/lib/bible-
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { useEntityLabels } from "./useEntityLabels"
+import { useRetryOnReconnect } from "./use-retry-on-reconnect"
 import type { BibleVoicesContextValue, VoiceMaintainerActions } from "./voices-context"
 
 export type VoicesPack =
@@ -54,6 +55,9 @@ export async function loadVoicesPack(book: string): Promise<VoicesPack> {
 
 function useVoicesPack(book: string | null): VoicesPack | null {
   const [pack, setPack] = useState<VoicesPack | null>(null)
+  const current = book && pack?.book === book ? pack : null
+  // AQU-1692: a book that failed offline loads again on reconnecting.
+  const attempt = useRetryOnReconnect(current?.ok === false && current.reason === "offline")
   useEffect(() => {
     if (!book) return
     let live = true
@@ -63,8 +67,8 @@ function useVoicesPack(book: string | null): VoicesPack | null {
     return () => {
       live = false
     }
-  }, [book])
-  return book && pack?.book === book ? pack : null
+  }, [book, attempt])
+  return current
 }
 
 export interface BibleVoicesOptions {
@@ -84,7 +88,19 @@ export interface BibleVoicesOptions {
   maintainer: VoiceMaintainerActions | null
 }
 
-/** What rows read through BibleVoicesContext; null while Voices shows nothing. */
+/** AQU-1692: why a book's Bible data did not load. */
+export interface BiblePackFailure {
+  book: string
+  reason: BkpFailureReason
+}
+
+export interface BibleVoices {
+  /** What rows read through BibleVoicesContext; null while Voices shows nothing. */
+  context: BibleVoicesContextValue | null
+  /** AQU-1692: why the book's voices did not load; null when they did or are loading. */
+  failure: BiblePackFailure | null
+}
+
 export function useBibleVoices({
   project,
   cells,
@@ -92,7 +108,7 @@ export function useBibleVoices({
   enabled,
   showLinesBy,
   maintainer,
-}: BibleVoicesOptions): BibleVoicesContextValue | null {
+}: BibleVoicesOptions): BibleVoices {
   const prefs = useBibleDataViewPrefs()
   const book = useMemo(() => (enabled ? firstVerseBook(cells) : null), [enabled, cells])
   const pack = useVoicesPack(book)
@@ -107,7 +123,7 @@ export function useBibleVoices({
   const labelFor = useEntityLabels(project, pack?.ok ? pack.people.entities : null)
 
   const entities = pack?.ok ? pack.people.entities : null
-  return useMemo<BibleVoicesContextValue | null>(
+  const context = useMemo<BibleVoicesContextValue | null>(
     () =>
       index && labelFor && entities
         ? {
@@ -123,4 +139,6 @@ export function useBibleVoices({
         : null,
     [index, shared, labelFor, prefs.voiceChips, prefs.speechRails, showLinesBy, entities, maintainer],
   )
+  const failure = useMemo(() => (pack && !pack.ok ? { book: pack.book, reason: pack.reason } : null), [pack])
+  return { context, failure }
 }

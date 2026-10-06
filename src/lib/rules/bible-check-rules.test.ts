@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest"
 import { checkRulesForCell } from "./rule-engine"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
-import { bibleChecksGate, buildCellCheckContexts } from "@/lib/bible-data/check-context"
+import { bibleChecksEnabled, bibleChecksGate, buildCellCheckContexts } from "@/lib/bible-data/check-context"
 import type { CellData } from "@/hooks/useCells"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
@@ -88,9 +88,11 @@ describe("Bible data checks in checkRulesForCell", () => {
 
 describe("the checks enrichment gates the rules themselves", () => {
   const scripture = [{ type: "usfm" as const }]
+  /** AQU-1685: the device-local Bible data experiment, switched on. */
+  const experiment = { experimentalFlags: { bibleData: true } }
 
   it("with Bible data checks off, the rules do not exist, so broken text yields nothing", () => {
-    const project = { bibleResourcesEnabled: true, bibleEnrichments: { checks: false }, files: scripture, languageProfile: ENGLISH }
+    const project = { ...experiment, bibleResourcesEnabled: true, bibleEnrichments: { checks: false }, files: scripture, languageProfile: ENGLISH }
     expect(bibleChecksGate(project)).toEqual({ state: "off" })
     const rules = enabled({ bibleChecks: false })
     expect(rules.some((r) => r.id.startsWith("builtin:bkp:"))).toBe(false)
@@ -100,11 +102,25 @@ describe("the checks enrichment gates the rules themselves", () => {
   })
 
   it("Bible data off turns the checks off whatever the enrichment says", () => {
-    expect(bibleChecksGate({ bibleResourcesEnabled: false, bibleEnrichments: { checks: true }, files: scripture })).toEqual({ state: "off" })
+    expect(
+      bibleChecksGate({ ...experiment, bibleResourcesEnabled: false, bibleEnrichments: { checks: true }, files: scripture }),
+    ).toEqual({ state: "off" })
+  })
+
+  // AQU-1685: Bible data checks are part of the Bible data experiment. On a
+  // device that has not switched it on they are not rules at all (Rules →
+  // Built-in checks does not list them) and nothing runs, whatever the
+  // project's own choices, which a collaborator with the experiment on set.
+  it("the Bible data experiment off on this device turns the checks off, and the rules do not exist", () => {
+    const project = { bibleResourcesEnabled: true, bibleEnrichments: { checks: true }, files: scripture, languageProfile: ENGLISH }
+    expect(bibleChecksEnabled(project)).toBe(false)
+    expect(bibleChecksGate(project)).toEqual({ state: "off" })
+    expect(bibleChecksGate({ ...project, experimentalFlags: { bibleData: false } })).toEqual({ state: "off" })
+    expect(bibleChecksGate({ ...project, ...experiment }).state).toBe("on")
   })
 
   it("on but without quotation marks is dormant; with them, on", () => {
-    const base = { bibleResourcesEnabled: true, files: scripture }
+    const base = { ...experiment, bibleResourcesEnabled: true, files: scripture }
     expect(bibleChecksGate(base).state).toBe("dormant")
     expect(bibleChecksGate({ ...base, languageProfile: ENGLISH }).state).toBe("on")
   })

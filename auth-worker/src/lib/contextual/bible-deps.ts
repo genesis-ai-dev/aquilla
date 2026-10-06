@@ -67,7 +67,10 @@ export function makeBibleTickDeps(
   run: { projectId: string; runId: string },
   recorders: BibleRunRecorders = {},
 ): BibleTickDeps {
-  const runEnv: Env = { ...env, AQUILLA_PG: db }
+  // Prototype-chained, not spread: a request env can inherit its bindings
+  // (index.ts builds it with Object.create), and a spread would drop them —
+  // OPENROUTER_API_KEY first, so every Jev question would quietly abstain.
+  const runEnv: Env = Object.assign(Object.create(env) as Env, { AQUILLA_PG: db })
   let jevMs = 0
   return {
     flags: async () => {

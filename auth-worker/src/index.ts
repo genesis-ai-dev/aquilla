@@ -101,6 +101,7 @@ import agentMemoryRoutes from "./routes/agent-memory"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
+import contextualBibleCheckRoutes from "./routes/contextual-bible-check"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
@@ -312,6 +313,8 @@ app.route("/api/v2/projects", contextualRoutes)
 // Decision routes — the agent → user channel's HTTP surface (seam design
 // §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
 app.route("/api/v2/projects", contextualDecisionsRoutes)
+// AQU-1690: "Check with Bible data" over translated cells (routes/contextual-bible-check.ts).
+app.route("/api/v2/projects", contextualBibleCheckRoutes)
 // Durable team channel — the shared, project-scoped message store behind the
 // one-channel agent workspace (routes/team.ts). Sibling router, same base as
 // contextual.ts; the autopilot tick writes activity into it server-side.

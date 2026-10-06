@@ -145,6 +145,16 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssi
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 
 /**
+ * Whether bulk text validation may sign off untouched AI drafts. Like
+ * countStructuralCells it is not a permission policy — it widens what one
+ * validate gesture covers, not who may validate — so it rides the general
+ * MAINTAINER gate and needs only validation. Unset means NO. The rule it
+ * relaxes is client-side (the bulk paths' eligibility filter); the external
+ * Agent API keeps its own no-bypass check in sync-worker (AQU-1184).
+ */
+const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
+
+/**
  * AQU-1083: tell each project's realtime room that its effective settings
  * moved, so an editor already open on one re-reads instead of waiting for a
  * focus or a reload.
@@ -401,6 +411,11 @@ orgSettings.on(
     const rawCountStructural = body.settings[COUNT_STRUCTURAL_KEY]
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
+    }
+    // Same reason: a string "true" would read as off and nobody would know why.
+    const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
+    if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
+      return c.json({ error: `${ALLOW_BULK_AI_DRAFTS_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

@@ -53,6 +53,12 @@ export function countedFileSql(alias = 'f'): string {
   return `${alias}.deleted_at IS NULL AND ${notHiddenFileSql(alias)}`
 }
 
+/** "`<alias>` is a file whose rows are NOT work" — `countedFileSql`, negated. */
+function uncountedFileSql(alias: string): string {
+  return `(${alias}.deleted_at IS NOT NULL
+            OR COALESCE(${alias}.role, '') IN (${HIDDEN_ROLE_LIST}))`
+}
+
 /**
  * The anti-join form, for a row that carries `project_id` / `file_id` but has
  * no `files` join to hang a predicate on — progress rows, cells, audio takes.
@@ -65,16 +71,59 @@ export function countedFileSql(alias = 'f'): string {
  * silently vanish from every total. Only a file that is present AND uncounted
  * takes its rows out.
  *
- * Cost: one lookup on the `files` primary key per candidate row, so this is a
- * probe rather than a scan. `probe` names the correlation; override it only to
- * avoid a collision with an alias already in the query.
+ * Cost: a correlated probe on `files`, which the planner may run once per
+ * candidate row. That is fine for a statement bounded to one project or one
+ * page. A statement that filters MANY rows across projects wants the set form
+ * below instead. `probe` names the correlation; override it only to avoid a
+ * collision with an alias already in the query.
  */
 export function inCountedFileSql(alias: string, probe = 'uncounted_file'): string {
   return `NOT EXISTS (
     SELECT 1 FROM files ${probe}
      WHERE ${probe}.id = ${alias}.file_id
        AND ${probe}.project_id = ${alias}.project_id
-       AND (${probe}.deleted_at IS NOT NULL
-            OR COALESCE(${probe}.role, '') IN (${HIDDEN_ROLE_LIST}))
+       AND ${uncountedFileSql(probe)}
+  )`
+}
+
+/**
+ * The SET form of `inCountedFileSql`, for a statement that filters many rows
+ * at once (the org dashboard's audio rollup reads every selected dub take in
+ * every project of every org on the page).
+ *
+ * Uncounted files are rare — a few tombstones and hidden companions per
+ * project — so they are gathered ONCE into a small materialized set and the
+ * rows are anti-joined against that. The per-row probe above looks cheap and
+ * was not: on that dashboard it ran ~140k times through `idx_files_project`,
+ * and adding it to a join changed the join's plan enough to read all of
+ * `cells` sequentially. Together those took the all-organizations rollup from
+ * under a second to past the SPA's 15s abort.
+ *
+ * Two halves, used together:
+ *
+ *   * `uncountedFilesCteSql(scope)` goes in the statement's WITH list. `scope`
+ *     is a subquery yielding the project ids the statement is already bounded
+ *     to, so the set never grows past the caller's own reach.
+ *   * `inCountedFileSetSql(alias)` goes where `inCountedFileSql(alias)` would.
+ *
+ * Same direction as the probe, for the same reason: NOT EXISTS over the
+ * uncounted files, so a row whose `files` row is missing stays IN.
+ */
+export const UNCOUNTED_FILES_CTE = 'uncounted_files'
+
+export function uncountedFilesCteSql(projectScopeSql: string): string {
+  return `${UNCOUNTED_FILES_CTE} AS MATERIALIZED (
+       SELECT uf.project_id, uf.id AS file_id
+         FROM files uf
+        WHERE uf.project_id IN (${projectScopeSql})
+          AND ${uncountedFileSql('uf')}
+     )`
+}
+
+export function inCountedFileSetSql(alias: string, probe = 'uncounted'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM ${UNCOUNTED_FILES_CTE} ${probe}
+     WHERE ${probe}.file_id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
   )`
 }

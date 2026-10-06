@@ -188,6 +188,12 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1679: files of THIS project that stand in for upstream files
+    -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
+    -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
+    -- mirror writes those upstream files' source onto the named files instead
+    -- of adding copies; `pending` are the ones whose lines are not matched yet.
+    source_link_adopt    TEXT,
     -- AQU-507: designated Project Manager (attribution, distinct from the
     -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
     -- so removing a user never orphans the row. (migration 0072)
@@ -599,6 +605,13 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-1679: the upstream cell this source row stands in for, when that is
+    -- not the row's own cell_id (migration 0140). Set by source.cell.mirror on
+    -- a file the project already had and chose to follow the link into
+    -- (projects.source_link_adopt) — the row keeps its own cell_id, so its
+    -- translations stay attached, and the mirror finds it through this. NULL
+    -- everywhere else, including ordinary mirrored rows.
+    upstream_cell_id  TEXT,
     -- AQU-538: target-language lane (migration 0054). '' = the file's single
     -- configured target language (every pre-lane row, and the default lane for
     -- projects that never add a second language — N=1 back-compat). Source-side
@@ -755,8 +768,7 @@ CREATE TABLE cell_validators (
 );
 
 -- AQU-490: one row per (take, person). Presence IS the vote, exactly as in
--- cell_validators. No target_lang — unlike a translation, a recording is
--- shared by every target language, so a vote on it is not per-lane.
+-- cell_validators.
 CREATE TABLE cell_audio_validators (
     project_id TEXT   NOT NULL,
     file_id    TEXT   NOT NULL,
@@ -764,6 +776,13 @@ CREATE TABLE cell_audio_validators (
     audio_id   TEXT   NOT NULL,
     username   TEXT   NOT NULL,
     decided_ts BIGINT NOT NULL,
+    -- AQU-1591 (migration 0135): the lane of the TAKE this vote is on, copied
+    -- from cell_audio.lane_id at projection time rather than read off the
+    -- voter. A take lives in one lane, so its votes do too, and a lane-scoped
+    -- reader never has to join back to cell_audio to find out which. NULL on
+    -- every row that predates the backfill (AQU-1616); not part of the PK,
+    -- because (take, person) is already unique without it.
+    lane_id    TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id, username)
 );
 
@@ -794,6 +813,17 @@ CREATE TABLE cell_audio (
     deleted            INTEGER NOT NULL DEFAULT 0,
     event_id           TEXT NOT NULL,
     created_ts         BIGINT NOT NULL,
+    -- AQU-1591 (migration 0135): the lane this take belongs to (lanes.id).
+    -- AQU-1200 decided audio is per lane: `role = 'source'` — the shared
+    -- programme audio an import attached — resolves to the project's source
+    -- lane, and every dub to the target lane whose language it performs (the
+    -- event's `targetLang`, which cell.audio.* has carried since AQU-1462).
+    --
+    -- Nullable, unlike cells.lane_id, because the backfill is its own PR
+    -- (AQU-1616). Every reader resolves a NULL by the backfill's own rule —
+    -- source role -> the source lane, dub -> the lane whose legacy_tag is '' —
+    -- so a take reads into the same lane before and after that backfill runs.
+    lane_id            TEXT,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
     -- AQU-646 round 8: a take's PERMANENT display name ("Take 3", or whatever
@@ -1059,6 +1089,9 @@ CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
 CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
+-- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
+-- per-file audio read and the progress audio CTE both filter on the lane now.
+CREATE INDEX idx_cell_audio_lane ON cell_audio(project_id, file_id, lane_id) WHERE deleted = 0;
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
@@ -1840,6 +1873,8 @@ CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
 
 -- Autopilot model-call traces (0129_contextual_run_traces.sql): prompt and
 -- reply per call for the Team step inspector. VIEWER-readable, 30-day TTL.
+-- Row-level security: 0136_contextual_run_traces_rls.sql (the exact-project
+-- scope its sibling contextual tables got in 0074/0076; policies live in migrations).
 CREATE TABLE IF NOT EXISTS contextual_run_traces (
   id                bigserial PRIMARY KEY,
   run_id            text NOT NULL,
@@ -2299,6 +2334,9 @@ CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at)
 -- live databases reach that via migrations 0104–0111, which must run only after
 -- the backfill has filled every row (they fail closed if any NULL remains).
 ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+-- AQU-1591: nullable until AQU-1616. Enforced on new writes; a NULL member is exempt.
+ALTER TABLE cell_audio            ADD CONSTRAINT cell_audio_lane_id_fkey            FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE cell_audio_validators ADD CONSTRAINT cell_audio_validators_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);

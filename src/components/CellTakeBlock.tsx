@@ -179,6 +179,7 @@ function CellTakeBlockView({
     onCommitted,
     jwt: session?.jwt ?? null,
     ...(targetLang ? { targetLang } : {}),
+    surface: "recording-tab",
   })
   const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
 

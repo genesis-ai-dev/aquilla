@@ -7,7 +7,7 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach } from "vitest"
-import { stageEvents, type EmitStageContext } from "../lib/agent/emit-stage"
+import { stageEvents, type EmitStageContext, type StageOutcome } from "../lib/agent/emit-stage"
 import { AliasMap } from "../lib/agent/compress"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -544,5 +544,242 @@ describe("stageEvents — lanes (AQU-1447)", () => {
     const event = result.proposal!.events[0]
     expect(event.parentId).toBe(TARGET_HEAD)
     expect(event.payload).not.toHaveProperty("targetLang")
+  })
+})
+
+// AQU-609: a rule with scope "lane" governs only its own lane, so lane-scoped
+// rules must not lint other lanes' drafts. Staging feeds every NEEDS REVIEW
+// line back to the model as an instruction to redraft — a rule pinned to "fr"
+// firing on an "es" or default-lane draft would make the model rewrite text
+// that was correct for its own lane.
+describe("stageEvents — lane-scoped lint rules (AQU-609)", () => {
+  const FR = "fr"
+  const RULE_NAME = "French lane: no 'beginnito'"
+  // Fresh per call: staging writes provenance and targetLang into the payload.
+  const draft = () => [
+    { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "En el beginnito" } },
+  ]
+
+  beforeEach(async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [
+            {
+              id: "r-fr",
+              name: RULE_NAME,
+              enabled: true,
+              scope: "lane",
+              lane: FR,
+              check: { type: "target-forbids", targetPattern: "beginnito*" },
+            },
+          ],
+        }),
+      )
+      .run()
+  })
+
+  it.each([
+    ["another lane", "es"],
+    ["the default lane", ""],
+  ])("does not lint a draft staged into %s against a rule pinned to a different lane", async (_where, lane) => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).not.toContain(RULE_NAME)
+  })
+
+  it("still lints a draft staged into the rule's own lane", async () => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: FR }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain(RULE_NAME)
+  })
+})
+
+// AQU-1670: staging a whole-file proposal used to cost one Hyperdrive→Neon
+// round-trip PER PROPOSED CELL, so a 28-cell proposal (the partner repro) ran
+// past Cloudflare's origin timeout and returned 522 — discarding every cell
+// the model had just paid to draft, identically on every retry. These tests
+// pin the shape that fixed it: the number of cell reads must not depend on the
+// number of cells.
+describe("stageEvents — batched cell reads (AQU-1670)", () => {
+  /** Count the statements that read the `cells` projection. */
+  function countingDb(db: AquillaDb, opts: { failFirstBatch?: boolean } = {}) {
+    const stats = { cellReads: 0, batchReads: 0, failures: 0 }
+    const proxy = {
+      prepare(sql: string) {
+        const readsCells = /FROM cells/.test(sql)
+        const isBatch = readsCells && /\(file_id, cell_id\) IN/.test(sql)
+        if (readsCells) stats.cellReads++
+        if (isBatch) stats.batchReads++
+        if (isBatch && opts.failFirstBatch && stats.failures === 0) {
+          stats.failures++
+          return {
+            bind: () => ({
+              async all() {
+                throw new Error("connection reset")
+              },
+            }),
+          }
+        }
+        return db.prepare(sql)
+      },
+    } as unknown as AquillaDb
+    return { db: proxy, stats }
+  }
+
+  /** N distinct source/target cell pairs in one file, GEN 1:1…1:N. */
+  async function seedCells(count: number): Promise<string[]> {
+    const ids: string[] = []
+    for (let i = 0; i < count; i++) {
+      const n = String(i + 1).padStart(4, "0")
+      const cellId = `9${n}9999-9999-4999-8999-999999999999`
+      const sourceEvent = `a${n}aaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`
+      const targetEvent = `b${n}bbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'source', 'src', ?, ?, 0),
+                (?, ?, ?, 'target', 'old', ?, ?, 0)`,
+      )
+        .bind(
+          PROJECT, FILE, cellId, `GEN 1:${i + 1}`, sourceEvent,
+          PROJECT, FILE, cellId, `GEN 1:${i + 1}`, targetEvent,
+        )
+        .run()
+      ids.push(cellId)
+    }
+    return ids
+  }
+
+  function commits(cellIds: string[]) {
+    return cellIds.map((cellId, i) => ({
+      kind: "target.cell.commit",
+      fileId: FILE,
+      cellId,
+      payload: { value: `draft ${i + 1}` },
+    }))
+  }
+
+  it("reads 28 cells in ONE query — the same count as a single-cell batch", async () => {
+    const cellIds = await seedCells(28)
+
+    const one = countingDb(env.AQUILLA_PG)
+    const small = await stageEvents(one.db, commits(cellIds.slice(0, 1)), ctx())
+    expect(small.proposal!.events).toHaveLength(1)
+
+    const many = countingDb(env.AQUILLA_PG)
+    const big = await stageEvents(many.db, commits(cellIds), ctx())
+    expect(big.proposal!.events).toHaveLength(28)
+
+    // The point of the issue: 28× the cells, the SAME number of cell reads.
+    expect(many.stats.cellReads).toBe(one.stats.cellReads)
+    expect(many.stats.batchReads).toBe(1)
+    expect(many.stats.cellReads).toBe(1)
+  })
+
+  it("reads a 100-cell proposal in ONE query too (acceptance criterion)", async () => {
+    const cellIds = await seedCells(100)
+    const counted = countingDb(env.AQUILLA_PG)
+    const result = await stageEvents(counted.db, commits(cellIds), ctx())
+
+    expect(result.proposal!.events).toHaveLength(100)
+    expect(counted.stats.cellReads).toBe(1)
+  })
+
+  it("resolves each cell's own chain and source pin through the batch", async () => {
+    const cellIds = await seedCells(3)
+    const result = await stageEvents(env.AQUILLA_PG, commits(cellIds), ctx())
+
+    const events = result.proposal!.events
+    expect(events.map((e) => e.cellId)).toEqual(cellIds)
+    // Each event must carry ITS OWN cell's head and source pin, not a
+    // neighbour's — the failure mode a batched read would introduce.
+    events.forEach((event, i) => {
+      const n = String(i + 1).padStart(4, "0")
+      expect(event.parentId).toBe(`b${n}bbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`)
+      expect(event.payload.sourceEventId).toBe(`a${n}aaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`)
+      expect(event.display.canonicalRef).toBe(`GEN 1:${i + 1}`)
+    })
+  })
+
+  it("keeps the batch lane-scoped: another lane's head is never borrowed", async () => {
+    const cellIds = await seedCells(2)
+    const result = await stageEvents(env.AQUILLA_PG, commits(cellIds), ctx({ lane: "zz99zz99" }))
+
+    // No target row exists in that lane, so every commit is a genesis commit
+    // tagged with the lane — exactly as the single-cell path behaves.
+    for (const event of result.proposal!.events) {
+      expect(event.parentId).toBeUndefined()
+      expect(event.payload.targetLang).toBe("zz99zz99")
+    }
+  })
+
+  it("retries a transient prefetch failure instead of discarding the batch", async () => {
+    const cellIds = await seedCells(5)
+    const counted = countingDb(env.AQUILLA_PG, { failFirstBatch: true })
+    const result = await stageEvents(counted.db, commits(cellIds), ctx())
+
+    // The whole batch rides on the one read, so a single hiccup must not cost
+    // the model's work — it is retried, and nothing falls back to per-cell.
+    expect(result.proposal!.events).toHaveLength(5)
+    expect(counted.stats.batchReads).toBe(2)
+  })
+
+  it("reports a stage outcome carrying the cell count and the duration", async () => {
+    const cellIds = await seedCells(4)
+    const outcomes: StageOutcome[] = []
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [
+        ...commits(cellIds),
+        // One rejected (unknown kind) and one stale (superseded parent).
+        { kind: "cells.update", fileId: FILE, payload: {} },
+        {
+          kind: "target.cell.commit",
+          fileId: FILE,
+          cellId: CELL,
+          parentId: SOURCE_HEAD,
+          payload: { value: "x" },
+        },
+      ],
+      ctx({ onStageOutcome: (o) => outcomes.push(o) }),
+    )
+
+    expect(result.proposal!.events).toHaveLength(4)
+    expect(outcomes).toHaveLength(1)
+    const outcome = outcomes[0]
+    expect(outcome).toMatchObject({
+      runId: RUN_ID,
+      projectId: PROJECT,
+      requested: 6,
+      staged: 4,
+      rejected: 1,
+      stale: 1,
+      status: "staged",
+      // Zero is the regression guard: a non-zero value means some cell escaped
+      // the batch and paid for its own round-trip again.
+      fallbackQueries: 0,
+    })
+    expect(outcome.cellsPrefetched).toBe(5)
+    expect(outcome.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("never lets a throwing telemetry sink cost a staged batch", async () => {
+    const cellIds = await seedCells(2)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      commits(cellIds),
+      ctx({
+        onStageOutcome: () => {
+          throw new Error("posthog exploded")
+        },
+      }),
+    )
+    expect(result.proposal!.events).toHaveLength(2)
   })
 })

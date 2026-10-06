@@ -93,6 +93,7 @@ import {
   renameProjectLane,
   setProjectLaneArchived,
   fetchLaneLastChange,
+  settingsEditorName,
   type LaneLastChangeResult,
 } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
@@ -110,7 +111,8 @@ import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
+import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
+import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -128,7 +130,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -356,6 +358,15 @@ const BLOB_BACKED_KEYS = [
   "termMatching",
 ] as const satisfies readonly (keyof Baseline)[]
 type BlobBackedKey = (typeof BLOB_BACKED_KEYS)[number]
+
+/** The provenance line under the project name. The settings response names
+ *  the saver only by id, so without a username it gives the date alone rather
+ *  than "Last edited by undefined" (walk 10-02). */
+function lastEditedLine(name: string | null, date: string, t: TFunction): string {
+  return name
+    ? t("projectSettings.shared.lastEdited", { name, date })
+    : t("projectSettings.shared.lastEditedOn", { date })
+}
 
 function sameSetting(a: unknown, b: unknown): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b)
@@ -723,13 +734,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Seed once when the project first loads. We intentionally don't reseed on
   // every `project` identity change — background sync writes to IDB shouldn't
   // wipe the user's in-progress edits. After save/discard we reseed manually.
+  //
+  // `project` here has NO shared settings (`includeSettings: false` above), so
+  // when this page's own settings GET has already landed, seed from the record
+  // with the blob overlaid. Otherwise the shared-settings effect below settles
+  // the shared fields once the GET lands.
   useEffect(() => {
     if (!project || seededRef.current) return
-    const b = buildBaseline(project)
+    const b = buildBaseline(
+      sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
+    )
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
-  }, [project, applyBaseline])
+  }, [project, applyBaseline, sharedSettingsFetched, sharedSettingsBlob])
 
   // Settings that live ONLY in the shared settings blob never reach `project`
   // on this page: it passes `includeSettings: false` to `useProject` (it owns
@@ -1137,7 +1155,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           toast.add({
             type: "warning",
             title: t("projectSettings.save.conflictToast", {
-              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
+              username: settingsEditorName(out.latest.updatedBy) ?? t("projectSettings.save.conflictFallbackUsername"),
             }),
           })
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
@@ -1332,6 +1350,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
     { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
+    // AQU-1672: the brief gates Autopilot starts (AQU-827) but had no entry of
+    // its own anywhere in settings — it was reachable only by opening Living
+    // Memory's Instructions pane and clicking the breadcrumb back up to the
+    // index. Its own section id gives it a row in the AI & completion pane AND
+    // makes a search for "brief" land on it.
+    { id: "section-brief", label: "Translation brief", keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -1432,6 +1456,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // standalone /project/:id/memory surface; this pane keeps a cross-link
       // NavRow to memory/instructions instead of a nested settings page.
       sectionIds: [
+        "section-brief",
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
@@ -1622,8 +1647,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
+                // "icon", not "icon-sm": the group lines its halves up, so the
+                // arrow must be as tall as "Save changes" beside it.
                 <Button
-                  size="icon-sm"
+                  size="icon"
                   disabled={saving}
                   aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
                 >
@@ -1721,6 +1748,23 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // edited on memory/instructions now, so read the saved value straight off
   // the project record — the same source the removed form baseline used.
   const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+
+  // AQU-1672: the brief's derived status, as the row's right-aligned hint —
+  // same three strings the Living Memory index shows, so the two surfaces can
+  // never disagree about whether a brief exists. Read from the editable
+  // settings hook first (it carries this page's optimistic overlay) and fall
+  // back to the project record before that GET resolves, like the panes above.
+  const briefHint = (() => {
+    const brief = sharedSettingsBlob?.translationBrief ?? project?.translationBrief
+    switch (briefStatus(brief)) {
+      case "none":
+        return t("terminology.livingMemory.section.brief.statusNone")
+      case "draft":
+        return t("terminology.livingMemory.section.brief.statusDraft")
+      case "complete":
+        return t("terminology.livingMemory.section.brief.statusComplete")
+    }
+  })()
 
   const settingsContent = (
     <Page size={pageSize}>
@@ -1834,11 +1878,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
-                  sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
-                    ? t("projectSettings.shared.lastEdited", {
-                        name: sharedUpdatedBy.username,
-                        date: new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-                      })
+                  sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
+                    ? lastEditedLine(
+                        settingsEditorName(sharedUpdatedBy),
+                        new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+                        t,
+                      )
                     : t("projectSettings.shared.nameHint")
                 }
                 control={
@@ -2062,6 +2107,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+
+        {/* AQU-1672: a direct, first-class entry to the translation brief.
+            Unlike the Living Memory cross-link below it, this row renders while
+            searching too — a search for "brief" has to produce the path to the
+            brief, not an empty result. Same deliberate omission of a modal
+            `state`: this is a real navigation out of settings. */}
+        {searchGroupLabel("section-brief")}
+        {id && sectionsToRender.some((s) => s.id === "section-brief") && (
+          <div id="section-brief" className="flex flex-col gap-12">
+            <NavList>
+              <NavRow
+                to={projectMemoryPath(id, "brief")}
+                icon={BRIEF_ICON}
+                title={t("autopilot.readiness.brief.label")}
+                description={t("terminology.livingMemory.section.brief.description")}
+                hint={briefHint}
+              />
+            </NavList>
+          </div>
         )}
 
         {searchGroupLabel("section-ai-instructions")}

@@ -51,6 +51,10 @@ interface Props {
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
   cells: CellData[]
+  /** The corpus behind `cells` is still loading; mining it now would see nothing. */
+  cellsLoading?: boolean
+  /** The corpus read failed, so `cells` is empty for a reason other than "no edits". */
+  cellsError?: Error
   completionSettings?: CompletionSettings
   orgRules?: TranslationRule[]
   canEditOrgRules?: boolean
@@ -80,6 +84,8 @@ export function RulesSurface({
   setBuiltinOverride,
   infractions,
   cells,
+  cellsLoading,
+  cellsError,
   completionSettings,
   orgRules = [],
   canEditOrgRules = false,
@@ -227,6 +233,8 @@ export function RulesSurface({
         onAdd={addRule}
         projectId={projectId}
         cells={cells}
+        cellsLoading={cellsLoading}
+        cellsError={cellsError}
       />
       <Button
         onClick={() => setEditingRuleId("new")}

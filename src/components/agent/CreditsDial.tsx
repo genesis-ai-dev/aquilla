@@ -1,6 +1,6 @@
 /**
- * CreditsDial — at-a-glance org agent-credit gauge for the agent surfaces
- * (dock panel + workbench agent pane).
+ * CreditsDial — at-a-glance org agent-credit gauge, shown beside the agent
+ * chat composer (via AgentUsageRing) for maintainers.
  *
  * A small ring shows today's agent-rail spend against the org's agent daily
  * cap; clicking opens a popover with the full breakdown (agent day/week +
@@ -10,32 +10,31 @@
  *   1. Role gate: viewer's org role must be >= MAINTAINER (600). Translators
  *      must never see credit/cost data.
  *   2. Server gate: getOrgCredits returns null on 403 (not maintainer server-
- *      side, or showToOrg off) → the dial self-hides.
+ *      side, or showToOrg off) → the dial renders `fallback` instead.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { UsageRingIcon } from "./UsageRingIcon"
 
 export interface CreditsDialProps {
   jwt: string
   orgId: number
   /** The viewer's numeric org role level (from OrgSummary.role.level). */
   orgRoleLevel: number
+  /** Re-fetch when this changes (e.g. after each agent run settles). */
+  refreshKey?: unknown
+  /** Shown while credits are loading or hidden (403 / error), so the slot
+   *  never goes blank for a maintainer whose org hides credits. */
+  fallback?: ReactNode
 }
 
-/** Ring color mirrors the cap-pressure convention used elsewhere. */
-function ringClass(pct: number): string {
-  if (pct >= 85) return "stroke-red-500"
-  if (pct >= 60) return "stroke-amber-500"
-  return "stroke-sky-500"
-}
-
-export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
+export function CreditsDial({ jwt, orgId, orgRoleLevel, refreshKey, fallback = null }: CreditsDialProps) {
   const t = useT()
   const [data, setData] = useState<OrgCredits | null>(null)
   const [open, setOpen] = useState(false)
@@ -49,20 +48,14 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+  }, [refresh, refreshKey])
 
   // Role gate (double-check): non-maintainers never see credit data.
-  if (orgRoleLevel < ROLE.MAINTAINER) return null
-  if (!data) return null
+  if (orgRoleLevel < ROLE.MAINTAINER) return fallback
+  if (!data) return fallback
 
   const { day, week, config, remaining } = data
   const pct = capUsagePct(day.agentCredits, config.agentDailyCap)
-
-  // Ring drawn in a 12x12 box, rendered at 16px. The radius insets by half the
-  // stroke so the arc stays inside the box at this weight.
-  const stroke = 2.5
-  const r = (12 - stroke) / 2
-  const C = 2 * Math.PI * r
 
   const summary = t("onboarding.credits.dialSummary", { credits: formatCredits(day.agentCredits) })
 
@@ -80,33 +73,14 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
               onClick={refresh}
               data-testid="credits-dial"
               aria-label={summary}
-              className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground"
+              className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground"
             />
           }
         >
-          <svg viewBox="0 0 12 12" className="size-4 -rotate-90" aria-hidden>
-            <circle
-              cx="6"
-              cy="6"
-              r={r}
-              fill="none"
-              strokeWidth={stroke}
-              className="stroke-muted-foreground/25"
-            />
-            <circle
-              cx="6"
-              cy="6"
-              r={r}
-              fill="none"
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={`${(pct / 100) * C} ${C}`}
-              className={ringClass(pct)}
-            />
-          </svg>
+          <UsageRingIcon pct={pct} />
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="end" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
+      <PopoverContent side="top" align="start" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
         <p className="mb-2 font-medium">{t("onboarding.credits.popoverAgentTitle")}</p>
         <div className="space-y-1.5">
           <DialRow label={t("onboarding.timeWindow.today")} used={day.agentCredits} cap={config.agentDailyCap} testId="dial-agent-day" />

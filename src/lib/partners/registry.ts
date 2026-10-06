@@ -18,7 +18,11 @@
  * See `docs/PARTNER-INTEGRATIONS.md` for the convention and how to add one.
  */
 
-import type { IdmlTargetHtmlNormalizer, PartnerIntegration } from "./types"
+import type {
+  IdmlTargetHtmlNormalizer,
+  PartnerIdmlExportOption,
+  PartnerIntegration,
+} from "./types"
 
 const registered = import.meta.glob<{ default: PartnerIntegration }>(
   "/src/partner-integrations/*/register.ts",
@@ -102,4 +106,18 @@ export function isScriptureCellWith(
 
 export function isPartnerScriptureCell(cellMetadata: unknown): boolean {
   return isScriptureCellWith(INTEGRATIONS, cellMetadata)
+}
+
+/**
+ * Export-dialog options a partner registered for this file's profile. Empty
+ * when the profile is missing or no partner claimed it — including the public
+ * copy, where the partner folders are gone.
+ */
+export function partnerIdmlExportOptionsFor(
+  profileId: string | null | undefined,
+): readonly PartnerIdmlExportOption[] {
+  if (!profileId) return []
+  return INTEGRATIONS.flatMap((integration) =>
+    (integration.idmlExportOptions ?? []).filter((option) => option.profileIds.includes(profileId)),
+  )
 }

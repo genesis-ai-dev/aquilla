@@ -254,6 +254,8 @@ export default defineConfig(({ mode }) => ({
             "scripts/lib/e2e-lock.test.ts",
             "scripts/lib/worktree-install-guard.test.ts",
             "scripts/lib/spawn-command.test.ts",
+            "scripts/lib/playwright-loader-env.test.ts",
+            "scripts/lib/listening-pids.test.ts",
           ],
         },
       },

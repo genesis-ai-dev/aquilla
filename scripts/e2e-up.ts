@@ -15,6 +15,8 @@ import {
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
 import { acquireE2eSlotLock, type E2eSlotLock } from "./lib/e2e-lock"
+import { pidsFromNetstat } from "./lib/listening-pids"
+import { playwrightLoaderEnv } from "./lib/playwright-loader-env"
 import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -236,18 +238,27 @@ function dumpLogs(tailLines = 80): void {
 /** Free a port held by a stale process from a prior run. Non-interactive
  * SIGTERM-then-SIGKILL — anything bound to one of our managed ports is by
  * definition leftover orchestrator state. */
-async function freePort(port: number): Promise<void> {
+function pidsListeningOn(port: number): string[] {
+  // lsof is not on Windows. A missing lookup used to look like "port is free",
+  // so the next stack's mock died with EADDRINUSE and the stale listener
+  // answered health checks.
+  if (process.platform === "win32") {
+    const raw = spawnSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8" }).stdout || ""
+    return pidsFromNetstat(raw, port)
+  }
   const pidsRaw = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
-  const pids = pidsRaw.split("\n").filter(Boolean)
+  return pidsRaw.split("\n").filter(Boolean)
+}
+
+async function freePort(port: number): Promise<void> {
+  const pids = pidsListeningOn(port)
   if (pids.length === 0) return
   console.log(`${TAG}[e2e-up] freeing port ${port} (held by ${pids.join(", ")})…`)
   for (const pid of pids) {
     try { process.kill(Number(pid), "SIGTERM") } catch {}
   }
   await new Promise((r) => setTimeout(r, 500))
-  const remaining = (spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || "")
-    .split("\n").filter(Boolean)
-  for (const pid of remaining) {
+  for (const pid of pidsListeningOn(port)) {
     try { process.kill(Number(pid), "SIGKILL") } catch {}
   }
 }
@@ -759,6 +770,7 @@ async function main(): Promise<void> {
     env: {
       ...process.env,
       ...browserEnv,
+      ...playwrightLoaderEnv(),
       E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
       E2E_DATABASE_URL: E2E_PG_URL,
     },

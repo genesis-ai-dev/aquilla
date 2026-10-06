@@ -28,6 +28,8 @@ export default defineConfig({
       "lib/e2e-lock.test.ts",
       "lib/worktree-install-guard.test.ts",
       "lib/spawn-command.test.ts",
+      "lib/playwright-loader-env.test.ts",
+      "lib/listening-pids.test.ts",
     ],
     passWithNoTests: false,
   },

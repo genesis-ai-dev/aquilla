@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { composeBridges, SOLID_MIN_PAIRS, TINT_SOLID_MIN, tintStyle } from "./bridge-compose"
+import {
+  alwaysDottedWords,
+  composeBridges,
+  OT_PRONOUNS_ALWAYS_DOTTED,
+  SOLID_MIN_PAIRS,
+  TINT_SOLID_MIN,
+  tintStyle,
+} from "./bridge-compose"
+import type { BkpTextLayer } from "./pack-types"
 
 // JHN 4:7. Greek → source (BSB): Ἰησοῦς → "Jesus" (token 8), αὐτῇ → "to her"
 // (10, 11). Source → target (a draft): "Jesus" → "Yesus" (target 3), "her" →
@@ -63,5 +71,32 @@ describe("solid or dotted", () => {
   it("composes into dotted when either step is weak, even if the other is certain", () => {
     const [link] = composeBridges([{ wordId: "w", token: 0, conf: 1 }], [{ src: 0, tgt: 0, conf: 0.45 }])
     expect(tintStyle(link.conf, SOLID_MIN_PAIRS)).toBe("dotted")
+  })
+})
+
+describe("OT pronouns", () => {
+  it("draw dotted while Hebrew pronouns measure under the bar for solid", () => {
+    // pack 1.2.0, Bridge 1 to the BSB, links at ≥ 0.5: GEN 77.6% right, RUT
+    // 66.7%, against John's 92.2%. Lift the rule only after re-measuring.
+    expect(OT_PRONOUNS_ALWAYS_DOTTED).toBe(true)
+  })
+
+  it("are the Macula Hebrew words of class pron, suffixes and independent pronouns alike", () => {
+    const text: BkpTextLayer = {
+      book: "RUT",
+      verses: {},
+      words: {
+        o080010160052: { text: "י", after: " ", lemma: "הוּא", gloss: "me", class: "pron", type: "pronominal", morph: "Sp1cs" },
+        o080010160021: { text: "רוּת", after: " ", lemma: "רוּת", gloss: "Ruth", class: "noun", type: "proper", morph: "Np" },
+        n43004007013: { text: "μοι", after: " ", lemma: "ἐγώ", gloss: "me", class: "pron", type: "personal", morph: "P-1DS" },
+      },
+    }
+    const dotted = alwaysDottedWords(text)
+    expect(dotted("o080010160052")).toBe(true)
+    expect(dotted("o080010160021")).toBe(false)
+    // A Greek pronoun keeps the confidence rule.
+    expect(dotted("n43004007013")).toBe(false)
+    // A word the layer does not have is not singled out.
+    expect(dotted("o080010160099")).toBe(false)
   })
 })

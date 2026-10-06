@@ -19,7 +19,7 @@ import {
   wordsFromSpans,
   type BridgedWord,
 } from "@/lib/bible-data/bridge-mentions"
-import type { WordTokenLink } from "@/lib/bible-data/bridge-compose"
+import { alwaysDottedWords, type WordTokenLink } from "@/lib/bible-data/bridge-compose"
 import { tokenize } from "@/lib/completion/tokenize"
 import { contentHash } from "@/lib/dcs/content-hash"
 import { alignToPackWords, packWordsFor } from "@/lib/bible-data/macula-alignment"
@@ -138,7 +138,11 @@ export function useCellMentionWords(cellId: string, ref: string, type: string, s
       const bridge = bridge1For(withText, cellId, verses.refs, sourceText)
       if (!bridge) return null
       bridged = bridge.bridged
-      placed = wordsFromSpans(sourceText, spansFromLinks(bridge.links, bridge.trainedPairs, (id) => byWord.has(id)))
+      placed = wordsFromSpans(
+        sourceText,
+        // AQU-1700: an OT pronoun placed by the alignment draws dotted at any confidence.
+        spansFromLinks(bridge.links, bridge.trainedPairs, (id) => byWord.has(id), alwaysDottedWords(context.text)),
+      )
     }
     // AQU-1700: a Hebrew word written whole carries all its morphemes, so
     // two of them may name people ("her mother-in-law": the noun and its
@@ -191,7 +195,8 @@ export function useCellTargetTints(
     // Not computed for these texts yet: ask for the chapter.
     if (!bridge2) return { chapter: verses.refs[0].slice(0, verses.refs[0].lastIndexOf(":")), runs: null, tokens: [] }
     const byWord = new Map(mentionsIn(context.index, verses.refs).map((at) => [at.wordId, at]))
-    const runs: TintRun[] = targetSpans(bridge1, bridge2, (id) => byWord.has(id)).map((span) => {
+    const dotted = alwaysDottedWords(context.text)
+    const runs: TintRun[] = targetSpans(bridge1, bridge2, (id) => byWord.has(id), dotted).map((span) => {
       const at = byWord.get(span.wordId)!
       return {
         firstToken: span.firstToken,

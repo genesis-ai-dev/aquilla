@@ -1258,8 +1258,16 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   )
     .bind(invite.org_id, user.id)
     .first<{ role_level: number }>()
+  // [Pen test 2026-10-06] Same-user re-redeem is idempotent-while-member only
+  // (mirrors AQU-347 for projects): a removed member's old link is dead and a
+  // demoted member's role is not restored.
+  if (invite.used_at && invite.used_by === user.id && !existing) {
+    return c.json({ error: "Invite already used" }, 410)
+  }
   const finalRole = existing
-    ? Math.max(existing.role_level, invite.role_level)
+    ? invite.used_at
+      ? existing.role_level
+      : Math.max(existing.role_level, invite.role_level)
     : invite.role_level
 
   try {

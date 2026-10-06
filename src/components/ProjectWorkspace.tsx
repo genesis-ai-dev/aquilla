@@ -10802,6 +10802,8 @@ export function ProjectWorkspace() {
     videoIsTransport,
     audioMergedCells.some((c) => queueClockIsFileTime(c)),
     timelineDurationSec,
+    // AQU-1704: the same answer the playback bar gets through `freeTiming`.
+    timingMode === "audioFirst",
   )
   useEffect(() => {
     if (!virtualIsTransport) {
@@ -10899,11 +10901,12 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646: a subtitle import has no Free timing to switch to, and the
-      // picker that could have asked for it is not rendered for one. Silent
-      // because it is unreachable from the UI — this exists so no future
+      // AQU-646, rescoped by AQU-1704: a subtitle import with its video linked
+      // has no Free timing to switch to, and the picker is not rendered for
+      // one. Silent because it is unreachable from the UI; this exists so no
       // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && isSubtitleFile) return
+      // A video-less subtitle file DOES get the picker, so it must get through.
+      if (mode === "audioFirst" && timingModeFixedByFootage) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -10924,7 +10927,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, timingModeFixedByFootage, applyTimingMode],
   )
   /**
    * Persist a dragged (or Alt+Arrow'd) track order: overlay first so the row
@@ -14198,6 +14201,7 @@ export function ProjectWorkspace() {
                   // arrangement and leaves the bar exactly as it was.
                   timelineDurationSec={timelineDurationSec}
                   virtualSoundingCellId={virtualSoundingCellId}
+                  freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
                   below={
                     <>

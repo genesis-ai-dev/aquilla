@@ -946,3 +946,48 @@ describe("planFreeSourceAdvance (pure)", () => {
     expect(planFreeSourceAdvance(win, "u", "u", el(6 + PROG_CONTIG_EPSILON_SEC)).kind).toBe("continue")
   })
 })
+
+describe("audio-first transport — video-less subtitle import (AQU-1704)", () => {
+  /** A text cue (SRT/VTT line) with a take of its own and no source clip. */
+  function cue(id: string, startTime: number, endTime: number, takeMs: number): CellData {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return {
+      id,
+      fileId: "f1",
+      original: "line",
+      translated: "",
+      medium: "text",
+      startTime,
+      endTime,
+      selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: `http://audio.test/${id}.webm`, durationMs: takeMs },
+      },
+    } as unknown as CellData
+  }
+
+  it("lays the takes back to back on the programme clock, not at the cue times", async () => {
+    // Cues 0-3, 3-6, 6-9 s; takes 1 s, 5 s, 2 s.
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1" })
+    expect(getQueueProgress().duration).toBe(1 + 5 + 2)
+
+    // The 1 s take ends the verse: c2 starts at once, no wait until 3 s.
+    dubEl("c1")!.tick(1)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1, 6)
+
+    // The 5 s take is not cut off at the cue's 3 s.
+    dubEl("c2")!.tick(3)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c2" })
+    dubEl("c2")!.tick(5)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 6)
+  })
+})

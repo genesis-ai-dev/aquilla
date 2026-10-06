@@ -1808,8 +1808,16 @@ export function TimelineEditor({
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
   const layout = useMemo<TimelineLayout>(
-    () => buildTimelineLayout(timingMode, cells, dialogue, subtitleFileWithFootage ? videoDurationSec : null),
-    [timingMode, cells, dialogue, subtitleFileWithFootage, videoDurationSec],
+    () =>
+      buildTimelineLayout(
+        timingMode,
+        cells,
+        // AQU-1704: Free timing on a video-less subtitle import. No media cells,
+        // so the cues are the verses; export stitches them the same way.
+        dialogue.length > 0 ? dialogue : subtitle,
+        subtitleFileWithFootage ? videoDurationSec : null,
+      ),
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that

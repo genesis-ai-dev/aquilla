@@ -86,16 +86,30 @@ comments on judgment calls, not mechanical rules.`
 
 const TERMINOLOGY = `# Terminology cookbook — the termbase and how to honour it
 
-Concepts live in project_settings as JSON (key 'terminology'), not a table:
-SELECT jsonb_array_length(settings::jsonb -> 'terminology' -> 'concepts') AS n
-FROM project_settings WHERE project_id = :project
+Concepts live in the concepts table, one row per concept. The old
+project_settings 'terminology' key is retired; migrated projects do not have it.
+SELECT status, count(*) AS n FROM concepts
+WHERE project_id = :project AND deleted_at IS NULL GROUP BY status
 
-Pull the concepts (each has a gloss/renderings the project standardised on):
-SELECT jsonb_array_elements(settings::jsonb -> 'terminology' -> 'concepts') AS concept
-FROM project_settings WHERE project_id = :project
+Pull the concepts that bind (renderings is [{rendering, status}], with status
+'preferred' | 'admitted' | 'forbidden'):
+SELECT concept_id, source_term, renderings, notes FROM concepts
+WHERE project_id = :project AND deleted_at IS NULL AND status = 'active'
+  AND source_term ILIKE '%word%'
+ORDER BY created_at
 LIMIT 50
-NEVER dump the whole termbase into an answer — select, then mention only the
-top concepts matched against the text you are working on.
+Or search({q:'word', side:'terms'}). Only 'active' concepts bind; 'draft' ones
+are suggestions that wait for approval. NEVER dump the whole termbase into an
+answer — select, then mention only the concepts matched against the text you
+are working on.
+
+Add or change a concept with term.* events (describe_command({kind:'EmitEvents'})
+for the shapes), never with a PatchSettings op on 'terminology':
+propose_command({commands:[{kind:'EmitEvents', events:[{kind:'term.create',
+  payload:{sourceTerm:'covenant', renderings:[{rendering:'…', status:'preferred'}],
+  status:'draft'}}]}]})
+Query the table first: a second term.create for an existing source_term does
+not merge. Change an existing concept with term.update {conceptId, …}.
 
 Where a term surfaces in the target text (inflection-tolerant via prefix
 matching with :* in tsquery):

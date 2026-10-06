@@ -26,12 +26,13 @@ import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
-function planLabel(plan: OrgBilling["plan"]): string {
+function planLabelKey(plan: OrgBilling["plan"]): MessageKey {
   const resolved = normalizeBillingPlan(plan)
-  if (resolved === "field") return "Field Plan"
-  if (resolved === "enterprise") return "Enterprise"
-  return "Free"
+  if (resolved === "field") return "billing.plan.field"
+  if (resolved === "enterprise") return "billing.plan.enterprise"
+  return "billing.plan.free"
 }
 
 export function OrgSettingsBilling() {
@@ -55,12 +56,12 @@ export function OrgSettingsBilling() {
   const [busy, setBusy] = useState<"portal" | null>(null)
 
   const [searchParams, setSearchParams] = useSearchParams()
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<MessageKey | null>(null)
 
   useEffect(() => {
     const checkout = searchParams.get("checkout")
     if (!["success", "cancel", "rehearsal"].includes(checkout ?? "")) return
-    setNotice(checkout === "rehearsal" ? "Test checkout returned. Refresh billing to check payment confirmation." : checkout === "success" ? "Checkout completed. Your plan updates after payment is confirmed." : "Checkout canceled.")
+    setNotice(checkout === "rehearsal" ? "billing.checkout.rehearsal" : checkout === "success" ? "billing.checkout.success" : "billing.checkout.canceled")
     const next = new URLSearchParams(searchParams)
     next.delete("checkout")
     setSearchParams(next, { replace: true })
@@ -114,7 +115,7 @@ export function OrgSettingsBilling() {
     >
       {notice ? (
         <p className="text-sm text-muted-foreground" role="status">
-          {notice}
+          {t(notice)}
         </p>
       ) : null}
 
@@ -126,28 +127,28 @@ export function OrgSettingsBilling() {
           <span className="text-sm">{t("billing.loading")}</span>
         </div>
       ) : !workspace ? (
-        <Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry billing</Button>
+        <Button variant="outline" onClick={() => setReload(value => value + 1)}>{t("billing.retry")}</Button>
       ) : (
         <div className="flex flex-col gap-10">
           <SettingsGroup label={t("billing.plan.group")}>
             <SettingsRow
               label={t("billing.plan.current")}
               description={
-                paid ? (paid.billingInterval === "year" ? "Billed annually." : "Billed monthly.")
+                paid ? (paid.billingInterval === "year" ? t("billing.plan.billedAnnually") : t("billing.plan.billedMonthly"))
                   : data?.plan === "enterprise"
-                  ? "Custom annual quote for support and platform usage."
-                  : "Your organization’s plan covers its projects and collaborators."
+                  ? t("billing.plan.enterpriseHelp")
+                  : t("billing.plan.coverageHelp")
               }
               control={
                 <Badge variant={!paid && normalizeBillingPlan(data?.plan ?? "none") === "explore" ? "outline" : "default"} data-testid="billing-plan">
-                  {paid ? billingOfferLabels[paid.offer] : planLabel(data!.plan)}
+                  {paid ? billingOfferLabels[paid.offer] : t(planLabelKey(data!.plan))}
                 </Badge>
               }
             />
             {(paid ? workspace.portalEnabled === true : data?.canManage) ? (
               <SettingsRow
                 label={t("billing.plan.manage")}
-                description={paid ? "Manage your plan, invoices, and payment methods securely with Stripe." : t("billing.plan.manageHelp")}
+                description={paid ? t("billing.plan.manageStripeHelp") : t("billing.plan.manageHelp")}
                 control={
                   <Button
                     variant="outline"
@@ -156,45 +157,45 @@ export function OrgSettingsBilling() {
                     data-testid="manage-billing"
                   >
                     <ExternalLink data-icon="inline-start" />
-                    {busy === "portal" ? "Redirecting…" : paid ? "Manage billing" : "Open customer portal"}
+                    {busy === "portal" ? t("billing.portal.redirecting") : paid ? t("billing.portal.manage") : t("billing.portal.open")}
                   </Button>
                 }
               />
             ) : null}
           </SettingsGroup>
 
-          <Button className="self-start" variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
+          <Button className="self-start" variant="outline" onClick={() => setReload(value => value + 1)}>{t("billing.refresh")}</Button>
           <BillingWorkspaceDetails data={workspace} />
           {!paid && jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
-          <SettingsGroup label="Plans and covered access">
+          <SettingsGroup label={t("billing.coverage.title")}>
             <SettingsRow
-              label="ETEN affiliate or Bible-translation team?"
-              description="Your organization’s access may already be covered. Contact us to confirm coverage and arrange access without paying for a subscription."
+              label={t("billing.coverage.etenQuestion")}
+              description={t("billing.coverage.etenHelp")}
               control={
                 <a
                   href="mailto:hello@aquilla.app?subject=ETEN%20affiliate%20or%20Bible-translation%20access"
                   className={cn(buttonVariants({ variant: "outline" }))}
                 >
-                  Check covered access
+                  {t("billing.coverage.check")}
                 </a>
               }
             />
             <SettingsRow
-              label="Compare plans"
-              description="See Individual and Team pricing or discuss a custom annual Enterprise quote."
-              control={<a href="https://aquilla.app/pricing" className={cn(buttonVariants({ variant: "outline" }))}>View plans</a>}
+              label={t("billing.selection.compare")}
+              description={t("billing.plans.compareHelp")}
+              control={<a href="https://aquilla.app/pricing" className={cn(buttonVariants({ variant: "outline" }))}>{t("billing.plans.view")}</a>}
             />
           </SettingsGroup>
-          <SettingsGroup label="AI usage">
+          <SettingsGroup label={t("billing.aiUsage.title")}>
             <SettingsBlock data-testid="billing-usage" className="flex flex-col gap-3 text-sm text-muted-foreground">
-              <p>Collaborators share your organization’s AI allowance across its projects.</p>
+              <p>{t("billing.aiUsage.shared")}</p>
               {paid ? <>
-                <p>AI capacity resets every seven days from your plan’s activation, with no rollover. Monthly or annual billing does not change this schedule.</p>
-                <p>Usage measurement is not available yet.</p>
-              </> : <p>Weekly limits use a rolling seven-day window. Capacity returns as older usage leaves the window. Daily limits may also apply.</p>}
-              <p>Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.</p>
-              <p>Self-service allowance purchases are not available. Contact us if your organization needs more capacity.</p>
-              <a href="mailto:support@aquilla.app?subject=Organization%20AI%20capacity" className="underline">Discuss AI capacity</a>
+                <p>{t("billing.aiUsage.paidReset")}</p>
+                <p>{t("billing.aiUsage.notMeasured")}</p>
+              </> : <p>{t("billing.aiUsage.rollingWindow")}</p>}
+              <p>{t("billing.aiUsage.pauseNote")}</p>
+              <p>{t("billing.aiUsage.noSelfService")}</p>
+              <a href="mailto:support@aquilla.app?subject=Organization%20AI%20capacity" className="underline">{t("billing.aiUsage.contact")}</a>
             </SettingsBlock>
           </SettingsGroup>
         </div>

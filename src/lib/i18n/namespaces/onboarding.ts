@@ -92,6 +92,8 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.wizard.setupAriaLabel": "Account setup",
     "onboarding.wizard.stepProgress": "Step {step} of {total}",
+    "onboarding.wizard.billingAfterSetup": "Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.",
+    "onboarding.wizard.billingInvalid": "This plan selection is unavailable. You can finish setup and choose a plan later.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Product tour (ProductTour.tsx) — TOUR_STEPS content + chrome
@@ -599,6 +601,14 @@ export const onboarding = defineNamespace({
           step: "Current step number (1-based).",
           total: "Total number of steps in the wizard (8).",
         },
+      },
+      "onboarding.wizard.billingAfterSetup": {
+        description:
+          "Note above the onboarding wizard when the user arrived from a pricing link with a plan already chosen. The plan is reviewed after setup; nothing is bought during setup.",
+      },
+      "onboarding.wizard.billingInvalid": {
+        description:
+          "Alert above the onboarding wizard when the pricing link the user arrived from names a plan or billing interval that does not exist. Setup can still be finished.",
       },
       "onboarding.tour.skipAriaLabel": {
         description: "Accessible name of the small X button that dismisses the whole product tour.",

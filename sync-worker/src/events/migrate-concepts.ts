@@ -118,20 +118,32 @@ function isMappableConcept(
 const MIGRATION_CHUNK = 200
 
 /**
+ * All that reading the blob needs. Narrower than AquillaDb because autopilot's
+ * context loader in auth-worker reaches this read through a minimal handle.
+ */
+export interface SettingsReadDb {
+  prepare(query: string): {
+    bind(...params: unknown[]): { first<T>(): Promise<T | null> }
+  }
+}
+
+/**
  * Decode a project's LEGACY blob termbase into the read route's wire shape.
  *
  * Read-only. Used by the concepts read route as a fallback while a project is
  * still unmigrated, so nobody ever sees an empty termbase — see the long note
  * at that call site for why a fallback exists at all and why it does not
  * reopen the concurrent-add bug (the blob is never WRITTEN any more). The
- * in-app agent's term search (auth-worker/src/lib/agent/tools/search.ts)
- * imports it for the same fallback, so the agent sees what the editor shows.
+ * in-app agent's term search (auth-worker/src/lib/agent/tools/search.ts) and
+ * auth-worker's readProjectConcepts (lib/concepts-read.ts: subscribed
+ * termbases and autopilot) import it for the same fallback, so they see what
+ * the editor shows.
  *
  * Shares `loadBlobConcepts` with the migration itself, so what a user sees
  * before migration and what lands after it cannot drift apart.
  */
 export async function readBlobConcepts(
-  db: AquillaDb,
+  db: SettingsReadDb,
   projectId: string,
 ): Promise<Array<{
   conceptId: string
@@ -172,7 +184,7 @@ export async function readBlobConcepts(
  * blob will not parse, or every entry is unusable.
  */
 async function loadBlobConcepts(
-  db: AquillaDb,
+  db: SettingsReadDb,
   projectId: string,
 ): Promise<Array<BlobConcept & { id: string; sourceTerm: string }>> {
   const row = await db

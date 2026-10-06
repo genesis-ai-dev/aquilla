@@ -117,6 +117,8 @@ export const billing = defineNamespace({
     "billing.portal.redirecting": "Redirecting…",
     "billing.portal.manage": "Manage billing",
     "billing.portal.open": "Open customer portal",
+    "billing.portal.startFailed": "Couldn't start Stripe.",
+    "billing.loadFailed": "Billing details are unavailable. Try again; your access stays unchanged.",
     "billing.retry": "Retry billing",
     "billing.refresh": "Refresh billing",
     "billing.checkout.rehearsal": "Test checkout returned. Refresh billing to check payment confirmation.",
@@ -514,6 +516,12 @@ export const billing = defineNamespace({
   },
   "billing.portal.open": {
     "description": "Button that opens the Stripe customer portal for an older organization plan."
+  },
+  "billing.portal.startFailed": {
+    "description": "Alert shown when the Stripe billing portal could not be opened and no specific reason is available. Stripe is the payment provider's name; do not translate it."
+  },
+  "billing.loadFailed": {
+    "description": "Alert shown when the billing page cannot load the billing details. Says that the user can try again and that their access did not change. A Retry billing button appears with it."
   },
   "billing.retry": {
     "description": "Button shown when billing details failed to load. Loads them again."

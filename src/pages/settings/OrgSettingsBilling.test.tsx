@@ -145,12 +145,14 @@ describe("OrgSettingsBilling", () => {
   it('shows an unavailable state instead of claiming Free or insufficient permissions', async () => {
     vi.mocked(getBillingWorkspace).mockRejectedValueOnce(new Error('offline'))
     renderBilling()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Billing details are unavailable')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Billing details are unavailable. Try again; your access stays unchanged.')
     expect(screen.queryByTestId('billing-plan')).toBeNull()
     expect(mockGet).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Retry billing' }))
     mockGet.mockResolvedValue(unpaid)
     expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Free')
+    // A retry that succeeds must clear the failure, not leave it beside the plan.
+    expect(screen.queryByRole('alert')).toBeNull()
   })
   it('discards an older workspace response after navigation', async () => {
     let resolve!: (workspace: BillingWorkspace) => void
@@ -257,6 +259,15 @@ it('routes native paid billing to the workspace portal and preserves access on f
   expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
   expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
   expect(getBillingOffers).not.toHaveBeenCalled()
+})
+
+it('explains a portal failure that carries no message in catalog copy', async () => {
+  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('pro'), portalEnabled: true })
+  vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce('network down')
+  renderBilling()
+  fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't start Stripe.")
+  expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
 })
 
 // AQU-1524: a settings card has no padding of its own — only its rows supply the

@@ -52,6 +52,8 @@ export function OrgSettingsBilling() {
   const workspace = current?.workspace ?? null
   const paid = workspace?.entitlement ?? null
   const [pending, setPending] = useState(true)
+  // Load failures are translated at render so the load effect does not depend on `t`.
+  const [loadFailed, setLoadFailed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"portal" | null>(null)
 
@@ -70,6 +72,7 @@ export function OrgSettingsBilling() {
   useEffect(() => {
     const generation = ++request.current
     setResult(null)
+    setLoadFailed(false)
     setError(null)
     setBusy(null)
     setPending(true)
@@ -80,7 +83,7 @@ export function OrgSettingsBilling() {
       if (!workspace.entitlement && !legacy) throw new Error("Billing details are unavailable.")
       if (request.current === generation) setResult({ jwt, orgId: activeOrgId, workspace, legacy })
     })().catch(() => {
-      if (request.current === generation) setError("Billing details are unavailable. Try again; your access stays unchanged.")
+      if (request.current === generation) setLoadFailed(true)
     }).finally(() => {
       if (request.current === generation) setPending(false)
     })
@@ -102,7 +105,7 @@ export function OrgSettingsBilling() {
       if (isTauriRuntime() && request.current === generation) setBusy(null)
     } catch (err) {
       if (request.current !== generation) return
-      setError(err instanceof Error ? err.message : "Couldn't start Stripe.")
+      setError(err instanceof Error ? err.message : t("billing.portal.startFailed"))
       setBusy(null)
     }
   }
@@ -121,7 +124,7 @@ export function OrgSettingsBilling() {
 
       {!canManage ? (
         <p className="text-sm text-muted-foreground">{t("billing.maintainersOnly")}</p>
-      ) : pending || (!current && !error) ? (
+      ) : pending || (!current && !error && !loadFailed) ? (
         <div className="flex items-center gap-2 text-muted-foreground" role="status">
           <Spinner className="size-3.5" />
           <span className="text-sm">{t("billing.loading")}</span>
@@ -201,9 +204,9 @@ export function OrgSettingsBilling() {
         </div>
       )}
 
-      {error ? (
+      {loadFailed || error ? (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {loadFailed ? t("billing.loadFailed") : error}
         </p>
       ) : null}
     </OrgSettingsDetailPage>

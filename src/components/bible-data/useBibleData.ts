@@ -125,8 +125,8 @@ export function useBibleData({
   const whosWhoOn = shown && resolveBibleEnrichment(project, "whos-who", hasScripture)
   const contextOn = shown && resolveBibleEnrichment(project, "original-context", hasScripture)
   // AQU-1695: what the Context tab adds. Their layers load when it first opens.
-  const helpsOn = resolveBibleEnrichment(project, "helps", hasScripture)
-  const termsOn = resolveBibleEnrichment(project, "terms", hasScripture)
+  const helpsOn = shown && resolveBibleEnrichment(project, "helps", hasScripture)
+  const termsOn = shown && resolveBibleEnrichment(project, "terms", hasScripture)
 
   const cells = useVerseCells(cellStore, cellIds, version, voicesWanted || whosWhoOn || contextOn)
   const shared = useMemo(() => sharedVerseRefs(cells), [cells])

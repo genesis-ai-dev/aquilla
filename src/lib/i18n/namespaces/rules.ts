@@ -204,7 +204,7 @@ export const rules = defineNamespace({
     "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
     "rules.surface.noProjectRules.title": "No project rules yet",
     "rules.surface.noProjectRules.description":
-      "Add a rule, import a style guide, or suggest rules from your edits using the buttons above.",
+      "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",
     "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
     "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
@@ -340,31 +340,25 @@ export const rules = defineNamespace({
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
 
-    // ── RuleSuggestFromEditsDialog ("Suggest from edits") ──────────────────
+    // ── Suggested rules, reviewed in place in the project rules list ───────
     "rules.suggestFromEdits.noPatternsFound":
       "No edit patterns found. Translate some cells in this file to generate suggestions.",
-    "rules.suggestFromEdits.noTestablePatterns":
-      "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
     "rules.suggestFromEdits.analysisFailed": "Analysis failed",
     "rules.suggestFromEdits.corpusLoading": "Loading your translations…",
     "rules.suggestFromEdits.corpusLoadFailed": "Couldn't load your translations: {message}",
-    "rules.suggestFromEdits.stats.repeated": "{count} repeated",
-    "rules.suggestFromEdits.stats.recent": "{count} recent",
-    "rules.suggestFromEdits.stats.pairs": "{count} from pairs",
-    "rules.suggestFromEdits.stats.human": "{count} human-authored",
-    "rules.suggestFromEdits.tooltip": "Mine your edits for rule patterns",
-    "rules.suggestFromEdits.tooltipUnconfigured": "Configure LLM in project settings first",
-    "rules.suggestFromEdits.triggerButton": "Suggest from edits",
-    "rules.suggestFromEdits.reviewTitle": plural({
-      one: "Review {count} suggested rule",
-      other: "Review {count} suggested rules",
-    }),
-    "rules.suggestFromEdits.title": "Suggest rules from your edits",
-    "rules.suggestFromEdits.description":
-      "Analyzes your repeated corrections, recent edits, and human-authored translations to propose testable rules. You'll review each suggestion before anything is saved.",
-    "rules.suggestFromEdits.analyzeButton": "Analyze my edits",
-    "rules.suggestFromEdits.miningLabel": "Mining edit patterns…",
-    "rules.suggestFromEdits.minedPatterns": "Mined patterns: {patterns}",
+    "rules.suggestions.suggestButton": "Suggest rules from my edits",
+    "rules.suggestions.suggestMoreButton": "Suggest more",
+    "rules.suggestions.loading": "Reading your edits…",
+    "rules.suggestions.focusPlaceholder": "Optional topic, such as punctuation",
+    "rules.suggestions.focusAriaLabel": "What the suggested rules should be about",
+    "rules.suggestions.noneNew": "No new rules found in your edits.",
+    "rules.suggestions.noneNewFocused": "No new rules about “{focus}” found in your edits.",
+    "rules.suggestions.draftBadge": "Suggestion",
+    "rules.suggestions.itemAriaLabel": "Suggested rule: {name}",
+    "rules.suggestions.evidence": "Based on: {evidence}",
+    "rules.suggestions.addButton": "Add rule",
+    "rules.suggestions.dismissButton": "Dismiss",
+    "rules.suggestions.addFailed": "Couldn't add that rule. Try again.",
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
@@ -769,30 +763,20 @@ export const rules = defineNamespace({
         description:
           "Warning above the review list when extraction was cut off but some rules did come back, so the list under it is incomplete rather than everything the document contains.",
       },
-      "rules.suggestFromEdits.stats.repeated": {
-        description:
-          "One segment of the comma-joined mining-stats summary ('N repeated, N recent, …') after analyzing edits.",
-        placeholders: { count: "Number of repeated-correction candidates mined." },
+      "rules.suggestions.noneNewFocused": {
+        description: "Shown under the suggest row when a topic-focused ask for rule suggestions found nothing new.",
+        placeholders: { focus: "The topic the user typed, e.g. 'punctuation' — user content, never translated." },
       },
-      "rules.suggestFromEdits.stats.recent": {
-        description: "Mining-stats segment counting recently-edited-cell candidates.",
-        placeholders: { count: "Number of recent-edit candidates mined." },
+      "rules.suggestions.focusAriaLabel": {
+        description: "Screen-reader label for the optional topic box beside the 'Suggest rules' button at the foot of the rules list.",
       },
-      "rules.suggestFromEdits.stats.pairs": {
-        description: "Mining-stats segment counting candidates from validated source/target pairs.",
-        placeholders: { count: "Number of validated-pair candidates mined." },
+      "rules.suggestions.itemAriaLabel": {
+        description: "Screen-reader label for one suggested (not yet saved) rule in the rules list.",
+        placeholders: { name: "The suggested rule's name — LLM content, never translated." },
       },
-      "rules.suggestFromEdits.stats.human": {
-        description: "Mining-stats segment counting human-authored (non-AI-drafted) candidates.",
-        placeholders: { count: "Number of human-authored candidates mined." },
-      },
-      "rules.suggestFromEdits.reviewTitle": {
-        description: "Dialog title once edit-mining + LLM suggestion finishes and drafts are ready for review.",
-        placeholders: { count: "Number of suggested rule drafts." },
-      },
-      "rules.suggestFromEdits.minedPatterns": {
-        description: "Summary line above the review list, showing the mining-stats breakdown.",
-        placeholders: { patterns: "Already-localized, comma-joined stats segments (see rules.suggestFromEdits.stats.*)." },
+      "rules.suggestions.evidence": {
+        description: "Small italic line under a suggested rule saying which of the user's edits it came from.",
+        placeholders: { evidence: "Evidence text from the edit miner, e.g. 'Repeated in 3 cells'." },
       },
       "rules.completion.failedToFetchModels": {
         description: "Thrown error when the model-list fetch for a custom OpenAI-compatible endpoint fails.",

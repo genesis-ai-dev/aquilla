@@ -11,7 +11,7 @@
 //      Voices enrichment is on);
 //   3. AQU-1695: Translation Notes and Questions (Translation helps on), see
 //      CellContextHelps. An anchored note's number marks its words in the
-//      word list, which is never colour alone. Key-term chips sit on the
+//      word list, which is never color alone. Key-term chips sit on the
 //      words that carry a term (Key terms on).
 // The notes and terms layers load when this tab first opens for a book.
 //
@@ -31,7 +31,7 @@ import { CellContextHelps } from "./CellContextHelps"
 import { TermChip } from "./TermChip"
 import { VoiceDetails } from "./VoiceDetails"
 import { impliedSubjectHint, mentionKindKey } from "./people-text"
-import { useCellHelps, type CellHelps } from "./useContextHelps"
+import { useCellHelps, type CellHelps } from "./useCellHelps"
 import { BibleVoicesContext, type CellVoiceView } from "./voices-context"
 import type { CellContextView } from "./whos-who-context"
 

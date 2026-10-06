@@ -14,7 +14,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { noteCategoryKey } from "./helps-text"
-import type { CellHelpsState } from "./useContextHelps"
+import type { CellHelpsState } from "./useCellHelps"
 
 const SECTION = "flex flex-col gap-2 border-t border-border/60 pt-3"
 
@@ -88,6 +88,8 @@ function NoteItem({ note, number }: { note: BkpNote; number: number | null }) {
   const t = useT()
   const fmt = useFormat()
   const range = noteRange(note)
+  // Only the id, ref and text are checked when the file is read.
+  const quote: unknown = note.quote
   return (
     <article data-testid="context-note" data-note-id={note.id} data-anchor={note.anchor ?? "none"} className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -111,9 +113,9 @@ function NoteItem({ note, number }: { note: BkpNote; number: number | null }) {
         )}
       </div>
       {/* An unhighlighted note says which Greek it is about. */}
-      {number === null && note.quote && (
+      {number === null && typeof quote === "string" && quote !== "" && (
         <p lang="grc" dir="ltr" className="text-sm">
-          {note.quote}
+          {quote}
         </p>
       )}
       <div lang="en" dir="auto" className="flex flex-col gap-1">

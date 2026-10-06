@@ -10,6 +10,10 @@
 //     mention) into a scroll to the first cell of that verse.
 // Rows read the result through WhosWhoContext. Nothing here throws: an
 // unavailable pack means no tints, no Context tab, and an empty panel.
+//
+// AQU-1694: while Who's Who highlights are on, it also loads the file's
+// stored word alignment (Bridge 1, for a source that is not the pack's own
+// words) and runs Bridge 2 (source → target) for the target column's tints.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
@@ -23,6 +27,8 @@ import { onMentionJumpRequest } from "./bible-data-bus"
 import { createMentionHighlightStore } from "./mention-highlight-store"
 import { participantName } from "./people-text"
 import { usePeoplePack } from "./people-pack"
+import { ensureSourceAlignment, useSourceAlignment } from "./source-alignment-store"
+import { createTargetBridge, type TargetBridge, type TargetCorpusCell } from "./target-bridge"
 import { useEntityLabels, type EntityLabeler } from "./useEntityLabels"
 import type { WhosWhoContextValue } from "./whos-who-context"
 
@@ -40,6 +46,10 @@ export interface WhosWhoOptions {
   /** Scroll the editor to a cell. */
   jumpToCell: (cellId: string) => void
   showMentionsOf: (entity: BkpEntityId) => void
+  /** Sync tokens; without one, no stored alignment is read (Bridge 1). */
+  getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** The file's cells with both texts, read when Bridge 2 runs; without it, no target tints. */
+  targetCorpus?: () => readonly TargetCorpusCell[]
 }
 
 export interface WhosWho {
@@ -58,6 +68,8 @@ export function useWhosWho({
   contextOn,
   jumpToCell,
   showMentionsOf,
+  getTokenForFile,
+  targetCorpus,
 }: WhosWhoOptions): WhosWho {
   const t = useT()
   const fmt = useFormat()
@@ -108,6 +120,24 @@ export function useWhosWho({
     return onMentionJumpRequest(fileId, (ref) => jumpTo(ref))
   }, [fileId, whosWhoOn, jumpTo])
 
+  // Bridge 1: the file's stored alignment, while highlights are on.
+  const highlightsOn = whosWhoOn && prefs.whosWhoHighlights !== "off"
+  const projectId = project.id
+  useEffect(() => {
+    if (!highlightsOn || !fileId || !getTokenForFile) return
+    ensureSourceAlignment(projectId, fileId, getTokenForFile)
+  }, [highlightsOn, projectId, fileId, getTokenForFile])
+  const alignment = useSourceAlignment(highlightsOn && getTokenForFile ? projectId : null, fileId)
+  const sourceLinks = alignment.status.kind === "ready" ? alignment.status.cells : null
+
+  // Bridge 2: one per editor and file, while highlights are on and the table offers its cells.
+  const targetBridge = useMemo<TargetBridge | null>(
+    () => (highlightsOn && fileId && targetCorpus ? createTargetBridge({ corpus: targetCorpus }) : null),
+    [highlightsOn, fileId, targetCorpus],
+  )
+  // Releases the bridge's worker; the bridge stays usable (StrictMode re-runs this).
+  useEffect(() => () => targetBridge?.dispose(), [targetBridge])
+
   const context = useMemo<WhosWhoContextValue | null>(
     () =>
       index && labelFor && nameOf
@@ -123,6 +153,7 @@ export function useWhosWho({
             shared,
             jumpTo,
             showMentionsOf: whosWhoOn ? showMentionsOf : null,
+            bridges: { source: highlightsOn ? sourceLinks : null, target: highlightsOn ? targetBridge : null },
           }
         : null,
     [
@@ -138,6 +169,9 @@ export function useWhosWho({
       shared,
       jumpTo,
       showMentionsOf,
+      highlightsOn,
+      sourceLinks,
+      targetBridge,
     ],
   )
 

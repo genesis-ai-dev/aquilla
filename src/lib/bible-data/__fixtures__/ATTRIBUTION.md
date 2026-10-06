@@ -32,3 +32,25 @@ To refresh: rebuild the pack (`pnpm --filter pipeline run:bkp` in bible-wiki)
 and re-run the extraction for the same verses. The golden tests in
 `../voice-index.test.ts`, `../speech-rails.test.ts` and
 `../people-index.test.ts` then show what changed.
+
+# `bridge-jhn4.json` — attribution (AQU-1694)
+
+Written by `pnpm bridges:eval --data <Clear-Bible/Alignments> --pack <bkp/v1>
+--book JHN --text BSB --write-fixture` (scripts/bridge-align-eval.ts). For
+each verse of JHN 4:
+
+- the Greek words, with only the fields the aligner reads (id, text, lemma,
+  class, type), from the Bible Knowledge Pack `text` layer (built from MACULA
+  Greek, Clear-Bible / Biblica): **CC BY 4.0**;
+- the verse in the **Berean Standard Bible** (BSB), public domain, as the
+  tokens of Clear-Bible's `data/eng/targets/BSB/nt_BSB.tsv` spaced as that
+  file's `skip_space_after` column says;
+- per Greek word, the BSB tokens (indexes in `tokenize(bsb)` order) that the
+  manual alignment `data/eng/alignments/BSB/SBLGNT-BSB-manual.json` links it
+  to. Clear-Bible Alignments (<https://github.com/Clear-Bible/Alignments>),
+  alignment by Biblica: **CC BY 4.0**
+  (<https://creativecommons.org/licenses/by/4.0/>).
+
+The golden test in `../source-alignment.test.ts` checks the aligner against
+these links; the full evaluation (all of John, other books, YLT) needs the
+complete Clear files and is in the script.

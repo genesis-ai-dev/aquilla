@@ -9,6 +9,10 @@
 //
 // The popover opens on hover and on keyboard focus (see
 // use-hover-focus-popover), so hover is never the only way in.
+//
+// AQU-1694: on a gateway-language source the word was placed by the stored
+// word alignment. Below the confidence threshold it is "approximate": its lit
+// and "always" tints draw dotted, and its name says so.
 
 import type { ReactNode } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -53,7 +57,8 @@ export function MentionToken({ view, word, text, children }: MentionTokenProps) 
         data-mention-lit={lit ? "true" : undefined}
         data-mention-tinted={always ? "true" : undefined}
         data-thread-slot={slot ?? undefined}
-        aria-label={t("bibleData.whosWho.mentionAria", {
+        data-mention-approximate={word.approximate ? "true" : undefined}
+        aria-label={t(word.approximate ? "bibleAlignment.mentionApproximateAria" : "bibleData.whosWho.mentionAria", {
           word: text,
           kind: kindKey ? t(kindKey) : kind,
           name: fmt.isolate(context.nameOf(entity)),
@@ -81,6 +86,7 @@ export function MentionToken({ view, word, text, children }: MentionTokenProps) 
           id={popover.contentId}
           view={view}
           at={word.at}
+          placement={word.bridged ? (word.approximate ? "approximate" : "aligned") : "exact"}
           onJumped={() => popover.onOpenChange(false)}
         />
       </PopoverContent>

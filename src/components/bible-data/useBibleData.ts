@@ -10,7 +10,7 @@
 // through the Bible data bus and reads it back from there.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellStore, CellSummary } from "@/hooks/useActiveCellStore"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { mentionsEntity, type PeopleIndex } from "@/lib/bible-data/people-index"
@@ -26,6 +26,7 @@ import { projectHasScriptureFiles, type ProjectRecord } from "@/lib/parsers/type
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
 import { onBibleFilterRequest, publishBibleFilter, type BibleFilterKind, type BibleFilterSpec } from "./bible-data-bus"
+import type { TargetCorpusCell } from "./target-bridge"
 import { useBibleVoices } from "./useBibleVoices"
 import { useWhosWho } from "./useWhosWho"
 import { useVerseCells } from "./verse-cells"
@@ -44,6 +45,8 @@ export interface BibleDataOptions {
   fileId: string | null
   /** Scroll the editor to a cell (a mention jump). */
   jumpToCell: (cellId: string) => void
+  /** Sync tokens, for the stored word alignment (AQU-1694). */
+  getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
 /** The filter as the bar above the list shows it. */
@@ -92,7 +95,26 @@ export function filterCells(
   })
 }
 
-export function useBibleData({ project, bibleOpen, cellStore, cellIds, version, fileId, jumpToCell }: BibleDataOptions): BibleData {
+/** The file's verse cells as Bridge 2 reads them: both texts, and the chapter ("JHN 4"). */
+export function targetCorpusOf(summaries: readonly CellSummary[]): TargetCorpusCell[] {
+  return summaries.flatMap((cell) => {
+    const verses = cellVerses({ ref: cell.group, type: cell.type })
+    if (!verses) return []
+    const first = verses.refs[0]
+    return [{ cellId: cell.id, chapter: first.slice(0, first.lastIndexOf(":")), source: cell.original, target: cell.translated }]
+  })
+}
+
+export function useBibleData({
+  project,
+  bibleOpen,
+  cellStore,
+  cellIds,
+  version,
+  fileId,
+  jumpToCell,
+  getTokenForFile,
+}: BibleDataOptions): BibleData {
   const prefs = useBibleDataViewPrefs()
   const hasScripture = projectHasScriptureFiles(project.files)
   // AQU-1685: only on a device with the Bible data experiment on, and only
@@ -120,6 +142,8 @@ export function useBibleData({ project, bibleOpen, cellStore, cellIds, version, 
   const showMentionsOf = useCallback((entity: BkpEntityId) => setFilter({ kind: "mentions", entity }), [setFilter])
 
   const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy })
+  // AQU-1694: Bridge 2 trains on the file's cells as they are when it runs.
+  const targetCorpus = useCallback(() => targetCorpusOf(cellStore.getAllSummaries()), [cellStore])
   const whosWho = useWhosWho({
     project,
     cells,
@@ -130,6 +154,8 @@ export function useBibleData({ project, bibleOpen, cellStore, cellIds, version, 
     contextOn,
     jumpToCell,
     showMentionsOf,
+    getTokenForFile,
+    targetCorpus,
   })
 
   // A "mentions" filter needs Who's Who on; a speaker filter needs Voices.

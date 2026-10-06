@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest"
 import { getCookbook } from "../lib/agent/docs"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { AliasMap } from "../lib/agent/compress"
+import { AGENT_REQUIRED_ROLE } from "../lib/agent/schema-card"
+import { TERM_EMIT_KINDS } from "../../../sync-worker/src/external/commands-emit-events"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const OTHER = "99999999-9999-4999-8999-999999999999"
@@ -88,5 +90,23 @@ describe("terminology cookbook — reads the concepts table", () => {
     expect(text).toContain("term.create")
     expect(text).toContain("term.update")
     expect(text).toMatch(/never with a PatchSettings op on 'terminology'/)
+  })
+})
+
+// The in-app agent can stage a term only through propose_command →
+// EmitEvents: emit-stage.ts rejects any kind outside AGENT_REQUIRED_ROLE, and
+// that table has no term.* kinds. So a doc that names a term kind the sync-worker
+// EmitEvents allowlist lacks sends the agent to a plan that prepare rejects.
+describe("term.* kinds the agent docs name", () => {
+  it("are all kinds that EmitEvents accepts and the raw propose tool does not", () => {
+    const named = new Set<string>()
+    for (const topic of ["terminology", "playbooks/project-bootstrap", "playbooks/first-cycle"]) {
+      for (const m of getCookbook(topic).text.matchAll(/\bterm\.[a-z]+/g)) named.add(m[0])
+    }
+    expect(named.size).toBeGreaterThan(0)
+    for (const kind of named) {
+      expect(TERM_EMIT_KINDS.has(kind), kind).toBe(true)
+      expect(AGENT_REQUIRED_ROLE[kind], kind).toBeUndefined()
+    }
   })
 })

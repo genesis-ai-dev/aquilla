@@ -99,6 +99,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -12564,6 +12565,9 @@ export function ProjectWorkspace() {
           onFootnoteViewModeChange={setFootnoteViewMode}
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
+          bibleDataVoicesEnabled={
+            !!project && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+          }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
           onHealthCalculationsChange={setHealthCalculationsEnabled}

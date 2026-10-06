@@ -916,4 +916,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +
     "autopilot.readiness.terminology.label names the readiness check on the " +
     "project's own approved renderings, which several languages call terminology.",
+  "bibleData.voices.author":
+    "AQU-1687: the writer of a Bible letter (Paul, Peter), shown in the voice chip " +
+    "where a Gospel shows 'Narrator'. comments.filter.authorLabel filters comments " +
+    "by the person who wrote them. A biblical author and a comment's author are " +
+    "different words in many languages (writer of scripture vs. poster).",
+  "bibleData.voices.type.dialogue":
+    "AQU-1687: a kind of quotation in the Bible text, people talking with each " +
+    "other in the story. agentWorkspace.conversation is the user's chat thread with " +
+    "the AI agent. A dialogue between characters and a chat session are different " +
+    "words in most target languages.",
 }

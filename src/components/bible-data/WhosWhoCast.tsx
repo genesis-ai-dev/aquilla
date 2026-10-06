@@ -6,6 +6,8 @@
 // plain sentences that jump to their verse. Choosing a name filters the
 // editor to the cells that mention them; choosing it again shows every line.
 // Places and anything that is not a person are listed apart, collapsed.
+// AQU-1695: each participant's description and family (pack 1.1), whose
+// names jump to that relative's first mention.
 
 import { ArrowDown, ArrowUp, CircleHelp, UserRoundPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +22,7 @@ import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
+import { EntityAbout } from "./EntityAbout"
 import { GENDER_KEYS, NUMBER_KEYS, flagKey } from "./people-text"
 
 export interface CastActions {
@@ -148,6 +151,7 @@ function CastRow({
         </span>
       </div>
       {facts.length > 0 && <p className="text-muted-foreground">{facts.join(" · ")}</p>}
+      <EntityAbout index={index} entity={member.entity} nameOf={nameOf} jump={(ref) => actions.jump(ref)} />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <Button
           type="button"

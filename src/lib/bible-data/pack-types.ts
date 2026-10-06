@@ -3,12 +3,17 @@
 // The contract is owned by the pipeline that builds and publishes the pack:
 // bible-wiki pipeline/src/schemas/bkp.ts (zod schemas, checked at build time
 // before anything is published). These types mirror it; keep them in step.
+// AQU-1695: pack 1.1.0 (`notes`, `terms`, and `via`, `descriptions`, `kin`
+// and `local-thing` in `people`), plus the two optional fields pack slice 3
+// will add (a deity mention's `form`, a speech's `disputed`).
 //
 // The SPA checks each file's envelope only: the right kind of object, for the
 // right book, with the top-level fields its layer needs. That is enough to
 // turn a wrong file, an HTML error page or a truncated download into
 // `invalid` before any renderer sees it, without re-running the pipeline's
-// field-by-field checks on several MB per book.
+// field-by-field checks on several MB per book. So readers check each item
+// they use, skip one that is malformed, and ignore fields they do not know:
+// a newer pack may add some.
 
 import type { BkpLayer } from "../../../db/shared/bible-enrichments"
 
@@ -80,6 +85,14 @@ export interface BkpSpeech {
   type?: string
   delivery?: string
   fcbh?: string
+  /** Pack slice 3 (not built yet): scholars disagree where this speech starts or ends. */
+  disputed?: BkpSpeechDispute
+}
+
+/** Why a speech's boundary is disputed, and who says so. Data, in English. */
+export interface BkpSpeechDispute {
+  reason: string
+  source: string
 }
 
 export interface BkpVoiceUnit {
@@ -97,7 +110,17 @@ export interface BkpVoicesLayer {
   verses: Record<BkpRef, BkpVoiceUnit[]>
 }
 
-export type BkpEntityType = "person" | "group" | "deity" | "place" | "local-person" | "local-group"
+/** Pack 1.1 adds `local-thing`: an unnamed thing ("water"), never a participant. */
+export type BkpEntityType = "person" | "group" | "deity" | "place" | "local-person" | "local-group" | "local-thing"
+
+/** ACAI's family relations (pack 1.1), limited to entities in the same book's entity map. */
+export interface BkpKin {
+  father?: BkpEntityId[]
+  mother?: BkpEntityId[]
+  siblings?: BkpEntityId[]
+  partners?: BkpEntityId[]
+  offspring?: BkpEntityId[]
+}
 
 export interface BkpEntity {
   type: BkpEntityType
@@ -107,6 +130,10 @@ export interface BkpEntity {
   /** Label per language code. */
   labels: Record<string, string>
   labelSource: "acai" | "fcbh" | "gloss"
+  /** Pack 1.1: ACAI's first description per language code (in practice English), plain text, about 200 characters. */
+  descriptions?: Record<string, string>
+  /** Pack 1.1. */
+  kin?: BkpKin
   members?: BkpEntityId[]
   anchor?: BkpWordId
   mergedFrom?: BkpWordId[]
@@ -115,9 +142,18 @@ export interface BkpEntity {
 export interface BkpMention {
   entity: BkpEntityId
   kind: "explicit" | "pronoun" | "subject"
-  src: "acai" | "macula" | "acai+macula"
+  /** `macula+voices` (pack 1.1): a vocative, or a chain through one, names its speech's addressee. */
+  src: "acai" | "macula" | "acai+macula" | "macula+voices"
   hops: number
+  /** Pack 1.1: the Macula words the chain went through, in order (hops − 1 of them; only when hops ≥ 2). */
+  via?: BkpWordId[]
   conf: number
+  /**
+   * Pack slice 3 (not built yet): how the text names a deity at this word,
+   * per language code, at least `eng`: θεός → "God", where the entity's own
+   * label is "LORD".
+   */
+  form?: Record<string, string>
 }
 
 export interface BkpPeopleLayer {
@@ -127,14 +163,67 @@ export interface BkpPeopleLayer {
 }
 
 /**
- * TODO(AQU-1685): `notes` and `terms` have no schema in the pipeline yet
- * (bible-wiki pipeline/src/schemas/bkp.ts covers text, structure, voices and
- * people). Type them from there when they land; until then only the
- * envelope is known.
+ * Where a note's quote was found in the verse's Macula words (pack 1.1):
+ *   anchored   — in one place: `words` are those words;
+ *   ambiguous  — in several places: `words` is the shortest, so no highlight;
+ *   unanchored — nowhere (a different spelling or word order): `words` is empty.
+ * A note with no quote (General Information) has no `anchor` and no words.
  */
-export interface BkpEnvelope {
+export type BkpNoteAnchor = "anchored" | "ambiguous" | "unanchored"
+
+/** One unfoldingWord Translation Note. Its text is English. */
+export interface BkpNote {
+  /** "tn:{content id}". */
+  id: string
+  ref: BkpRef
+  /** The last verse of a note on a range of verses. */
+  endRef?: BkpRef
+  /** The Greek the note discusses (UGNT spelling). */
+  quote?: string
+  /** The unfoldingWord Translation Academy slug ("figs-rquestion"), or "other". */
+  category?: string
+  /** The pipeline always writes it; a reader treats a missing one as empty. */
+  words?: BkpWordId[]
+  anchor?: BkpNoteAnchor
+  /** Plain text, cut after about 400 characters. */
+  text: string
+  altTranslations?: string[]
+}
+
+/** One unfoldingWord Translation Question. Its text is English. */
+export interface BkpQuestion {
+  /** "tq:{content id}". */
+  id: string
+  /** Every verse it covers: a range is expanded ("JHN 4:14", "JHN 4:15"). */
+  refs: BkpRef[]
+  q: string
+  a: string
+}
+
+export interface BkpNotesLayer {
   book: string
-  [field: string]: unknown
+  notes: BkpNote[]
+  questions: BkpQuestion[]
+}
+
+/** "tw:{article}" for a Translation Words article, or an ACAI keyterm id ("keyterm:Life.2"). */
+export type BkpTermId = string
+
+export interface BkpTerm {
+  /** English title. */
+  title: string
+  source: "tw" | "acai"
+  /** Strong's numbers ("4540"); empty for ACAI keyterms. */
+  strongs: string[]
+  /** Localized titles per language code, when the source has them. */
+  titles?: Record<string, string>
+}
+
+export interface BkpTermsLayer {
+  book: string
+  /** The words that carry at least one term. */
+  words: Record<BkpWordId, BkpTermId[]>
+  terms: Record<BkpTermId, BkpTerm>
 }
 
 /** What each layer's file holds. */
@@ -143,8 +232,8 @@ export interface BkpLayerData {
   structure: BkpStructureLayer
   voices: BkpVoicesLayer
   people: BkpPeopleLayer
-  notes: BkpEnvelope
-  terms: BkpEnvelope
+  notes: BkpNotesLayer
+  terms: BkpTermsLayer
 }
 
 export interface BkpManifest {
@@ -180,8 +269,8 @@ const LAYER_SHAPES: Readonly<Record<BkpLayer, { objects: readonly string[]; arra
   structure: { objects: ["verses"], arrays: ["segments", "moves"] },
   voices: { objects: ["narrator", "verses"], arrays: ["speeches"] },
   people: { objects: ["entities", "mentions"], arrays: [] },
-  notes: { objects: [], arrays: [] },
-  terms: { objects: [], arrays: [] },
+  notes: { objects: [], arrays: ["notes", "questions"] },
+  terms: { objects: ["words", "terms"], arrays: [] },
 }
 
 /** A layer file for `book`, or null when `raw` is not one. */

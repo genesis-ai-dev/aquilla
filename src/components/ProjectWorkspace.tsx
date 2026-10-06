@@ -4831,9 +4831,6 @@ export function ProjectWorkspace() {
     // AQU-1391: org default for repetition auto-propagation (a project may
     // override it either way).
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
-    // Whether bulk text validation may sign off untouched AI drafts (Sam,
-    // 2026-10-01). Off unless the org opts in; both bulk paths read it.
-    allowBulkValidateAiDrafts: orgSettingsAllowBulkValidateAiDrafts,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -4843,14 +4840,6 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
-  // The project's own settings response carries the org's switch first: a
-  // member who is not in the org cannot read the org's settings (403), so the
-  // org read alone left the switch off for them whatever the org chose. That
-  // response is also the one re-read on focus and remote changes. The org read
-  // covers a server that predates the field.
-  const allowBulkValidateAiDrafts =
-    projectSettings?.orgAllowBulkValidateAiDrafts ?? orgSettingsAllowBulkValidateAiDrafts
-
   const { rules } = useRules(
     project ?? null,
     refresh,
@@ -9063,6 +9052,57 @@ export function ProjectWorkspace() {
     refresh()
   }, [project, currentUsername, refresh])
 
+  // AQU-1702: a cross-group drag in the file sidebar. Two events, one gesture:
+  // `file.corpus.set` carries the new group, `file.reorder` the slot inside
+  // it. They are applied in one `patchProject` pass so the sidebar repaints
+  // once, in the place the pointer let go of — applying them separately shows
+  // the file arriving at the end of the new group and then jumping.
+  const handleMoveFileToGroup = useCallback(async (move: {
+    fileId: string
+    corpusMarker: string | null
+    writes: ReadonlyArray<{ fileId: string; sortIndex: number | null }>
+  }) => {
+    if (!project) return
+    const { fileId, corpusMarker, writes } = move
+    setOptimisticSortIndexes((current) => {
+      const next = new Map(current)
+      for (const write of writes) next.set(write.fileId, write.sortIndex)
+      return next
+    })
+    try {
+      await patchProject(project.id, (p) =>
+        moveFileToCorpus(applyFileSortIndexes(p, writes), fileId, corpusMarker ?? ""),
+      )
+      await Promise.all([
+        emitFileCorpusSet({
+          projectId: project.id,
+          fileId,
+          corpusMarker,
+          author: currentUsername,
+        }),
+        ...writes.map((w) =>
+          emitFileReorder({
+            projectId: project.id,
+            fileId: w.fileId,
+            sortIndex: w.sortIndex,
+            author: currentUsername,
+          }),
+        ),
+      ])
+    } catch (error) {
+      console.error("[reorder] cross-group file move failed", error)
+      setOptimisticSortIndexes((current) => {
+        const next = new Map(current)
+        for (const write of writes) {
+          if (next.get(write.fileId) === write.sortIndex) next.delete(write.fileId)
+        }
+        return next
+      })
+      return
+    }
+    refresh()
+  }, [project, currentUsername, refresh])
+
   const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
     if (!project) return
@@ -9415,9 +9455,8 @@ export function ProjectWorkspace() {
       username: currentUsername,
       myScopes,
       activeLane,
-      allowBulkValidateAiDrafts,
     }),
-  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane, allowBulkValidateAiDrafts])
+  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
 
   const actionCtx = useMemo(() => ({
     project: project!,
@@ -12748,6 +12787,7 @@ export function ProjectWorkspace() {
                   // than present-and-403ing.
                   canReorderFiles={canPerform("file.reorder", project?.syncRole?.level ?? null)}
                   onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
+                  onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -12922,7 +12962,6 @@ export function ProjectWorkspace() {
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
-                  allowBulkValidateAiDrafts={allowBulkValidateAiDrafts}
                   audioMode={lens === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
                   mediaLayer={!!audioLens}

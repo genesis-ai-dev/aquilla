@@ -22,7 +22,7 @@
 //   * Loads db/postgres/schema.sql into the local Postgres on first create,
 //     and on every later boot reconciles drift additively (CREATE TABLE /
 //     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
-//     container lacks — never drops data).
+//     container lacks, CREATE OR REPLACE for its views — never drops data).
 // All steps are safe to run on every boot.
 //
 // Lifecycle: writes a managed `.env.development.local` so the Vite client
@@ -70,6 +70,7 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { reconcilePgViews } from "./dev-stack-schema-views"
 import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import {
   resolveConfiguredAgentSandbox,
@@ -373,15 +374,15 @@ function backfillMissingLocalProgress(): void {
 }
 
 /**
- * Additive-only drift repair: create tables (plus their indexes) and add
- * columns that schema.sql has but the live container lacks. Never drops or
- * rewrites anything, so it's safe on every boot.
+ * Additive-only drift repair: create tables (plus their indexes), add columns
+ * and (re)create the views that schema.sql has but the live container lacks.
+ * Never drops or rewrites table data, so it's safe on every boot.
  */
 async function reconcilePgSchema(
   client: import("pg").Client,
   schemaSql: string,
 ): Promise<void> {
-  const { tables, indexesByTable } = parsePgSchema(schemaSql)
+  const { tables, indexesByTable, views } = parsePgSchema(schemaSql)
   const { rows } = await client.query(
     `SELECT table_name, column_name FROM information_schema.columns
      WHERE table_schema = 'public'`,
@@ -518,6 +519,9 @@ async function reconcilePgSchema(
     )
     patched.push("rebuilt changesets_status_check with 'committing'")
   }
+
+  // Views last: every table and column they read is in place by now.
+  patched.push(...await reconcilePgViews(client, run, views))
 
   if (patched.length) {
     console.log(

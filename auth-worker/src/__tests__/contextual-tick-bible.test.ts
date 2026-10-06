@@ -9,7 +9,7 @@
 
 import { env } from "cloudflare:test"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createRun, listContextualRunEvents, listDrafts } from "../../../db/shared/contextual-runs"
+import { createRun, getRun, listContextualRunEvents, listDrafts, setSpanCursor, terminateRun } from "../../../db/shared/contextual-runs"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
 import { JHN4_PEOPLE, JHN4_TEXT } from "../../../db/shared/bible-facts/__fixtures__/jhn4-people"
 import { runOneTick, makeLlmCall } from "../lib/contextual/tick"
@@ -233,5 +233,64 @@ describe("bounded repair, end to end", () => {
     expect(c9?.verdicts?._triage).toBe("human")
     expect(decodeBibleParams(c9?.verdicts?.["bkp:V2"])).toMatchObject({ kind: "close-after-aside", startRef: "JHN 4:9" })
     expect(c9?.verdicts).toHaveProperty("redrafted")
+  })
+})
+
+describe("fact questions for the Language profile", () => {
+  async function factQuestionStatuses(factKey: string): Promise<{ status: string; run_id: string | null }[]> {
+    const { results } = await db
+      .prepare(`SELECT status, run_id FROM contextual_decisions WHERE project_id = ? AND fact_key = ? ORDER BY created_at, id`)
+      .bind(PROJECT, factKey)
+      .all<{ status: string; run_id: string | null }>()
+    return results ?? []
+  }
+
+  /** One run, two waves (one span each), sharing the run's Bible deps as the driver does. */
+  async function runTwoWaves(): Promise<string> {
+    const created = await createRun(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      targetLang: "",
+      initiatedBy: "tester",
+      roleSnapshot: { userId: 1, username: "tester", level: 600 },
+      spanAllowance: null,
+    })
+    if (created.status !== "ok") throw new Error("run not created")
+    const seed = (id: string, start: string, end: string) => ({
+      id, fileId: FILE, anchorCellId: start, startCellId: start, endCellId: end, seedSource: "canonical-ref",
+    })
+    await setSpanCursor(db, created.run.id, { seeds: [seed("s1", "c7", "c8"), seed("s2", "c9", "c10")], nextIndex: 0 })
+    const llm = makeLlmCall({ url: MOCK_URL, apiKey: "mock", models: { fast: "m/f", mid: "m/m", deep: "m/d" } })
+    const bible = makeBibleTickDeps({ ...env, BKP_BASE: PACK }, db, { projectId: PROJECT, runId: created.run.id })
+    // Never parked on the question: wave 1 goes on to wave 2, and wave 2
+    // parks only because the work is done.
+    expect((await runOneTick({ db, runId: created.run.id, llm, bible, concurrency: 1 })).continueRun).toBe(true)
+    await runOneTick({ db, runId: created.run.id, llm, bible, concurrency: 1 })
+    expect(await getRun(db, created.run.id)).toMatchObject({ status: "parked", parkReason: "work_exhausted" })
+    return created.run.id
+  }
+
+  it("asks once per run when the profile has no quotation marks, without parking the run", async () => {
+    await runTwoWaves()
+    expect(await factQuestionStatuses("quoteMarks")).toEqual([{ status: "open", run_id: null }])
+    expect((await listDrafts(db, PROJECT, FILE, "proposed", "")).map((d) => d.cellId).sort()).toEqual(["c10", "c7", "c8", "c9"])
+  })
+
+  it("a later run asks again and supersedes the open question, so one card stays open", async () => {
+    // The first run is finished (a parked run still holds the file), then a new run starts.
+    await terminateRun(db, await runTwoWaves())
+    await db.prepare(`DELETE FROM contextual_drafts WHERE project_id = ?`).bind(PROJECT).run()
+    await runTwoWaves()
+    expect(await factQuestionStatuses("quoteMarks")).toEqual([
+      { status: "superseded", run_id: null },
+      { status: "open", run_id: null },
+    ])
+  })
+
+  it("asks nothing once the profile has the slot", async () => {
+    await setSettings({ languageProfile: ENGLISH_PROFILE })
+    await runTwoWaves()
+    expect(await factQuestionStatuses("quoteMarks")).toEqual([])
+    expect(await factQuestionStatuses("questionMarkers")).toEqual([])
   })
 })

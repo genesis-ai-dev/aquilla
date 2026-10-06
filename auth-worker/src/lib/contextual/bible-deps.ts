@@ -76,6 +76,7 @@ export function makeBibleTickDeps(
       return { autopilot: flags.autopilot, checks: flags.autopilot && flags.checks }
     },
     loadPack: (book, opts) => loadBookPack(env, book, opts),
+    raisedFactKeys: new Set(),
     judge: {
       cache: new Map(),
       decide: async (input) => {

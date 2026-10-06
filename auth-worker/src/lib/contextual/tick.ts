@@ -65,6 +65,7 @@ import { reflectAtPark } from "./reflect"
 import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
 import { bibleGateOf, spanBible } from "./bible-span"
 import { recheckForStage, withBibleVerdicts } from "./bible-gates"
+import { raiseBibleFactQuestions } from "./bible-fact-questions"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { ingestRunActivity } from "../team-ingest"
@@ -1432,6 +1433,16 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     profile: ctx.languageProfile,
     concepts: ctx.concepts,
   })
+  // A Language-profile slot the pack needs and the project lacks: ask once per
+  // run, without parking it (runId: null).
+  if (bible.state === "ready" && bible.data.checks && deps.bible?.raisedFactKeys) {
+    await raiseBibleFactQuestions(db, {
+      projectId: run.projectId,
+      fileId: run.fileId,
+      data: bible.data,
+      raised: deps.bible.raisedFactKeys,
+    })
+  }
   const shared: RunContext = {
     ctx,
     rules,

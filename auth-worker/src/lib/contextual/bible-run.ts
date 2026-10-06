@@ -59,6 +59,8 @@ export interface BibleTickDeps {
   loadPack: LoadBookPack
   /** Jev for the Bible data questions. Omitted → only code decides; nothing is asked. */
   judge?: BibleJudgeDeps
+  /** Fact-question keys this run has raised (./bible-fact-questions.ts). Omitted → none are raised. */
+  raisedFactKeys?: Set<string>
 }
 
 /** The book of the first cell with a verse ref, e.g. "JHN"; null for a file with none. */

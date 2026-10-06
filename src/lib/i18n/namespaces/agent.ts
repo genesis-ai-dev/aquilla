@@ -368,7 +368,7 @@ export const agent = defineNamespace({
     "agent.changeset.loading": "Loading changeset…",
     "agent.changeset.backTo": "Back to {projectName}",
     "agent.changeset.notStagedNotice":
-      "This changeset is currently {status} and can no longer be approved.",
+      "This changeset is {status} and can no longer be approved.",
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",

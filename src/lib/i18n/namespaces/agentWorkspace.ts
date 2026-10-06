@@ -51,7 +51,7 @@ export const agentWorkspace = defineNamespace({
     "agentWorkspace.sourceEvidenceHelp": "This estimates available support, not the quality of a translation that has not been written.",
     "agentWorkspace.humanValidated": "Human validated · 100%",
     "agentWorkspace.validationAuthoritative": "Validation is authoritative. Automatic checks may still report a separate warning.",
-    "agentWorkspace.automaticHealthHelp": "Based on post-translation health signals, softly averaged across nearby cells. This is evidence, not validation.",
+    "agentWorkspace.automaticHealthHelp": "Average of the health signals from nearby translated cells. It is evidence, not validation.",
     "agentWorkspace.sourceCoverageHelp": "Coverage from supplied examples before translation. It describes available support, not predicted translation quality.",
     "agentWorkspace.chapterPercentProgress": "{validated}% validated · {translated}% translated",
     "agentWorkspace.chapterCountProgress": "{validated} validated · {automatic} awaiting validation · {untranslated} untranslated",

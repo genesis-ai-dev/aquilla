@@ -1599,11 +1599,11 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * Audio coverage and validation, with structural cells dropped where a project
  * excludes them.
  *
- * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
- * divides by the audio total, so leaving audio alone while the text denominator
- * shrank would let a scripture project whose headings were voiced read over
- * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
- * exist.
+ * Both audio fractions divide by `audio_total_cells` (AQU-1566: each file's
+ * cue sheet, else the file), which drops structural cells the same way the
+ * text total does, so leaving audio alone while that denominator shrank would
+ * let a scripture project whose headings were voiced read over 100% covered.
+ * Bulk synthesis has no type filter, so those takes genuinely exist.
  *
  * `recorded_ms` never takes the exclusion: it measures work that was actually
  * done rather than progress against a denominator — the same reasoning that

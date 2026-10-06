@@ -20,7 +20,7 @@ export const importExport = defineNamespace({
     "importExport.captionTrack.new": "New caption track",
     "importExport.captionTrack.name": "Track name",
     "importExport.captionTrack.overwrite": plural({
-      one: "{count} segment currently in this track will be overwritten.",
+      one: "{count} segment in this track will be overwritten.",
       other: "{count} segments in this track will be overwritten.",
     }),
     "importExport.captionTrack.consent": "Overwrite the existing content in this track",

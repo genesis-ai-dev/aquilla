@@ -3,7 +3,8 @@
 // Used only for a cell whose words are the pack's words (see
 // macula-alignment): a Greek or Hebrew source. Every word that refers to a
 // participant becomes a MentionToken; an implied subject gets a quiet hint
-// before its verb ("[he = Jesus]") when the person's option allows. The rest
+// before its verb ("[he = Jesus]") when the person's option allows and the
+// verb's form settles the pronoun (the Context tab lists every one). The rest
 // of the text renders as the editor always renders it, through `renderSlice`,
 // so terminology lookups and rule findings keep working between mentions.
 
@@ -54,6 +55,8 @@ export function MentionSourceText({ view, cellId, text, renderSlice }: MentionSo
           entities: context.index.entities,
           name: context.nameOf(word.at.mention.entity),
           namesOnly: context.hints === "names",
+          // At rest, only where the verb's own form says who: "[he = Jesus]".
+          pronounOnly: true,
         })
 
   const parts: ReactNode[] = []

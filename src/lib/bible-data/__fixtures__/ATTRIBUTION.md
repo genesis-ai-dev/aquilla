@@ -21,7 +21,7 @@ trimmed to whole records:
 - `bkp-v1-JHN-4.people.json` (AQU-1687, AQU-1689): the mentions in
   JHN 4:1–42, the entities they name, the members of those groups, and the
   entities the voices fixture names.
-- `bkp-v1-JHN-4.text.json` (AQU-1689): the words of JHN 4:6–10 and 4:27.
+- `bkp-v1-JHN-4.text.json` (AQU-1689): the words of JHN 4:6–11, 4:14 and 4:27.
 - `bkp-v1-JHN-4.structure.json` (AQU-1689): JHN 4's segments, and the verse
   facts and moves of the verses in the text fixture.
 - `bkp-v1-MRK-1.*.json` (AQU-1689): the mentions in MRK 1:21–34 with their

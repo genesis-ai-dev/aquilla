@@ -269,6 +269,35 @@ describe("flags", () => {
     expect(ambiguity).toMatchObject({ at: { ref: "MRK 1:30", wordId: "n41001030010" }, others: [PETER] })
   })
 
+  // Real data, JHN 4:11: "the woman says to him (αὐτῷ): Sir (Κύριε), you
+  // have nothing to draw with". The pack keeps the vocative κύριε as its own
+  // participant ("Sir"), who is in fact Jesus. A vocative addresses the
+  // listener, so like "you" it is never a rival for "him".
+  it("does not count a form of address ('Sir') as a rival for 'him'", () => {
+    const index = jhn()
+    const sir = "local:JHN:n43004011005"
+    expect(verseMentionsByEntity(index, "JHN 4:11").get(sir)?.[0]).toMatchObject({ firstOrSecondPerson: true })
+    const jesus = member(castAt(index, "JHN 4:11"), JESUS)
+    const in411 = jesus.flags.filter((flag) => flag.code === "possible-ambiguity" && flag.at.ref === "JHN 4:11")
+    expect(in411).toEqual([])
+  })
+
+  // Real data, JHN 4:27: "his (αὐτοῦ) disciples came ... yet no one (οὐδείς)
+  // said ...". The pack keeps "no one" as a participant. A negative word
+  // introduces nobody a pronoun could stand for, so it is never a rival.
+  it("never offers 'no one' as a reading of a pronoun", () => {
+    const index = jhn()
+    const noOne = "local:JHN:n43004027014"
+    expect(index.negativeReferents.has(noOne)).toBe(true)
+    const jesus = member(castAt(index, "JHN 4:27"), JESUS)
+    const citing = jesus.flags.filter((flag) => flag.code === "possible-ambiguity" && flag.others.includes(noOne))
+    expect(citing).toEqual([])
+    // Without the structure layer the index cannot know, and says so by
+    // reading every participant as a possible rival.
+    const blind = buildPeopleIndex(jhn4People(), null, jhn4Text())
+    expect(blind.negativeReferents.size).toBe(0)
+  })
+
   it("does not flag a pronoun whose gender already tells the participants apart", () => {
     // MRK 1:30 αὐτῆς ("her") is the mother-in-law; the only other woman? None.
     const motherInLaw = member(castAt(mrk(), "MRK 1:30"), MOTHER_IN_LAW)

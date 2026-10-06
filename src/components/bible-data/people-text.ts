@@ -99,7 +99,10 @@ export function participantName(
  * The hint before a verb whose subject is implied: "[he = Jesus]", or
  * "[Jesus]" when the verb's form does not settle the pronoun. Null for a word
  * that is not an implied subject, and, with `namesOnly`, for a subject the
- * data does not name (an unnamed "woman").
+ * data does not name (an unnamed "woman"). With `pronounOnly`, null too when
+ * the form settles no pronoun: a participle or an infinitive, whose subject
+ * usually stands right beside it ("Ἰησοῦς κεκοπιακώς"), so a hint there only
+ * repeats the text.
  */
 export function impliedSubjectHint(
   t: TFunction,
@@ -110,13 +113,15 @@ export function impliedSubjectHint(
     entities: Readonly<Record<BkpEntityId, BkpEntity>>
     name: string
     namesOnly: boolean
+    pronounOnly: boolean
   },
 ): string | null {
-  const { at, word, entities, name, namesOnly } = options
+  const { at, word, entities, name, namesOnly, pronounOnly } = options
   if (at.mention.kind !== "subject") return null
   if (namesOnly && !isNamedEntity(at.mention.entity, entities)) return null
   const entity = Object.hasOwn(entities, at.mention.entity) ? entities[at.mention.entity] : undefined
   const pronoun = subjectPronoun(word, entity)
+  if (pronounOnly && !pronoun) return null
   return pronoun
     ? t("bibleData.whosWho.hint", { pronoun: t(SUBJECT_PRONOUN_KEYS[pronoun]), name: isolate(name) })
     : t("bibleData.whosWho.hintNameOnly", { name: isolate(name) })

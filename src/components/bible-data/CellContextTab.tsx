@@ -104,6 +104,7 @@ function Referent({ view, at, word }: { view: CellContextView; at: MentionAt; wo
     entities: context.index.entities,
     name,
     namesOnly: false,
+    pronounOnly: false,
   })
   const kindKey = mentionKindKey(kind)
   const facts = [

@@ -44,9 +44,9 @@ export interface MentionAt {
   ref: BkpRef
   mention: BkpMention
   /**
-   * The word is in the first or second person ("I", "you", "we", "give!"):
-   * it refers to the speaker or the listener. False when the text layer did
-   * not say.
+   * The word refers to the speaker or the listener: it is in the first or
+   * second person ("I", "you", "we", "give!"), or it addresses someone (a
+   * vocative, "Sir"). False when the text layer did not say.
    */
   firstOrSecondPerson: boolean
 }
@@ -73,6 +73,11 @@ export interface PeopleIndex {
   refsByEntity: ReadonlyMap<BkpEntityId, readonly BkpRef[]>
   /** The book's pericopes, in order. Empty when the structure layer is missing. */
   pericopes: readonly Pericope[]
+  /**
+   * Participants a negative word introduces ("no one", οὐδείς): no later
+   * pronoun can stand for them. From the structure layer's negators.
+   */
+  negativeReferents: ReadonlySet<BkpEntityId>
 }
 
 const REF_RE = /^\S+ (\d+):(\d+)$/
@@ -92,13 +97,14 @@ function isMention(value: unknown): value is BkpMention {
 /**
  * First- and second-person pronouns carry the person in their morphology code
  * (personal P-1/P-2, reflexive F-1/F-2, possessive S-1/S-2); verbs carry it
- * in `person`.
+ * in `person`. A vocative is the case of address, so it names the listener.
  */
 const FIRST_OR_SECOND_PERSON_MORPH = /^[PFS]-[12]/
 
 function isFirstOrSecondPerson(word: BkpWord | undefined): boolean {
   if (!word) return false
-  return word.person === "first" || word.person === "second" || FIRST_OR_SECOND_PERSON_MORPH.test(word.morph)
+  if (word.person === "first" || word.person === "second" || word.case === "vocative") return true
+  return FIRST_OR_SECOND_PERSON_MORPH.test(word.morph)
 }
 
 /**
@@ -141,7 +147,16 @@ export function buildPeopleIndex(
   }
   pericopes.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
 
-  return { book: people.book, entities: people.entities, mentions, byVerse, refsByEntity, pericopes }
+  const negators = new Set<BkpWordId>()
+  for (const verse of Object.values(structure?.verses ?? {})) {
+    if (Array.isArray(verse?.negators)) for (const wordId of verse.negators) negators.add(wordId)
+  }
+  const negativeReferents = new Set<BkpEntityId>()
+  for (const [entityId, entity] of Object.entries(people.entities)) {
+    if (entity.anchor && negators.has(entity.anchor)) negativeReferents.add(entityId)
+  }
+
+  return { book: people.book, entities: people.entities, mentions, byVerse, refsByEntity, pericopes, negativeReferents }
 }
 
 // ── Memo: one index per (pack version, book) ────────────────────────────────
@@ -255,7 +270,8 @@ export function pericopeAt(index: PeopleIndex, ref: BkpRef): Pericope | null {
  *                        verse that also mentions another participant of the
  *                        same gender and number. "Active" means referred to
  *                        in that verse in the third person: a speaker ("I")
- *                        or a listener ("you") is never read as "him".
+ *                        or a listener ("you", "Sir") is never read as "him",
+ *                        nor is "no one".
  */
 export type PeopleFlag =
   | { code: "reintroduce"; at: MentionAt }
@@ -342,7 +358,7 @@ function buildCast(index: PeopleIndex, pericope: Pericope): CastMember[] {
       const member = members.get(at.mention.entity)
       const gender = genderClass(member?.gender ?? null)
       if (!member || member.role !== "participant" || gender === null || member.number === null) continue
-      if (at.firstOrSecondPerson) continue
+      if (at.firstOrSecondPerson || index.negativeReferents.has(member.entity)) continue
       present.set(member.entity, `${gender}/${member.number}`)
     }
     const flagged = new Set<BkpEntityId>()

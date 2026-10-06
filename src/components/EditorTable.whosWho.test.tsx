@@ -350,6 +350,9 @@ describe("word tints on a Greek source", () => {
     expect(hints()).toContain("[he = Jesus]")
     // ᾔδεις ("you had known") is the unnamed woman: not a name, so hidden.
     expect(hints()).not.toContain("[you = Samaritan woman]")
+    // λέγων and πεῖν (a participle, an infinitive) carry no person of their
+    // own: at rest a hint there would only repeat the text, so there is none.
+    expect(hints().every((hint) => hint.includes(" = "))).toBe(true)
 
     act(() => setBibleDataViewPrefs({ impliedSubjectHints: "all" }))
     expect(hints()).toContain("[you = Samaritan woman]")
@@ -408,6 +411,9 @@ describe("the Context tab", () => {
     expect(visible(eipen?.textContent)).toContain("[he = Jesus]")
     const kai = tab.querySelector<HTMLElement>('[data-word-id="n43004010003"]')
     expect(kai?.querySelector('[data-testid="context-referent"]')).toBeNull()
+    // The Context tab lists every implied subject, a participle's too.
+    const legon = tab.querySelector<HTMLElement>('[data-word-id="n43004010016"]')
+    expect(visible(legon?.textContent)).toContain("[Jesus]")
   })
 })
 

@@ -68,7 +68,7 @@ describe("alignToPackWords", () => {
 
   it("leaves USFM-marked text alone, and a verse the pack lacks", () => {
     expect(alignToPackWords("\\w Ἰησοῦς\\w*", packWordsFor(text, ["JHN 4:10"]))).toEqual({ ok: false, reason: "markup" })
-    expect(packWordsFor(text, ["JHN 4:11"])).toBeNull()
+    expect(packWordsFor(text, ["JHN 4:12"])).toBeNull()
     expect(alignToPackWords("ἀπεκρίθη", null)).toEqual({ ok: false, reason: "no-words" })
   })
 })

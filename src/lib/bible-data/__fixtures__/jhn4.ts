@@ -32,7 +32,7 @@ export function jhn4People(): BkpPeopleLayer {
   return layer
 }
 
-/** The words of JHN 4:6–10 and 4:27 only. */
+/** The words of JHN 4:6–11, 4:14 and 4:27 only. */
 export function jhn4Text(): BkpTextLayer {
   const layer = parseLayer("text", "JHN", JSON.parse(textJson))
   if (!layer) throw new Error("bkp-v1-JHN-4.text.json is not a text layer for JHN")

@@ -4842,7 +4842,6 @@ export const my: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"ဤပရောဂျက်တွင် ဤအမည်များဖြင့် ဖိုင်များ ရှိပြီးသား:"},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"သင့်ရှိပြီးသား ဖိုင်များကို ဘာသာပြန်ချက်များနှင့်အတူ မပြောင်းလဲဘဲ ထားမည်။ ထင်ဟပ်မိတ္တူများသည် ဘာသာပြန်ချက်ဗလာဖြင့် ၎င်းတို့ဘေးတွင် ရောက်လာမည်ဖြစ်၍ ဤအမည်တစ်ခုချင်းစီသည် ဖိုင်စာရင်းတွင် နှစ်ကြိမ် ပေါ်မည်။"},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "ပုံမှန် ဘာသာပြန်ဘာသာစကား",
-  "projectSettings.languages.defaultTargetNote": "ပုံမှန် (အမည်မဲ့) လိုင်း။ အထက်ပါ ပရောဂျက်အချက်အလက်တွင် ပြောင်းလဲပါ။",
   "projectSettings.languages.additionalLanesLabel": "ထပ်တိုး ဘာသာပြန်လိုင်းများ",
   "projectSettings.languages.additionalLanesDescription": "ဤပရောဂျက်အတွက် ထပ်တိုးဘာသာပြန်ဘာသာစကားလိုင်းများ — ဥပမာ ဒေသိယဘာသာကွဲများ သို့မဟုတ် မူရင်းတစ်ခုတည်း၏ ပြိုင်တူမူကြမ်းများ။",
   "projectSettings.languages.laneNameLabel": "လမ်းကြောင်းအမည်",

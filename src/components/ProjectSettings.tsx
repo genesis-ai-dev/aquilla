@@ -27,7 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -226,8 +225,6 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  sourceLanguage: string
-  targetLanguage: string
   username: string
   provider: CompletionProvider
   endpoint: string
@@ -280,8 +277,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
     username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
@@ -337,8 +332,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
-  "sourceLanguage",
-  "targetLanguage",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -633,8 +626,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [sourceLanguage, setSourceLanguage] = useState("")
-  const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
@@ -701,8 +692,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setSourceLanguage(b.sourceLanguage)
-    setTargetLanguage(b.targetLanguage)
     setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
@@ -787,8 +776,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
-      sourceLanguage: setSourceLanguage,
-      targetLanguage: setTargetLanguage,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -881,8 +868,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      sourceLanguage !== baseline.sourceLanguage ||
-      targetLanguage !== baseline.targetLanguage ||
       username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
@@ -922,7 +907,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1129,8 +1114,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
-      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -1199,8 +1182,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (trimmedName !== name) setName(trimmedName)
       const newBaseline: Baseline = {
         name: trimmedName,
-        sourceLanguage,
-        targetLanguage,
         username,
         provider,
         endpoint: endpoint.trim(),
@@ -1265,7 +1246,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    id, baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1923,36 +1904,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   {nameError}
                 </p>
               ) : null}
-              <SettingsRow
-                label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="sl"
-                      value={sourceLanguage}
-                      onValueChange={setSourceLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.sourceLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-              <SettingsRow
-                label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="tl"
-                      value={targetLanguage}
-                      onValueChange={setTargetLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.targetLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
               <SettingsRow
                 label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
                 description={t("projectSettings.info.smartQuotesDescription")}

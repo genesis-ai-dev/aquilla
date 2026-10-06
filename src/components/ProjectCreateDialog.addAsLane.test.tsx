@@ -75,6 +75,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
 })
 
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn(),
 }))
@@ -100,13 +103,13 @@ vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource } from "@/lib/sync/archive"
 import { createProject } from "@/lib/store/project-index"
-import { fetchProjectSettings, patchProjectSettings } from "@/lib/sync/project-settings"
+import { createProjectLane, fetchProjectSettings } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
-const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
+const mockCreateProjectLane = vi.mocked(createProjectLane)
 
 async function pickCorpusSource() {
   fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
@@ -141,22 +144,14 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     mockLinkProjectSource.mockClear()
     mockCreateProject.mockClear()
     mockFetchProjectSettings.mockReset()
-    mockPatchProjectSettings.mockReset()
+    mockCreateProjectLane.mockReset()
     mockFetchProjectSettings.mockResolvedValue({
       version: 3,
       updatedAt: "2026-07-13T00:00:00.000Z",
       updatedBy: null,
       settings: { targetLanguage: "English", targetLanes: ["es"] },
     })
-    mockPatchProjectSettings.mockResolvedValue({
-      kind: "ok",
-      value: {
-        version: 4,
-        updatedAt: "2026-07-13T00:00:01.000Z",
-        updatedBy: { id: 1, username: "wendi" },
-        settings: { targetLanguage: "English", targetLanes: ["es", "French"] },
-      },
-    })
+    mockCreateProjectLane.mockResolvedValue({ kind: "ok", lane: { id: "lane" } } as never)
   })
 
   it("renders the recommendation for linked-target + consumes=source with an upstream chosen", async () => {
@@ -244,23 +239,21 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
   })
 
-  it("clicking 'Add as lane' PATCHes the UPSTREAM project's targetLanes and does NOT create a project", async () => {
+  it("clicking 'Add as lane' creates a lane on the UPSTREAM project and does NOT create a project", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
     pickCorpusSource()
 
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(1)
     })
 
     expect(mockFetchProjectSettings).toHaveBeenCalledWith("tok", "upstream-1")
-    expect(mockPatchProjectSettings).toHaveBeenCalledWith(
-      "tok",
-      "upstream-1",
-      { targetLanes: ["es", "French"] },
-      3,
-    )
+    expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", "upstream-1", {
+      name: "",
+      language: "French",
+    })
 
     // Success hint, and no project was ever created.
     await waitFor(() => {
@@ -280,8 +273,8 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     )
   })
 
-  it("shows a friendly message on a 403 from the upstream settings PATCH", async () => {
-    mockPatchProjectSettings.mockResolvedValueOnce({ kind: "forbidden", required: 600, role: 400 })
+  it("shows a friendly message on a 403 from the upstream lane create", async () => {
+    mockCreateProjectLane.mockResolvedValueOnce({ kind: "error", message: "create failed (403)" })
 
     await openLinkedTargetWithUpstream(/English Source/i)
     pickCorpusSource()
@@ -319,12 +312,10 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledWith(
-        "tok",
-        "upstream-1",
-        { targetLanes: ["es", "English"] },
-        3,
-      )
+      expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", "upstream-1", {
+        name: "",
+        language: "English",
+      })
     })
     expect(screen.queryByText(/already .* default target language/i)).toBeNull()
   })
@@ -344,7 +335,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     await waitFor(() => {
       expect(screen.getByText(/already a lane on English Source/i)).toBeTruthy()
     })
-    expect(mockPatchProjectSettings).not.toHaveBeenCalled()
+    expect(mockCreateProjectLane).not.toHaveBeenCalled()
   })
 
   it("disables the button below maintainer when the upstream's role is known", async () => {

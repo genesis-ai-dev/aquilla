@@ -4824,7 +4824,6 @@ export const ms: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"Projek ini sudah mempunyai fail dengan nama berikut:"},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"Fail sedia ada anda dikekalkan sebagaimana adanya, bersama terjemahannya. Salinan cerminan tiba bersamanya dengan terjemahan kosong, jadi setiap nama ini akan muncul dua kali dalam senarai fail."},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "Bahasa sasaran lalai",
-  "projectSettings.languages.defaultTargetNote": "Laluan lalai (tanpa nama). Tukar di Maklumat Projek, di atas.",
   "projectSettings.languages.additionalLanesLabel": "Laluan sasaran tambahan",
   "projectSettings.languages.additionalLanesDescription": "Laluan bahasa sasaran tambahan untuk projek ini — cth. varian dialek atau draf selari bagi sumber yang sama.",
   "projectSettings.languages.laneNameLabel": "Nama lorong",

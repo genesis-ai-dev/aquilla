@@ -4922,7 +4922,6 @@ export const id: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"Proyek ini sudah memiliki file dengan nama berikut:"},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"File Anda yang ada dipertahankan persis seperti adanya, beserta terjemahannya. Salinan cerminan datang di sampingnya dengan terjemahan kosong, sehingga setiap nama ini akan muncul dua kali dalam daftar file."},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "Bahasa target bawaan",
-  "projectSettings.languages.defaultTargetNote": "Jalur bawaan (tanpa nama). Ubah di Info Proyek, di atas.",
   "projectSettings.languages.additionalLanesLabel": "Jalur target tambahan",
   "projectSettings.languages.additionalLanesDescription": "Jalur bahasa target tambahan untuk proyek ini — mis. varian dialek atau draf sejajar dari sumber yang sama.",
   "projectSettings.languages.laneNameLabel": "Nama lajur",

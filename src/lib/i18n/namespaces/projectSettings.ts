@@ -946,7 +946,6 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
     "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
     "projectSettings.languages.additionalLanesDescription":
       "Extra target-language lanes for this project — e.g. dialect variants or " +

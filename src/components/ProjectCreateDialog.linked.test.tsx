@@ -61,6 +61,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
   fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn().mockResolvedValue({
@@ -91,12 +94,14 @@ vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
-import { patchProjectSettings } from "@/lib/sync/project-settings"
+import { createProjectLane, fetchProjectSettings, renameProjectLane } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockTriggerLinkSync = vi.mocked(triggerLinkSync)
-const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
+const mockCreateProjectLane = vi.mocked(createProjectLane)
+const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
+const mockRenameProjectLane = vi.mocked(renameProjectLane)
 
 
 describe("ProjectCreateDialog — linked-target creation flow", () => {
@@ -104,7 +109,27 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     mockCreateCloudProject.mockClear()
     mockLinkProjectSource.mockClear()
     mockTriggerLinkSync.mockClear()
-    mockPatchProjectSettings.mockClear()
+    mockCreateProjectLane.mockClear()
+    mockFetchProjectSettings.mockReset()
+    mockFetchProjectSettings.mockResolvedValue({
+      version: 0,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: {},
+      lanes: [
+        {
+          id: "source-lane",
+          role: "source",
+          language: "",
+          name: null,
+          langCode: null,
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ],
+    })
+    mockRenameProjectLane.mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } } as never)
     mockTriggerLinkSync.mockResolvedValue(true)
     resetLinkSeedStatusForTests()
     mockLinkProjectSource.mockResolvedValue({
@@ -210,15 +235,12 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     // The lanes PATCH used to be gated on the self-contained shape; a linked
     // target is precisely the case that wants several of them.
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
-      const [, , settings, version] = mockPatchProjectSettings.mock.calls[0]!
-      expect(settings).toEqual({
-        sourceLanguage: "English",
-        targetLanguage: "French",
-        targetLanes: ["French", "es"],
-      })
-      expect(version).toBe(0)
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
     })
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "French" },
+      { name: "", language: "es" },
+    ])
   })
 
   it("QA-BUG-1: self-heals client-side when the server reports seeding did NOT run (mode=live)", async () => {

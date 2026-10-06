@@ -10404,8 +10404,12 @@ export function ProjectWorkspace() {
       // a sibling still loading: the row exists, drawn empty, rather than
       // appearing a moment after the timeline settles.
       hasAudioCues: audioCues !== null,
+      // AQU-1566 (Sam, Oct 5): a subtitle file linked to a video keeps its
+      // Source audio row for the video's own sound. Not in Free timing, where
+      // the video is hidden and silent.
+      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
     }),
-    [isSubtitleFile, audioMergedCells, audioCues],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no

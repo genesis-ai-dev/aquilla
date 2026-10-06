@@ -3665,8 +3665,14 @@ export function TimelineEditor({
             // Sam's D3: on an empty linked video the row is one dashed chip
             // the length of the film, and what it stands for is the video's
             // own sound. In Free timing the video is hidden and silent, so
-            // the row says nothing at all rather than claim it.
-            gapLabel={linkedVideoEmpty && !audioFirst ? t("editor.timeline.soundSourceVideo") : undefined}
+            // the row says nothing at all rather than claim it. (Sam, Oct 5:
+            // the same holds once the captions are rows — a linked video with
+            // no audio cues keeps the one labelled band.)
+            gapLabel={
+              (linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)) && !audioFirst
+                ? t("editor.timeline.soundSourceVideo")
+                : undefined
+            }
             hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
             scrollLeftPx={scrollLeft}
           />

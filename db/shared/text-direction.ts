@@ -23,6 +23,8 @@
 // every file that never had an explicit direction follows, which is the
 // behaviour a 49-file project needs and a stamped copy could not give.
 
+import { laneLanguage } from '../../src/lib/lanes/lane-display'
+
 export type TextDirection = 'ltr' | 'rtl'
 /** A direction, or "work it out from the text/language" — what a settings key
  *  and the per-file UI control both hold. */
@@ -141,7 +143,13 @@ export function resolveProjectTextDirection(
 ): TextDirection {
   const explicit = projectSettingTextDirection(settings, side)
   if (explicit) return explicit
+  // The language is the lane's. With no lane row in hand, the source side and
+  // the former default lane still resolve through laneLanguage's migration
+  // fallback; this function does not read the settings keys itself.
   const language = languageOverride
-    ?? (side === 'source' ? settings?.sourceLanguage : settings?.targetLanguage)
+    ?? laneLanguage(
+      { role: side },
+      { settings, role: side, legacyTag: side === 'source' ? null : '' },
+    )
   return languageDefaultDirection(language)
 }

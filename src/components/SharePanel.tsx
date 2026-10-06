@@ -24,7 +24,7 @@ import {
 } from "@/lib/sync/invites"
 import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneRowLabel } from "@/lib/lanes/lane-language"
+import { laneLanguageForTag, laneRowLabel } from "@/lib/lanes/lane-language"
 import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
@@ -256,7 +256,8 @@ function MembersTab({ projectId }: { projectId: string }) {
           resolveCloudProjectResult(projectId, jwt),
         ])
         if (!alive) return
-        const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
+        const defaultLanguage = laneLanguageForTag("", settingsRes?.lanes, settingsRes?.settings) ?? ""
+        const defaultLabel = defaultLanguage || "Default"
         // AQU-1607: one option per lane ROW, valued by lane id, so scoping
         // someone to one of two lanes sharing a language picks that lane.
         // A server predating lane rows keeps the old tag-derived list.
@@ -274,7 +275,7 @@ function MembersTab({ projectId }: { projectId: string }) {
               }))
             : [
                 { value: "", label: defaultLabel },
-                ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
+                ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLanguage).map((t) => ({ value: t, label: t })),
               ],
         )
         if (!projectRes.ok) {

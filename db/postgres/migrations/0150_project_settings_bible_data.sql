@@ -1,4 +1,4 @@
--- Migration 0141: the Bible data switches, projected out of project_settings
+-- Migration 0150: the Bible data switches, projected out of project_settings
 -- (AQU-1686).
 --
 -- The Bible Aquifer gate (auth-worker/src/lib/aquifer/gate.ts) read the

@@ -108,6 +108,53 @@ export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "bible-draft", from: "bible_checks", to: "draft", kind: "redraft" },
 ]
 
+/**
+ * AQU-1685: the graph as drawn. The Bible data steps appear only on a device
+ * with the Bible data experiment on. Without it the graph is the one from
+ * before them: segment flows straight into construe and lint into routing,
+ * and every later node moves one STEP left per step left out.
+ */
+export interface ProcessGraphTopology {
+  nodes: readonly ProcessNodeLayout[]
+  edges: readonly ProcessEdge[]
+  viewBox: { width: number; height: number }
+}
+
+const BIBLE_DATA_NODE_IDS: ReadonlySet<ProcessNodeId> = new Set<ProcessNodeId>(["bible_facts", "bible_checks"])
+
+/** The flows past the Bible data steps, drawn only without them. */
+const BIBLE_DATA_BYPASS_EDGES: readonly ProcessEdge[] = [
+  { id: "segment-construe", from: "segment", to: "construe", kind: "flow" },
+  { id: "lint-route", from: "lint_rules", to: "route_risk", kind: "flow" },
+]
+
+/** Every edge a model carries a state for, whichever graph is drawn. */
+const MODEL_EDGES: readonly ProcessEdge[] = [...PROCESS_EDGES, ...BIBLE_DATA_BYPASS_EDGES]
+
+const BIBLE_DATA_NODES = PROCESS_NODE_LAYOUT.filter((node) => BIBLE_DATA_NODE_IDS.has(node.id))
+
+const WITH_BIBLE_DATA: ProcessGraphTopology = {
+  nodes: PROCESS_NODE_LAYOUT,
+  edges: PROCESS_EDGES,
+  viewBox: PROCESS_VIEWBOX,
+}
+
+const WITHOUT_BIBLE_DATA: ProcessGraphTopology = {
+  nodes: PROCESS_NODE_LAYOUT.filter((node) => !BIBLE_DATA_NODE_IDS.has(node.id)).map((node) => ({
+    ...node,
+    x: node.x - STEP * BIBLE_DATA_NODES.filter((bible) => bible.x < node.x).length,
+  })),
+  edges: [
+    ...PROCESS_EDGES.filter((edge) => !BIBLE_DATA_NODE_IDS.has(edge.from) && !BIBLE_DATA_NODE_IDS.has(edge.to)),
+    ...BIBLE_DATA_BYPASS_EDGES,
+  ],
+  viewBox: { ...PROCESS_VIEWBOX, width: PROCESS_VIEWBOX.width - STEP * BIBLE_DATA_NODES.length },
+}
+
+export function processGraphTopology(bibleData: boolean): ProcessGraphTopology {
+  return bibleData ? WITH_BIBLE_DATA : WITHOUT_BIBLE_DATA
+}
+
 const READING: readonly ProcessNodeId[] = [
   "scope", "segment", "bible_facts", "construe", "expand_window", "register", "summarize", "persist",
 ]
@@ -387,7 +434,7 @@ function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, P
 export function emptyProcessGraph(live = false): ProcessGraphModel {
   return {
     nodeStates: { ...EMPTY_STATES },
-    edgeStates: Object.fromEntries(PROCESS_EDGES.map((edge) => [edge.id, "pending"])),
+    edgeStates: Object.fromEntries(MODEL_EDGES.map((edge) => [edge.id, "pending"])),
     liveSpanLabels: [],
     lastDecision: null,
     inspect: emptyInspect(null),
@@ -439,7 +486,7 @@ export function deriveProcessGraph(
     inspectForNode(id, nodeStates[id], cursors, activity ?? null, lastDecision),
   ])) as Record<ProcessNodeId, ProcessNodeInspect>
   const edgeStates = Object.fromEntries(
-    PROCESS_EDGES.map((edge) => [edge.id, edgeState(edge, nodeStates)]),
+    MODEL_EDGES.map((edge) => [edge.id, edgeState(edge, nodeStates)]),
   )
 
   return {
@@ -460,7 +507,7 @@ export function deriveProcessGraphFromOverview(overview: ContextualOverview | nu
   const model = emptyProcessGraph(working)
   if (working) {
     for (const id of PROCESS_NODE_IDS) model.nodeStates[id] = "pending"
-    for (const edge of PROCESS_EDGES) {
+    for (const edge of MODEL_EDGES) {
       if (edge.kind === "flow") model.edgeStates[edge.id] = "active"
     }
     model.live = true
@@ -473,13 +520,15 @@ export function deriveProcessGraphFromOverview(overview: ContextualOverview | nu
   }
   if (done) {
     for (const id of PROCESS_NODE_IDS) model.nodeStates[id] = "done"
-    for (const edge of PROCESS_EDGES) model.edgeStates[edge.id] = "done"
+    for (const edge of MODEL_EDGES) model.edgeStates[edge.id] = "done"
   }
   return model
 }
 
-export function layoutById(): Record<ProcessNodeId, ProcessNodeLayout> {
-  return Object.fromEntries(PROCESS_NODE_LAYOUT.map((node) => [node.id, node])) as Record<
+export function layoutById(
+  nodes: readonly ProcessNodeLayout[] = PROCESS_NODE_LAYOUT,
+): Record<ProcessNodeId, ProcessNodeLayout> {
+  return Object.fromEntries(nodes.map((node) => [node.id, node])) as Record<
     ProcessNodeId,
     ProcessNodeLayout
   >

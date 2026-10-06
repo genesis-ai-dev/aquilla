@@ -8,16 +8,15 @@ import { cn } from "@/lib/utils"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
-  PROCESS_EDGES,
-  PROCESS_NODE_LAYOUT,
   PROCESS_NODE_SIZE,
-  PROCESS_VIEWBOX,
   deriveProcessGraph,
   deriveProcessGraphFromOverview,
   layoutById,
+  processGraphTopology,
   type ProcessDecision,
   type ProcessEdge,
   type ProcessGraphModel,
+  type ProcessGraphTopology,
   type ProcessNodeId,
   type ProcessNodeInspect,
   type ProcessNodeLayout,
@@ -155,27 +154,30 @@ function HoverBody({ inspect, t }: { inspect: ProcessNodeInspect; t: TFunction }
 
 function GraphSvg({
   model,
+  topology,
   compact,
   selectedId,
   onSelect,
   t,
 }: {
   model: ProcessGraphModel
+  topology: ProcessGraphTopology
   compact: boolean
   selectedId: ProcessNodeId | null
   onSelect?: (id: ProcessNodeId) => void
   t: TFunction
 }) {
   const reactId = useId().replace(/:/g, "")
-  const positions = layoutById()
+  const { nodes, edges, viewBox } = topology
+  const positions = layoutById(nodes)
   const size = compact ? PROCESS_NODE_SIZE - 1 : PROCESS_NODE_SIZE
   const radius = size / 2
   const markerPrefix = `${compact ? "mini" : "full"}-${reactId}`
-  const hit = `${((size + 6) / PROCESS_VIEWBOX.width) * 100}%`
+  const hit = `${((size + 6) / viewBox.width) * 100}%`
   return (
     <div className="relative w-full">
       <svg
-        viewBox={`0 0 ${PROCESS_VIEWBOX.width} ${PROCESS_VIEWBOX.height}`}
+        viewBox={`0 0 ${viewBox.width} ${viewBox.height}`}
         role="img"
         aria-label={t("autopilot.graph.aria")}
         data-testid={compact ? "autopilot-process-graph-mini" : "autopilot-process-graph"}
@@ -214,7 +216,7 @@ function GraphSvg({
             </marker>
           ))}
         </defs>
-        {PROCESS_EDGES.map((edge) => {
+        {edges.map((edge) => {
           const state = model.edgeStates[edge.id] ?? "pending"
           const dashed = edge.kind === "loop" || edge.kind === "redraft"
           const live = state === "active" && !dashed
@@ -233,7 +235,7 @@ function GraphSvg({
             />
           )
         })}
-        {PROCESS_NODE_LAYOUT.map((node) => {
+        {nodes.map((node) => {
           const state = model.nodeStates[node.id]
           const selected = selectedId === node.id
           return (
@@ -263,7 +265,7 @@ function GraphSvg({
           )
         })}
       </svg>
-      {PROCESS_NODE_LAYOUT.map((node) => {
+      {nodes.map((node) => {
         const inspect = model.inspect[node.id]
         const selected = selectedId === node.id
         return (
@@ -279,8 +281,8 @@ function GraphSvg({
               aria-pressed={onSelect ? selected : undefined}
               className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-0 bg-transparent p-0"
               style={{
-                left: `${(node.x / PROCESS_VIEWBOX.width) * 100}%`,
-                top: `${(node.y / PROCESS_VIEWBOX.height) * 100}%`,
+                left: `${(node.x / viewBox.width) * 100}%`,
+                top: `${(node.y / viewBox.height) * 100}%`,
                 width: hit,
                 aspectRatio: "1",
               }}
@@ -295,15 +297,20 @@ function GraphSvg({
 
 function InspectPanel({
   inspect,
+  bibleData,
   t,
   onClose,
 }: {
   inspect: ProcessNodeInspect
+  bibleData: boolean
   t: TFunction
   onClose: () => void
 }) {
   const copy = NODE_COPY[inspect.nodeId]
   const decision = decisionLine(inspect.decision, t)
+  // AQU-1685: a span's "bible_data_*" reasons (the pack did not load) are
+  // Bible data, shown only with the experiment on.
+  const reasons = (inspect.decision?.reasons ?? []).filter((reason) => bibleData || !reason.startsWith("bible_data_"))
   const brief = inspect.sceneBrief?.l1Summary ?? inspect.sceneBrief?.construal
   const ambiguities = Array.isArray(inspect.sceneBrief?.ambiguityRegister)
     ? inspect.sceneBrief.ambiguityRegister
@@ -342,8 +349,8 @@ function InspectPanel({
         <div>
           <p className="text-xs font-medium">{t("autopilot.graph.inspect.decision")}</p>
           <p className="text-muted-foreground">{decision ?? t("autopilot.graph.inspect.noDecision")}</p>
-          {inspect.decision?.reasons && inspect.decision.reasons.length > 0 && (
-            <p className="text-xs text-muted-foreground">{inspect.decision.reasons.join(" · ")}</p>
+          {reasons.length > 0 && (
+            <p className="text-xs text-muted-foreground">{reasons.join(" · ")}</p>
           )}
         </div>
       </CardContent>
@@ -356,13 +363,20 @@ export function AutopilotProcessGraph({
   activity,
   overview,
   compact = false,
+  bibleData = false,
 }: {
   run?: ContextualRunRecord | null
   activity?: ContextualRunActivity | null
   overview?: ContextualOverview | null
   compact?: boolean
+  /**
+   * AQU-1685: draw the Bible facts and Bible checks steps. Only for a device
+   * with the Bible data experiment on (useBibleDataExperiment).
+   */
+  bibleData?: boolean
 }) {
   const { locale, t } = useI18n()
+  const topology = processGraphTopology(bibleData)
   const [selectedId, setSelectedId] = useState<ProcessNodeId | null>(null)
   const model = useMemo(
     () => (compact && !activity && !run
@@ -382,7 +396,7 @@ export function AutopilotProcessGraph({
   if (compact) {
     return (
       <div className="flex flex-col gap-1" data-testid="autopilot-process-graph-card">
-        <GraphSvg model={model} compact selectedId={null} t={t} />
+        <GraphSvg model={model} topology={topology} compact selectedId={null} t={t} />
       </div>
     )
   }
@@ -411,13 +425,14 @@ export function AutopilotProcessGraph({
       <p className="text-xs text-muted-foreground">{t("autopilot.graph.inspectHint")}</p>
       <GraphSvg
         model={model}
+        topology={topology}
         compact={false}
         selectedId={selectedId}
         onSelect={(id) => setSelectedId((current) => current === id ? null : id)}
         t={t}
       />
       {selected && (
-        <InspectPanel inspect={selected} t={t} onClose={() => setSelectedId(null)} />
+        <InspectPanel inspect={selected} bibleData={bibleData} t={t} onClose={() => setSelectedId(null)} />
       )}
     </section>
   )

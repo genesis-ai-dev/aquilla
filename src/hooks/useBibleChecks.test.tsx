@@ -3,7 +3,9 @@
 // WHY: the checks must cost nothing for a project that has not asked for them
 // (no pack fetch while they are off or dormant), must compile once per file
 // and pack version rather than on every keystroke, and must hand the engine
-// each cell's own facts.
+// each cell's own facts. AQU-1685: they are part of the Bible data
+// experiment, so they also cost and show nothing on a device that has not
+// switched it on, or while the open file is not a Bible book.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
@@ -23,7 +25,13 @@ const ENGLISH = {
   quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "reopen-each-paragraph" as const },
 }
 const scripture = [{ type: "usfm" as const }]
-const ON: BibleChecksProject = { bibleResourcesEnabled: true, files: scripture, languageProfile: ENGLISH }
+const BOOK = scripture[0]
+const ON: BibleChecksProject = {
+  bibleResourcesEnabled: true,
+  files: scripture,
+  languageProfile: ENGLISH,
+  experimentalFlags: { bibleData: true },
+}
 const CELLS = [
   { id: "c7", globalReferences: ["JHN 4:7"] },
   { id: "c9", globalReferences: ["JHN 4:9"] },
@@ -41,7 +49,7 @@ beforeEach(() => {
 
 describe("useBibleChecks", () => {
   it("loads the book's voices and structure once, and gives each verse cell its own expectation", async () => {
-    const { result } = renderHook(() => useBibleChecks(ON, CELLS))
+    const { result } = renderHook(() => useBibleChecks(ON, CELLS, BOOK))
     expect(result.current.status).toBe("loading")
     await waitFor(() => expect(result.current.status).toBe("ready"))
     expect(vi.mocked(loadLayer).mock.calls.map(([layer, book]) => `${layer}/${book}`).sort()).toEqual([
@@ -56,7 +64,7 @@ describe("useBibleChecks", () => {
 
   it("keeps the same compile when only cell text changes, and recompiles when refs change", async () => {
     let cells = CELLS
-    const { result, rerender } = renderHook(() => useBibleChecks(ON, cells))
+    const { result, rerender } = renderHook(() => useBibleChecks(ON, cells, BOOK))
     await waitFor(() => expect(result.current.status).toBe("ready"))
     const { signature, contextFor } = result.current
     cells = CELLS.map((cell) => ({ ...cell, translated: "typing…" }))
@@ -70,21 +78,43 @@ describe("useBibleChecks", () => {
   })
 
   it("fetches nothing while the checks are off or dormant", () => {
-    const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS))
+    const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS, BOOK))
     expect(off.result.current.status).toBe("off")
-    const dormant = renderHook(() => useBibleChecks({ ...ON, languageProfile: {} }, CELLS))
+    const dormant = renderHook(() => useBibleChecks({ ...ON, languageProfile: {} }, CELLS, BOOK))
     expect(dormant.result.current.status).toBe("dormant")
     expect(dormant.result.current.contextFor("c9")).toBeUndefined()
     expect(loadLayer).not.toHaveBeenCalled()
     expect(loadManifest).not.toHaveBeenCalled()
   })
 
+  // The experiment is device-local and off by default: a collaborator who
+  // switched it on must not make Bible data checks fetch or flag anything here.
+  it("is off, and fetches nothing, while this device has the Bible data experiment off", () => {
+    const { result } = renderHook(() => useBibleChecks({ ...ON, experimentalFlags: {} }, CELLS, BOOK))
+    expect(result.current.status).toBe("off")
+    expect(result.current.contextFor("c9")).toBeUndefined()
+    expect(loadLayer).not.toHaveBeenCalled()
+    expect(loadManifest).not.toHaveBeenCalled()
+  })
+
+  // "A Bible is open" for checks: the open file has scripture sections. A
+  // non-scripture file whose cells happen to carry verse refs gets nothing.
+  it("is off, and fetches nothing, unless the open file is a Bible book", () => {
+    const notes = renderHook(() => useBibleChecks(ON, CELLS, { type: "md" }))
+    expect(notes.result.current.status).toBe("off")
+    expect(notes.result.current.contextFor("c9")).toBeUndefined()
+    const none = renderHook(() => useBibleChecks(ON, CELLS, null))
+    expect(none.result.current.status).toBe("off")
+    expect(loadLayer).not.toHaveBeenCalled()
+    expect(loadManifest).not.toHaveBeenCalled()
+  })
+
   it("is unavailable for a file with no verse refs, or when the pack lacks the book", async () => {
-    expect(renderHook(() => useBibleChecks(ON, [{ id: "h", globalReferences: ["JHN 4"] }])).result.current.status).toBe(
+    expect(renderHook(() => useBibleChecks(ON, [{ id: "h", globalReferences: ["JHN 4"] }], BOOK)).result.current.status).toBe(
       "unavailable",
     )
     vi.mocked(loadLayer).mockResolvedValue({ ok: false, reason: "not-found" })
-    const { result } = renderHook(() => useBibleChecks(ON, CELLS))
+    const { result } = renderHook(() => useBibleChecks(ON, CELLS, BOOK))
     await waitFor(() => expect(result.current.status).toBe("unavailable"))
     expect(result.current.contextFor("c9")).toBeUndefined()
   })
@@ -99,12 +129,12 @@ describe("useBibleChecks", () => {
       return { ok: true, value: JHN_A_TEXT } as never
     })
     const cells = [{ id: "c11", globalReferences: ["JHN 21:11"] }]
-    const quotes = renderHook(() => useBibleChecks(ON, cells))
+    const quotes = renderHook(() => useBibleChecks(ON, cells, BOOK))
     await waitFor(() => expect(quotes.result.current.status).toBe("ready"))
     expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "text")).toBe(false)
     expect(quotes.result.current.contextFor("c11")?.bible?.expectation.numbers).toEqual([])
 
-    const numbers = renderHook(() => useBibleChecks({ ...ON, languageProfile: { numberWords: "cldr" } }, cells))
+    const numbers = renderHook(() => useBibleChecks({ ...ON, languageProfile: { numberWords: "cldr" } }, cells, BOOK))
     await waitFor(() => expect(numbers.result.current.contextFor("c11")?.bible?.expectation.numbers).toHaveLength(1))
     expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "text")).toBe(true)
     expect(numbers.result.current.contextFor("c11")?.bible?.expectation.numbers[0]?.value).toBe(153)
@@ -112,14 +142,14 @@ describe("useBibleChecks", () => {
 
   it("loads the structure layer for Check file's scans, even while the live checks are dormant", async () => {
     const headingsOnly = { ...ON, languageProfile: { headings: "pericope" as const } }
-    const { result } = renderHook(() => useBibleChecks(headingsOnly, CELLS))
+    const { result } = renderHook(() => useBibleChecks(headingsOnly, CELLS, BOOK))
     expect(result.current.status).toBe("dormant")
     expect(loadLayer).not.toHaveBeenCalled()
     const scan = await result.current.fileScan()
     expect(scan?.profile).toEqual({ headings: "pericope" })
     expect(scan?.structure).toBe(JHN4_STRUCTURE)
     expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
-    const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS))
+    const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS, BOOK))
     expect(await off.result.current.fileScan()).toBeNull()
   })
 })

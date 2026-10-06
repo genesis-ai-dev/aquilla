@@ -547,6 +547,60 @@ describe("stageEvents — lanes (AQU-1447)", () => {
   })
 })
 
+// AQU-609: a rule with scope "lane" governs only its own lane, so lane-scoped
+// rules must not lint other lanes' drafts. Staging feeds every NEEDS REVIEW
+// line back to the model as an instruction to redraft — a rule pinned to "fr"
+// firing on an "es" or default-lane draft would make the model rewrite text
+// that was correct for its own lane.
+describe("stageEvents — lane-scoped lint rules (AQU-609)", () => {
+  const FR = "fr"
+  const RULE_NAME = "French lane: no 'beginnito'"
+  // Fresh per call: staging writes provenance and targetLang into the payload.
+  const draft = () => [
+    { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "En el beginnito" } },
+  ]
+
+  beforeEach(async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [
+            {
+              id: "r-fr",
+              name: RULE_NAME,
+              enabled: true,
+              scope: "lane",
+              lane: FR,
+              check: { type: "target-forbids", targetPattern: "beginnito*" },
+            },
+          ],
+        }),
+      )
+      .run()
+  })
+
+  it.each([
+    ["another lane", "es"],
+    ["the default lane", ""],
+  ])("does not lint a draft staged into %s against a rule pinned to a different lane", async (_where, lane) => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).not.toContain(RULE_NAME)
+  })
+
+  it("still lints a draft staged into the rule's own lane", async () => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: FR }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain(RULE_NAME)
+  })
+})
+
 // AQU-1670: staging a whole-file proposal used to cost one Hyperdrive→Neon
 // round-trip PER PROPOSED CELL, so a 28-cell proposal (the partner repro) ran
 // past Cloudflare's origin timeout and returned 522 — discarding every cell

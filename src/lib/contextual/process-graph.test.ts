@@ -5,6 +5,8 @@ import {
   deriveProcessGraph,
   deriveProcessGraphFromOverview,
   emptyProcessGraph,
+  layoutById,
+  processGraphTopology,
 } from "./process-graph"
 import type {
   ContextualActivityEvent,
@@ -191,6 +193,42 @@ describe("deriveProcessGraph", () => {
     expect(model.nodeStates.construe).toBe("done")
     expect(model.nodeStates.verify_force).toBe("active")
     expect(model.liveSpanLabels).toEqual(["LUK 1:1–1:8"])
+  })
+})
+
+// AQU-1685: a device without the Bible data experiment draws the graph from
+// before AQU-1690's Bible data steps: no Bible facts or Bible checks node, no
+// edge into or out of them, the old flows past them, the old spacing. Those
+// flows still carry live state, so the graph still shows where a run is.
+describe("processGraphTopology", () => {
+  it("leaves out the Bible data steps without the experiment, and keeps the flow past them", () => {
+    const without = processGraphTopology(false)
+    const ids = without.nodes.map((node) => node.id)
+    expect(ids).not.toContain("bible_facts")
+    expect(ids).not.toContain("bible_checks")
+    expect(ids).toHaveLength(PROCESS_NODE_IDS.length - 2)
+    expect(without.edges.some((edge) => edge.from.startsWith("bible_") || edge.to.startsWith("bible_"))).toBe(false)
+    expect(without.edges.map((edge) => edge.id)).toEqual(expect.arrayContaining(["segment-construe", "lint-route"]))
+    const at = layoutById(without.nodes)
+    const step = at.segment.x - at.scope.x
+    expect(at.construe.x - at.segment.x).toBe(step)
+    expect(at.route_risk.x - at.lint_rules.x).toBe(step)
+    expect(without.viewBox.width).toBe(processGraphTopology(true).viewBox.width - 2 * step)
+  })
+
+  it("draws every node and edge with the experiment on", () => {
+    const withBible = processGraphTopology(true)
+    expect(withBible.nodes.map((node) => node.id)).toEqual([...PROCESS_NODE_IDS])
+    expect(withBible.edges).toBe(PROCESS_EDGES)
+  })
+
+  it("gives the flows past the Bible data steps a live state", () => {
+    const model = deriveProcessGraph(run, activity([
+      event({ id: "start", kind: "span_started", spanId: "s1", spanLabel: "LUK 1:1–1:8" }),
+      event({ id: "phase", kind: "phase", spanId: "s1", spanLabel: "LUK 1:1–1:8", phase: "checking" }),
+    ]))
+    expect(model.edgeStates["lint-route"]).toBe("active")
+    expect(model.edgeStates["segment-construe"]).toBe("done")
   })
 })
 

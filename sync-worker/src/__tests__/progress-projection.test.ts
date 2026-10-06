@@ -113,16 +113,19 @@ describe('file_section_progress projection', () => {
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     expect(await rows('file_section_progress')).toHaveLength(4)
 
+    // c3 loses its reference. It sits below c2 in the file — the anchor the
+    // editor orders by — so since AQU-1493 it counts in c2's chapter.
     await pg.query(
-      `UPDATE cells SET canonical_ref = NULL
+      `UPDATE cells SET canonical_ref = NULL, anchor_cell_id = 'c2'
         WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c3' AND side = 'source'`,
       [PROJECT, FILE],
     )
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
     // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
-    const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
+    const projected = await rows<{ scope: string; section_key: string; total_count: number }>('file_section_progress')
     expect(projected).toHaveLength(3)
+    expect(projected.find((row) => row.section_key === 'GEN 1')?.total_count).toBe(3)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
     expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
@@ -392,14 +395,19 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s4"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s6"')
 
     const notHonoured = async (candidate: string) => (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}`, 'If-None-Match': candidate },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!.status
 
     // A client from before shape markers existed at all.
-    expect(await notHonoured(etag.replace(':s4', ''))).toBe(200)
+    expect(await notHonoured(etag.replace(':s6', ''))).toBe(200)
+    // AQU-1493: nor one from before the list carried its unnumbered lines,
+    expect(await notHonoured(etag.replace(':s6', ':s4'))).toBe(200)
+    // nor one from before headings moved to the verse below them and were
+    // flagged `structural` rather than `unnumbered`.
+    expect(await notHonoured(etag.replace(':s6', ':s5'))).toBe(200)
     // AQU-490: and one from the shape immediately before this, which is the
     // live case at deploy. `take_signed` kept its name and its type and
     // changed its question — nothing else in the key moves for that.

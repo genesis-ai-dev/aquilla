@@ -6,7 +6,9 @@
 // compile is keyed by pack version, the cells' refs and the Language profile,
 // never by cell text, so typing in one cell re-checks only that cell.
 //
-// Nothing is fetched while the checks are off or dormant. AQU-1697: the text
+// Nothing is fetched while the checks are off or dormant, and they are off
+// unless the open file is a Bible book (AQU-1685): a Bible data check over a
+// scripture file is the checks' form of "a Bible is open". AQU-1697: the text
 // layer (several MB) loads only while a check that reads it can run (numbers,
 // negation, run-on sentences), and `fileScan` loads the structure layer for
 // Check file's scans (headings, verse numbering) when it runs.
@@ -24,6 +26,7 @@ import {
   type BibleChecksProject,
 } from "@/lib/bible-data/check-context"
 import type { BibleFileScanInput } from "@/lib/rules/bible-check-rules"
+import { fileHasSections, type FileReference } from "@/lib/parsers/types"
 import type { CellRefsInput } from "../../db/shared/bible-checks/compile"
 import { bibleChecksReadText } from "../../db/shared/bible-checks/evaluate"
 
@@ -37,8 +40,9 @@ export interface BibleChecksState {
   signature: string
   /**
    * AQU-1697: what Check file's Bible data scans read (S1 headings, S8 verse
-   * numbering), loaded when called. Null while the checks enrichment is off,
-   * for a file with no verse refs, or when the pack does not load.
+   * numbering), loaded when called. Null while the checks are off (the
+   * enrichment, the Bible data experiment, or a file that is not a Bible
+   * book), for a file with no verse refs, or when the pack does not load.
    */
   fileScan: () => Promise<BibleFileScanInput | null>
 }
@@ -69,10 +73,12 @@ const NO_CONTEXTS: ReadonlyMap<string, CellCheckContext> = new Map()
 export function useBibleChecks(
   project: BibleChecksProject | null | undefined,
   cells: readonly CellRefsInput[],
+  /** The open file. The checks run only on one with scripture sections. */
+  file: Pick<FileReference, "type" | "hasScriptureContent"> | null | undefined,
 ): BibleChecksState {
   // Keyed on a boolean and a string, so a new project object with the same
   // settings does not recompile anything.
-  const enabled = bibleChecksEnabled(project)
+  const enabled = bibleChecksEnabled(project) && !!file && fileHasSections(file)
   const profileKey = JSON.stringify(project?.languageProfile ?? null)
   const gate = useMemo(() => bibleChecksGateFor(enabled, JSON.parse(profileKey)), [enabled, profileKey])
 

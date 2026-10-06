@@ -31,7 +31,7 @@ function CheckRow({ draft, projectId, runId }: { draft: ContextualDraftRecord; p
         {where}
       </Link>
       <p className="line-clamp-2 text-xs text-muted-foreground" dir="auto">{draft.text}</p>
-      <DraftFindingChips review={draft.review} />
+      <DraftFindingChips review={draft.review} evidence />
     </li>
   )
 }

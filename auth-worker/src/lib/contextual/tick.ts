@@ -63,7 +63,8 @@ import { examplesForSpan } from "./bible-examples"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
 import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
-import { spanBible } from "./bible-span"
+import { bibleGateOf, spanBible } from "./bible-span"
+import { recheckForStage, withBibleVerdicts } from "./bible-gates"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { ingestRunActivity } from "../team-ingest"
@@ -978,6 +979,7 @@ async function processSpan(
     seedSource: storedSeed.seedSource as SpanSeed["seedSource"],
   }
   const label = spanLabel(storedSeed, shared.pairs)
+  const bibleGate = bibleGateOf(shared.bible)
 
   // The lane opens BEFORE the closure loop's first model call — otherwise the
   // UI shows nothing at all through the slowest phase of the span.
@@ -1087,7 +1089,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, bibleGate ?? undefined),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -1105,6 +1108,12 @@ async function processSpan(
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // AQU-1690: re-check the Bible data expectations on the FINAL text, so
+        // every bkp: code describes the staged words. A warning that survived
+        // its repair stages the cell for a person, never skips it.
+        const rechecks = new Map(
+          fresh.map((c) => [c.cellId, bibleGate ? recheckForStage(bibleGate, c.cellId, c.text, c.findings ?? []) : null]),
+        )
         // Finding codes + a "needs a human?" call per flagged cell, stored on
         // the draft for the PR view. Never blocks staging (triage.ts).
         const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
@@ -1114,7 +1123,7 @@ async function processSpan(
             ref: pairById.get(c.cellId)?.canonicalRef ?? null,
             source: pairById.get(c.cellId)?.source ?? "",
             text: c.text,
-            findings: c.findings ?? [],
+            findings: rechecks.get(c.cellId)?.findings ?? c.findings ?? [],
           })),
           deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
         )
@@ -1126,7 +1135,7 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
-            verdicts: verdictsByCell.get(c.cellId) ?? {},
+            verdicts: withBibleVerdicts(verdictsByCell.get(c.cellId) ?? {}, rechecks.get(c.cellId) ?? null),
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,

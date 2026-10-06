@@ -398,7 +398,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
                   {reviewByDraft.get(selected.draftId)?.findings.length ? (
                     <div className="flex flex-col gap-1.5 rounded-md border border-border/60 p-2" data-testid="draft-review-comments">
                       <p className="text-xs font-medium">{t("agentDraftReview.comments")}</p>
-                      <DraftFindingChips review={reviewByDraft.get(selected.draftId)} />
+                      <DraftFindingChips review={reviewByDraft.get(selected.draftId)} evidence />
                     </div>
                   ) : null}
                   <ContextualDraftCard

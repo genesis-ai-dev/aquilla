@@ -6,6 +6,8 @@
 // shapes — no class instances cross a node boundary, so the Workflows runtime
 // (or a plain test harness) can serialize any edge value verbatim.
 
+import type { BibleCheckFinding } from "../../../../db/shared/bible-checks/types"
+
 // ── Model interface ──────────────────────────────────────────────────────────
 
 export type Tier = "fast" | "mid" | "deep"
@@ -153,6 +155,9 @@ export interface LintFlag {
   cellId: string
   ruleId: string
   message: string
+  /** AQU-1690: set on a `bkp:` flag — the Bible data finding behind it. Such
+   *  flags are counted apart from lint (router.ts). */
+  bible?: BibleCheckFinding
 }
 
 export type VerifierKey = "force" | "ambiguity" | "naturalness"

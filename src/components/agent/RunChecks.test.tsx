@@ -8,6 +8,8 @@ import { MemoryRouter } from "react-router-dom"
 import { RunChecks } from "./RunChecks"
 import { runReviewOf } from "@/hooks/useRunReview"
 import type { ContextualDraftRecord, ContextualRunRecord } from "@/lib/contextual/transport"
+import { findingsFromVerdicts } from "@/lib/agent/draft-findings"
+import { encodeBibleParams } from "../../../db/shared/bible-checks/params"
 
 const run = { runId: "run-1", fileId: "f1" } as ContextualRunRecord
 
@@ -43,6 +45,25 @@ describe("RunChecks", () => {
     const link = screen.getByRole("link", { name: "Open MRK 1:1–1:8 · b in Files changed" })
     expect(link.getAttribute("href")).toContain("view=review")
     expect(link.getAttribute("href")).toContain("cell=b")
+  })
+
+  // AQU-1690: a Bible data finding names its check and says what is wrong and
+  // where the fact comes from, from the params the server stored on the draft.
+  it("shows a Bible data finding with its explanation and pack evidence", () => {
+    const verdicts = {
+      "bkp:V2": encodeBibleParams({
+        kind: "close-after-aside", level: "1", evidence: "speech",
+        startRef: "JHN 4:9", startWord: "8", endRef: "JHN 4:9", endWord: "18",
+        speakerSources: "fcbh,macula", speakerConf: "0.97",
+      }),
+      _triage: "human",
+      _severity: "3",
+    }
+    view([{ draftId: "d-9", runId: "run-1", cellId: "c9", text: "text c9", spanLabel: "JHN 4:9", review: findingsFromVerdicts(verdicts) }])
+    const needs = screen.getByTestId("checks-needs-you")
+    expect(within(needs).getByText("Bible data: Quotation closes")).toBeInTheDocument()
+    expect(within(needs).getByText(/closes after the narration that follows it/)).toBeInTheDocument()
+    expect(within(needs).getByText(/OpenText speech JHN 4:9 words 8.18; speaker from Clear speaker-quotations, Macula/)).toBeInTheDocument()
   })
 
   it("says so plainly when every pending draft passed cleanly", () => {

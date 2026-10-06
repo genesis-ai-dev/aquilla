@@ -8,6 +8,7 @@
 
 import type { InfractionSpan, RuleInfraction } from "@/lib/parsers/types"
 import { evaluateCell } from "../../../db/shared/bible-checks/evaluate"
+import { bibleReasonParams } from "../../../db/shared/bible-checks/params"
 import type {
   BibleCheckFinding,
   BibleCheckId,
@@ -37,23 +38,9 @@ function findingsFor(text: string, input: BibleCellCheckInput): BibleCheckFindin
   return findings
 }
 
-/** A finding as flat strings, for `RuleInfraction.reasonParams`. */
-export function bibleReasonParams(finding: BibleCheckFinding): Record<string, string> {
-  const params: Record<string, string> = { ...finding.params, kind: finding.reason, evidence: finding.evidence.kind }
-  if (finding.approximate) params.approximate = "true"
-  const evidence = finding.evidence
-  if (evidence.kind === "speech") {
-    params.startRef = evidence.startRef
-    params.startWord = String(evidence.startWord)
-    params.endRef = evidence.endRef
-    params.endWord = String(evidence.endWord)
-    params.speakerSources = evidence.speakerSources.join(",")
-    params.speakerConf = String(evidence.speakerConf)
-  } else {
-    params.refs = evidence.refs.join(",")
-  }
-  return params
-}
+// AQU-1690: shared with autopilot, which stores the same strings on a draft's
+// `bkp:` verdict. Re-exported so this module's callers are unchanged.
+export { bibleReasonParams }
 
 /** The infraction for one Bible data rule on one cell, or null. No input means the check cannot run here. */
 export function bibleCheckInfraction(

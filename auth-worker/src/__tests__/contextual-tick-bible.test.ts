@@ -196,7 +196,7 @@ describe("Jev questions, traced", () => {
     jevP = 0.1
     const runId = await tickOnce({ withTraces: true })
     expect(jevCalls).toHaveLength(1)
-    const all = await listRunTraces(db, { projectId: PROJECT, runId, includeJev: true })
+    const all = await listRunTraces(db, { projectId: PROJECT, runId, maintainer: true })
     const jev = all.traces.filter((trace) => trace.label === "jev:bible-qa")
     expect(jev).toHaveLength(1)
     expect(jev[0]).toMatchObject({ tier: "jev", model: "typesafe/jev-1.13", promptTokens: 40, completionTokens: 3 })
@@ -205,7 +205,7 @@ describe("Jev questions, traced", () => {
     // Shadow answers act on nothing: the draft is staged unredrafted, with no bkp:M3 finding.
     const drafts = await listDrafts(db, PROJECT, FILE, "proposed", "")
     expect(drafts.find((d) => d.cellId === "c9")?.verdicts ?? {}).not.toHaveProperty("bkp:M3")
-    // Maintainers only: without includeJev the row is not listed.
+    // Maintainers only: other roles do not get the row.
     const viewer = await listRunTraces(db, { projectId: PROJECT, runId })
     expect(viewer.traces.some((trace) => trace.label === "jev:bible-qa")).toBe(false)
   })
@@ -303,7 +303,9 @@ describe("per-span facts and metrics, traced", () => {
     expect(facts.traces).toHaveLength(1)
     expect(facts.traces[0]).toMatchObject({ tier: "code", model: "bkp@1.0.0" })
     expect(facts.traces[0].user).toContain("JHN 4:7: speech Jesus [person:Jesus.2] → Samaritan woman")
-    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics" })
+    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics", maintainer: true })
+    // The metrics carry shadow answers: maintainers only.
+    expect((await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics" })).traces).toEqual([])
     expect(JSON.parse(metrics.traces[0].output ?? "{}")).toMatchObject({
       bibleData: "facts+checks",
       construeRounds: 1,
@@ -318,7 +320,7 @@ describe("per-span facts and metrics, traced", () => {
     await setSettings({ bibleEnrichments: { autopilot: false } })
     const runId = await tickOnce({ withTraces: true })
     expect((await listRunTraces(db, { projectId: PROJECT, runId, label: "bible-facts" })).traces).toEqual([])
-    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics" })
+    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics", maintainer: true })
     expect(JSON.parse(metrics.traces[0].output ?? "{}")).toMatchObject({ bibleData: "off", jevCalls: 0 })
   })
 })

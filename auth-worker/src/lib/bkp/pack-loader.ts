@@ -21,10 +21,12 @@
 //     JSON the contract describes is `invalid`, like a malformed file.
 
 import type { Env } from "../../types"
+import { isSecondPersonWord } from "../../../../db/shared/bible-facts/facts"
 import {
   parseServerLayer,
   parseServerManifest,
   type BkpManifest,
+  type BkpWord,
   type ServerBkpLayer,
   type ServerBkpLayerData,
 } from "./pack-types"
@@ -39,7 +41,7 @@ const LAYER_MAX_BYTES = 8_000_000
 const MANIFEST_CACHE_SECONDS = 300
 /** A versioned layer URL never changes content. */
 const LAYER_CACHE_SECONDS = 7 * 24 * 3600
-/** Parsed layers kept per isolate: four layers of three books. */
+/** Parsed layers kept per isolate: four layers of three books (the text layer compacted). */
 const MEMORY_ENTRIES = 12
 const BOOK_CODE = /^[1-4]?[A-Z]{2,3}$/
 
@@ -54,6 +56,17 @@ export type BkpFailureReason = "offline" | "not-found" | "invalid"
 
 export type BkpResult<T> = { ok: true; value: T } | { ok: false; reason: BkpFailureReason }
 
+/**
+ * The text layer as autopilot keeps it: only the second-person words, with
+ * the fields the facts read. A full layer runs to ~4 MB of JSON and several
+ * times that parsed; autopilot reads it only for "you" singular or plural.
+ */
+export interface CompactTextLayer {
+  book: string
+  verses: Record<string, string[]>
+  words: Record<string, Pick<BkpWord, "class" | "morph" | "person" | "number">>
+}
+
 export interface BookPack {
   version: string
   book: string
@@ -61,7 +74,7 @@ export interface BookPack {
   structure: ServerBkpLayerData["structure"]
   people: ServerBkpLayerData["people"]
   /** Present only when the caller asked for it and it loaded. */
-  text: ServerBkpLayerData["text"] | null
+  text: CompactTextLayer | null
 }
 
 type PackEnv = Pick<Env, "BKP_BASE" | "AQUIFER_USER_AGENT">
@@ -183,15 +196,37 @@ function remember(key: string, value: unknown): void {
   }
 }
 
-async function loadLayer<L extends ServerBkpLayer>(
+/** Only the second-person words of a text layer (see CompactTextLayer). */
+export function compactTextLayer(layer: ServerBkpLayerData["text"]): CompactTextLayer {
+  const verses: CompactTextLayer["verses"] = {}
+  const words: CompactTextLayer["words"] = {}
+  for (const [ref, ids] of Object.entries(layer.verses)) {
+    if (!Array.isArray(ids)) continue
+    const kept = ids.filter((id) => {
+      const word = Object.hasOwn(layer.words, id) ? layer.words[id] : undefined
+      return word !== undefined && isSecondPersonWord(word)
+    })
+    if (kept.length === 0) continue
+    verses[ref] = kept
+    for (const id of kept) {
+      const { class: wordClass, morph, person, number } = layer.words[id]
+      words[id] = { class: wordClass, morph, ...(person ? { person } : {}), ...(number ? { number } : {}) }
+    }
+  }
+  return { book: layer.book, verses, words }
+}
+
+async function loadLayer<L extends ServerBkpLayer, T = ServerBkpLayerData[L]>(
   env: PackEnv,
   base: string,
   version: string,
   layer: L,
   book: string,
-): Promise<BkpResult<ServerBkpLayerData[L]>> {
+  /** Reduce the parsed layer before it is kept in memory. */
+  shape: (parsed: ServerBkpLayerData[L]) => T = (parsed) => parsed as unknown as T,
+): Promise<BkpResult<T>> {
   const memoKey = `${base}|${version}|${layer}|${book}`
-  const remembered = memory.get(memoKey) as ServerBkpLayerData[L] | undefined
+  const remembered = memory.get(memoKey) as T | undefined
   if (remembered) {
     remember(memoKey, remembered)
     return { ok: true, value: remembered }
@@ -207,8 +242,9 @@ async function loadLayer<L extends ServerBkpLayer>(
   if (!fetched.ok) return fetched
   const parsed = parseServerLayer(layer, book, fetched.value)
   if (!parsed) return { ok: false, reason: "invalid" }
-  remember(memoKey, parsed)
-  return { ok: true, value: parsed }
+  const value = shape(parsed)
+  remember(memoKey, value)
+  return { ok: true, value }
 }
 
 /**
@@ -243,7 +279,7 @@ export async function loadBookPack(
   if (!structure.ok) return structure
   if (!people.ok) return people
   const text = opts.text && entry.layers.includes("text")
-    ? await loadLayer(env, base, version, "text", book)
+    ? await loadLayer(env, base, version, "text", book, compactTextLayer)
     : null
   return {
     ok: true,

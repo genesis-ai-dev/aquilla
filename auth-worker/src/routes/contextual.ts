@@ -1292,8 +1292,8 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     limit,
     ...(spanId ? { spanId } : {}),
     ...(label ? { label } : {}),
-    // AQU-1690: shadow-mode Jev answers are for maintainers only.
-    includeJev: gate.level >= ROLE.MAINTAINER,
+    // AQU-1690: shadow-mode Jev answers (Jev and metrics rows) are for maintainers only.
+    maintainer: gate.level >= ROLE.MAINTAINER,
   })
   return c.json(result)
 })

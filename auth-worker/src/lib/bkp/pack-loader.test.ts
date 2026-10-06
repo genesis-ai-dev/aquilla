@@ -3,7 +3,12 @@
 // it must never read an old file for a new pack version.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { __resetBkpServerMemory, bkpBase, loadBookPack, DEFAULT_BKP_BASE } from "./pack-loader"
+import { __resetBkpServerMemory, bkpBase, compactTextLayer, loadBookPack, DEFAULT_BKP_BASE } from "./pack-loader"
+import type { ServerBkpLayerData } from "./pack-types"
+import { compileFileExpectations } from "../../../../db/shared/bible-checks/compile"
+import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../../db/shared/bible-checks/__fixtures__/pack"
+import { JHN4_TEXT } from "../../../../db/shared/bible-facts/__fixtures__/jhn4-people"
+import { computeCellFacts } from "../../../../db/shared/bible-facts/facts"
 
 const BASE = "https://packs.test/bkp/v1"
 
@@ -151,6 +156,27 @@ describe("loadBookPack", () => {
       expect(layerFetches()).toBe(2)
     } finally {
       vi.useRealTimers()
+    }
+  })
+})
+
+// A parsed text layer is several times its ~4 MB of JSON; kept whole for a
+// few books it could exhaust an isolate. Autopilot reads it only for "you".
+describe("compactTextLayer", () => {
+  it("keeps only the second-person words, and the facts read from it are unchanged", () => {
+    const full = JHN4_TEXT as unknown as ServerBkpLayerData["text"]
+    const compact = compactTextLayer(full)
+    expect(Object.keys(compact.words).length).toBeLessThan(Object.keys(full.words).length / 5)
+    expect(compact.verses["JHN 4:8"]).toBeUndefined()
+    const refs = ["JHN 4:7", "JHN 4:8", "JHN 4:9", "JHN 4:10"]
+    const expectations = compileFileExpectations(refs.map((ref) => ({ id: ref, globalReferences: [ref] })), JHN4_VOICES, JHN4_STRUCTURE)
+    for (const ref of refs) {
+      const expectation = expectations.get(ref)
+      if (!expectation) throw new Error(ref)
+      const layers = { voices: JHN4_VOICES, structure: JHN4_STRUCTURE, people: null }
+      expect(computeCellFacts(expectation, { ...layers, text: compact }).secondPerson).toBe(
+        computeCellFacts(expectation, { ...layers, text: full }).secondPerson,
+      )
     }
   })
 })

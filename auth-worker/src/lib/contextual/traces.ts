@@ -242,19 +242,20 @@ interface TraceRow {
 }
 
 /**
- * Traces for one run, oldest first, optionally narrowed to a span. Jev rows
- * (label "jev:…", AQU-1690) carry shadow-mode answers that act on nothing
- * yet; only callers that pass `includeJev` (maintainers) see them.
+ * Traces for one run, oldest first, optionally narrowed to a span. AQU-1690:
+ * Jev rows (label "jev:…") and the per-span metrics rows ("span-metrics")
+ * carry shadow-mode answers that act on nothing yet; only maintainers see
+ * them (`maintainer`).
  */
 export async function listRunTraces(
   db: AquillaDb,
-  input: { projectId: string; runId: string; spanId?: string; label?: string; limit?: number; includeJev?: boolean },
+  input: { projectId: string; runId: string; spanId?: string; label?: string; limit?: number; maintainer?: boolean },
 ): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
   const limit = Math.min(Math.max(1, input.limit ?? TRACE_LIST_LIMIT), TRACE_LIST_LIMIT)
   const spanClause = input.spanId ? "AND span_id = ?" : ""
   // AQU-1690: one kind of row, e.g. the "bible-facts" row of every span.
   const labelClause = input.label ? "AND label = ?" : ""
-  const jevClause = input.includeJev ? "" : "AND label NOT LIKE 'jev:%'"
+  const jevClause = input.maintainer ? "" : "AND label NOT LIKE 'jev:%' AND label <> 'span-metrics'"
   const { results } = await db
     .prepare(
       `SELECT * FROM contextual_run_traces

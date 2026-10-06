@@ -22,6 +22,7 @@ import type {
   FactsSpeechInput,
   FactsTextInput,
   FactsVoicesInput,
+  FactsWordInput,
   SecondPersonNumber,
   SpeechFact,
 } from './types'
@@ -99,7 +100,15 @@ function isParticipant(people: FactsPeopleInput, id: string): boolean {
   return !(entity.type === 'local-person' && entity.gender === 'neuter')
 }
 
-/** A second-person verb, or a second-person personal pronoun (σύ, ὑμεῖς). Possessives are left out: their number is the possessed noun's. */
+/**
+ * A second-person verb, or a second-person personal pronoun (σύ, ὑμεῖς).
+ * Possessives are left out: their number is the possessed noun's. Exported
+ * for the worker's pack loader, which keeps only these words of a text layer.
+ */
+export function isSecondPersonWord(word: FactsWordInput): boolean {
+  return word.person === 'second' || (word.class === 'pron' && /^P-2/.test(word.morph))
+}
+
 function secondPersonOf(text: FactsTextInput | null, refs: readonly string[]): SecondPersonNumber | null {
   if (!text) return null
   const numbers = new Set<string>()
@@ -107,8 +116,7 @@ function secondPersonOf(text: FactsTextInput | null, refs: readonly string[]): S
     for (const wordId of own(text.verses, ref) ?? []) {
       const word = own(text.words, wordId)
       if (!word) continue
-      const second = word.person === 'second' || (word.class === 'pron' && /^P-2/.test(word.morph))
-      if (second && (word.number === 'singular' || word.number === 'plural')) numbers.add(word.number)
+      if (isSecondPersonWord(word) && (word.number === 'singular' || word.number === 'plural')) numbers.add(word.number)
     }
   }
   if (numbers.size === 0) return null

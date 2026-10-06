@@ -69,21 +69,22 @@ describe("Bridge 2 per chapter", () => {
     const bridge = createTargetBridge({ corpus: () => cells, aligner })
     bridge.request("JHN 4")
     await flush()
-    expect(bridge.linksFor("c0", cells[0].source, cells[0].target)).toEqual({ links: [], trainedPairs: 10 })
+    expect(bridge.linksFor("c0", cells[0].source, cells[0].target)).toMatchObject({ links: [], trainedPairs: 10 })
     bridge.request("JHN 4")
     await flush()
     expect(aligner.calls).toBe(1)
   })
 
-  it("tells its subscribers when links arrive", async () => {
+  it("tells its subscribers when links arrive, and keeps a cell's answer the same object", async () => {
     const cells = corpus(30)
     const bridge = createTargetBridge({ corpus: () => cells, aligner: countingAligner() })
     const listener = vi.fn()
     bridge.subscribe(listener)
-    const before = bridge.version()
     bridge.request("JHN 4")
     await flush()
     expect(listener).toHaveBeenCalledTimes(1)
-    expect(bridge.version()).toBe(before + 1)
+    // A row reads its answer as a store snapshot: it must not change between reads.
+    const first = bridge.linksFor("c3", cells[3].source, cells[3].target)
+    expect(bridge.linksFor("c3", cells[3].source, cells[3].target)).toBe(first)
   })
 })

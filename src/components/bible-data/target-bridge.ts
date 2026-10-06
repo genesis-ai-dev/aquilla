@@ -7,10 +7,14 @@
 // on. A cell whose texts change reads as "not computed" again, and its row's
 // next request recomputes the chapter. Requests are coalesced per chapter,
 // so a page of rows asks once. Nothing is persisted (see target-alignment.ts).
+//
+// `linksFor` returns the same object for as long as a cell's answer stands,
+// so a row can read it as a useSyncExternalStore snapshot and re-render only
+// when its own links change, not whenever any chapter arrives.
 
 import { contentHash } from "@/lib/dcs/content-hash"
 import { createTargetAligner, type TargetAligner } from "@/lib/bible-data/bridge-align-client"
-import type { TargetCellLinks, TargetPairInput } from "@/lib/bible-data/target-alignment"
+import type { TargetPairInput } from "@/lib/bible-data/target-alignment"
 import type { AlignLink } from "@/lib/bible-data/word-align"
 
 /** One cell of the book, with the chapter it belongs to ("JHN 4"). */
@@ -18,19 +22,22 @@ export interface TargetCorpusCell extends TargetPairInput {
   chapter: string
 }
 
+/** One cell's answer: its links, for the two texts with these hashes. */
 export interface TargetBridgeLinks {
+  sourceHash: string
+  targetHash: string
   links: readonly AlignLink[]
+  /** The translated cells the model that computed these links trained on. */
   trainedPairs: number
 }
 
 export interface TargetBridge {
-  /** The links for these exact texts, or undefined when they are not computed. */
+  /** The answer for these exact texts (the same object each time), or undefined when not computed. */
   linksFor(cellId: string, source: string, target: string): TargetBridgeLinks | undefined
   /** Compute a chapter's links (no-op while that chapter is in flight). */
   request(chapter: string): void
+  /** Called whenever answers arrive. */
   subscribe(listener: () => void): () => void
-  /** Bumps whenever links arrive. */
-  version(): number
   /** Release the worker (a later request starts a new one); computed links are kept. */
   dispose(): void
 }
@@ -42,22 +49,15 @@ export interface TargetBridgeOptions {
 }
 
 export function createTargetBridge({ corpus, aligner = createTargetAligner() }: TargetBridgeOptions): TargetBridge {
-  const results = new Map<string, TargetCellLinks>()
+  const results = new Map<string, TargetBridgeLinks>()
   const inFlight = new Set<string>()
   const listeners = new Set<() => void>()
-  let trainedPairs = 0
-  let version = 0
-
-  const notify = () => {
-    version++
-    for (const listener of listeners) listener()
-  }
 
   return {
     linksFor(cellId, source, target) {
       const found = results.get(cellId)
       if (!found || found.sourceHash !== contentHash(source) || found.targetHash !== contentHash(target)) return undefined
-      return { links: found.links, trainedPairs }
+      return found
     },
     request(chapter) {
       if (inFlight.has(chapter)) return
@@ -73,21 +73,20 @@ export function createTargetBridge({ corpus, aligner = createTargetAligner() }: 
       void aligner
         .align(cells.map(strip), wanted.map(strip))
         .then((alignment) => {
-          trainedPairs = alignment.trainedPairs
-          for (const cell of alignment.cells) results.set(cell.cellId, cell)
-          // A chapter the model could not cover (too few translated cells) still
-          // records its cells, with no links, so its rows stop asking.
+          const { trainedPairs } = alignment
+          const answered = new Map(alignment.cells.map((cell) => [cell.cellId, cell]))
+          // A cell the model could not cover (too few translated cells) is
+          // recorded with no links, so its row stops asking.
           for (const cell of wanted) {
-            if (!results.has(cell.cellId)) {
-              results.set(cell.cellId, {
-                cellId: cell.cellId,
-                sourceHash: contentHash(cell.source),
-                targetHash: contentHash(cell.target),
-                links: [],
-              })
-            }
+            const answer = answered.get(cell.cellId)
+            results.set(cell.cellId, {
+              sourceHash: answer?.sourceHash ?? contentHash(cell.source),
+              targetHash: answer?.targetHash ?? contentHash(cell.target),
+              links: answer?.links ?? [],
+              trainedPairs,
+            })
           }
-          notify()
+          for (const listener of listeners) listener()
         })
         .catch(() => {
           // Leave the chapter uncomputed; a later render may ask again.
@@ -102,7 +101,6 @@ export function createTargetBridge({ corpus, aligner = createTargetAligner() }: 
         listeners.delete(listener)
       }
     },
-    version: () => version,
     dispose() {
       aligner.dispose()
     },

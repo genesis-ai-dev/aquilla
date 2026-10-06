@@ -10,7 +10,7 @@
 // its mention words through Bridge 1, the stored alignment; the target column
 // gets tints through Bridges 1+2 (useCellTargetTints).
 
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type RefObject } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type RefObject } from "react"
 import {
   directTokenLinks,
   EXACT_PAIRS,
@@ -27,7 +27,6 @@ import type { BkpEntityId, BkpRef, BkpTextLayer } from "@/lib/bible-data/pack-ty
 import { mentionsIn, threadSlot, type MentionAt, type PeopleIndex } from "@/lib/bible-data/people-index"
 import { cellVerses, type CellVerses } from "@/lib/bible-data/voice-index"
 import type { ImpliedSubjectHintMode, WhosWhoHighlightMode } from "@/lib/store/bible-data-view-prefs"
-import { readAtVersion } from "@/hooks/useActiveCellStore"
 import type { MentionHighlightStore } from "./mention-highlight-store"
 import type { CellSourceLinks } from "./source-alignment-store"
 import type { TargetBridge } from "./target-bridge"
@@ -137,7 +136,7 @@ export function useCellMentionWords(cellId: string, ref: string, type: string, s
   }, [context, cellId, ref, type, sourceText])
 }
 
-const NO_BRIDGE = { subscribe: () => () => {}, version: () => 0 }
+const noSubscribe = () => () => {}
 
 /**
  * Tint the participants in a row's rendered target text (`root`), through
@@ -157,35 +156,34 @@ export function useCellTargetTints(
 ): void {
   const context = useContext(WhosWhoContext)
   const bridge = context?.bridges.target ?? null
-  const version = useSyncExternalStore((bridge ?? NO_BRIDGE).subscribe, (bridge ?? NO_BRIDGE).version, (bridge ?? NO_BRIDGE).version)
-  // readAtVersion: the React Compiler would otherwise drop `version`, which
-  // the plan does not read, and never re-plan when Bridge 2 answers.
-  const plan = useMemo(
-    () =>
-      readAtVersion(version, () => {
-        if (!context || !bridge || context.highlights === "off" || !context.text || targetText.trim() === "") return null
-        const verses = wholeVerses(context, ref, type)
-        if (!verses) return null
-        const bridge1 = bridge1For({ ...context, text: context.text }, cellId, verses.refs, sourceText)
-        if (!bridge1) return null
-        const bridge2 = bridge.linksFor(cellId, sourceText, targetText)
-        // Not computed for these texts yet: ask for the chapter.
-        if (!bridge2) return { chapter: verses.refs[0].slice(0, verses.refs[0].lastIndexOf(":")), runs: null, tokens: [] }
-        const byWord = new Map(mentionsIn(context.index, verses.refs).map((at) => [at.wordId, at]))
-        const runs: TintRun[] = targetSpans(bridge1, bridge2, (id) => byWord.has(id)).map((span) => {
-          const at = byWord.get(span.wordId)!
-          return {
-            firstToken: span.firstToken,
-            lastToken: span.lastToken,
-            entity: at.mention.entity,
-            slot: context.highlights === "always" ? threadSlot(context.index, at.ref, at.mention.entity) : null,
-            approximate: span.approximate,
-          }
-        })
-        return { chapter: null, runs, tokens: tokenize(targetText) }
-      }),
-    [context, bridge, version, cellId, ref, type, sourceText, targetText],
+  // This cell's own answer: the same object until it changes, so a chapter
+  // arriving re-renders only the rows it answers.
+  const readLinks = useCallback(
+    () => bridge?.linksFor(cellId, sourceText, targetText),
+    [bridge, cellId, sourceText, targetText],
   )
+  const bridge2 = useSyncExternalStore(bridge ? bridge.subscribe : noSubscribe, readLinks, readLinks)
+  const plan = useMemo(() => {
+    if (!context || !bridge || context.highlights === "off" || !context.text || targetText.trim() === "") return null
+    const verses = wholeVerses(context, ref, type)
+    if (!verses) return null
+    const bridge1 = bridge1For({ ...context, text: context.text }, cellId, verses.refs, sourceText)
+    if (!bridge1) return null
+    // Not computed for these texts yet: ask for the chapter.
+    if (!bridge2) return { chapter: verses.refs[0].slice(0, verses.refs[0].lastIndexOf(":")), runs: null, tokens: [] }
+    const byWord = new Map(mentionsIn(context.index, verses.refs).map((at) => [at.wordId, at]))
+    const runs: TintRun[] = targetSpans(bridge1, bridge2, (id) => byWord.has(id)).map((span) => {
+      const at = byWord.get(span.wordId)!
+      return {
+        firstToken: span.firstToken,
+        lastToken: span.lastToken,
+        entity: at.mention.entity,
+        slot: context.highlights === "always" ? threadSlot(context.index, at.ref, at.mention.entity) : null,
+        approximate: span.approximate,
+      }
+    })
+    return { chapter: null, runs, tokens: tokenize(targetText) }
+  }, [context, bridge, bridge2, cellId, ref, type, sourceText, targetText])
 
   useEffect(() => {
     if (plan?.chapter && bridge) bridge.request(plan.chapter)

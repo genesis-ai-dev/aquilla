@@ -43,7 +43,7 @@
 -- time after the sync-worker.
 
 BEGIN;
--- Give up after 5s of WAITING for a lock, as 0141 does. Creating a table takes
+-- Give up after 5s of WAITING for a lock, as 0150 does. Creating a table takes
 -- no lock on another table, so this only guards against a stuck catalog.
 SET LOCAL lock_timeout = '5s';
 

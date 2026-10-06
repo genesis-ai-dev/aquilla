@@ -134,14 +134,14 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       setConnection(connRes)
       setProjectConnected(linkRes.orgConnected ?? linkRes.link?.orgConnected)
       if (linkRes.orgConnected == null && !linkRes.link && !connRes) {
-        setStatusError("Could not check the Monday connection. Try again.")
+        setStatusError(t("projectSettings.monday.connectionCheckFailed"))
       }
     } catch (e) {
       if (aliveRef.current) setStatusError(errMsg(e))
     } finally {
       if (aliveRef.current) setLoading(false)
     }
-  }, [jwt, projectId, orgId])
+  }, [jwt, projectId, orgId, t])
 
   useEffect(() => {
     void load()
@@ -358,7 +358,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           ) : statusError ? (
             <div role="alert" className="flex flex-col gap-2">
               <p>{statusError}</p>
-              <Button variant="outline" onClick={() => void load()}>Retry</Button>
+              <Button variant="outline" onClick={() => void load()}>{t("projectSettings.monday.retryAction")}</Button>
             </div>
           ) : !orgConnected && !canManage ? (
             <div className="space-y-2 text-sm text-muted-foreground">
@@ -495,7 +495,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         orgId={orgId}
         jwt={jwt}
         orgConnected={orgConnected}
-        accountSlug={connection?.account?.slug ?? null}
         onLinked={(next) => {
           setLink(next)
           setWarnings([])

@@ -80,7 +80,7 @@ export function MondayLinkedView({
           </p>
           {(link.boardUrl ?? structure?.url) && (
             <a href={link.boardUrl ?? structure?.url ?? undefined} target="_blank" rel="noopener noreferrer" className="underline">
-              Open board in Monday
+              {t("projectSettings.monday.overviewOpenBoard")}
             </a>
           )}
           <p className="text-xs text-muted-foreground">

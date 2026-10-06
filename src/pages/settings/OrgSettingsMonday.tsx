@@ -304,24 +304,24 @@ export function OrgSettingsMonday() {
       {connected && (
         <Card>
           <CardHeader>
-            <CardTitle>Next: link your projects</CardTitle>
+            <CardTitle>{t("projectSettings.monday.orgNextLinkProjectsTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
-              Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.
+              {t("projectSettings.monday.orgNextLinkProjectsDescription")}
             </p>
-            {accessibleProjectsLoading ? <p role="status">Loading projects…</p> : accessibleProjectsError ? (
+            {accessibleProjectsLoading ? <p role="status">{t("projectSettings.monday.orgProjectsLoading")}</p> : accessibleProjectsError ? (
               <div role="alert">
                 <p>{accessibleProjectsError}</p>
-                <Button variant="outline" onClick={() => void refreshAccessibleProjects()}>Retry projects</Button>
+                <Button variant="outline" onClick={() => void refreshAccessibleProjects()}>{t("projectSettings.monday.orgProjectsRetry")}</Button>
               </div>
             ) : accessibleProjects.filter(project => project.orgId === activeOrgId).length === 0 ? (
-              <p>No accessible projects in this organization.</p>
+              <p>{t("projectSettings.monday.orgNoAccessibleProjects")}</p>
             ) : accessibleProjects.filter(project => project.orgId === activeOrgId).map(project => (
               <div key={project.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                 <span className="font-medium">{project.name}</span>
                 <Link to={`/project/${project.id}/settings/integrations#section-monday`} className="text-sm underline">
-                  {project.role.level >= ROLE.MAINTAINER ? "Set up or manage board" : "View Monday integration"}
+                  {project.role.level >= ROLE.MAINTAINER ? t("projectSettings.monday.orgSetUpOrManageBoard") : t("projectSettings.monday.orgViewIntegration")}
                 </Link>
               </div>
             ))}

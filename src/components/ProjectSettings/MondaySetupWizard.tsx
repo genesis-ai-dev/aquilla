@@ -65,8 +65,6 @@ interface Props {
   jwt: string | null
   /** Whether the org already holds a Monday connection. */
   orgConnected: boolean
-  /** Monday account slug, for the "View board" deep link. */
-  accountSlug?: string | null
   /** A link was created — parent refreshes its own view. */
   onLinked: (link: MondayBoardLink) => void
   /** The wizard's Undo removed the link it had just created. */
@@ -340,7 +338,7 @@ export function MondaySetupWizard({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
-            {stage === "done" ? (pushNotice?.ok ? "Monday.com is set up" : "Board linked — sync needs attention") : "Set up Monday.com with AI"}
+            {stage === "done" ? (pushNotice?.ok ? "Monday.com is set up" : t("projectSettings.monday.wizardDoneNeedsAttentionTitle")) : "Set up Monday.com with AI"}
           </DialogTitle>
           {stage === "intro" && (
             <DialogDescription>
@@ -449,10 +447,10 @@ export function MondaySetupWizard({
             </div>
 
             <div className="flex flex-col gap-2 text-sm">
-              <p>Recommended: one item per {granularity}, with {mappedCount} progress {mappedCount === 1 ? "column" : "columns"}.</p>
-              {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">Preview board in Monday</a>}
+              <p>{t("projectSettings.monday.wizardRecommendation", { granularity, mappedCount })}</p>
+              {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">{t("projectSettings.monday.wizardPreviewBoardLink")}</a>}
               <Button variant="outline" onClick={() => setCustomizing(!customizing)}>
-                {customizing ? "Hide customization" : "Customize data and columns"}
+                {customizing ? t("projectSettings.monday.wizardHideCustomization") : t("projectSettings.monday.wizardShowCustomization")}
               </Button>
             </div>
             {customizing && <div>
@@ -551,7 +549,7 @@ export function MondaySetupWizard({
                 {t("projectSettings.monday.viewBoardLink")} <ExternalLink className="h-3.5 w-3.5" />
               </a>
             )}
-            {!boardUrl && <p className="text-sm text-muted-foreground">Find {linkedBoardName ?? analysis?.boardId} in Monday. The direct board link is unavailable.</p>}
+            {!boardUrl && <p className="text-sm text-muted-foreground">{t("projectSettings.monday.wizardFindBoardManually", { name: linkedBoardName ?? analysis?.boardId ?? "" })}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}

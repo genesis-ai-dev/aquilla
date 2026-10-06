@@ -75,7 +75,6 @@ function renderWizard(props: Partial<Parameters<typeof MondaySetupWizard>[0]> = 
       orgId={7}
       jwt="tok"
       orgConnected
-      accountSlug="acme"
       onLinked={onLinked}
       onUnlinked={onUnlinked}
       onConnected={onConnected}

@@ -21,6 +21,7 @@ import {
   type TranslationBriefParameters,
 } from "./project-context"
 import { projectDecisionLines } from "./project-decisions"
+import type { SpanBible } from "./bible-span"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
@@ -73,6 +74,8 @@ export interface RunSpanDeps {
   /** AQU-1691: the decision log (scoped to the span in here) and the Language profile. */
   projectFacts?: ProjectFact[]
   languageProfile?: LanguageProfile
+  /** AQU-1690: Bible data for this span, when autopilot uses it. */
+  bible?: SpanBible
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -201,6 +204,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     orderedPairs: deps.pairs,
     neighborBriefs: deps.neighborBriefs,
     layerAbove: deps.layerAbove,
+    ...(deps.bible ? { facts: deps.bible.construeFacts } : {}),
   }
   const closure: ClosureResult = await construeScene({
     seed: deps.seed,

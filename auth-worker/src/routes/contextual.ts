@@ -115,6 +115,7 @@ import {
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
 import { decide } from "../lib/jev/decide"
+import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -375,6 +376,8 @@ async function selfTickLoop(
   const meter = makeCostMeter(env, db)
   // Prompt/reply per call for the Team step inspector; flushed with the meter.
   const traces = makeTraceRecorder(env, db, { runId, projectId })
+  // AQU-1690: Bible data for the run; its caches last across waves.
+  const bible = makeBibleTickDeps(env, db, { projectId })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -433,6 +436,7 @@ async function selfTickLoop(
             notify,
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            bible,
           })
         } finally {
           await guarded.stop()

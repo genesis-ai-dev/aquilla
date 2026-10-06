@@ -62,6 +62,8 @@ import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
+import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
+import { spanBible } from "./bible-span"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { ingestRunActivity } from "../team-ingest"
@@ -893,6 +895,8 @@ export interface TickDeps {
   concurrency?: number
   /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
   triage?: TriageCall
+  /** AQU-1690: Bible data switches and the pack loader. Omitted → no Bible data. */
+  bible?: BibleTickDeps
 }
 
 export interface TickResult {
@@ -911,6 +915,8 @@ interface RunContext {
   pairs: CellPair[]
   layerAbove: LayerAboveBlock[]
   excludedCellIds: Set<string>
+  /** AQU-1690: the wave's Bible data, or why there is none. */
+  bible: BibleRun
   scope: {
     projectId: string
     fileId: string
@@ -934,10 +940,13 @@ function spanReasonCodes(
   report: SpanReport | undefined,
   outcome: "done" | "failed" | "blocked",
   occupiedAtStage: number,
+  bible: BibleRun,
 ): ContextualSpanReason[] {
   const reasons = new Set<ContextualSpanReason>()
   if (outcome === "failed") reasons.add("span_failed")
   if (occupiedAtStage > 0) reasons.add("target_already_filled")
+  const bibleReason = bibleReasonCode(bible)
+  if (bibleReason) reasons.add(bibleReason)
   for (const reason of report?.incompleteReasons ?? []) {
     if (reason.startsWith("scene construal did not close")) reasons.add("scene_construal_incomplete")
     else if (reason.startsWith("draft attempt")) reasons.add("draft_failed")
@@ -1019,6 +1028,7 @@ async function processSpan(
       // AQU-1691: durable decisions, re-read every wave (never consumed).
       projectFacts: shared.ctx.projectFacts,
       languageProfile: shared.ctx.languageProfile,
+      ...(shared.bible.state === "ready" ? { bible: spanBible(shared.bible.data) } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
@@ -1198,7 +1208,7 @@ async function processSpan(
       : report?.incomplete || occupiedAtStage > 0
         ? "partial"
         : "complete"
-  const reasons = spanReasonCodes(report, outcome, occupiedAtStage)
+  const reasons = spanReasonCodes(report, outcome, occupiedAtStage, shared.bible)
   await notify({
     type: "contextual.span",
     runId: run.id,
@@ -1399,12 +1409,19 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     : []
   // AQU-609: lane-scoped rules only constrain their own lane's drafts.
   const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)
+  // AQU-1690: Bible data for the wave, loaded once beside the project context.
+  const bible = await prepareBibleWave(deps.bible, {
+    pairs,
+    profile: ctx.languageProfile,
+    concepts: ctx.concepts,
+  })
   const shared: RunContext = {
     ctx,
     rules,
     pairs,
     layerAbove,
     excludedCellIds,
+    bible,
     scope: {
       projectId: run.projectId,
       fileId: run.fileId,

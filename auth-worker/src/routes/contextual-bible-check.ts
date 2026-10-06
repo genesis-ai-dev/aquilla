@@ -45,9 +45,9 @@ bibleCheck.post(
     const body = c.req.valid("json")
     const db = c.env.AQUILLA_PG
 
-    const deps = makeBibleTickDeps(c.env, db, { projectId, runId: `bible-check:${crypto.randomUUID()}` }, {
-      meter: makeCostMeter(c.env, db),
-    })
+    // Jev calls are metered like a run's (agent_cost_meter, COST_METER=1); flushed before the answer.
+    const meter = makeCostMeter(c.env, db)
+    const deps = makeBibleTickDeps(c.env, db, { projectId, runId: `bible-check:${crypto.randomUUID()}` }, { meter })
     const flags = await deps.flags()
     if (!flags.autopilot || !flags.checks) {
       const { body: err, status } = errorJson(
@@ -88,6 +88,7 @@ bibleCheck.post(
       data: bible.data,
       raised: new Set(),
     })
+    await meter.flush()
     return c.json({ ...result, factQuestions })
   },
 )

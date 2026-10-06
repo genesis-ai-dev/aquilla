@@ -163,8 +163,10 @@ const TOOL_SPECS: McpToolSpec[] = [
       'ifMatchVersion (the version from get_project_settings — stale values return ' +
       'plan_stale at prepare AND again at commit), changesetId (optional UUIDv7 for ' +
       'idempotency). JSON cannot express undefined, so a key cannot be deleted — write null. ' +
-      'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
-      'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
+      'Floors: every key needs MAINTAINER 600 (the language keys use the org language-edit ' +
+      'floor, default 600). `terminology` is retired (AQU-1724) and rejected — write key ' +
+      'terms with term.create / term.update events in an EmitEvents changeset. The policy ' +
+      'keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
       'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
       'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +

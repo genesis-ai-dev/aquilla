@@ -21,7 +21,6 @@ import {
 import {
   previewSettingValue,
   resolveLanguageEditMinRole,
-  resolveTermbaseEditMinRole,
   LANGUAGE_SETTINGS_KEYS,
   type PatchSettingsOp,
 } from './commands-patch-settings'
@@ -82,10 +81,8 @@ export async function projectSetupFloor(
   if (cmd.imports?.length) {
     floor = Math.max(floor, REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
+  // No termbase floor: `terminology` is refused at prepare (AQU-1724).
   const allOps = [...ops.plain, ...ops.policy]
-  if (allOps.some((op) => op.key === 'terminology')) {
-    floor = Math.max(floor, await resolveTermbaseEditMinRole(db, projectId))
-  }
   if (allOps.some((op) => LANGUAGE_KEY_SET.has(op.key))) {
     floor = Math.max(floor, await resolveLanguageEditMinRole(db, projectId))
   }

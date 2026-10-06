@@ -34,7 +34,11 @@ import {
   normalizeSettings,
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
-import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
+import {
+  RETIRED_TERMINOLOGY_KEY,
+  RETIRED_TERMINOLOGY_MESSAGE,
+  validateSettingsKeyValue,
+} from '../../../db/shared/project-settings-keys'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
 import { ROLE } from '../events/role-policy'
 
@@ -86,10 +90,6 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
 
 const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)
 
-/** Default floor for the `terminology` key when the org sets none — mirrors
- *  auth-worker's DEFAULT_TERMBASE_EDIT_MIN_ROLE (org-permissions.ts). */
-export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
-
 /** AQU-1086: settings keys gated by the org's `languageEditMinRole` rather
  *  than the flat MAINTAINER floor. Must stay in lock-step with LANGUAGE_KEYS
  *  in auth-worker/src/routes/project-settings.ts — the two surfaces write the
@@ -104,9 +104,9 @@ export const LANGUAGE_SETTINGS_KEYS: readonly string[] = [
 const LANGUAGE_KEY_SET = new Set(LANGUAGE_SETTINGS_KEYS)
 
 /** Default floor for the language keys when the org sets none — mirrors
- *  auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE (org-permissions.ts). Unlike
- *  the termbase floor this default is MAINTAINER: an org opts IN to letting
- *  project leads change languages. */
+ *  auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE (org-permissions.ts). The
+ *  default is MAINTAINER: an org opts IN to letting project leads change
+ *  languages. */
 export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
 
 export interface PatchValidationIssue {
@@ -193,18 +193,17 @@ export function validatePatchSettingsCommand(
   return { kind: 'PatchSettings', projectId: c.projectId, ops, ifMatchVersion: c.ifMatchVersion }
 }
 
-/** Static index floor for PatchSettings (catalog parity): PROJECT_LEAD when
- *  every op is `terminology`, else MAINTAINER. The dynamic org floors for
- *  `terminology` (AQU-822) and the language keys (AQU-1086) are resolved at
- *  prepare/commit.
- *
- *  The catalog advertises each key's DEFAULT floor, so the language keys stay
- *  at MAINTAINER here — that is their default. An org that lowers
- *  `languageEditMinRole` to PROJECT_LEAD makes the catalog conservative for
- *  its leads (prepare/commit still admit the write), the mirror image of an
- *  org that RAISES `termbaseEditMinRole`. */
-export function staticPatchSettingsFloor(cmd: PatchSettingsCommand): number {
-  return cmd.ops.every((op) => op.key === 'terminology') ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
+/** AQU-1724: the deprecated UpdateProjectSettings whole-blob replace may not
+ *  CHANGE the retired `terminology` key — set it, edit it, or drop a stored
+ *  value (on a project not yet migrated that is its only termbase). A
+ *  read-modify-write that echoes the stored value unchanged passes, exactly as
+ *  it does for the policy keys. */
+export function retiredTerminologyBlobDenial(
+  candidate: Record<string, unknown>,
+  current: Record<string, unknown>,
+): Response | null {
+  if (deepEqualJson(candidate[RETIRED_TERMINOLOGY_KEY], current[RETIRED_TERMINOLOGY_KEY])) return null
+  return errorResponse('validation_failed', RETIRED_TERMINOLOGY_MESSAGE, { key: RETIRED_TERMINOLOGY_KEY })
 }
 
 /** Policy keys whose STORED value would change if `candidate` replaced the
@@ -232,21 +231,11 @@ export function previewSettingValue(value: unknown): string {
   return s.length > SETTING_PREVIEW_MAX ? `${s.slice(0, SETTING_PREVIEW_MAX - 1)}…` : s
 }
 
-/** Effective floor for the `terminology` key: the project org's
- *  termbaseEditMinRole (org_settings blob), default PROJECT_LEAD. Mirrors
- *  auth-worker's getTermbaseEditMinRoleForProject — read with a targeted query
- *  so sync-worker never loads auth-worker code. Values outside the 100..700
- *  role ladder fall back to the default, matching extractRoleFloor. */
-export async function resolveTermbaseEditMinRole(
-  db: AquillaDb,
-  projectId: string,
-): Promise<number> {
-  return resolveOrgRoleFloor(db, projectId, 'termbaseEditMinRole', DEFAULT_TERMBASE_EDIT_MIN_ROLE)
-}
-
 /** AQU-1086: effective floor for the language keys — the project org's
  *  `languageEditMinRole`, default MAINTAINER. Mirrors auth-worker's
- *  getLanguageEditMinRoleForProject. */
+ *  getLanguageEditMinRoleForProject — read with a targeted query so
+ *  sync-worker never loads auth-worker code. Values outside the 100..700 role
+ *  ladder fall back to the default, matching extractRoleFloor. */
 export async function resolveLanguageEditMinRole(
   db: AquillaDb,
   projectId: string,
@@ -283,24 +272,26 @@ async function resolveOrgRoleFloor(
   return fallback
 }
 
-/** Max per-key floor across the ops: `terminology` → the resolved org termbase
- *  floor; a language key → the resolved org language floor; every other key →
- *  MAINTAINER (600). Taking the MAX means a mixed batch is gated by its
- *  strictest key, so lowering one floor never widens another. */
-function requiredRoleForOps(
-  ops: readonly PatchSettingsOp[],
-  termbaseFloor: number,
-  languageFloor: number,
-): number {
+/** Max per-key floor across the ops: a language key → the resolved org
+ *  language floor; every other key → MAINTAINER (600). Taking the MAX means a
+ *  mixed batch is gated by its strictest key, so lowering one floor never
+ *  widens another. (`terminology` has no floor: it is refused outright,
+ *  AQU-1724.) */
+function requiredRoleForOps(ops: readonly PatchSettingsOp[], languageFloor: number): number {
   let floor = 0
   for (const op of ops) {
-    const keyFloor =
-      op.key === 'terminology' ? termbaseFloor
-      : LANGUAGE_KEY_SET.has(op.key) ? languageFloor
-      : ROLE.MAINTAINER
-    floor = Math.max(floor, keyFloor)
+    floor = Math.max(floor, LANGUAGE_KEY_SET.has(op.key) ? languageFloor : ROLE.MAINTAINER)
   }
   return floor
+}
+
+/** AQU-1724: a stored plan that still names the retired `terminology` key —
+ *  staged before prepare began refusing it, and possibly still waiting in the
+ *  approval queue — is refused at commit with the same pointer, not applied to
+ *  a key the editor never reads. */
+function retiredKeyOpDenial(ops: readonly PatchSettingsOp[]): Response | null {
+  if (!ops.some((op) => op.key === RETIRED_TERMINOLOGY_KEY)) return null
+  return errorResponse('validation_failed', RETIRED_TERMINOLOGY_MESSAGE, { key: RETIRED_TERMINOLOGY_KEY })
 }
 
 /** AQU-1282 §1: ops naming a POLICY key whose write would LOOSEN it (or
@@ -347,11 +338,8 @@ export async function preparePatchSettings(
   const denial = policyOpDenial(cmd.ops, current.settings)
   if (denial) return denial
 
-  const [termbaseFloor, languageFloor] = await Promise.all([
-    resolveTermbaseEditMinRole(db, urlProjectId),
-    resolveLanguageEditMinRole(db, urlProjectId),
-  ])
-  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor, languageFloor)
+  const languageFloor = await resolveLanguageEditMinRole(db, urlProjectId)
+  const requiredRole = requiredRoleForOps(cmd.ops, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role for these settings keys', {
@@ -418,15 +406,15 @@ export async function commitPatchSettings(
     return toErrorResponse(err)
   }
 
+  const retired = retiredKeyOpDenial(cmd.ops)
+  if (retired) return retired
+
   const live = await loadProjectSettings(db, projectId)
   const denial = policyOpDenial(cmd.ops, live.settings)
   if (denial) return denial
 
-  const [termbaseFloor, languageFloor] = await Promise.all([
-    resolveTermbaseEditMinRole(db, projectId),
-    resolveLanguageEditMinRole(db, projectId),
-  ])
-  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor, languageFloor)
+  const languageFloor = await resolveLanguageEditMinRole(db, projectId)
+  const requiredRole = requiredRoleForOps(cmd.ops, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role for these settings keys', {

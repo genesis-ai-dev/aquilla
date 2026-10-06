@@ -185,16 +185,17 @@ describe("project-settings language carve-out (AQU-1086)", () => {
     expect(stored.validationCount).toBe(2)
   })
 
-  it("does not widen the termbase carve-out (its floor still governs terminology)", async () => {
-    // languageEditMinRole 500 must not let a contributor through on
-    // terminology — that scope has its own floor, unchanged at its 500 default.
+  it("does not reopen terminology (the key is retired for every role, AQU-1724)", async () => {
+    // languageEditMinRole 500 must not let anyone write terminology — it is
+    // refused outright, pointing to term.* events.
     await seed('{"languageEditMinRole":500}')
-    const res = await patchProjectSettings("carla", {
+    const res = await patchProjectSettings("dan", {
       sourceLanguage: "en",
       targetLanguage: "fr",
       terminology: [{ id: "c1", sourceTerm: "grace", renderings: [], status: "active" }],
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error?: string }).error).toContain("term.create")
     expect((await storedSettings()).terminology).toBeUndefined()
   })
 

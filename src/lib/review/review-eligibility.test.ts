@@ -18,7 +18,17 @@ describe("isBulkValidationEligible", () => {
     expect(isBulkValidationEligible({
       translated: "Machine draft",
       targetEventId: "event-1",
+      aiDrafted: true,
     })).toBe(true)
+  })
+
+  // Restoring the old exclusion must fail a test. It is the only reason
+  // `aiDrafted` is still on the interface.
+  it("ignores aiDrafted entirely — it changes no answer", () => {
+    const cell = { translated: "Machine draft", targetEventId: "event-1" }
+    expect(isBulkValidationEligible({ ...cell, aiDrafted: true }))
+      .toBe(isBulkValidationEligible({ ...cell, aiDrafted: false }))
+    expect(isBulkValidationEligible({ ...cell, aiDrafted: true })).toBe(true)
   })
 
   it("blocks empty and uncommitted cells", () => {

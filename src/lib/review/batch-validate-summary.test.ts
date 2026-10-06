@@ -258,7 +258,10 @@ describe("batchValidateTelemetry — the surface can no longer be invisible", ()
 // themselves were signed off. These are the guards for the corrected rule.
 describe("summarizeBatchValidate — machine provenance is not an eligibility rule", () => {
   it("validates a selection in which the caller has edited nothing", () => {
-    const cells = [cell({ id: "a", lastEditor: "other" }), cell({ id: "b", lastEditor: "other" })]
+    const cells = [
+      cell({ id: "a", lastEditor: "other", aiDrafted: true }),
+      cell({ id: "b", lastEditor: "other", aiDrafted: true }),
+    ]
     const summary = summarizeBatchValidate(cells, base)
     expect(summary.validatable.map((c) => c.id)).toEqual(["a", "b"])
     expect(summary.skippedTotal).toBe(0)
@@ -269,7 +272,7 @@ describe("summarizeBatchValidate — machine provenance is not an eligibility ru
   // used to be reduced to the caller's 2.
   it("validates another user's cells alongside the caller's own", () => {
     const cells = [
-      ...[1, 2, 3, 4, 5].map((n) => cell({ id: `other-${n}`, lastEditor: "other" })),
+      ...[1, 2, 3, 4, 5].map((n) => cell({ id: `other-${n}`, lastEditor: "other", aiDrafted: true })),
       ...[1, 2].map((n) => cell({ id: `mine-${n}`, lastEditor: ME })),
     ]
     const summary = summarizeBatchValidate(cells, base)
@@ -281,12 +284,22 @@ describe("summarizeBatchValidate — machine provenance is not an eligibility ru
     expect(BATCH_VALIDATE_SKIP_REASONS).not.toContain("aiDraft")
   })
 
+  // Restoring the old exclusion must fail a test, not slip through green.
+  it("buckets a machine-drafted line nowhere — it is simply validated", () => {
+    const summary = summarizeBatchValidate([cell({ id: "a", aiDrafted: true })], base)
+    expect(summary.validatable.map((c) => c.id)).toEqual(["a"])
+    expect(summary.skippedTotal).toBe(0)
+    expect(batchValidateSkipReason(cell({ aiDrafted: true }), ME, [], "")).toBeNull()
+  })
+
   it("still names a cell this user already signed off as theirs", () => {
     expect(batchValidateSkipReason(cell({ activeValidators: [ME] }), ME, [], "")).toBe("alreadyMine")
   })
 
   it("describes the run without claiming the text is human-authored", () => {
-    const body = batchValidateConfirmDescription(summarizeBatchValidate([cell()], base), t, joinList)
+    const body = batchValidateConfirmDescription(
+      summarizeBatchValidate([cell({ aiDrafted: true })], base), t, joinList,
+    )
     expect(body).toContain("nav.workspaceActions.batchValidate.willValidate")
     expect(body).not.toContain("WithDrafts")
   })

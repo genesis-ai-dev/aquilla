@@ -1,6 +1,14 @@
 export interface BulkReviewCandidate {
   translated: string
   targetEventId?: string | null
+  /**
+   * `cells.ai_drafted` — provenance for the reader (the "AI draft · review
+   * required" badge). Declared here and deliberately NOT read: a guard that
+   * omitted the field instead would let the AQU-1703 exclusion be restored with
+   * every test still green, because no fixture could mark a line as
+   * machine-drafted. Callers pass whole cells, which carry it.
+   */
+  aiDrafted?: boolean
 }
 
 /**

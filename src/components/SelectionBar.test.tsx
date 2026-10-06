@@ -334,7 +334,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.mocked(emitCellValidate).mockClear()
     const ids = ["d1", "d2", "d3", "d4", "d5"]
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(ids))
-    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, lastEditor: "other" }))
+    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, aiDrafted: true, lastEditor: "other" }))
 
     renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
     const btn = validateButton()
@@ -350,7 +350,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(
       makeProject(ROLE.CONTRIBUTOR),
-      [makeCell({ id: "cell-1", translated: "auto draft", activeValidators: ["alice"] })],
+      [makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true, activeValidators: ["alice"] })],
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
@@ -915,7 +915,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
   // the self-validation rule, which is the one the reader can act on.
   it("names the own change for the reader's own machine-drafted line", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft"]))
-    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", lastEditor: "alice" })])
+    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" })])
     expect(validateButton()).toBeDisabled()
     await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
     vi.restoreAllMocks()
@@ -976,8 +976,8 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     vi.mocked(emitCellValidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft", "their-draft"]))
     renderBar(strict(), [
-      makeCell({ id: "own-draft", translated: "auto", lastEditor: "alice" }),
-      makeCell({ id: "their-draft", translated: "auto 2", lastEditor: "bob" }),
+      makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" }),
+      makeCell({ id: "their-draft", translated: "auto 2", aiDrafted: true, lastEditor: "bob" }),
     ])
     const btn = validateButton()
     expect(btn).toBeEnabled()

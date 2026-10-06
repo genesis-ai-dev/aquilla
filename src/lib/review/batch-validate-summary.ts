@@ -39,6 +39,8 @@ export interface BatchValidateCandidate {
   fileId: string
   translated: string
   targetEventId?: string | null
+  /** `cells.ai_drafted`. Carried, never an eligibility input (AQU-1703). */
+  aiDrafted?: boolean
   activeValidators?: string[]
   /** AQU-1571: who wrote the current text in the active lane. */
   lastEditor?: string | null

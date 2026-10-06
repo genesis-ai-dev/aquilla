@@ -24,6 +24,7 @@ interface Cell {
   fileId: string
   translated: string
   targetEventId?: string | null
+  aiDrafted?: boolean
 }
 
 function filterValidatableCells(cells: Cell[], activeFileId: string): Cell[] {
@@ -40,7 +41,7 @@ describe("AQU-288: batch-validate cell filter", () => {
     { id: "c3", fileId: FILE_A, translated: "", targetEventId: null },
     { id: "c4", fileId: FILE_A, translated: "" },
     { id: "c5", fileId: FILE_B, translated: "human", targetEventId: "evt-5" },
-    { id: "c6", fileId: FILE_A, translated: "untouched AI", targetEventId: "evt-6" },
+    { id: "c6", fileId: FILE_A, translated: "untouched AI", targetEventId: "evt-6", aiDrafted: true },
   ]
 
   it("includes only cells in the active file that have a targetEventId", () => {

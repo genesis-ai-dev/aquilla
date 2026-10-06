@@ -46,10 +46,11 @@ describe("isBulkValidatableByMe", () => {
   // guards that say WHO may validate still apply, so a run never fires a
   // guaranteed 403 or a repeat vote.
   it("takes a machine-drafted line, and keeps the scope and already-mine guards", () => {
-    expect(isBulkValidatableByMe(cell(), "ana", unscoped, "")).toBe(true)
+    const draft = cell({ aiDrafted: true })
+    expect(isBulkValidatableByMe(draft, "ana", unscoped, "")).toBe(true)
     const scopes = [{ kind: "file", value: "other" }] as unknown as MemberScope[]
-    expect(isBulkValidatableByMe(cell(), "ana", scopes, "")).toBe(false)
-    expect(isBulkValidatableByMe(cell({ activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
+    expect(isBulkValidatableByMe(draft, "ana", scopes, "")).toBe(false)
+    expect(isBulkValidatableByMe(cell({ aiDrafted: true, activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
   })
 })
 
@@ -77,6 +78,6 @@ describe("isBulkValidatableByMe — own latest change", () => {
   // AQU-1703: dropping the AI-draft exclusion widened what one gesture covers,
   // not who may validate — the caller's own latest change is still theirs.
   it("still skips the caller's own latest change on a machine-drafted line", () => {
-    expect(isBulkValidatableByMe(cell({ lastEditor: "ana" }), "ana", unscoped, "", off)).toBe(false)
+    expect(isBulkValidatableByMe(cell({ aiDrafted: true, lastEditor: "ana" }), "ana", unscoped, "", off)).toBe(false)
   })
 })

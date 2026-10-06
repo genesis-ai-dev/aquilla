@@ -43,7 +43,7 @@ import type { AgentTargetCommitOutcome, AgentWorkbenchCell } from "./AgentContex
 import { AgentDocumentContext } from "./AgentDocumentContext"
 import { TeamThreadsView } from "./TeamThreadsView"
 import { TeamChannel, type TeamChannelProps } from "./TeamChannel"
-import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
+import type { CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
 import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
@@ -58,7 +58,7 @@ export interface AgentWorkbenchProps {
   /** One source of truth in ProjectWorkspace. `pendingPrompt` rides along so
    *  dock quick actions (Summarize book/chapter) run in this surface's chat. */
   agent: Omit<AgentDockViewProps, "suggestedActions">
-  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
+  /** Org agent-credit gauge for the composer usage ring (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
   /** File display names for the Team tab's thread titles. */
   fileNames?: ReadonlyMap<string, string>
@@ -333,6 +333,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
   const renderChannel = (channel: TeamChannelProps) => (
     <AgentDockView
       {...agent}
+      credits={credits}
       conversationPrelude={channel.items.length > 0 || channel.heldQuestions > 0
         ? <TeamChannel {...channel} conversationRuns={[]} embedded />
         : undefined}
@@ -395,7 +396,6 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
               />
             </>
           ) : null}
-          {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" onClick={stop}>
               <Square data-icon="inline-start" />

@@ -37,6 +37,8 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentEmptyState } from "./AgentEmptyState"
+import { AgentUsageRing } from "./AgentUsageRing"
+import type { CreditsDialProps } from "./CreditsDial"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
 import { passageRowsFor } from "./cards/registry"
@@ -49,6 +51,9 @@ export interface AgentDockViewProps {
   jwt: string | null
   /** Current username — author on applied events. */
   author: string
+  /** Org credit gauge for the composer's usage ring (maintainer+ only;
+   *  everyone else sees the latest run's budget %). */
+  credits?: CreditsDialProps | null
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
   /** Current file/cell location — automatically sent as run context. */
@@ -94,6 +99,7 @@ function ScopedAgentDockView({
   projectId,
   jwt,
   author,
+  credits,
   roleLevel,
   context,
   rules,
@@ -394,6 +400,7 @@ function ScopedAgentDockView({
             >
               {uploading ? <Spinner /> : <Paperclip />}
             </InputGroupButton>
+            <AgentUsageRing credits={credits} runs={state.runs} isStreaming={state.isStreaming} />
           </>
         }
       />

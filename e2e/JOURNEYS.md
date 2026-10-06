@@ -168,6 +168,13 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- Costly model waits show a shared fills-twice bar (editor AI draft, and
+  suggest-rules-from-edits). The draft or the suggestions appear as soon as
+  the call returns; the bar then finishes in about 200ms, and reduced motion
+  stays a static mark. Covered in RTL (`fills-twice-indicator.test.tsx`,
+  and the editor row assertion in `EditorTable.editorActions.test.tsx`).
+  The sparkle still filling a cell stays `e2e/specs/ai/completion.smoke.spec.ts`.
+
 - Unified Agent conversation/document/knowledge navigation and same-task
   re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
   The former competing Team/Chat tabs and mandatory three-pane layout are retired.

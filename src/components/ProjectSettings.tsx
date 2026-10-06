@@ -111,7 +111,8 @@ import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
+import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
+import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -1349,6 +1350,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
     { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
+    // AQU-1672: the brief gates Autopilot starts (AQU-827) but had no entry of
+    // its own anywhere in settings — it was reachable only by opening Living
+    // Memory's Instructions pane and clicking the breadcrumb back up to the
+    // index. Its own section id gives it a row in the AI & completion pane AND
+    // makes a search for "brief" land on it.
+    { id: "section-brief", label: "Translation brief", keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -1449,6 +1456,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // standalone /project/:id/memory surface; this pane keeps a cross-link
       // NavRow to memory/instructions instead of a nested settings page.
       sectionIds: [
+        "section-brief",
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
@@ -1740,6 +1748,23 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // edited on memory/instructions now, so read the saved value straight off
   // the project record — the same source the removed form baseline used.
   const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+
+  // AQU-1672: the brief's derived status, as the row's right-aligned hint —
+  // same three strings the Living Memory index shows, so the two surfaces can
+  // never disagree about whether a brief exists. Read from the editable
+  // settings hook first (it carries this page's optimistic overlay) and fall
+  // back to the project record before that GET resolves, like the panes above.
+  const briefHint = (() => {
+    const brief = sharedSettingsBlob?.translationBrief ?? project?.translationBrief
+    switch (briefStatus(brief)) {
+      case "none":
+        return t("terminology.livingMemory.section.brief.statusNone")
+      case "draft":
+        return t("terminology.livingMemory.section.brief.statusDraft")
+      case "complete":
+        return t("terminology.livingMemory.section.brief.statusComplete")
+    }
+  })()
 
   const settingsContent = (
     <Page size={pageSize}>
@@ -2082,6 +2107,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+
+        {/* AQU-1672: a direct, first-class entry to the translation brief.
+            Unlike the Living Memory cross-link below it, this row renders while
+            searching too — a search for "brief" has to produce the path to the
+            brief, not an empty result. Same deliberate omission of a modal
+            `state`: this is a real navigation out of settings. */}
+        {searchGroupLabel("section-brief")}
+        {id && sectionsToRender.some((s) => s.id === "section-brief") && (
+          <div id="section-brief" className="flex flex-col gap-12">
+            <NavList>
+              <NavRow
+                to={projectMemoryPath(id, "brief")}
+                icon={BRIEF_ICON}
+                title={t("autopilot.readiness.brief.label")}
+                description={t("terminology.livingMemory.section.brief.description")}
+                hint={briefHint}
+              />
+            </NavList>
+          </div>
         )}
 
         {searchGroupLabel("section-ai-instructions")}

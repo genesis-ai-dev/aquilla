@@ -27,14 +27,13 @@ import {
   LibraryBig,
   ShieldCheck,
   Sparkles,
-  Target,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
-import { LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
+import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
 import { useProject } from "@/hooks/useProject"
@@ -89,7 +88,7 @@ export interface LivingMemorySectionDef {
 export const LIVING_MEMORY_SECTIONS: readonly LivingMemorySectionDef[] = [
   {
     id: "brief",
-    icon: Target,
+    icon: BRIEF_ICON,
     titleKey: "terminology.livingMemory.section.brief.title",
     descriptionKey: "terminology.livingMemory.section.brief.description",
   },

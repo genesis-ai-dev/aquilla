@@ -65,6 +65,7 @@ import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
 import {
@@ -84,6 +85,7 @@ import { parseTnTsv } from "./parsers/translation-notes"
 import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { reimportKeysFor } from "./import/reimport-keys"
 import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
@@ -360,40 +362,18 @@ export async function applyEBibleTargetImport(
   // Preserve the exact target-side input before queuing any edits. One
   // immutable artifact can bind to several Aquilla files, and the active lane
   // is part of every binding so later audit/export never confuses languages.
+  //
+  // AQU-1365: the artifact routes sit at Project lead (500), but a target
+  // import only needs Contributor (400) for its commits, and the Import
+  // button now opens a translation import for Contributors. A role refusal
+  // (403) therefore skips the preserved copy and still imports the text;
+  // any other failure still stops the import before a commit is queued.
   const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
   if (sourceArtifact && groups.length > 0) {
-    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
-    const artifactId = uuidv7()
-    await uploadSourceOriginal({
-      projectId: ctx.projectId,
-      fileId: firstFileId,
-      artifactId,
-      bytes: sourceArtifact.bytes,
-      format: sourceArtifact.format,
-      artifactName: sourceArtifact.name,
-      bindingRole: "target",
-      targetLang: ctx.targetLang,
-      profileId: `builtin:target-${sourceArtifact.format}`,
-      profileVersion: "1",
-      fidelity: "preserved-only",
-      updateSourceSidecar: false,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-    for (const fileId of otherFileIds) {
-      await bindSourceArtifact({
-        projectId: ctx.projectId,
-        fileId,
-        artifactId,
-        memberPath: sourceArtifact.name,
-        profileId: `builtin:target-${sourceArtifact.format}`,
-        profileVersion: "1",
-        fidelity: "preserved-only",
-        bindingRole: "target",
-        targetLang: ctx.targetLang,
-        getToken: ctx.getToken,
-        signal: ctx.signal,
-      })
+    try {
+      await preserveTargetArtifact(sourceArtifact, groups.map((group) => group.fileId), ctx)
+    } catch (error) {
+      if (!isSourceUploadRoleRefusal(error)) throw error
     }
   }
 
@@ -412,6 +392,47 @@ export async function applyEBibleTargetImport(
 
   const skippedCount = matchResult.matched.length - committedCount
   return { committedCount, skippedCount }
+}
+
+/** Upload a target import's original once and bind it to every file it fills. */
+async function preserveTargetArtifact(
+  sourceArtifact: TargetImportArtifact,
+  fileIds: readonly string[],
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal" | "targetLang">,
+): Promise<void> {
+  const [firstFileId, ...otherFileIds] = fileIds
+  const artifactId = uuidv7()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: firstFileId,
+    artifactId,
+    bytes: sourceArtifact.bytes,
+    format: sourceArtifact.format,
+    artifactName: sourceArtifact.name,
+    bindingRole: "target",
+    targetLang: ctx.targetLang,
+    profileId: `builtin:target-${sourceArtifact.format}`,
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const fileId of otherFileIds) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId,
+      artifactId,
+      memberPath: sourceArtifact.name,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -1602,12 +1623,7 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const reimportKeys = [
-    result.bookCode?.trim().toUpperCase(),
-    result.name.trim().toLowerCase(),
-    result.originalName?.trim().toLowerCase(),
-  ].filter((key): key is string => Boolean(key))
-  const existingFileId = reimportKeys
+  const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
   const fileId = existingFileId ?? uuidv7()

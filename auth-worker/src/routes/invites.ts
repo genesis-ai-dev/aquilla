@@ -488,8 +488,11 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         continue
       }
 
+      // [Pen test 2026-10-06] Re-accept never raises a (possibly demoted) role.
       const finalRole = existing
-        ? Math.max(existing.role_level, invite.role_level)
+        ? invite.used_at
+          ? existing.role_level
+          : Math.max(existing.role_level, invite.role_level)
         : invite.role_level
 
       if (existing) {

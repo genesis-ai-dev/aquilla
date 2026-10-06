@@ -7,7 +7,9 @@ import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import {
   inAudioCountedFileSetSql,
   inCountedFileSql,
+  inCountedFileSetSql,
   uncountedAudioFilesCteSql,
+  uncountedFilesCteSql,
   countedFileSql,
   notHiddenFileSql,
 } from "../../../db/shared/counted-files"

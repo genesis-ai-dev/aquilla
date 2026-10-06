@@ -77,6 +77,19 @@ describe("a concept's Bible entity link", () => {
     expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ externalIds: { acai: "person:Jesus.2" } })
   })
 
+  it("a TBX entry's link reaches term.create through the glossary import", async () => {
+    // The real importer's output through the real delta (AGENTS.md rule 12).
+    const tbx = `<martif><text><body><termEntry id="c-jesus">
+      <xref type="externalCrossReference" target="acai:person:Jesus.2">ACAI person:Jesus.2</xref>
+      <langSet xml:lang="source"><tig><term>Jesus</term></tig></langSet>
+    </termEntry></body></text></martif>`
+    await emitConceptDelta({ ...base, prev: [], next: importConceptsTbx(tbx) })
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({
+      conceptId: "c-jesus",
+      externalIds: { acai: "person:Jesus.2" },
+    })
+  })
+
   it("linking an existing concept sends the link", async () => {
     await emitConceptDelta({ ...base, prev: [jesus({ externalIds: undefined })], next: [jesus()] })
     expect(emitTermUpdate).toHaveBeenCalledWith({ ...base, conceptId: "c1", externalIds: { acai: "person:Jesus.2" } })

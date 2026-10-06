@@ -33,6 +33,36 @@ and re-run the extraction for the same verses. The golden tests in
 `../voice-index.test.ts`, `../speech-rails.test.ts` and
 `../people-index.test.ts` then show what changed.
 
+# `bkp-v1.1-*.json` — attribution (AQU-1695)
+
+Source: the bibletranslation.org Bible Knowledge Pack, version 1.1.0 (built
+2026-10-06T07:29:11Z by bible-wiki `pipeline/src/bkp`, after commit 7ec5c21).
+
+Licence: the `notes`, `terms` and `people` layers are **CC BY-SA 4.0**
+(<https://creativecommons.org/licenses/by-sa/4.0/>); the `text` layer is
+**CC BY 4.0** (<https://creativecommons.org/licenses/by/4.0/>). Besides the
+sources above, `notes` and `terms` are built from unfoldingWord Translation
+Notes, Translation Questions and Translation Words (via BibleAquifer),
+CC BY-SA 4.0, and ACAI keyterms, CC BY-SA 4.0.
+
+Every value is copied from the published pack, unchanged. The files are
+trimmed to whole records:
+
+- `bkp-v1.1-JHN-4.text.json`: the words of JHN 4:5, 4:6, 4:9–11, 4:14, 4:51
+  and 5:12. JHN 4 has no `unanchored` note, so JHN 5:12's is the example.
+- `bkp-v1.1-JHN-4.notes.json`: the notes and questions on those verses, and
+  the JHN 1:40–42 General Information note (a note on a range of verses).
+- `bkp-v1.1-JHN-4.terms.json`: the tagged words of those verses, and the
+  terms they use.
+- `bkp-v1.1-JHN-4.people.json`: every mention in JHN 4 and JHN 5:12; the
+  entities they name, the members of those groups, the speakers and
+  addressees of `bkp-v1-JHN-4.voices.json`, and the relatives (`kin`) of
+  all of those. A relative only mentioned outside these verses (Levi,
+  Joseph of Nazareth, Mary) is in the entity map without a mention.
+
+The text and structure layers of JHN 4 are the same in 1.0.0 and 1.1.0. The
+golden tests in `../helps-index.test.ts` show what a refreshed file changes.
+
 # `bridge-jhn4.json` — attribution (AQU-1694)
 
 Written by `pnpm bridges:eval --data <Clear-Bible/Alignments> --pack <bkp/v1>

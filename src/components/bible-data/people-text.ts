@@ -18,6 +18,7 @@ import type { MentionAt, MentionKind, PeopleFlag } from "@/lib/bible-data/people
 import type { VoiceLabel } from "@/lib/bible-data/voice-labels"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { BibleDataSourceId } from "../../../db/shared/bible-enrichments"
 
 export const MENTION_KIND_KEYS: Readonly<Record<MentionKind, MessageKey>> = {
   explicit: "bibleData.whosWho.kind.explicit",
@@ -55,16 +56,35 @@ export const NUMBER_KEYS: Readonly<Record<EntityNumber, MessageKey>> = {
 }
 
 /** The datasets a mention's `src` names, as source names. */
-const MENTION_SOURCE_DATASETS: Readonly<Record<BkpMention["src"], readonly ("acai" | "macula")[]>> = {
+const MENTION_SOURCE_DATASETS: Readonly<Record<BkpMention["src"], readonly BibleDataSourceId[]>> = {
   acai: ["acai"],
   macula: ["macula"],
   "acai+macula": ["acai", "macula"],
+  // Pack 1.1: a vocative names the addressee of its speech, which the voices
+  // layer has from OpenText's speech spans and Clear's speaker-quotations.
+  "macula+voices": ["macula", "opentext", "speaker-quotations"],
 }
 
 /** "ACAI", "Macula", or both, for the evidence line. Empty for a source this build does not know. */
 export function mentionSourceKeys(src: string): MessageKey[] {
   if (!Object.hasOwn(MENTION_SOURCE_DATASETS, src)) return []
   return MENTION_SOURCE_DATASETS[src as BkpMention["src"]].map((id) => BIBLE_DATA_SOURCE_SHORT_NAME_KEYS[id])
+}
+
+/**
+ * Pack slice 3: how the text names a deity at this mention ("God" for θεός,
+ * where the entity's label is "LORD"), in the label language. Null for any
+ * other mention, or one without a usable form: the participant's name then.
+ */
+export function deityFormName(
+  mention: BkpMention,
+  entity: BkpEntity | undefined,
+  pick: (byLanguage: Readonly<Record<string, unknown>> | undefined) => { text: string } | null,
+): string | null {
+  if (entity?.type !== "deity") return null
+  const form: unknown = mention.form
+  if (typeof form !== "object" || form === null || Array.isArray(form)) return null
+  return pick(form as Record<string, unknown>)?.text ?? null
 }
 
 /** Where the flag sends the translator, and which words say why. */

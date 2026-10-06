@@ -32,6 +32,7 @@ import {
   mrk1Structure,
   mrk1Text,
 } from "./__fixtures__/mrk1"
+import { WATER, jhn4People11 } from "./__fixtures__/jhn4-pack11"
 import type { BkpPeopleLayer, BkpStructureLayer } from "./pack-types"
 import {
   adjacentMentionRef,
@@ -349,6 +350,13 @@ describe("entity types this build does not know", () => {
       expect(member(cast, entity)).toMatchObject({ role: "other", flags: [], number: null })
     }
     expect(member(cast, "local:JHN:missing").info).toBeUndefined()
+  })
+
+  it("keeps pack 1.1's real local thing, water in JHN 4:10, out of the flags and thread colors", () => {
+    const index = buildPeopleIndex(jhn4People11(), jhn4Structure())
+    expect(index.entities[WATER].type).toBe("local-thing")
+    expect(member(castAt(index, "JHN 4:10"), WATER)).toMatchObject({ role: "other", flags: [] })
+    expect(threadSlot(index, "JHN 4:10", WATER)).toBeNull()
   })
 
   it("skips a mention record that is not one", () => {

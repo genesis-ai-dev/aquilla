@@ -46,8 +46,8 @@ function layerFile(layer: string, book: string, tag: string): Record<string, unk
     structure: { segments: [], moves: [], verses: {} },
     voices: { narrator: { kind: "narrator" }, speeches: [], verses: {} },
     people: { entities: {}, mentions: {} },
-    notes: {},
-    terms: {},
+    notes: { notes: [], questions: [] },
+    terms: { words: {}, terms: {} },
   }
   return { book, tag, ...shapes[layer] }
 }

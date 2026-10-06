@@ -208,6 +208,37 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     const afterWaive = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
     expect(afterWaive.data?.cells).toEqual([])
   })
+
+  // AQU-609: a lane-pinned rule applies only in its own lane. The test above
+  // runs in the default lane, so it still passes if read.ts hands rulesForLane
+  // '' instead of ctx.lane. This one runs in lane "es".
+  it("applies a rule pinned to the run's lane, never one pinned to another lane", async () => {
+    await seedWorld()
+    for (const c of CELLS) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', 'es', ?, ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID())
+        .run()
+    }
+    const rules = [
+      { id: "rule-es-only", name: "Avoid enseñaba", scope: "lane", lane: "es", enabled: true, check: { type: "target-forbids", targetPattern: "enseñaba" } },
+      // c1 says "comenzó": it shows up if the French lane's rule leaks in.
+      { id: "rule-fr-only", name: "Avoid comenzó", scope: "lane", lane: "fr", enabled: true, check: { type: "target-forbids", targetPattern: "comenzó" } },
+    ]
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ rules }))
+      .run()
+
+    const flagged = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx("es"))
+    expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    expect(flagged.text).toContain("rule-es-only")
+    expect(flagged.text).not.toContain("rule-fr-only")
+  })
 })
 
 // AQU-846 — the agent drafted five verses into Mark while the user had Genesis

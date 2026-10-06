@@ -38,7 +38,7 @@ export interface TestDbOptions {
 }
 
 function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
-  const wrap = (q: { query: PGlite["query"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
+  const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
       opts.onStatement?.(sql, params)
       if (params.length > DRIVER_MAX_BIND_PARAMS) {
@@ -48,6 +48,12 @@ function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
           new Error("MAX_PARAMETERS_EXCEEDED: Max number of parameters (65534) exceeded"),
           { code: "MAX_PARAMETERS_EXCEEDED" },
         )
+      }
+      // postgres.js sends a parameterless unsafe() over the simple protocol,
+      // which accepts several statements (migration replays rely on it).
+      if (params.length === 0) {
+        const last = (await q.exec(sql)).at(-1)
+        return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
       }
       const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }

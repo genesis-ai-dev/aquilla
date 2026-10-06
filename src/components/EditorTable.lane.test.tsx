@@ -43,6 +43,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),
 }))
 vi.mock("@/lib/contextual/transport", () => ({ reviewContextualDraft }))
+// AQU-1572: the emit reports each validation itself (cell-telemetry.ts, at the
+// emit seam). With the emits mocked, any capture here would be the row
+// reporting a second time on its own.
+const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
+vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation, captureAudioAction: vi.fn() }))
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).
@@ -173,6 +178,24 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     )
   })
 
+  // AQU-1572: "toggling text validation in the editor produces one cell
+  // validated event with medium=text". One emit is one event (the seam test
+  // pins that), so the click must reach exactly one emit and report nothing
+  // beside it.
+  it("reports a validation from the cell's control once, through its one emit", async () => {
+    emitCellValidate.mockClear()
+    captureCellValidation.mockClear()
+    renderTable("fr")
+    fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "file-1", cellId: "cell-1", targetLang: "fr", surface: "cell",
+    }))
+    // A click is a review: not marked as the app's own vote.
+    expect(emitCellValidate).not.toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
+    expect(captureCellValidation).not.toHaveBeenCalled()
+  })
+
   it("passes the default lane ('') unchanged so N=1 stays byte-identical", async () => {
     emitCellValidate.mockClear()
     renderTable("")
@@ -199,6 +222,9 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
     expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
+    // AQU-1572: the vote an edit casts for itself is still reported, marked
+    // auto so the deliberate reviews can be counted without it.
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
     emitTargetCellCommit.mockClear()
   })
 

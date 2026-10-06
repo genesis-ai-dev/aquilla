@@ -20,6 +20,8 @@ import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { fetchAgentSession, runsFromTurns } from "@/lib/agent/session-history"
+import { useAgentSessionHistory } from "@/hooks/useAgentSessionHistory"
 import { buildUndoEvents } from "@/lib/agent/undo"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
 import type { TranslatedEditorCommit } from "../TranslatedEditor"
@@ -120,7 +122,35 @@ export interface AgentWorkbenchProps {
 
 export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollapse, onJumpToCell, onChooseFile, editorMode, fileMenuItems, workspace }: AgentWorkbenchProps) {
   const t = useT()
-  const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
+  const { state, stop, startNewChat, switchTo, decide } = useAgentSession(agent.projectId, agent.author)
+  // AQU-1653: this user's own past chats on the project, for the chat menu's
+  // "Previous chats" switcher. Reloaded after a new chat is started so the one
+  // just left appears in the list straight away.
+  const chatHistory = useAgentSessionHistory(agent.jwt, agent.projectId)
+  const [openingChat, setOpeningChat] = useState(false)
+  const openPastChat = useCallback(
+    async (sessionId: string) => {
+      if (!agent.jwt) return
+      setOpeningChat(true)
+      try {
+        const past = await fetchAgentSession(agent.jwt, agent.projectId, sessionId)
+        switchTo(sessionId, runsFromTurns(past.turns))
+      } catch {
+        // Leave the current chat exactly as it is — a failed switch must not
+        // blank the conversation on screen. The menu's own status row is not
+        // the right place for this (the list loaded fine), so the list is
+        // reloaded in case the chat is simply gone.
+        chatHistory.reload()
+      } finally {
+        setOpeningChat(false)
+      }
+    },
+    [agent.jwt, agent.projectId, switchTo, chatHistory],
+  )
+  const beginNewChat = useCallback(() => {
+    startNewChat()
+    chatHistory.reload()
+  }, [startNewChat, chatHistory])
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
   // was applied (that would re-offer applied drafts and drop Undo).
@@ -404,8 +434,12 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
           )}
           <AgentChatOptions
             key={JSON.stringify([agent.projectId, agent.author])}
-            onReset={reset}
-            disabled={applying}
+            onNewChat={beginNewChat}
+            sessions={chatHistory.sessions}
+            historyStatus={chatHistory.status}
+            currentSessionId={state.sessionId}
+            onOpenSession={openPastChat}
+            disabled={applying || openingChat}
           />
           <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
             <ArrowLeft aria-hidden data-icon="inline-start" className="rtl:rotate-180" />

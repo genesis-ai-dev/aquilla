@@ -141,6 +141,24 @@ describe('EmitEvents — validation + floors', () => {
     expect(JSON.stringify(body.error.details)).toContain('not an allowed EmitEvents kind')
   })
 
+  // AQU-1571: an agent has NO door to audio votes — EmitEvents is the only
+  // generic event door and it does not list them. If that ever changes, the
+  // commit still re-enters events/route.ts, whose audio policy gates hold any
+  // token (validation-config-enforcement.test.ts pins that for src:
+  // 'external'); replace this test with one that commits through here.
+  it.each(['cell.audio.validate', 'cell.audio.unvalidate'])('cannot stage %s', async (kind) => {
+    expect(ALLOWED_EMIT_KINDS).not.toContain(kind)
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, [
+      { kind, fileId: FILE, cellId: 'cell-1', payload: { audioId: 'take-1' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(JSON.stringify(body.error.details)).toContain(`${kind}\\" is not an allowed EmitEvents kind`)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('every allowlisted kind has a plain-language effect label (no raw kind reaches a reviewer)', () => {
     for (const kind of ALLOWED_EMIT_KINDS) {
       const one = emitKindEffectLabel(kind, 1)
@@ -433,6 +451,61 @@ describe('EmitEvents — commit', () => {
     expect(Number(assignments[0].cells_total)).toBe(2) // both source cells in FILE
     const acells = await tdb.rows('assignment_cells')
     expect(acells).toHaveLength(2)
+  })
+
+  it("AQU-1628: a 'cells' scope assigns only the named cells, and an empty list is refused", async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const assignee = await memberToken(tdb, 400)
+    const { body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: ['cell-1'] }],
+          scopeLabel: '1 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    expect((await commit(env, lead.token, prep.changeset.id)).res.status).toBe(200)
+
+    const assignments = await tdb.rows<{ cells_total: number; scope_kind: string }>('assignments')
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0].scope_kind).toBe('cells')
+    expect(Number(assignments[0].cells_total)).toBe(1) // not both source cells in FILE
+    expect(await tdb.rows('assignment_cells')).toHaveLength(1)
+
+    // Widening an empty selection to the whole file is the bug, so the
+    // perimeter refuses it rather than resolving it to something.
+    const { res: emptyRes, body: emptyBody } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: [] }],
+          scopeLabel: '0 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(emptyRes.status).toBe(400)
+    expect(JSON.stringify(emptyBody)).toContain('cellIds')
+
+    // And a cells scope with no list at all is not silently a book scope.
+    const { res: missingRes } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'whoops',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(missingRes.status).toBe(400)
   })
 
   it('the perimeter is the backstop: a mid-flight role revocation rejects the events', async () => {

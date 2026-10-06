@@ -44,7 +44,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_COMPLETION_SETTINGS, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -111,21 +111,9 @@ const REGENERATE_TEMPERATURE = 0.8
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
 // Exported for other LLM call sites (e.g. back-translation) that must apply
-// the same "project settings else Frontier default" precedence.
-export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
-  provider: "frontier",
-  endpoint: "",
-  model: "",
-  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
-  temperature: 0.3,
-  systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
-  top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
-  contextSize: "medium",
-  useOnlyValidatedExamples: true,
-  main_chat_language: "",
-  fewShotExampleFormat: "source-and-target",
-}
+// the same "project settings else Frontier default" precedence. Aliases the
+// single definition in completion-service so the two cannot drift (AQU-1671).
+export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = DEFAULT_COMPLETION_SETTINGS
 
 export type CommitCompletedCell = (
   cell: CellData,
@@ -627,6 +615,7 @@ export function useCompletion(
     // discourse window. Run-scoped by construction — it is a local, so it
     // cannot outlive the run or reach another one.
     const inRunDrafts: PrecedingContextEntry[] = []
+    const runCellIds: ReadonlySet<string> = new Set(selectedById.keys())
 
     try {
       for (const chunk of chunks) {
@@ -697,18 +686,22 @@ export function useCompletion(
         // AQU-1386 §3: the approved discourse window, then whatever THIS run
         // has already drafted immediately before this chunk. Without the
         // second part, every chunk after the first starts its discourse cold —
-        // `corpusCells` was read once before the loop, and gatherPrecedingContext
-        // only admits validated targets, so call N+1 could never see call N.
+        // `corpusCells` was read once before the loop, so call N+1 could never
+        // see call N.
         //
         // In-run only. `inRunDrafts` is a local that dies with the run: nothing
         // is persisted, and the rule that unapproved text never becomes a
         // retrieval EXAMPLE is untouched — these rows are labelled as
         // unreviewed drafts in the prompt and excluded from the example pool
         // below, exactly like the approved window is.
+        // This run's own cells are skipped: their fresh drafts come from
+        // `inRunDrafts`, and the snapshot's older text for them is stale.
         const approvedContext = gatherPrecedingContext(
           corpusCells,
           chunk[0].id,
           draftContext.precedingTargetCells,
+          false,
+          runCellIds,
         )
         const precedingContext: PrecedingContextEntry[] = mergeInRunDraftContext(
           approvedContext,

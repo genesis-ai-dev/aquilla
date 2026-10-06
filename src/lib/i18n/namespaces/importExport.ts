@@ -933,6 +933,18 @@ export const importExport = defineNamespace({
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
+    // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
+    "importExport.errors.unchainableTargetCells": plural({
+      one:
+        "Import failed: {count} of the {total} selected lines has no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+      other:
+        "Import failed: {count} of the {total} selected lines have no event to chain the " +
+        "translation onto, so nothing was saved. Close and reopen the file so its lines " +
+        "finish loading, then import again.",
+    }),
+
     // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
     "importExport.errors.oversizedCells": plural({
       one:
@@ -1083,6 +1095,9 @@ export const importExport = defineNamespace({
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.laneLabel": "Fill which language",
+    "importExport.fileTarget.laneHint": "The translations go into this language. Choosing another one opens it in the editor.",
+    "importExport.fileTarget.laneLoading": "Opening this language… you can choose a file in a moment.",
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
@@ -2066,6 +2081,20 @@ export const importExport = defineNamespace({
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
       },
+      "importExport.errors.unchainableTargetCells": {
+        description:
+          "Thrown when a target import is asked to fill lines that have no event to " +
+          "attach a translation to, so none of them can be saved. Aquilla chains every " +
+          "translation onto the line's latest event; a line whose events are not known " +
+          "to the app yet — usually because the chosen language's lines had not finished " +
+          "loading — cannot be chained, and the import is abandoned whole rather than " +
+          "saving part of it. The closing sentence is the remedy: reopen the file so the " +
+          "lines load, then import again.",
+        placeholders: {
+          count: "How many of the selected lines could not be chained.",
+          total: "How many lines the user selected for import in total.",
+        },
+      },
       "importExport.errors.oversizedCells": {
         description:
           "Thrown before any upload when one or more parsed cells exceed the server's " +
@@ -2879,6 +2908,30 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.laneLabel": {
+        description:
+          "Label above the language picker on the panel that fills in the open " +
+          "file's translations. The picker chooses which of the project's target " +
+          "languages the uploaded translations are written into, and it only " +
+          "appears when the project has more than one. Short noun phrase, no " +
+          "closing full stop.",
+        maxLength: 32,
+      },
+      "importExport.fileTarget.laneHint": {
+        description:
+          "Small grey note under that language picker, in two short sentences: the " +
+          "first states that the uploaded translations go into the chosen " +
+          "language, the second warns that choosing a different one also switches " +
+          "the language shown in the editor behind the dialog. Keep both " +
+          "sentences — the second is the only warning the user gets.",
+      },
+      "importExport.fileTarget.laneLoading": {
+        description:
+          "Replaces the note under the language picker while the newly chosen " +
+          "language is still loading, during which the file picker is disabled. " +
+          "Reassurance that the wait is short, not an error. Keep the trailing " +
+          "ellipsis on the first clause.",
       },
       "importExport.fileTarget.noCuesInSubtitle": {
         description:

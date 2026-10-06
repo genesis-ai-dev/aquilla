@@ -28,6 +28,7 @@ import {
 } from "./parsers/subtitle"
 import { extractSbvStrings } from "./parsers/sbv"
 import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -255,7 +256,12 @@ function toMatchedCell(
     incomingText: text,
     currentText,
     hasConflict: current.length > 0 && !alreadyThere,
-    parentId: cell.targetEventId ?? cell.sourceEventId ?? "",
+    // "" = unchainable (neither event id known yet). applyEBibleTargetImport
+    // rejects the whole apply rather than dropping the cell (AQU-1669).
+    parentId: resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? "",
     ref,
     sourceText: cell.original,
     ...(showCellRef && cell.cueRef ? { cellRef: cell.cueRef } : {}),

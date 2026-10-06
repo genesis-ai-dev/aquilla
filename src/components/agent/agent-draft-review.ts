@@ -16,7 +16,9 @@ import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { getOutboxRecords } from "@/lib/sync/outbox"
 import { fetchProjectSettingsResult } from "@/lib/sync/project-settings"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
+import { textValidationScope } from "@/lib/review/text-validation-policy"
 import { resolveIdmlEditorConfiguration, validateIdmlEditorCommit } from "@/lib/richtext/idml-editor"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export class DraftReviewError extends Error {
   readonly code: "stale" | "queued" | "locked" | "unavailable" | "readOnly" | "rejected"
@@ -147,7 +149,7 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
     if (invalid) throw new Error(invalid)
     const eventId = await emitTargetCellCommit({
       projectId, fileId: run.fileId, cellId: draft.cellId,
-      parentId: fresh.targetEventId ?? fresh.sourceEventId ?? null,
+      parentId: resolveTargetCommitParent({ targetEventId: fresh.targetEventId, sourceEventId: fresh.sourceEventId }),
       sourceEventId: fresh.sourceEventId,
       value: args.text, valueHtml: args.text, author: session.username, targetLang: lane,
     })
@@ -160,6 +162,11 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
         canValidate: canPerform("cell.validate", mint.role.level),
         allowSelfValidation: settings.value.settings.allowSelfValidation,
         roleLevel: mint.role.level,
+        // AQU-1571: the stored blob uses the project record's key names.
+        scopeCanValidate: textValidationScope(settings.value.settings, {
+          roleLevel: mint.role.level,
+          username: session.username,
+        }).canValidate,
       }),
     }
     onQueued(queued)
@@ -198,6 +205,13 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
       queued.validationEventId = await emitCellValidate({
         projectId, fileId: run.fileId, cellId: draft.cellId,
         editEventId: queued.eventId, author: session.username, targetLang: lane,
+        // AQU-1572: the agent applying its own draft review, not a person.
+        source: "agent",
+        // …and only because the accepted text is the person's own edit now,
+        // which validates itself under the same rule as typing it
+        // (`validationNeeded` above). Nobody asked for this vote.
+        auto: true,
+        surface: "draft-review",
       })
       onQueued({ ...queued })
     }

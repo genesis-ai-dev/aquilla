@@ -416,6 +416,39 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.audioCells).toBe(2)
   })
 
+  it("AQU-1083: only the project that opts out loses its headings, not the sibling beside it", async () => {
+    // structural_cells picks its projects by id — the excluding ones, as an
+    // array — instead of joining to the policy (see the note above
+    // portfolioCtes for why). Both halves have to hold in ONE request: the
+    // project that opted out still drops its voiced heading, and a project
+    // beside it that counts headings keeps its own.
+    await seedStructuralOrg("{}", JSON.stringify({ countStructuralCells: false }))
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Mark', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, ai_drafted_count,
+                          structural_cell_count, structural_filled_count, structural_approved_count, structural_ai_drafted_count, last_edit_at)
+       VALUES ('f2','pb','MRK','e1', 10, 6, 4, 2,  2, 1, 1, 1, 1000)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, type, event_id, last_edit_at)
+       VALUES ('pb','f2','h1','source','Chapter 1','heading','e1',1),
+              ('pb','f2','v1','source','The beginning of the gospel','verse','e1',1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts) VALUES
+        ('pb','f2','h1','bh','generatedVoice','frontier-audio://bh.wav',5000,1,0,1,'beh',1),
+        ('pb','f2','v1','bv','recording','frontier-audio://bv.wav',7000,1,0,1,'bev',1)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; totalCells: number; audioCells: number }>
+    }
+    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 8, audioCells: 1 })
+    expect(body.projects.find((p) => p.id === "pb")).toMatchObject({ totalCells: 10, audioCells: 2 })
+  })
+
   it("AQU-1083: the per-lane breakdown subtracts the same cells as the headline", async () => {
     // Caught on a real imported Genesis: the scalar totals dropped from 1540 to
     // 1533 while the lane row under them still read 1540. The lane rollup is a
@@ -499,6 +532,42 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
     // Still reads the generated columns rather than parsing the blob.
     expect(settingsQuery).not.toContain("ps.settings AS settings")
+  })
+
+  // The all-organizations dashboard timed out at the SPA's 15s abort on
+  // 2026-10-05 for a caller with 8 orgs and 433 projects, while each org on
+  // its own loaded in a second or two. A plan like that cannot be reproduced
+  // at fixture scale — PGlite reads a ten-row table the same way whatever the
+  // SQL says — so the two shapes behind it are pinned as text here, and the
+  // behaviour they must keep is tested against a real database below. The
+  // measurements are in the note above portfolioCtes.
+  it("reads cells only for projects that exclude structural cells, and never probes files per row", async () => {
+    const preparedQueries: string[] = []
+    const prepare = vi.fn((query: string) => ({
+      bind: () => {
+        preparedQueries.push(query)
+        return { all: vi.fn().mockResolvedValue({ results: [] }) }
+      },
+    }))
+    const fakeEnv = { AQUILLA_PG: { prepare } } as unknown as Env
+
+    await getOrgPortfolios(fakeEnv, [1, 2], { userId: 99, isAdmin: true })
+
+    const aggregate = preparedQueries.find((query) => query.includes("au AS MATERIALIZED"))!
+    const structuralCells = aggregate.slice(
+      aggregate.indexOf("structural_cells AS ("),
+      aggregate.indexOf("au_cells AS MATERIALIZED"),
+    )
+    // Joined to the policy, nothing made Postgres look at the (usually empty)
+    // set of excluding projects before it read `cells`, and one added
+    // predicate was enough to make it read all 2.2M pages first. An array is
+    // resolved before the scan starts: empty means no read at all.
+    expect(structuralCells).toContain("c.project_id = ANY(ARRAY(")
+    expect(structuralCells).not.toMatch(/JOIN\s+policy/)
+    // The counted-files rule (AQU-1626) is one small set built once for the
+    // page. As a correlated probe it ran once per audio take — ~140k times.
+    expect(aggregate).toContain("uncounted_files AS MATERIALIZED")
+    expect(aggregate).not.toMatch(/FROM files uncounted_file\b/)
   })
 
   it("returns one bounded portfolio per requested organization", async () => {
@@ -790,6 +859,62 @@ describe("plan unit rollup", () => {
     expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
   })
 
+  // AQU-1626: the unit count above has applied the rule since AQU-1097, but the
+  // CELL rollups rendered on the same row had no such filter — so a linked
+  // video's 500-cue caption track added 500 untranslated cells to the org
+  // dashboard and the project read as barely started, two tiles away from a
+  // plan board showing the truth. Deleted files inflated it the same way.
+  it("keeps tombstoned files and hidden companions out of the cell rollups and the lane chips", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count) VALUES ('live', 'pa', 'Live', 'e1', 10, 4, 2)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 7, 7, 7, 123)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, role) VALUES ('cue', 'pa', 'Cues', 'e1', 500, 0, 'audio-cues')")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, role) VALUES ('caption-track', 'pa', 'Caption track', 'e1', 500, 0, 'timeline-content')")
+    for (const fileId of ["live", "gone", "cue", "caption-track"]) await progress(fileId, "file", "")
+    const row = await portfolio()
+    expect(row).toMatchObject({ totalCells: 10, filledCells: 4, validatedCells: 2 })
+    // The lane chip reads file_section_progress rather than files, so it is a
+    // separate path to the same wrong number: one progress row per file per
+    // lane means four rows here and only one of them is work.
+    expect(row.lanes.find((lane) => lane.lane === "")).toMatchObject({ totalCells: 10 })
+  })
+
+  // AQU-1626 applied the same rule to the AUDIO rollup, through a different
+  // door: a take is keyed by file but never joined to `files`, so it is
+  // filtered against the uncounted-files set (inCountedFileSetSql). That half
+  // shipped without a test, and it is the half whose first form — a probe per
+  // take — took this endpoint past the SPA's 15s abort.
+  const take = (fileId: string, cellId: string, durationMs: number) =>
+    sql(`INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, validator_count, event_id, created_ts)
+         VALUES ('pa', '${fileId}', '${cellId}', 'a-${fileId}-${cellId}', 'recording', 'frontier-audio://${fileId}-${cellId}.wav', ${durationMs}, 1, 0, 1, 'ea-${fileId}-${cellId}', 1)`)
+
+  it("keeps takes in tombstoned files and hidden companions out of audio coverage and recorded time", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('live', 'pa', 'Live', 'e1', 10)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 7, 123)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, role) VALUES ('cue', 'pa', 'Cues', 'e1', 500, 'audio-cues')")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, role) VALUES ('caption-track', 'pa', 'Caption track', 'e1', 500, 'timeline-content')")
+    await take("live", "c1", 4000)
+    await take("gone", "c1", 9000)
+    await take("cue", "c1", 9000)
+    await take("caption-track", "c1", 9000)
+    // One take is work. The other three are a deleted file's and two cue
+    // sheets', and their 27 seconds are not time the project has banked.
+    expect(await portfolio()).toMatchObject({ audioCells: 1, validatedAudioCells: 1, recordedMs: 4000 })
+  })
+
+  it("still counts a take whose file row is missing", async () => {
+    // The set holds the UNCOUNTED files and takes are anti-joined against it,
+    // so only a file that is present and uncounted removes anything. Built the
+    // other way round — keep takes whose file is in a set of counted files — a
+    // projection holding a take before its file would silently lose the work.
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('live', 'pa', 'Live', 'e1', 10)")
+    await take("live", "c1", 4000)
+    await take("not-projected-yet", "c1", 3000)
+    expect(await portfolio()).toMatchObject({ audioCells: 2, recordedMs: 7000 })
+  })
+
   it("counts a unit as done from its explicit mark", async () => {
     await seedOrg()
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Mark', 'e1', 10)")
@@ -823,15 +948,13 @@ describe("plan unit rollup", () => {
 })
 
 /**
- * AQU-1071 — the org's active-language count, served beside the rollup.
+ * AQU-1071 — the org's active-lane count, served beside the rollup.
  *
  * This is the number the enterprise billing band is read off, so it is counted by
- * the same helper billing counts with (`countTargetLanesByOrg` → the plans.ts
- * rule): distinct language tags; archived lanes, archived projects and paused
- * (`is_active = false`, AQU-1070) projects excluded.
- * The org dashboard tile reads it straight from here rather than tallying the
- * lane chips on screen, which would double-count a language two projects share
- * and would count an archived lane that still has progress rows.
+ * the same helper billing counts with (`countTargetLanesByOrg`): unarchived
+ * target lane rows. Archived projects and paused (`is_active = false`, AQU-1070)
+ * projects are excluded. The tile reads it from here rather than from the lane
+ * chips on screen.
  */
 describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)", () => {
   async function seedOrgWithLanes() {
@@ -845,12 +968,22 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
         ('pc', 'Luke', 1, 1, NULL),
         ('pz', 'Retired', 1, 1, '2026-01-01')`,
     ).run()
+    // Settings disagree with the lane rows on purpose: billing must follow lanes.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_settings (project_id, settings, version) VALUES
-        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Bambara","Dioula"]}', 1),
-        ('pb', '{"targetLanguage":"Dioula"}', 1),
-        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai"],"archivedLanes":["Songhai"]}', 1),
+        ('pa', '{"targetLanguage":"Bambara","targetLanes":["Dioula"]}', 1),
+        ('pb', '{"targetLanguage":"Bambara"}', 1),
+        ('pc', '{"targetLanguage":"Fulfulde","targetLanes":["Songhai","Ignored"],"archivedLanes":["Songhai"]}', 1),
         ('pz', '{"targetLanguage":"Zarma"}', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, archived_at) VALUES
+        ('eslane01', 'pa', 'target', 'Spanish', 'es', '', NULL),
+        ('eslane02', 'pa', 'target', 'Spanish', 'es', 'es-b', NULL),
+        ('eslane03', 'pa', 'target', 'Spanish', 'es', 'es-c', NULL),
+        ('frlane01', 'pb', 'target', 'French', 'fr', '', NULL),
+        ('fflane01', 'pc', 'target', 'Fulfulde', 'ff', '', '2026-01-01'),
+        ('zrlane01', 'pz', 'target', 'Zarma', 'dje', '', NULL)`,
     ).run()
   }
 
@@ -864,12 +997,11 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
     return ((await res.json()) as { activeLanguageCount: number }).activeLanguageCount
   }
 
-  it("counts each active target language once across the org", async () => {
+  it("counts each active target lane, including two lanes of one language", async () => {
     await seedOrgWithLanes()
-    // Bambara (pa, listed twice — primary and lane), Dioula (pa and pb), and
-    // Fulfulde (pc). Songhai is archived and Zarma's project is archived, so
-    // neither is a language this org is still translating into.
-    expect(await languageCount()).toBe(3)
+    // pa has three Spanish lanes. pb has one French lane. pc's only lane is
+    // archived, and pz's project is archived, so neither adds a lane.
+    expect(await languageCount()).toBe(4)
   })
 
   it("is zero for an org with no projects, rather than absent", async () => {
@@ -891,7 +1023,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: unknown[]; activeLanguageCount: number }
     expect(body.projects).toHaveLength(1)
-    expect(body.activeLanguageCount).toBe(3)
+    expect(body.activeLanguageCount).toBe(4)
   })
 })
 

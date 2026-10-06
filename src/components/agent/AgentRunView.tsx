@@ -177,14 +177,21 @@ export function AgentRunView({
     run.status === "ok" && onSuggestionSend && parsed ? parsed.suggestions.slice(0, 2) : []
   return (
     <div className="flex flex-col gap-2">
-      {/* User prompt — right-aligned primary bubble. */}
-      <Message align="end">
-        <MessageContent>
-          <Bubble>
-            <BubbleContent>{run.prompt}</BubbleContent>
-          </Bubble>
-        </MessageContent>
-      </Message>
+      {/* User prompt — right-aligned primary bubble. Skipped when there is no
+          prompt: a run rebuilt from a reopened chat (AQU-1653) can carry
+          assistant prose whose user turn fell outside the stored transcript,
+          and an empty bubble would read as a message the user never sent. */}
+      {run.prompt.trim() !== "" && (
+        <Message align="end">
+          <MessageContent>
+            <Bubble>
+              {/* App chrome disables selection globally (index.css); the
+                  conversation itself opts back in so it can be copied. */}
+              <BubbleContent className="select-text">{run.prompt}</BubbleContent>
+            </Bubble>
+          </MessageContent>
+        </Message>
+      )}
 
       {run.items.map((item, index) => {
         switch (item.kind) {
@@ -211,7 +218,7 @@ export function AgentRunView({
                     </div>
                   )}
                   <Bubble variant="ghost">
-                    <BubbleContent>
+                    <BubbleContent className="select-text">
                       <ChatMarkdown content={displayText} />
                     </BubbleContent>
                   </Bubble>

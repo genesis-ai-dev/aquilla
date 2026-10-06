@@ -31,6 +31,7 @@ import { matchesConcept } from "@/lib/terminology/match"
 import { deriveTermVerdict } from "@/lib/terminology/verdict"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 // ─── Status label helper ──────────────────────────────────────────────────────
 
@@ -188,7 +189,8 @@ function OccurrenceRow({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,
-        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        // AQU-1578: never chain on the optimistic placeholder head "".
+        parentId: resolveTargetCommitParent({ targetEventId: cell.targetEventId, sourceEventId: cell.sourceEventId }),
         sourceEventId: cell.sourceEventId ?? null,
         value,
         valueHtml,

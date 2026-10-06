@@ -20,7 +20,7 @@ not a micro-spec farm.
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
-| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; OAuth is MCP-bound while device tokens retain REST access; revocation blocks access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
 | Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
@@ -48,7 +48,7 @@ not a micro-spec farm.
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob after cold import setup on a throttled renderer | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
 | Collab | Same-parent commits held behind a request barrier on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
-| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
+| Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, a quick Tab / Shift+Tab re-edit of an empty or translated verse while its first save is still being written to the outbox (AQU-1578), and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
 | Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
@@ -300,6 +300,24 @@ UI chrome that used to be one smoke file per click is covered under
   re-read when a frame said files moved (`ProjectWorkspace.pushedLinkSync.test.ts`).
   Not smoke: a missed push loses nothing — the lazy pull on the next file open is the
   floor — and the walk needs two projects, a link and a second socket.
+- A ONE-TIME COPY of another project's source — the Cloned shape at Create New Project,
+  and the snapshot a detach freezes — bringing in exactly the files it shows (AQU-1608) is
+  auth-worker-tested against real Postgres in
+  `auth-worker/src/__tests__/source-linking-deleted-file-cells.test.ts`. Both flows are one
+  function, `snapshotSourceCells`, which copied file rows through `snapshotSourceFiles`
+  (live files only) and then every source cell in the upstream, so a file the upstream had
+  moved to Recently deleted contributed lines keyed to a file row the new project does not
+  have. Pinned there for all four shapes: the whole-project copy, a subset copy, a followed
+  file deleted upstream after the link was made (the detach half), and an upstream with
+  nothing deleted. No smoke, and this is the reason rather than the usual one — the walk is
+  cheap, but what went wrong is INVISIBLE on the surface a walk would check: the file list
+  was always right, and the stray rows showed only through project-wide search
+  (`scoped-search.ts` matches `cells` on `project_id` alone) and the health rollup's
+  `DISTINCT file_id`. A browser walk that asserted the file list would have passed on the
+  broken code; what the copy must hold is that its files and its lines are one set, which is
+  a server-state assertion. The manual walk is still worth running once per release and is
+  on this issue's QA checklist; it needs a three-file upstream with a phrase unique to the
+  deleted file, which no standing fixture provides.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests

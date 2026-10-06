@@ -2,8 +2,13 @@
  * AQU-1462: an archived lane refuses writes that name it.
  *
  * This is not the write wall. The freeze applies to every role, including
- * Maintainer, and it applies whether or not `LANE_READ_WALL` is on. The
- * default lane (`''`) cannot be archived.
+ * Maintainer, and it applies whether or not `LANE_READ_WALL` is on.
+ *
+ * AQU-1600: the former default lane (tag `''`) is an ordinary lane and can be
+ * archived, so a write that names it is frozen like any other. Its archived
+ * state lives ONLY on the lane row's `archivedAt` — the legacy
+ * `settings.archivedLanes` mirror is a list of tags and cannot name a lane
+ * whose tag is the empty string, so that mirror is not consulted for `''`.
  *
  * The wording does consult the read wall. A caller who is allowed to know the
  * lane exists (wall off, platform, Maintainer+, or a grant at Viewer or
@@ -63,6 +68,15 @@ export function archiveCheckApplies(kind: string): boolean {
 }
 
 /**
+ * AQU-1532: kinds whose projection writes a row keyed by `lane_id`
+ * (`cells`, `cell_validators`). Their lane tag must name an existing lane row,
+ * or the projection resolves a NULL `lane_id` and the write fails.
+ */
+export function writesLaneRow(kind: string): boolean {
+  return ALWAYS_LANE_KINDS.has(kind)
+}
+
+/**
  * The lane tag this event is asking to write, or null when the event is not
  * a lane write. `''` is the default lane.
  */
@@ -115,14 +129,17 @@ export function archivedLaneReason(input: {
   archivedTags: readonly string[]
   visibleLaneIds?: ReadonlySet<string> | null
 }): string | null {
-  if (input.tag === "") return null
   const matches = lanesForRequestedTag(input.lanes, input.tag)
   const archivedMatch = matches.find((lane) => lane.archivedAt != null && lane.archivedAt !== "")
+  // AQU-1600: for the former default lane (tag '') the row is the only truth.
+  // `archivedTags` holds tags, and matching one against the '' lane's NAME
+  // would archive it because some unrelated lane shares that name.
   const inSettings =
-    listed(input.archivedTags, input.tag) ||
-    matches.some(
-      (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name),
-    )
+    input.tag !== "" &&
+    (listed(input.archivedTags, input.tag) ||
+      matches.some(
+        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name),
+      ))
   if (!archivedMatch && !inSettings) return null
 
   const visible = input.visibleLaneIds

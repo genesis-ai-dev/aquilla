@@ -119,6 +119,26 @@ describe('planLanesForProject', () => {
     expect(targets(plans)[0].legacyTag).toBe('')
   })
 
+  it('AQU-1532: a regional lane beside its base-language primary gets its own lane', () => {
+    const plans = planLanesForProject({
+      sourceLanguage: 'English',
+      targetLanguage: 'French',
+      registryTargetLanes: ['French', 'fr-CA'],
+      dataTargetTags: [''],
+    })
+    expect(targets(plans).map((l) => l.legacyTag)).toEqual(['', 'fr-CA'])
+  })
+
+  it('AQU-1532: a code naming the primary still collapses into the default lane', () => {
+    const plans = planLanesForProject({
+      sourceLanguage: 'English',
+      targetLanguage: 'Spanish',
+      registryTargetLanes: ['es'],
+      dataTargetTags: [''],
+    })
+    expect(targets(plans).map((l) => l.legacyTag)).toEqual([''])
+  })
+
   it('code-style and freeform data tags are preserved verbatim', () => {
     const plans = planLanesForProject({
       sourceLanguage: 'English',

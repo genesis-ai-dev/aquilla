@@ -213,8 +213,9 @@ export function LivingMemoryPage({
   const brief = settings.translationBrief ?? project?.translationBrief
   // completionSettings comes from the overlaid project record (device-local
   // apiKey + server-side voice profiles merged in overlayDeviceLocalSettings /
-  // overlaySettings). If undefined (no LLM configured), the brief pane's
-  // generation affordances fall back to opening the builder.
+  // overlaySettings). Undefined while the record hydrates, and for a project
+  // that never customized AI — the brief pane resolves both to the Frontier
+  // platform default rather than reading them as "no provider" (AQU-1671).
   const completionSettings = project?.completionSettings
 
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {

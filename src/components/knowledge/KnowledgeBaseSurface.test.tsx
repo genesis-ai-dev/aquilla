@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
-import { KB_INDEX_STALE_MS, type KnowledgeDocument } from "@/lib/frontier/knowledge-base"
+import {
+  KB_INDEX_STALE_MS,
+  KnowledgeBaseApiError,
+  type KnowledgeDocument,
+} from "@/lib/frontier/knowledge-base"
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -118,6 +122,45 @@ describe("KnowledgeBaseSurface", () => {
     await waitFor(() => expect(api.upload).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", file))
     expect(await screen.findByText("new.md")).toBeInTheDocument()
     expect(screen.getByText("Indexing…")).toBeInTheDocument()
+  })
+
+  // AQU-1499: a partner's .docx can be refused for a reason that names its own
+  // fix (re-save it from Word). The generic "Try again." alone sends them back
+  // round a retry that cannot succeed, so the server's reason is shown with it.
+  it("shows the server's reason when an upload is rejected", async () => {
+    const reason =
+      "could not extract text: the document is too complex to read: word/document.xml is 39.5 MB, " +
+      'over the 64 MB limit. Re-saving the file from Word ("Save As" a new .docx) usually shrinks it.'
+    api.upload.mockRejectedValue(new KnowledgeBaseApiError(422, reason))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(["bytes"], "The Real God_Arabic (1).docx")
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() =>
+      expect(toastMock.add).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", description: reason }),
+      ),
+    )
+  })
+
+  it("reports an upload failure the server did not explain with the generic message alone", async () => {
+    api.upload.mockRejectedValue(new Error("network down"))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [new File(["x"], "notes.md")] } })
+
+    await waitFor(() => expect(toastMock.add).toHaveBeenCalled())
+    const options = toastMock.add.mock.calls.at(-1)?.[0] as { description?: string }
+    expect(options.description).toBeUndefined()
   })
 
   it("opens the extracted document content in an accessible dialog", async () => {

@@ -73,6 +73,13 @@ export interface MyAssignment {
   fileIds?: string[]
   scopeKind: string
   scopeLabel: string
+  /**
+   * AQU-1628: the assignment's resolved source cell ids, sent ONLY for a
+   * 'cells' scope — the one scope whose extent cannot be re-derived from
+   * `scopeLabel`. Absent for 'books'/'chapters' (and on older servers), so a
+   * reader must branch on `scopeKind`, never on this being empty.
+   */
+  cellIds?: string[]
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
   /** Display name from the lane row. Absent on older servers. */
@@ -195,10 +202,10 @@ export async function getProjectAssignments(
  * part of it that lands in the unit on screen. That is the only grain at which
  * "Anna: 940 of 950" can be read against the unit's own bar directly above it.
  *
- * `translated`/`validated` are measured in the lane the caller asked for;
- * `recorded`/`audioValidated` are lane-independent, because `cell_audio` has
- * no target_lang column — one recording is the recording, whichever text lane
- * you are looking at.
+ * All four are measured in the lane the caller asked for. `recorded` and
+ * `audioValidated` were lane-independent until AQU-1591, when a take came to
+ * belong to the lane it performs: a line voiced in one language no longer
+ * reads as recorded in another.
  *
  * `targetLang` is the lane the ASSIGNMENT is pinned to (AQU-538 §3.5, '' = the
  * default lane), which need not be the lane being viewed — see
@@ -337,6 +344,25 @@ async function postAssignmentEvent(
   }
 }
 
+/**
+ * One assigned unit of an assignment's scope:
+ *   - `fileId` alone          -> every source line in the file ('books')
+ *   - `fileId` + `chapter`    -> that chapter's lines ('chapters')
+ *   - `fileId` + `cellIds`    -> exactly those lines ('cells', AQU-1628)
+ *
+ * `cellIds` are source cell ids, the same ids the editor selects by. Sending
+ * the file alone for a selection is what AQU-1628 fixed: the assignee got the
+ * whole file while the label still said "N segment(s)".
+ */
+export interface AssignmentScopeEntry {
+  fileId: string
+  chapter?: string
+  cellIds?: string[]
+}
+
+/** How the server resolves `scope` into assignment_cells. */
+export type AssignmentScopeKind = "books" | "chapters" | "cells"
+
 export interface CreateAssignmentArgs {
   jwt: string
   projectId: string
@@ -346,9 +372,9 @@ export interface CreateAssignmentArgs {
   /** The manager's username (stamped as the event author; server re-verifies). */
   author: string
   assigneeUserId: number
-  /** One book (fileId only) or chapter (fileId + "BOOK CH") per entry. */
-  scope: { fileId: string; chapter?: string }[]
-  scopeKind: "books" | "chapters"
+  /** One book, chapter or explicit line set per entry. */
+  scope: AssignmentScopeEntry[]
+  scopeKind: AssignmentScopeKind
   scopeLabel: string
   /**
    * AQU-538 (§3.5): target-language lane to pin this assignment to. Omit or ''

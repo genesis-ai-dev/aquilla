@@ -96,31 +96,6 @@ export function periodAllowanceCredits(args: {
   return included + Math.max(0, Math.floor(args.addonPacks)) * addon + extra
 }
 
-export interface TargetLaneProject {
-  targetLanguage?: string | null
-  targetLanes?: readonly string[] | null
-  archivedLanes?: readonly string[] | null
-}
-
-function normalizeLaneTag(raw: string | null | undefined): string {
-  return (raw ?? "").trim().toLowerCase()
-}
-
-export function countDistinctTargetLanes(projects: readonly TargetLaneProject[]): number {
-  const tags = new Set<string>()
-  for (const project of projects) {
-    const archived = new Set((project.archivedLanes ?? []).map(normalizeLaneTag).filter(Boolean))
-    const primary = normalizeLaneTag(project.targetLanguage)
-    if (primary) tags.add(primary)
-    for (const lane of project.targetLanes ?? []) {
-      const tag = normalizeLaneTag(lane)
-      if (!tag || archived.has(tag)) continue
-      tags.add(tag)
-    }
-  }
-  return tags.size
-}
-
 export function formatAgentCredits(n: number): string {
   const value = Number.isFinite(n) ? n : 0
   return Math.round(value).toLocaleString("en-US")

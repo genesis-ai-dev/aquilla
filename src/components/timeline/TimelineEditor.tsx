@@ -1422,7 +1422,9 @@ export function TimelineEditor({
   const [follow, setFollow] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The clipped label column, and the div inside it that carries the vertical
-   *  offset. The gutter does not scroll — see `handleTrackScroll`. */
+   *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
+   *  when the browser scrolls it anyway `handleGutterScroll` hands the offset
+   *  back to the track column (AQU-1632). */
   const gutterRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
   /** The horizontal offset this component has already reacted to. Stage 3 made
@@ -2543,6 +2545,33 @@ export function TimelineEditor({
     if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
       setFollow(false)
     }
+  }
+
+  /**
+   * AQU-1632: the gutter is `overflow-hidden`, and that still makes it a
+   * scrollport. Nothing scrolls it by hand — but the browser does, on its own,
+   * to reveal a focused descendant: tab onto a track's ⋯ button that sits
+   * below the fold and the header column slides up while the lanes beside it
+   * stay put, because `handleTrackScroll` only ever reads the TRACK column's
+   * scrollTop and writes the gutter's transform from it. The gutter's own
+   * offset was never read back, so the two columns came apart and stayed
+   * apart.
+   *
+   * So: take whatever the browser just did here, zero it, and hand the delta
+   * to the track column instead. That column owns the vertical offset, its
+   * scroll re-writes the transform, and the button the browser was trying to
+   * reveal ends up on screen anyway — with its lane still beside it.
+   * Horizontal is simply undone; the gutter has no x to be at.
+   */
+  function handleGutterScroll() {
+    const gutter = gutterRef.current
+    if (!gutter) return
+    const { scrollTop, scrollLeft } = gutter
+    if (scrollTop === 0 && scrollLeft === 0) return
+    gutter.scrollTop = 0
+    gutter.scrollLeft = 0
+    const el = scrollRef.current
+    if (el && scrollTop !== 0) el.scrollTop += scrollTop
   }
 
   function applyZoom(next: number) {
@@ -4115,7 +4144,11 @@ export function TimelineEditor({
               through `tl-scroll`'s previousElementSibling, on the stated
               contract that the gutter renders exactly the DOM the hardcoded
               rows did. */}
-          <div ref={gutterRef} className="relative overflow-hidden bg-muted/20">
+          <div
+            ref={gutterRef}
+            className="relative overflow-hidden bg-muted/20"
+            onScroll={handleGutterScroll}
+          >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
                 BORDER. It was `border-r` on this container — but a border
                 paints outside the content box, so no row could ever cover its

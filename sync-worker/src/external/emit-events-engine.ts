@@ -28,6 +28,8 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
+import { emitEventsTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -36,6 +38,7 @@ import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import { resolveCommentFloors } from '../events/comment-floors'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage } from './canonical-lane'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import {
   archiveCheckApplies,
@@ -240,10 +243,19 @@ export async function prepareEmitEvents(
   projectId: string,
   id: string,
   autonomyMode: 'ask' | 'act',
-  cmd: EmitEventsCommand,
+  requested: EmitEventsCommand,
   env: ExternalEnv,
   callerRoleLevel: number,
 ): Promise<Response> {
+  // AQU-1532: settings are loaded only when an event names a lane. A lane id
+  // naming the primary language becomes '' (the default lane) before head
+  // resolution, the archive check and the staged plan.
+  const projectSettings = requested.events.some((e) => e.laneId)
+    ? await loadProjectSettings(db, projectId)
+    : null
+  const cmd = projectSettings
+    ? canonicalEmitEvents(requested, settingsTargetLanguage(projectSettings.settings))
+    : requested
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
   const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
@@ -264,8 +276,7 @@ export async function prepareEmitEvents(
     errorResponse('validation_failed', `events[${i}]: ${message}`, details)
 
   const namedLaneEvents = cmd.events.some((e) => e.laneId && archiveCheckApplies(e.kind))
-  if (namedLaneEvents) {
-    const projectSettings = await loadProjectSettings(db, projectId)
+  if (namedLaneEvents && projectSettings) {
     const lanes = (projectSettings.lanes ?? [])
       .filter((lane) => lane.role === 'target')
       .map((lane) => ({
@@ -543,6 +554,21 @@ export async function prepareEmitEvents(
   })
 }
 
+/**
+ * AQU-1532: the plan with every lane id made canonical. A lane id naming the
+ * primary language becomes '' (the default lane). It is kept as '' rather than
+ * dropped, because `assignment.reassign` reads an absent laneId as "keep the
+ * lane" and '' as "move to the default lane".
+ */
+function canonicalEmitEvents(cmd: EmitEventsCommand, targetLanguage: string | null): EmitEventsCommand {
+  return {
+    ...cmd,
+    events: cmd.events.map((e) =>
+      e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) },
+    ),
+  }
+}
+
 /** AQU-1462: stamp the lane so authorize can refuse an archived one. */
 function withLaneTag(kind: string, laneId: string | undefined, payload: Record<string, unknown>): Record<string, unknown> {
   if (!laneId || !archiveCheckApplies(kind)) return payload
@@ -725,10 +751,17 @@ export async function commitEmitEvents(
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
 
+  // AQU-1532: a plan staged before prepare canonicalized lane ids can still
+  // name the primary language. Pins stay keyed by the stored lane id; the
+  // compiled payload carries the canonical one.
+  const targetLanguage = cmd.events.some((e) => e.laneId)
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   for (const [i, e] of cmd.events.entries()) {
     const planned = cs.plannedIds?.emitEvents?.[i]
     const pin = e.cellId ? pins.get(laneCellKey(e.fileId!, e.cellId, e.laneId)) : undefined
-    const payload = compilePayload(e, pin, planned)
+    const compiledEvent = e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) }
+    const payload = compilePayload(compiledEvent, pin, planned)
     if (payload === null) {
       return errorResponse('job_failed', `events[${i}]: stored plan is missing its precondition pin`)
     }
@@ -782,12 +815,16 @@ export async function commitEmitEvents(
     }
   }
 
+  // AQU-1571: a refusal names the file and line the agent sent, so it can tell
+  // which validation (say, its own edit) was refused. Comment and term events
+  // were routed under the project sentinel and read back blank.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -795,10 +832,7 @@ export async function commitEmitEvents(
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings, ...rejectedWarnings(rejected, where)]
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,
@@ -807,5 +841,26 @@ export async function commitEmitEvents(
     committedAt: new Date().toISOString(),
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
+
+  // AQU-1572: report the validations that landed — after the terminal write,
+  // and only the accepted events, so a refused, stale or still-staged plan
+  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id. A
+  // session commit reports only with the person's analytics switch on. The
+  // lane is the canonical one the compiled event carried (a lane naming the
+  // primary language is the default lane, ''), as the browser reports it.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      emitEventsTelemetry(
+        projectId,
+        cmd.events
+          .filter((_, i) => acceptedIds.has(allEventIds[i]))
+          .map((e) => (e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) })),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
   return Response.json({ receipt })
 }

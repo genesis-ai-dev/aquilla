@@ -225,4 +225,16 @@ describe("AgentRunView", () => {
     expect(screen.queryByRole("button", { name: "Draft the next chapter" })).toBeNull()
     expect(screen.queryByText(/NEXT:/)).toBeNull()
   })
+
+  // AQU-1652: app chrome disables selection globally (index.css); the user's
+  // message and the agent's reply must opt back in or nothing can be copied.
+  it("makes the user's message and the agent's reply selectable", () => {
+    render(
+      <AgentRunView
+        run={makeRun({ items: [{ id: "i0", kind: "text", text: "It opens the creation account." }] })}
+      />,
+    )
+    expect(screen.getByText("Draft the untranslated verses in this chapter").closest(".select-text")).not.toBeNull()
+    expect(screen.getByText("It opens the creation account.").closest(".select-text")).not.toBeNull()
+  })
 })

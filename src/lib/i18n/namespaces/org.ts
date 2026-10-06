@@ -158,10 +158,9 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
-    // AQU-1071: the enterprise billing band is read off this number — distinct
-    // active target languages across the org, archived lanes excluded.
-    "org.orgHome.activeLanguages": "Active languages",
-    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
+    // AQU-1071 / AQU-1598: the enterprise billing band — active target lanes.
+    "org.orgHome.activeLanguages": "Active lanes",
+    "org.orgHome.activeLanguagesHint": "Target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -1275,6 +1274,8 @@ export const org = defineNamespace({
     "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
     // Role chip on guest-org rows in the switcher (not a ladder role).
     "org.switcher.guestRole": "Guest",
+    // Tag on the caller's own personal workspace row (pinned first; replaces the Owner role).
+    "org.switcher.personalWorkspace": "Personal",
     // Platform-admin chip on viaPlatformAdmin rows → org.orgSidebar.admin (identical text)
     // "All projects" → org.switcher.allProjects (identical text)
     // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)

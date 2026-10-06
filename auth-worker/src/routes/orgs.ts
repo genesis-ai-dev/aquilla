@@ -34,6 +34,8 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  summarizeVisiblePortfolios,
+  findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
   clampTeamDirectoryLimit,
@@ -151,13 +153,19 @@ type OrgListItem = {
   name: string | null
   role: { level: number; name: string }
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace (findPersonalOrg). */
+  personal?: boolean
 }
 
-function toMemberItem(o: { id: number; name: string | null; role: number }): OrgListItem {
+function toMemberItem(
+  o: { id: number; name: string | null; role: number },
+  personalId: number | null,
+): OrgListItem {
   return {
     id: o.id,
     name: o.name,
     role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+    ...(Number(o.id) === personalId ? { personal: true } : {}),
   }
 }
 
@@ -182,10 +190,12 @@ orgs.get("/", async (c) => {
   const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
 
   const list = await listUserOrgs(c.env, user)
+  const personal = await findPersonalOrg(c.env, user.id)
+  const personalId = personal ? Number(personal.id) : null
   const memberships = q
     ? list.filter((o) => (o.name ?? "").toLowerCase().includes(q))
     : list
-  const memberItems = memberships.map(toMemberItem)
+  const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
   if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
     return c.json({ orgs: memberItems, nextCursor: null })
@@ -281,40 +291,70 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
-/** Cap on an explicit orgIds list. All-orgs omits orgIds and uses memberships. */
-export const PORTFOLIO_ORG_IDS_MAX = 500
+/** No length cap. Omitted orgIds resolves every membership (AQU-756). */
+const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
 const portfolioBatchBody = z.object({
-  orgIds: z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional(),
+  orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
+})
+
+const portfolioSummaryBody = z.object({
+  orgIds: portfolioOrgIdsField,
+})
+
+/**
+ * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
+ * for this org"). There is no org-count cap. Omitted orgIds means every
+ * membership. An empty array still means none. Platform admins may name
+ * orgs they are not members of; everyone else must belong to each explicit id.
+ */
+async function resolvePortfolioOrgIds(
+  env: Env,
+  user: AuthUser,
+  orgIds: number[] | undefined,
+): Promise<{ orgIds: number[]; isAdmin: boolean } | { error: "not an org member" }> {
+  const fromMemberships = orgIds == null
+  const uniqueOrgIds = fromMemberships
+    ? (await listUserOrgs(env, user)).map((org) => org.id)
+    : [...new Set(orgIds)]
+  const isAdmin = isPlatformAdminEmail(env, user.email)
+  if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
+    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+    const allowed = await env.AQUILLA_PG.prepare(
+      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
+    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
+      return { error: "not an org member" }
+    }
+  }
+  return { orgIds: uniqueOrgIds, isAdmin }
+}
+
+/** POST /api/v2/orgs/portfolio/summary — overview totals, not the project list. */
+orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async (c) => {
+  const user = c.get("user")
+  const scope = await resolvePortfolioOrgIds(c.env, user, c.req.valid("json").orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const summary = await summarizeVisiblePortfolios(
+    c.env,
+    scope.orgIds,
+    { userId: user.id, isAdmin: scope.isAdmin },
+  )
+  return c.json({ ...summary.totals, orgs: summary.orgs })
 })
 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
   const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
-  // AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
-  // for this org"). Omitted orgIds means every membership, so all-orgs does
-  // not have to POST the whole id list. An empty array still means none.
-  const fromMemberships = orgIds == null
-  const uniqueOrgIds = fromMemberships
-    ? (await listUserOrgs(c.env, user)).map((org) => org.id)
-    : [...new Set(orgIds)]
+  const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const { orgIds: uniqueOrgIds, isAdmin } = scope
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
-
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  if (!isAdmin && !fromMemberships) {
-    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await c.env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
-    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
-      return c.json({ error: "not an org member" }, 403)
-    }
-  }
 
   const q = (qRaw ?? "").trim().toLowerCase()
   const pickerMode = limitNum != null || cursorRaw != null || q !== ""
@@ -370,14 +410,12 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  // AQU-1071: the active-language count rides along with the rollup the org
+  // AQU-1071: the active-lane count rides along with the rollup the org
   // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same rule billing bills on (distinct active target-language tags;
-  // archived lanes, archived projects and — AQU-1070 — paused projects
-  // excluded), and deliberately org-wide
-  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
-  // a partner reading a smaller figure than their invoice is the confusion this
-  // ticket exists to remove, and a bare count names no project, so it discloses
+  // is the same count billing bills on, and deliberately org-wide rather than
+  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
+  // reading a smaller figure than their invoice is the confusion this ticket
+  // exists to remove, and a bare count names no project, so it discloses
   // nothing the visibility rule guards.
   const [{ projects, nextCursor }, laneCounts] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),

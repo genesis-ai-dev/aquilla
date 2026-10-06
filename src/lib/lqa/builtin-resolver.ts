@@ -32,6 +32,7 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.name",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.name",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.name",
+  "usfm-structure": "rules.builtin.usfmStructure.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -45,6 +46,7 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.description",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.description",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.description",
+  "usfm-structure": "rules.builtin.usfmStructure.description",
 }
 
 /**

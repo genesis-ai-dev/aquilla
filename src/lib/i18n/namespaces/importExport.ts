@@ -1178,6 +1178,32 @@ export const importExport = defineNamespace({
       "yet verified.",
     "importExport.preview.reviewBeforeImporting": "Review before importing",
     "importExport.preview.structuralContentAriaLabel": "Structural content",
+    // ── USFM structure findings (AQU-1731) ──────────────────────────────
+    // Paratext parity for its "Chapter/Verse Numbers" and "Markers" checks.
+    // `{detail}` is raw file content — a marker token (`\\f`) or a number —
+    // interpolated as data and never translated. The ref the problem came from
+    // is rendered beside the message as monospace chrome, not inside it, so
+    // these sentences stay ref-free and reusable.
+    "importExport.usfmStructure.heading": "Structure problems found in this file",
+    "importExport.usfmStructure.more": plural({
+      one: "… {count} more problem",
+      other: "… {count} more problems",
+    }),
+    "importExport.usfmStructure.chapterDuplicate": "This chapter number appears more than once",
+    "importExport.usfmStructure.chapterMissing": "No chapter with this number in the file",
+    "importExport.usfmStructure.chapterOutOfOrder": "Chapter out of order ({detail})",
+    "importExport.usfmStructure.chapterInvalid": "Chapter marker has no usable number ({detail})",
+    "importExport.usfmStructure.verseDuplicate": "This verse number appears more than once ({detail})",
+    "importExport.usfmStructure.verseMissing": "No verse with this number in the chapter",
+    "importExport.usfmStructure.verseOutOfOrder": "Verse out of order ({detail})",
+    "importExport.usfmStructure.verseInvalid": "Verse marker has no usable number ({detail})",
+    "importExport.usfmStructure.verseOutsideChapter": "Verse marker before the first chapter ({detail})",
+    "importExport.usfmStructure.markerUnknown": "Unrecognized marker {detail}",
+    "importExport.usfmStructure.markerUnclosed": "Marker {detail} is never closed",
+    "importExport.usfmStructure.markerUnopened": "End marker {detail} has no opening marker",
+    "importExport.usfmStructure.markerLevelMixed": "Mixed marker levels in one file ({detail})",
+    "importExport.usfmStructure.markerAfterChapter":
+      "Marker {detail} belongs in the file header, before the first chapter",
     "importExport.review.alreadyThereCount": plural({
       one: "{count} already there",
       other: "{count} already there",
@@ -3344,6 +3370,82 @@ export const importExport = defineNamespace({
           "warnings raised while the file was read, next to a badge counting them. " +
           "Short imperative instruction telling the user to read the list before " +
           "committing.",
+      },
+      // ── USFM structure findings (AQU-1731) ────────────────────────────
+      // One bullet per finding in the import preview, each preceded by the
+      // Scripture reference it came from (rendered as separate monospace
+      // chrome, so the sentence itself must not repeat the ref).
+      "importExport.usfmStructure.more": {
+        description:
+          "Last bullet of the import-preview structure list when more problems were found than the list shows, counting the ones left out.",
+        placeholders: { count: "How many findings are not listed." },
+      },
+      "importExport.usfmStructure.chapterDuplicate": {
+        description:
+          "Import-preview bullet: the file declares the same chapter number twice.",
+      },
+      "importExport.usfmStructure.chapterMissing": {
+        description:
+          "Import-preview bullet: the chapter numbering skips this chapter.",
+      },
+      "importExport.usfmStructure.chapterOutOfOrder": {
+        description:
+          "Import-preview bullet: a chapter marker goes backwards relative to the chapter before it.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.chapterInvalid": {
+        description:
+          "Import-preview bullet: a chapter marker is followed by something that is not a number.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseDuplicate": {
+        description:
+          "Import-preview bullet: the chapter declares the same verse number twice.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseMissing": {
+        description:
+          "Import-preview bullet: the verse numbering inside this chapter skips this verse.",
+      },
+      "importExport.usfmStructure.verseOutOfOrder": {
+        description:
+          "Import-preview bullet: a verse marker goes backwards relative to the verse before it.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseInvalid": {
+        description:
+          "Import-preview bullet: a verse marker is followed by something that is not a number.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseOutsideChapter": {
+        description:
+          "Import-preview bullet: a verse marker appears before any chapter marker, so it has no chapter.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnknown": {
+        description:
+          "Import-preview bullet: a backslash marker the USFM taxonomy does not model (custom z-namespace markers and milestones are tolerated and never reported here).",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnclosed": {
+        description:
+          "Import-preview bullet: a paired marker such as a footnote was opened and the block ended before its closing marker.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnopened": {
+        description:
+          "Import-preview bullet: a closing marker appears with no matching opening marker.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerLevelMixed": {
+        description:
+          "Import-preview bullet: the file uses both the plain and the numbered form of one marker family, which Paratext flags as inconsistent.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerAfterChapter": {
+        description:
+          "Import-preview bullet: an identification or introduction marker appears after the first chapter, where it is out of position.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
       },
       "importExport.preview.structuralContentAriaLabel": {
         description:

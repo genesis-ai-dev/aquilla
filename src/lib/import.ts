@@ -31,6 +31,7 @@ import { createMediaCueSpecs } from "./import/media-cues"
 import { youTubeVideoId } from "./video/youtube"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
+import type { UsfmStructureFinding } from "./parsers/usfm-structure-check"
 import {
   assembleParatextProject,
   type ParatextBook,
@@ -495,6 +496,9 @@ export interface ImportResult {
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   importNotices?: ImportPreviewNotice[]
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Carried as codes + refs and translated in the preview. */
+  structureFindings?: UsfmStructureFinding[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -2086,6 +2090,9 @@ export interface ParatextBookPlan {
   strings: TranslatableString[]
   /** Verse refs that appear more than once in the book (surfaced in preview). */
   duplicateRefs: string[]
+  /** Paratext-parity chapter/verse + marker findings for this book (AQU-1731),
+   *  surfaced in preview next to the duplicate-ref count. */
+  structureFindings: UsfmStructureFinding[]
   cellCount: number
 }
 
@@ -2118,10 +2125,10 @@ export async function prepareParatextProject(
     throw new Error(t("importExport.errors.notAParatextProject"))
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+    const { strings, duplicateRefs, structureFindings } = usfmSectionToStrings(book.rawSource, {
       excludeFrontMatter: opts?.excludeFrontMatter,
     })
-    return { book, strings, duplicateRefs, cellCount: strings.length }
+    return { book, strings, duplicateRefs, structureFindings, cellCount: strings.length }
   })
   // Materialize and validate the complete package during preview. Commit then
   // uploads these exact immutable bytes; a large folder-derived ZIP cannot

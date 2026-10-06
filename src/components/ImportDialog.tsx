@@ -68,6 +68,7 @@ import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
+import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -2972,6 +2973,11 @@ function ParatextChoice({
                       </span>
                     </button>
                   </div>
+                  {b.structureFindings.length > 0 && (
+                    <div className="px-3 pb-2 ps-9">
+                      <UsfmStructureFindings findings={b.structureFindings} />
+                    </div>
+                  )}
                   {expanded && (
                     <ul className="space-y-1 px-3 pb-2 pl-9">
                       {b.strings.slice(0, 4).map((s) => (

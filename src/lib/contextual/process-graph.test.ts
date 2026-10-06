@@ -81,7 +81,9 @@ describe("deriveProcessGraph", () => {
     expect(model.nodeStates.verify_ambiguity).toBe("active")
     expect(model.nodeStates.stage).toBe("pending")
     expect(model.liveSpanLabels).toEqual(["LUK 1:1–1:8"])
-    expect(model.edgeStates["lint-route"]).toBe("active")
+    // The flow into the checking region: AQU-1690's Bible checks now sit between lint and routing.
+    expect(model.edgeStates["bible-route"]).toBe("active")
+    expect(model.nodeStates.bible_checks).toBe("done")
   })
 
   it("drops opaque cell/span UUIDs from live and inspect labels", () => {

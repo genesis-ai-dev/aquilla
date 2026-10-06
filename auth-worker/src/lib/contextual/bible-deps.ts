@@ -77,6 +77,7 @@ export function makeBibleTickDeps(
     },
     loadPack: (book, opts) => loadBookPack(env, book, opts),
     raisedFactKeys: new Set(),
+    ...(recorders.traces ? { trace: (row: TraceInput) => recorders.traces?.add(row) } : {}),
     judge: {
       cache: new Map(),
       decide: async (input) => {

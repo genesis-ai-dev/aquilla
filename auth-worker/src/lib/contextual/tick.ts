@@ -64,7 +64,8 @@ import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
 import { bibleReasonCode, prepareBibleWave, type BibleRun, type BibleTickDeps } from "./bible-run"
 import { bibleGateOf, spanBible } from "./bible-span"
-import { recheckForStage, withBibleVerdicts } from "./bible-gates"
+import { isBibleCode, recheckForStage, withBibleVerdicts } from "./bible-gates"
+import { bibleFactsTraceRow, spanMetrics, spanMetricsTraceRow } from "./span-metrics"
 import { raiseBibleFactQuestions } from "./bible-fact-questions"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
@@ -1007,6 +1008,10 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  // AQU-1690: the facts this span's prompts carry, and (below) its metrics.
+  const factsRow = bibleFactsTraceRow(seed.id, spanPairs(seed, shared.pairs), shared.bible)
+  if (factsRow) deps.bible?.trace?.(factsRow)
+  const residual: Record<string, number> = {}
   try {
     report = await runSpan({
       seed,
@@ -1123,6 +1128,9 @@ async function processSpan(
         const rechecks = new Map(
           fresh.map((c) => [c.cellId, bibleGate ? recheckForStage(bibleGate, c.cellId, c.text, c.findings ?? []) : null]),
         )
+        for (const recheck of rechecks.values()) {
+          for (const code of recheck?.findings ?? []) if (isBibleCode(code)) residual[code] = (residual[code] ?? 0) + 1
+        }
         // Finding codes + a "needs a human?" call per flagged cell, stored on
         // the draft for the PR view. Never blocks staging (triage.ts).
         const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
@@ -1227,6 +1235,7 @@ async function processSpan(
         ? "partial"
         : "complete"
   const reasons = spanReasonCodes(report, outcome, occupiedAtStage, shared.bible)
+  deps.bible?.trace?.(spanMetricsTraceRow(spanMetrics(seed.id, report, shared.bible, residual)))
   await notify({
     type: "contextual.span",
     runId: run.id,

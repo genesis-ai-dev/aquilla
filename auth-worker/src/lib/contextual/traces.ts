@@ -248,19 +248,29 @@ interface TraceRow {
  */
 export async function listRunTraces(
   db: AquillaDb,
-  input: { projectId: string; runId: string; spanId?: string; limit?: number; includeJev?: boolean },
+  input: { projectId: string; runId: string; spanId?: string; label?: string; limit?: number; includeJev?: boolean },
 ): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
   const limit = Math.min(Math.max(1, input.limit ?? TRACE_LIST_LIMIT), TRACE_LIST_LIMIT)
   const spanClause = input.spanId ? "AND span_id = ?" : ""
+  // AQU-1690: one kind of row, e.g. the "bible-facts" row of every span.
+  const labelClause = input.label ? "AND label = ?" : ""
   const jevClause = input.includeJev ? "" : "AND label NOT LIKE 'jev:%'"
   const { results } = await db
     .prepare(
       `SELECT * FROM contextual_run_traces
-        WHERE project_id = ? AND run_id = ? ${spanClause} ${jevClause}
+        WHERE project_id = ? AND run_id = ? ${spanClause} ${labelClause} ${jevClause}
         ORDER BY created_at ASC, id ASC
         LIMIT ?`,
     )
-    .bind(...[input.projectId, input.runId, ...(input.spanId ? [input.spanId] : []), limit + 1])
+    .bind(
+      ...[
+        input.projectId,
+        input.runId,
+        ...(input.spanId ? [input.spanId] : []),
+        ...(input.label ? [input.label] : []),
+        limit + 1,
+      ],
+    )
     .all<TraceRow>()
   const truncated = results.length > limit
   return {

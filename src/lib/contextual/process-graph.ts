@@ -15,6 +15,8 @@ import { humanPassageLabel } from "../../../shared/span-label"
 export const PROCESS_NODE_IDS = [
   "scope",
   "segment",
+  // AQU-1690: per-cell facts from Bible data, given to construe and draft.
+  "bible_facts",
   "construe",
   "expand_window",
   "register",
@@ -22,6 +24,8 @@ export const PROCESS_NODE_IDS = [
   "persist",
   "draft",
   "lint_rules",
+  // AQU-1690: the bkp: gates and the Jev questions; their cheap repair loops back to draft.
+  "bible_checks",
   "route_risk",
   "verify_force",
   "verify_ambiguity",
@@ -58,28 +62,31 @@ const YV = 8
 export const PROCESS_NODE_LAYOUT: readonly ProcessNodeLayout[] = [
   { id: "scope", x: X0, y: Y },
   { id: "segment", x: X0 + STEP, y: Y },
-  { id: "construe", x: X0 + STEP * 2, y: Y },
-  { id: "expand_window", x: X0 + STEP * 3, y: Y },
-  { id: "register", x: X0 + STEP * 4, y: Y },
-  { id: "summarize", x: X0 + STEP * 5, y: Y },
-  { id: "persist", x: X0 + STEP * 6, y: Y },
-  { id: "draft", x: X0 + STEP * 7, y: Y },
-  { id: "lint_rules", x: X0 + STEP * 8, y: Y },
-  { id: "route_risk", x: X0 + STEP * 9, y: Y },
-  { id: "verify_force", x: X0 + STEP * 9 + 10, y: YV },
-  { id: "verify_ambiguity", x: X0 + STEP * 9 + 23, y: YV },
-  { id: "verify_naturalness", x: X0 + STEP * 9 + 36, y: YV },
-  { id: "quorum", x: X0 + STEP * 11 + 20, y: Y },
-  { id: "stage", x: X0 + STEP * 12 + 20, y: Y },
-  { id: "report", x: X0 + STEP * 13 + 20, y: Y },
+  { id: "bible_facts", x: X0 + STEP * 2, y: Y },
+  { id: "construe", x: X0 + STEP * 3, y: Y },
+  { id: "expand_window", x: X0 + STEP * 4, y: Y },
+  { id: "register", x: X0 + STEP * 5, y: Y },
+  { id: "summarize", x: X0 + STEP * 6, y: Y },
+  { id: "persist", x: X0 + STEP * 7, y: Y },
+  { id: "draft", x: X0 + STEP * 8, y: Y },
+  { id: "lint_rules", x: X0 + STEP * 9, y: Y },
+  { id: "bible_checks", x: X0 + STEP * 10, y: Y },
+  { id: "route_risk", x: X0 + STEP * 11, y: Y },
+  { id: "verify_force", x: X0 + STEP * 11 + 10, y: YV },
+  { id: "verify_ambiguity", x: X0 + STEP * 11 + 23, y: YV },
+  { id: "verify_naturalness", x: X0 + STEP * 11 + 36, y: YV },
+  { id: "quorum", x: X0 + STEP * 13 + 20, y: Y },
+  { id: "stage", x: X0 + STEP * 14 + 20, y: Y },
+  { id: "report", x: X0 + STEP * 15 + 20, y: Y },
 ]
 
-export const PROCESS_VIEWBOX = { width: 268, height: 42 }
+export const PROCESS_VIEWBOX = { width: 302, height: 42 }
 export const PROCESS_NODE_SIZE = 7
 
 export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "scope-segment", from: "scope", to: "segment", kind: "flow" },
-  { id: "segment-construe", from: "segment", to: "construe", kind: "flow" },
+  { id: "segment-facts", from: "segment", to: "bible_facts", kind: "flow" },
+  { id: "facts-construe", from: "bible_facts", to: "construe", kind: "flow" },
   { id: "construe-expand", from: "construe", to: "expand_window", kind: "flow" },
   { id: "expand-construe", from: "expand_window", to: "construe", kind: "loop" },
   { id: "expand-register", from: "expand_window", to: "register", kind: "flow" },
@@ -87,7 +94,8 @@ export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "summarize-persist", from: "summarize", to: "persist", kind: "flow" },
   { id: "persist-draft", from: "persist", to: "draft", kind: "flow" },
   { id: "draft-lint", from: "draft", to: "lint_rules", kind: "flow" },
-  { id: "lint-route", from: "lint_rules", to: "route_risk", kind: "flow" },
+  { id: "lint-bible", from: "lint_rules", to: "bible_checks", kind: "flow" },
+  { id: "bible-route", from: "bible_checks", to: "route_risk", kind: "flow" },
   { id: "route-force", from: "route_risk", to: "verify_force", kind: "flow" },
   { id: "route-ambiguity", from: "route_risk", to: "verify_ambiguity", kind: "flow" },
   { id: "route-naturalness", from: "route_risk", to: "verify_naturalness", kind: "flow" },
@@ -97,12 +105,13 @@ export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "quorum-stage", from: "quorum", to: "stage", kind: "flow" },
   { id: "stage-report", from: "stage", to: "report", kind: "flow" },
   { id: "quorum-draft", from: "quorum", to: "draft", kind: "redraft" },
+  { id: "bible-draft", from: "bible_checks", to: "draft", kind: "redraft" },
 ]
 
 const READING: readonly ProcessNodeId[] = [
-  "scope", "segment", "construe", "expand_window", "register", "summarize", "persist",
+  "scope", "segment", "bible_facts", "construe", "expand_window", "register", "summarize", "persist",
 ]
-const DRAFTING: readonly ProcessNodeId[] = ["draft", "lint_rules"]
+const DRAFTING: readonly ProcessNodeId[] = ["draft", "lint_rules", "bible_checks"]
 const CHECKING: readonly ProcessNodeId[] = [
   "route_risk", "verify_force", "verify_ambiguity", "verify_naturalness", "quorum",
 ]

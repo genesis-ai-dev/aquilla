@@ -524,6 +524,12 @@ export const autopilot = defineNamespace({
       "No context evidence was recorded for this run.",
     "autopilot.inspector.context.recentBriefsOnly":
       "Only the most recent scene briefs are shown for this run.",
+    // AQU-1690: the Bible facts each span of a run used.
+    "autopilot.inspector.context.bibleFacts": "Bible facts each passage used",
+    "autopilot.inspector.context.bibleFactsNone": "No Bible facts were used in this run.",
+    "autopilot.inspector.context.bibleFactsLoading": "Loading Bible facts…",
+    "autopilot.inspector.context.bibleFactsError": "Could not load the Bible facts.",
+    "autopilot.inspector.context.bibleFactsTruncated": "Showing the first passages only.",
     "autopilot.inspector.technical.title": "Technical & evidence",
     "autopilot.inspector.technical.copyActivityLog": "Copy activity log",
     "autopilot.inspector.technical.activityLogCopied": "Activity log copied.",
@@ -560,6 +566,8 @@ export const autopilot = defineNamespace({
     "autopilot.graph.node.scope.role": "Find the cells that still need a translation.",
     "autopilot.graph.node.segment": "Piece",
     "autopilot.graph.node.segment.role": "Cut the next piece of text to work on.",
+    "autopilot.graph.node.bible_facts": "Bible facts",
+    "autopilot.graph.node.bible_facts.role": "Give each verse its speakers and people from Bible data.",
     "autopilot.graph.node.construe": "Situation",
     "autopilot.graph.node.construe.role":
       "Read the situation in this piece of text: who is there, and what they do.",
@@ -577,6 +585,8 @@ export const autopilot = defineNamespace({
     "autopilot.graph.node.draft.role": "Write the translation from the note.",
     "autopilot.graph.node.lint_rules": "Checks",
     "autopilot.graph.node.lint_rules.role": "Run the project checks.",
+    "autopilot.graph.node.bible_checks": "Bible checks",
+    "autopilot.graph.node.bible_checks.role": "Check quotations and questions against Bible data, and fix what fails.",
     "autopilot.graph.node.route_risk": "Review need",
     "autopilot.graph.node.route_risk.role": "Decide how much review this piece of text needs.",
     "autopilot.graph.node.verify_force": "Social function",

@@ -33,6 +33,7 @@ import type {
 const NODE_COPY = {
   scope: { label: "autopilot.graph.node.scope", role: "autopilot.graph.node.scope.role" },
   segment: { label: "autopilot.graph.node.segment", role: "autopilot.graph.node.segment.role" },
+  bible_facts: { label: "autopilot.graph.node.bible_facts", role: "autopilot.graph.node.bible_facts.role" },
   construe: { label: "autopilot.graph.node.construe", role: "autopilot.graph.node.construe.role" },
   expand_window: { label: "autopilot.graph.node.expand_window", role: "autopilot.graph.node.expand_window.role" },
   register: { label: "autopilot.graph.node.register", role: "autopilot.graph.node.register.role" },
@@ -40,6 +41,7 @@ const NODE_COPY = {
   persist: { label: "autopilot.graph.node.persist", role: "autopilot.graph.node.persist.role" },
   draft: { label: "autopilot.graph.node.draft", role: "autopilot.graph.node.draft.role" },
   lint_rules: { label: "autopilot.graph.node.lint_rules", role: "autopilot.graph.node.lint_rules.role" },
+  bible_checks: { label: "autopilot.graph.node.bible_checks", role: "autopilot.graph.node.bible_checks.role" },
   route_risk: { label: "autopilot.graph.node.route_risk", role: "autopilot.graph.node.route_risk.role" },
   verify_force: { label: "autopilot.graph.node.verify_force", role: "autopilot.graph.node.verify_force.role" },
   verify_ambiguity: { label: "autopilot.graph.node.verify_ambiguity", role: "autopilot.graph.node.verify_ambiguity.role" },

@@ -23,6 +23,7 @@ import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { BkpFailureReason, BkpResult, BookPack } from "../bkp/pack-loader"
 import type { Concept } from "./project-context"
 import type { BibleJudgeDeps } from "./bible-span"
+import type { TraceInput } from "./traces"
 
 export interface BibleFlags {
   /** Bible data on and the `autopilot` enrichment on. */
@@ -61,6 +62,8 @@ export interface BibleTickDeps {
   judge?: BibleJudgeDeps
   /** Fact-question keys this run has raised (./bible-fact-questions.ts). Omitted → none are raised. */
   raisedFactKeys?: Set<string>
+  /** Record a code-only trace row: a span's facts and its metrics (./span-metrics.ts). */
+  trace?: (row: TraceInput) => void
 }
 
 /** The book of the first cell with a verse ref, e.g. "JHN"; null for a file with none. */

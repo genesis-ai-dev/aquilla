@@ -294,3 +294,31 @@ describe("fact questions for the Language profile", () => {
     expect(await factQuestionStatuses("questionMarkers")).toEqual([])
   })
 })
+
+describe("per-span facts and metrics, traced", () => {
+  it("records the facts each span used and the span's metrics, listed by label", async () => {
+    await setSettings({ languageProfile: ENGLISH_PROFILE })
+    const runId = await tickOnce({ withTraces: true })
+    const facts = await listRunTraces(db, { projectId: PROJECT, runId, label: "bible-facts" })
+    expect(facts.traces).toHaveLength(1)
+    expect(facts.traces[0]).toMatchObject({ tier: "code", model: "bkp@1.0.0" })
+    expect(facts.traces[0].user).toContain("JHN 4:7: speech Jesus [person:Jesus.2] → Samaritan woman")
+    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics" })
+    expect(JSON.parse(metrics.traces[0].output ?? "{}")).toMatchObject({
+      bibleData: "facts+checks",
+      construeRounds: 1,
+      closureExit: "model-closed",
+      decisionRequired: null,
+      staged: 4,
+      bkpResidual: {},
+    })
+  })
+
+  it("records metrics for a span without Bible data too, so a project can be compared before and after", async () => {
+    await setSettings({ bibleEnrichments: { autopilot: false } })
+    const runId = await tickOnce({ withTraces: true })
+    expect((await listRunTraces(db, { projectId: PROJECT, runId, label: "bible-facts" })).traces).toEqual([])
+    const metrics = await listRunTraces(db, { projectId: PROJECT, runId, label: "span-metrics" })
+    expect(JSON.parse(metrics.traces[0].output ?? "{}")).toMatchObject({ bibleData: "off", jevCalls: 0 })
+  })
+})

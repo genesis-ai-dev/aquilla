@@ -704,14 +704,17 @@ export interface ContextualRunTrace {
 }
 
 /** Model-call traces for a run, oldest first; narrowed to a span when given.
- *  A run older than the retention window answers with an empty list. */
+ *  A run older than the retention window answers with an empty list.
+ *  AQU-1690: `label` lists one kind of row, e.g. "bible-facts". */
 export async function fetchContextualRunTraces(
   projectId: string,
   runId: string,
   spanId?: string,
+  opts: { label?: string } = {},
 ): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
   const jwt = await requireJwt()
-  const query = spanId ? `?${new URLSearchParams({ spanId }).toString()}` : ""
+  const params = new URLSearchParams({ ...(spanId ? { spanId } : {}), ...(opts.label ? { label: opts.label } : {}) })
+  const query = params.toString() ? `?${params.toString()}` : ""
   const { res, body: raw } = await conditionalGet(
     `${runsBase(projectId)}/${encodeURIComponent(runId)}/traces${query}`,
     jwt,

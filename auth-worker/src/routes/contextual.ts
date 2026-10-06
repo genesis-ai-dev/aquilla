@@ -1270,6 +1270,12 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     return c.json(body, status)
   }
   const spanId = c.req.query("spanId") || undefined
+  // AQU-1690: ?label=bible-facts lists one kind of row (the inspector's facts).
+  const label = c.req.query("label") || undefined
+  if (label !== undefined && !/^[a-z0-9:_-]{1,64}$/.test(label)) {
+    const { body, status } = errorJson("validation_failed", "label must be 1 to 64 of a-z 0-9 : _ -", 400)
+    return c.json(body, status)
+  }
   const limitRaw = c.req.query("limit")
   const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
   if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
@@ -1285,6 +1291,7 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     runId,
     limit,
     ...(spanId ? { spanId } : {}),
+    ...(label ? { label } : {}),
     // AQU-1690: shadow-mode Jev answers are for maintainers only.
     includeJev: gate.level >= ROLE.MAINTAINER,
   })

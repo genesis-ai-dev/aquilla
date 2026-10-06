@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { BibleFactsEvidence } from "./BibleFactsEvidence"
 import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -1777,6 +1778,7 @@ export function AutopilotActivityInspector({
                     </div>
                   )}
                   {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
+                  <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
                   {!readiness && sceneBriefs.length === 0 && (
                     <p className="text-sm text-muted-foreground">
                       {t("autopilot.inspector.context.noEvidence")}

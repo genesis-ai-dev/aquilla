@@ -28,6 +28,7 @@
  * resetContextualTransportForTesting().
  */
 
+import { findingsFromVerdicts, type DraftFindings } from "@/lib/agent/draft-findings"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { loadSession } from "@/lib/frontier/session-store"
@@ -222,6 +223,8 @@ export interface ContextualDraftRecord {
   cellId: string
   text: string
   spanLabel?: string
+  /** Verifier findings and triage stored at staging (draft-findings.ts). */
+  review?: DraftFindings
 }
 
 interface DraftListRow {
@@ -230,6 +233,7 @@ interface DraftListRow {
   cellId: string
   text: string
   provenance?: { spanId?: string; spanLabel?: string } | null
+  verdicts?: Record<string, string> | null
 }
 
 /**
@@ -263,6 +267,7 @@ export async function fetchContextualDrafts(
       cellId: d.cellId,
       text: d.text,
       ...(spanLabel && !isOpaqueId(spanLabel) ? { spanLabel } : {}),
+      review: findingsFromVerdicts(d.verdicts),
     }
   })
 }
@@ -671,6 +676,72 @@ export async function fetchContextualRuns(
 /** Evidence bundle for one durable run. Historic deployments may know the
  * run but have no event log; an empty bundle keeps the durable summary usable
  * and lets the inspector explain that deeper history was not recorded. */
+/** One Autopilot model call: what the model was asked and what it said
+ *  (auth-worker lib/contextual/traces.ts). Kept 30 days server-side. */
+export interface ContextualRunTrace {
+  id: number
+  spanId: string
+  /** Pipeline node: "construe", "draft", "verify", … */
+  label: string
+  tier: string
+  model: string
+  system: string
+  user: string
+  output: string | null
+  error: string | null
+  generationId: string | null
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  latencyMs: number
+  attempts: number
+  truncated: boolean
+  createdAt: string
+}
+
+/** Model-call traces for a run, oldest first; narrowed to a span when given.
+ *  A run older than the retention window answers with an empty list. */
+export async function fetchContextualRunTraces(
+  projectId: string,
+  runId: string,
+  spanId?: string,
+): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
+  const jwt = await requireJwt()
+  const query = spanId ? `?${new URLSearchParams({ spanId }).toString()}` : ""
+  const { res, body: raw } = await conditionalGet(
+    `${runsBase(projectId)}/${encodeURIComponent(runId)}/traces${query}`,
+    jwt,
+  )
+  if (res.status === 404 || res.status === 501) return { traces: [], truncated: false }
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot traces failed")
+  const body = objectValue(raw) ?? {}
+  const rows = Array.isArray(body.traces) ? body.traces : []
+  const traces = rows.flatMap((row): ContextualRunTrace[] => {
+    const r = objectValue(row)
+    if (!r) return []
+    return [{
+      id: numberValue(r.id),
+      spanId: stringValue(r.spanId),
+      label: stringValue(r.label),
+      tier: stringValue(r.tier),
+      model: stringValue(r.model),
+      system: stringValue(r.system),
+      user: stringValue(r.user),
+      output: typeof r.output === "string" ? r.output : null,
+      error: typeof r.error === "string" ? r.error : null,
+      generationId: typeof r.generationId === "string" ? r.generationId : null,
+      promptTokens: numberValue(r.promptTokens),
+      completionTokens: numberValue(r.completionTokens),
+      costCents: numberValue(r.costCents),
+      latencyMs: numberValue(r.latencyMs),
+      attempts: numberValue(r.attempts),
+      truncated: r.truncated === true,
+      createdAt: stringValue(r.createdAt),
+    }]
+  })
+  return { traces, truncated: body.truncated === true }
+}
+
 export async function fetchContextualRunActivity(
   projectId: string,
   runId: string,
@@ -766,12 +837,16 @@ export interface ProjectRunStartResult {
  *  The server picks the files and divides the concurrency ceiling across them. */
 export async function startProjectContextualRun(
   projectId: string,
+  /** AQU-935: the target-language lane to fan out across. `''` is the project
+   *  default lane and is OMITTED from the body, so a single-language project's
+   *  request is byte-identical to the pre-lane one. */
+  targetLang = "",
 ): Promise<ProjectRunStartResult> {
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(runsBase(projectId), {
     method: "POST",
     headers: authHeaders(jwt),
-    body: JSON.stringify({ scope: "project" }),
+    body: JSON.stringify({ scope: "project", ...(targetLang ? { targetLang } : {}) }),
   })
   if (!res.ok) return throwFromResponse(res, "start project autopilot failed")
   const body = (await res.json()) as Partial<ProjectRunStartResult>
@@ -801,7 +876,62 @@ export async function startFileContextualRun(
   fileId: string,
   targetLang = "",
 ): Promise<{ runId: string }> {
+  // No budget flag: the server's trust-gated default (AQU-1300) drafts one
+  // passage and parks to ask — which is exactly "the next passage".
   return realContextualTransport.start(projectId, fileId, undefined, targetLang)
+}
+
+/** Give a run parked `awaiting_input` another passage batch (AQU-1300), by id —
+ *  the Team surface continues runs other than the run-store's current one.
+ *  Those runs come from the run LIST, which never went through start/snapshot,
+ *  so the project is recorded here before the command resolves it. */
+export function continueFileContextualRun(projectId: string, runId: string): Promise<void> {
+  runProjects.set(runId, projectId)
+  return realContextualTransport.continueRun(runId, "batch")
+}
+
+/** One reaction the react-check started, or one file it deliberately passed on. */
+export interface ContextualReactCheckResult {
+  reactions: { fileId: string; runId: string }[]
+  skipped: { fileId: string; reason: string }[]
+}
+
+/**
+ * "Check for updates now" — the manual sibling of the server's 5-minute react
+ * sweep, for when waiting for the cron is the wrong answer. CONTRIBUTOR+.
+ *
+ * Returns `null` (rather than throwing) when the server predates the route,
+ * so an older backend disables the button with an explanation instead of
+ * making the whole mode control look broken.
+ */
+export async function requestReactCheck(
+  projectId: string,
+): Promise<ContextualReactCheckResult | null> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/react-check`,
+    { method: "POST", headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return null
+  if (!res.ok) return throwFromResponse(res, "check for updates failed")
+  const body = objectValue(await res.json())
+  const reactions = Array.isArray(body?.reactions) ? body.reactions : []
+  const skipped = Array.isArray(body?.skipped) ? body.skipped : []
+  return {
+    reactions: reactions.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      const runId = stringValue(row?.runId)
+      if (!fileId || !runId) return []
+      runProjects.set(runId, projectId)
+      return [{ fileId, runId }]
+    }),
+    skipped: skipped.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      return fileId ? [{ fileId, reason: stringValue(row?.reason) }] : []
+    }),
+  }
 }
 
 /** `continue` grants the run a batch of spans and resumes it; `continue-all`

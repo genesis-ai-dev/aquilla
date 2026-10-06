@@ -21,6 +21,7 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
 /** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
  *  enough: some mobile browsers report an empty or wrong MIME type for files
@@ -115,6 +116,10 @@ export interface AttachAudioFileArgs {
    *  The rail button passes nothing, deliberately: it has no takes list, and
    *  fetching one to label a single icon click isn't worth the request. */
   label?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1572: where the upload came from, for telemetry ("recorder", "cell"). */
+  surface: TelemetrySurface
 }
 
 export interface AttachAudioFileResult {
@@ -185,6 +190,10 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       mimeType: file.type || undefined,
       durationMs,
       label,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      // AQU-1572: the originating attach gesture — this is the one that counts.
+      audioOrigin: "attach",
+      surface: args.surface,
       author: username,
     })
   } catch (emitErr) {

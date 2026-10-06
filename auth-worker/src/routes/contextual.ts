@@ -5,6 +5,7 @@
 //   GET  /:projectId/contextual/runs?fileId=              snapshot for the pill (VIEWER)
 //   POST /:projectId/contextual/runs/:runId/pause|resume|terminate
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
+//   POST /:projectId/contextual/react-check               run the react watcher now
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
 //   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
 //        optional &strategy=auto|fixed&fixedSize=N        dry-run preview, no write
@@ -23,13 +24,16 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { visibleSourceSql } from "../lib/hidden-cells-scope"
 import { ROLE, type Env } from "../types"
-import { errorJson, requireRole } from "./_contextual-helpers"
+import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
+import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { listRunTraces, makeTraceRecorder, TRACE_LIST_LIMIT } from "../lib/contextual/traces"
 import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
@@ -110,6 +114,8 @@ import {
   getCachedContextualReadiness,
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
+import { decide } from "../lib/jev/decide"
+import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -367,6 +373,8 @@ async function selfTickLoop(
   // per wave. Buffered so the ledger write never lands inside the model hot
   // path and skews the latency it is recording.
   const meter = makeCostMeter(env, db)
+  // Prompt/reply per call for the Team step inspector; flushed with the meter.
+  const traces = makeTraceRecorder(env, db, { runId, projectId })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -398,6 +406,7 @@ async function selfTickLoop(
           ok: u.ok,
           ...(u.tokensPerSecond !== undefined ? { tokensPerSecond: u.tokensPerSecond } : {}),
         }),
+      onTrace: (t) => traces.add(t),
     })
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
       const weight = Math.max(1, Math.min(
@@ -423,6 +432,7 @@ async function selfTickLoop(
             llm: guarded.llm,
             notify,
             ...(concurrency ? { concurrency } : {}),
+            triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
           })
         } finally {
           await guarded.stop()
@@ -436,7 +446,7 @@ async function selfTickLoop(
         }
       }
       const result = await tick()
-      await meter.flush()
+      await Promise.all([meter.flush(), traces.flush()])
       if (!result.continueRun) return
       // The lease was released in tick()'s finally. Waiters poll at the
       // shorter retry interval, so a different file/isolate gets a chance to
@@ -565,6 +575,32 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
     projectRuns.push(run)
     byProject.set(run.projectId, projectRuns)
   }
+  // AQU-1050 — subsequent AI work. A project whose lead has switched Autopilot
+  // off must not have its stranded runs driven onward by the cron; that is the
+  // "disabling stops new work" half of the flag, and the sweep is the one
+  // caller with no human behind it. The run rows are left exactly as they are
+  // — status, cursor, drafts and activity all intact — so switching the flag
+  // back on resumes them on a later sweep instead of losing their place.
+  // Their heartbeats were refreshed by the claim above, so they will be
+  // re-offered each sweep and quietly declined again; that costs one UPDATE
+  // every five minutes and keeps the re-enable path free, which is the better
+  // trade than parking a run the operator never asked us to touch.
+  let declined = 0
+  for (const [projectId, runs] of [...byProject.entries()]) {
+    let released = false
+    try {
+      released = await isAutopilotReleased(db, projectId)
+    } catch (err) {
+      // Unreadable settings are not consent. Fail closed and try next sweep.
+      console.warn(`[contextual] release-flag read failed for ${projectId}:`, err)
+    }
+    if (released) continue
+    byProject.delete(projectId)
+    declined += runs.length
+  }
+  if (declined > 0) {
+    console.log(`[contextual cron] left ${declined} run(s) alone — Autopilot is off for their project`)
+  }
   const projectConcurrency = resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY)
   const projectLoops = [...byProject.entries()].map(([projectId, runs]) => {
     const perFile = Math.min(
@@ -578,8 +614,181 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
   const done = Promise.allSettled(projectLoops).then(() => {})
   if (projectLoops.length > 0) _test.lastLoop = done
   return {
-    adopted: adopted.length,
+    // Runs actually DRIVEN, not runs claimed: the cron logs this number as
+    // "resumed N stranded run(s)", and a declined run was not resumed.
+    adopted: adopted.length - declined,
     done,
+  }
+}
+
+// ── Reactions (v3 react loop) ───────────────────────────────────────────────
+
+/** `contextual_runs.initiated_by` for a run the react watcher started. Not a
+ *  username: the SPA badges these conversations as "reacted to your changes"
+ *  off exactly this value. */
+export const REACTION_INITIATOR = "reaction"
+
+/**
+ * Start one reaction run. Lives here, beside `selfTickLoop`, so a reaction
+ * goes through the SAME path a human start does — `createRun`'s refuse-second-
+ * active-run, the durable project concurrency lease, the tick loop, the
+ * activity record and the live frame. lib/react-loop.ts takes this as an
+ * injected dependency (`StartReactionRun`) rather than importing it, which is
+ * what keeps the two modules from importing each other.
+ *
+ * Guards versus the human start route: the org credit and word caps are
+ * enforced identically (they are org-scoped, so autonomous spend is capped the
+ * same way attended spend is). `runAiGuard` is NOT — it is a per-USER AI
+ * budget, and a reaction has no user to charge it to. The lane is always the
+ * default (''), matching the project-wide autopilot fan-out; reacting on a
+ * named multilingual lane is a follow-up.
+ */
+export const startReactionRun: StartReactionRun = async (env, input) => {
+  if (!env.OPENROUTER_API_KEY) return { status: "skipped", reason: "not_configured" }
+
+  let orgId = 0
+  try {
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0, exactly as the start route does */
+  }
+  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+  const words = await wordGuard(env.AQUILLA_PG, orgId)
+  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+
+  const created = await createRun(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    targetLang: input.targetLang,
+    initiatedBy: REACTION_INITIATOR,
+    ...(input.anchorCellId ? { anchorCellId: input.anchorCellId } : {}),
+  })
+  if (created.status === "active_exists") {
+    return { status: "skipped", reason: "a run is already active on this file" }
+  }
+
+  // Queue the auto-steering BEFORE the driver starts: runOneTick consumes
+  // steering ahead of picking a wave, so the direction shapes the very first
+  // span rather than arriving after the reaction has already drafted.
+  const steer = await appendSteering(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    runId: created.run.id,
+    kind: "direction",
+    body: input.direction,
+    createdBy: REACTION_INITIATOR,
+  })
+  if (steer.status === "validation_failed") {
+    console.warn(`[react] auto-steering rejected for run ${created.run.id}: ${steer.message}`)
+  }
+
+  await recordRunCreated(env.AQUILLA_PG, created.run)
+  try {
+    await notifySyncWorkerOfContextualActivity(env, input.projectId, runStateFrame(created.run))
+  } catch (err) {
+    console.warn(`[react] start notify failed for run ${created.run.id}:`, err)
+  }
+  return {
+    status: "ok",
+    runId: created.run.id,
+    done: selfTickLoop(env, input.projectId, created.run.id),
+  }
+}
+
+/** Wake a PARKED run with reaction steering instead of starting a rival run.
+ *  Mirrors the human steering route's wake path (queue direction → resume →
+ *  drive) under the same budget guards as a fresh reaction start. */
+export const wakeReactionRun: WakeReactionRun = async (env, input) => {
+  if (!env.OPENROUTER_API_KEY) return { status: "skipped", reason: "not_configured" }
+
+  let orgId = 0
+  try {
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0, exactly as the start route does */
+  }
+  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+  const words = await wordGuard(env.AQUILLA_PG, orgId)
+  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+
+  // An EXHAUSTED parked run (every span settled) has nothing left to drive —
+  // waking it would consume the steering and re-park untouched. Retire it and
+  // start a fresh reaction run over the file's CURRENT state instead; the old
+  // conversation stays in the list as finished history.
+  // Dev's park reason is the authority (AQU-1300): `work_exhausted` means the
+  // work-list is spent, so waking would re-park untouched.
+  if (input.parkReason === "work_exhausted") {
+    const retired = await terminateRun(env.AQUILLA_PG, input.runId)
+    if (retired.status !== "ok") {
+      return { status: "skipped", reason: `wake_failed (retire ${retired.status})` }
+    }
+    try {
+      await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, retired.run)
+    } catch (err) {
+      console.warn(`[react] retire notify failed for run ${input.runId}:`, err)
+    }
+    return startReactionRun(env, {
+      projectId: input.projectId,
+      fileId: input.fileId,
+      targetLang: input.targetLang,
+      anchorCellId: input.anchorCellId,
+      direction: input.direction,
+    })
+  }
+
+  // Queue the steering BEFORE resuming, so the woken tick's steering read
+  // picks the direction up ahead of its first wave.
+  const steer = await appendSteering(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    runId: input.runId,
+    kind: "direction",
+    body: input.direction,
+    createdBy: REACTION_INITIATOR,
+  })
+  if (steer.status === "validation_failed") {
+    return { status: "skipped", reason: "wake_failed (steering rejected)" }
+  }
+  await appendActivitySafely(env.AQUILLA_PG, {
+    runId: input.runId,
+    projectId: input.projectId,
+    fileId: input.fileId,
+    kind: "steering_queued",
+    status: "queued",
+    details: { steeringId: steer.entry.id, steeringKind: steer.entry.kind },
+  })
+
+  // An expert edit is the human input the trust gate waits for — the same
+  // grant a draft review buys (AQU-1300), capped so a stream of edits cannot
+  // silently fund an unattended run. Granting BEFORE resuming is what keeps
+  // the woken run from bouncing straight back to parked.
+  await grantSpanAllowance(env.AQUILLA_PG, input.runId, {
+    spans: INPUT_GRANT_SPANS,
+    cap: INPUT_GRANT_CAP,
+  })
+  const resumed = await resumeRun(env.AQUILLA_PG, input.runId)
+  if (resumed.status !== "ok") {
+    return { status: "skipped", reason: `wake_failed (${resumed.status})` }
+  }
+  try {
+    await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, resumed.run)
+  } catch (err) {
+    console.warn(`[react] wake notify failed for run ${input.runId}:`, err)
+  }
+  return {
+    status: "ok",
+    runId: input.runId,
+    done: selfTickLoop(env, input.projectId, input.runId),
   }
 }
 
@@ -613,6 +822,12 @@ contextual.post(
     const projectId = c.req.param("projectId") ?? ""
     const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
     if (!gate.ok) return gate.res
+    // AQU-1050 — admission. The release flag is checked before every other
+    // guard below: a project that never opted in should not be told which of
+    // its languages or briefs are missing, and must never reach the budget
+    // guards, which is where the spend starts.
+    const released = await requireAutopilotReleased(c, projectId)
+    if (!released.ok) return released.res
     if (!c.env.OPENROUTER_API_KEY) {
       const { body, status } = errorJson("not_configured", "OPENROUTER_API_KEY is not configured", 500)
       return c.json(body, status)
@@ -692,9 +907,14 @@ contextual.post(
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
     if (body.scope === "project") {
+      // AQU-935: discovery and conflict detection both read the lane the start
+      // request named. Without it a multi-lane project's second language sees
+      // the default lane's finished work and its in-flight runs, so a start
+      // there either finds nothing to do or skips every file as "already
+      // running". `lane` is `''` for a single-language project — unchanged.
       const [candidates, activeFiles] = await Promise.all([
-        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId),
-        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId),
+        listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId, lane),
+        listActiveAutopilotRunFiles(c.env.AQUILLA_PG, projectId, lane),
       ])
       if (candidates.length === 0) {
         const { body: err, status } = errorJson(
@@ -866,7 +1086,10 @@ async function readinessCellCounts(
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''`,
+          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            -- AQU-1424: a parked cell is not untranslated work waiting for
+            -- autopilot, so it leaves both of these counts.
+            AND ${visibleSourceSql('s')}`,
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()
@@ -1028,6 +1251,35 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
   })
 })
 
+// GET /:projectId/contextual/runs/:runId/traces?spanId= — prompt and reply of
+// each model call (VIEWER), oldest first, for the Team step inspector. Rows
+// expire after 30 days, so an older run answers with an empty list.
+contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const runId = c.req.param("runId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+
+  const run = await getRun(c.env.AQUILLA_PG, runId)
+  if (!run || run.projectId !== projectId) {
+    const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
+    return c.json(body, status)
+  }
+  const spanId = c.req.query("spanId") || undefined
+  const limitRaw = c.req.query("limit")
+  const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
+  if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
+    const { body, status } = errorJson(
+      "validation_failed",
+      `limit must be an integer from 1 to ${TRACE_LIST_LIMIT}`,
+      400,
+    )
+    return c.json(body, status)
+  }
+  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  return c.json(result)
+})
+
 // GET /:projectId/contextual/runs/:runId/activity — durable inspector bundle
 // (VIEWER). Events are the latest bounded tail in chronological order;
 // evidence rows are likewise capped and make truncation explicit.
@@ -1136,6 +1388,16 @@ contextual.post("/:projectId/contextual/runs/:runId/:action", authMiddleware, as
   }
   const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
   if (!gate.ok) return gate.res
+
+  // AQU-1050 — retries. `resume`, `continue` and `continue-all` all put the
+  // run back to work, so they are admission by another name and ride the
+  // release flag. `pause` and `terminate` deliberately do NOT: they are the
+  // only way to bring an in-flight run to rest, and a project that has just
+  // switched Autopilot off is exactly when someone needs them.
+  if (action === "resume" || action === "continue" || action === "continue-all") {
+    const released = await requireAutopilotReleased(c, projectId)
+    if (!released.ok) return released.res
+  }
 
   const run = await getRun(c.env.AQUILLA_PG, runId)
   if (!run || run.projectId !== projectId) {
@@ -1272,6 +1534,12 @@ contextual.post(
       return c.json({ command: intent, applied: false })
     }
 
+    // AQU-1050 — mutations. Checked AFTER the command fast-path above, so a
+    // "stop" typed into the composer of a project whose flag just went off
+    // still stops the run. Everything past here queues work for the agent.
+    const releasedToSteer = await requireAutopilotReleased(c, projectId)
+    if (!releasedToSteer.ok) return releasedToSteer.res
+
     if (body.kind === "refresh_span") {
       const brief = await getSceneBrief(c.env.AQUILLA_PG, body.body.trim())
       if (
@@ -1341,6 +1609,37 @@ contextual.post(
     return c.json({ steering: result.entry, ...(woken ? { wokeRunId: woken } : {}) }, 201)
   },
 )
+
+// POST /:projectId/contextual/react-check — run the react watcher for this
+// project NOW (CONTRIBUTOR, same floor as steering: it starts translation work
+// product). The 5-minute cron does the same sweep unattended; this is the
+// "check for updates now" affordance, so the answer is always the sweep's own
+// report — what it started and why it skipped everything else.
+contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
+  if (!gate.ok) return gate.res
+  // AQU-1050 — subsequent AI work, on demand. `reactCheckProject` refuses a
+  // disabled project on its own (that is what covers the cron), but the route
+  // answers before it so the client gets the flag's own 409 rather than a 200
+  // carrying a skip reason it would have to parse.
+  const released = await requireAutopilotReleased(c, projectId)
+  if (!released.ok) return released.res
+
+  const result = await reactCheckProject(c.env, projectId, {
+    startRun: startReactionRun,
+    wakeRun: wakeReactionRun,
+  })
+  // Same background-driver contract as kickLoop: the reaction runs keep
+  // ticking after this Response, and _test.lastLoop is the seam tests await.
+  _test.lastLoop = result.done
+  try {
+    c.executionCtx.waitUntil(result.done)
+  } catch {
+    void result.done.catch(() => {})
+  }
+  return c.json({ reactions: result.reactions, questions: result.questions, skipped: result.skipped })
+})
 
 // GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).
 contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
@@ -1536,7 +1835,7 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
-    selectCellPairs(db, projectId, { fileId }),
+    selectCellPairs(db, projectId, { fileId, targetLang: "" }),
   ])
   const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
@@ -1591,7 +1890,7 @@ contextual.put(
     // 'auto'/'fixed' do not need them, so only pay for the read when they do.
     const orderedCellIds =
       input.strategy === "explicit"
-        ? (await selectCellPairs(db, projectId, { fileId })).map((p) => p.cellId)
+        ? (await selectCellPairs(db, projectId, { fileId, targetLang: "" })).map((p) => p.cellId)
         : []
     const checked = validateSegmentationInput(input, orderedCellIds)
     if (!checked.ok) {
@@ -1689,7 +1988,7 @@ contextual.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    const pairs = await selectCellPairs(db, projectId, { fileId })
+    const pairs = await selectCellPairs(db, projectId, { fileId, targetLang: "" })
     if (pairs.length === 0) {
       const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
       return c.json(body, status)

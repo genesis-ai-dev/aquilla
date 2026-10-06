@@ -8,6 +8,8 @@
  * Public API (other agents depend on this shape — do NOT rename).
  */
 
+import { tokenize } from "./tokenize"
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 export interface BtSeed {
@@ -18,10 +20,32 @@ export interface BtSeed {
    * Negative weight penalizes (forbidden renderings).
    */
   weight: number
+  /**
+   * The cell this seed was derived from, when there is one. Lets `gloss` drop
+   * a cell's own seeds when it is glossed leave-one-out.
+   */
+  originId?: string
+}
+
+/** A (source ↔ target) training pair; `id` (a cell id) enables leave-one-out. */
+export interface GlossPair {
+  source: string
+  target: string
+  id?: string
+}
+
+export interface GlossOptions {
+  /**
+   * Leave-one-out: gloss as if the pair(s) and seeds with this id were never
+   * in the corpus. Without it, glossing a cell that is itself in the corpus
+   * replays its own source — the model has memorized that very alignment — so
+   * the output says nothing about whether the translation conveys the source.
+   */
+  excludeId?: string
 }
 
 export interface Glosser {
-  gloss(target: string): string
+  gloss(target: string, options?: GlossOptions): string
 }
 
 /**
@@ -93,12 +117,15 @@ type CooccurrenceMap = Map<string, Map<string, Alignment>>
 
 // ── Tokenization ─────────────────────────────────────────────────────────────
 
-const TOKEN_RE = /[\p{L}\p{N}]+/gu
-
-/** Split a string into lowercase tokens, preserving leading whitespace info. */
-function tokenize(s: string): string[] {
-  return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
-}
+/**
+ * AQU-1190: shared with `interlinear.ts` so the gloss and the alignment it is
+ * read against cannot disagree about where a word ends.
+ *
+ * This module's own copy of the regex was `[\p{L}\p{N}]+` — no `\p{M}` — so
+ * every pointed-Hebrew word was shredded into single consonants and the
+ * statistical gloss for a Macula/OSHB source was built over fragments rather
+ * than words. See `./tokenize` for the rule and the other scripts it affects.
+ */
 
 // ── Model building ────────────────────────────────────────────────────────────
 
@@ -190,16 +217,16 @@ function proximity(srcCenters: number[], tgtCenters: number[]): number {
  * bigram alignments between every source token and every target token in the
  * same sentence window. Longer n-gram matches are scored higher.
  */
-function buildAlignmentModel(
-  pairs: { source: string; target: string }[],
-  seeds: BtSeed[],
-): AlignmentMap {
+function buildAlignmentModel(pairs: GlossPair[], seeds: BtSeed[]): BuiltModel {
   const cooc: CooccurrenceMap = new Map()
   /** Total corpus co-occurrence mass per source phrase — the Dice denominator. */
   const srcMass = new Map<string, number>()
+  /** Target phrase → indices of the pairs containing it, ascending. */
+  const phraseIndex = new Map<string, number[]>()
 
   // ── Corpus-derived alignments ─────────────────────────────────────────────
-  for (const { source, target } of pairs) {
+  for (let idx = 0; idx < pairs.length; idx++) {
+    const { source, target } = pairs[idx]
     const srcTokens = tokenize(source)
     const tgtTokens = tokenize(target)
 
@@ -212,14 +239,19 @@ function buildAlignmentModel(
     const srcPhrases = phraseOccurrences(srcTokens, MAX_NGRAM)
     const tgtPhrases = phraseOccurrences(tgtTokens, MAX_NGRAM)
 
+    for (const tgtPhrase of tgtPhrases.keys()) {
+      const bucket = phraseIndex.get(tgtPhrase)
+      if (bucket) bucket.push(idx)
+      else phraseIndex.set(tgtPhrase, [idx])
+    }
+
     // For each (source ngram, target ngram) co-occurrence, emit ONE alignment
     // observation per pair, weighted by the shorter ngram length (longer = more
     // specific = higher weight per token) and discounted by how far apart the
     // two phrases sit in their sentences.
     for (const [tgtPhrase, tp] of tgtPhrases) {
       for (const [srcPhrase, sp] of srcPhrases) {
-        // Weight is geometric: single-word ×1, bigram ×2, trigram ×3
-        const w = Math.min(tp.len, sp.len) * proximity(sp.centers, tp.centers)
+        const w = alignmentWeight(tp, sp)
         addAlignment(cooc, tgtPhrase, srcPhrase, w)
         srcMass.set(srcPhrase, (srcMass.get(srcPhrase) ?? 0) + w)
       }
@@ -234,7 +266,26 @@ function buildAlignmentModel(
   // observation, so it would always normalize to the same value).
   const rules = compileSeedRules(seeds)
 
-  return scoreAlignments(cooc, srcMass, rules)
+  return {
+    model: scoreAlignments(cooc, (src) => srcMass.get(src) ?? 0, rules),
+    srcMass,
+    phraseIndex,
+    rules,
+  }
+}
+
+/** Weight is geometric: single-word ×1, bigram ×2, trigram ×3, discounted by distance. */
+function alignmentWeight(tp: PhraseOccurrences, sp: PhraseOccurrences): number {
+  return Math.min(tp.len, sp.len) * proximity(sp.centers, tp.centers)
+}
+
+interface BuiltModel {
+  model: AlignmentMap
+  /** Corpus co-occurrence mass per source phrase (the Dice denominator). */
+  srcMass: Map<string, number>
+  /** Target phrase → ascending indices of the pairs containing it. */
+  phraseIndex: Map<string, number[]>
+  rules: SeedRules
 }
 
 /**
@@ -385,7 +436,7 @@ function seedBonus(srcTokens: readonly string[], applicable: readonly SeedRule[]
  */
 function scoreAlignments(
   cooc: CooccurrenceMap,
-  srcMass: Map<string, number>,
+  srcMassOf: (src: string) => number,
   rules: SeedRules,
 ): AlignmentMap {
   const model: AlignmentMap = new Map()
@@ -395,50 +446,58 @@ function scoreAlignments(
   for (const rule of rules.all) targetPhrases.add(rule.tgtPhrase)
 
   for (const tgtPhrase of targetPhrases) {
-    const inner = cooc.get(tgtPhrase)
-    const applicable = rules.all.length > 0 ? rulesFor(tgtPhrase.split(" "), rules) : NO_RULES
-
-    // Total corpus mass for this target phrase — the other Dice denominator.
-    let tgtMass = 0
-    if (inner) for (const alignment of inner.values()) tgtMass += alignment.score
-
-    let bestSrc = ""
-    let bestScore = -Infinity
-    let bestCount = 0
-
-    if (inner) {
-      for (const [src, alignment] of inner) {
-        const denom = (srcMass.get(src) ?? 0) + tgtMass
-        const dice = denom > 0 ? (2 * alignment.score) / denom : 0
-        const score = dice + (applicable.length > 0 ? seedBonus(src.split(" "), applicable) : 0)
-        if (score > bestScore) {
-          bestScore = score
-          bestSrc = src
-          bestCount = alignment.count
-        }
-      }
-    }
-
-    // Seed-only candidates (no corpus co-occurrence) compete on seed weight.
-    // Only a rule whose target IS this phrase proposes its own source phrase;
-    // a rule merely contained in it would propose a partial gloss.
-    for (const rule of applicable) {
-      if (rule.tgtPhrase !== tgtPhrase) continue
-      if (inner?.has(rule.srcPhrase)) continue
-      const score = seedBonus(rule.src, applicable)
-      if (score > bestScore) {
-        bestScore = score
-        bestSrc = rule.srcPhrase
-        bestCount = 1
-      }
-    }
-
-    if (bestSrc) {
-      model.set(tgtPhrase, new Map([[bestSrc, { score: bestScore, count: bestCount }]]))
-    }
+    const best = scorePhrase(tgtPhrase, cooc.get(tgtPhrase), srcMassOf, rules)
+    if (best) model.set(tgtPhrase, new Map([[best.src, best.alignment]]))
   }
 
   return model
+}
+
+/** The argmax source phrase for one target phrase, or null if none qualifies. */
+function scorePhrase(
+  tgtPhrase: string,
+  inner: Map<string, Alignment> | undefined,
+  srcMassOf: (src: string) => number,
+  rules: SeedRules,
+): { src: string; alignment: Alignment } | null {
+  const applicable = rules.all.length > 0 ? rulesFor(tgtPhrase.split(" "), rules) : NO_RULES
+
+  // Total corpus mass for this target phrase — the other Dice denominator.
+  let tgtMass = 0
+  if (inner) for (const alignment of inner.values()) tgtMass += alignment.score
+
+  let bestSrc = ""
+  let bestScore = -Infinity
+  let bestCount = 0
+
+  if (inner) {
+    for (const [src, alignment] of inner) {
+      const denom = srcMassOf(src) + tgtMass
+      const dice = denom > 0 ? (2 * alignment.score) / denom : 0
+      const score = dice + (applicable.length > 0 ? seedBonus(src.split(" "), applicable) : 0)
+      if (score > bestScore) {
+        bestScore = score
+        bestSrc = src
+        bestCount = alignment.count
+      }
+    }
+  }
+
+  // Seed-only candidates (no corpus co-occurrence) compete on seed weight.
+  // Only a rule whose target IS this phrase proposes its own source phrase;
+  // a rule merely contained in it would propose a partial gloss.
+  for (const rule of applicable) {
+    if (rule.tgtPhrase !== tgtPhrase) continue
+    if (inner?.has(rule.srcPhrase)) continue
+    const score = seedBonus(rule.src, applicable)
+    if (score > bestScore) {
+      bestScore = score
+      bestSrc = rule.srcPhrase
+      bestCount = 1
+    }
+  }
+
+  return bestSrc ? { src: bestSrc, alignment: { score: bestScore, count: bestCount } } : null
 }
 
 // ── Gloss generation ──────────────────────────────────────────────────────────
@@ -598,22 +657,97 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
  *   weight penalizes. Default [].
  * @returns A `Glosser` whose `gloss(target)` method is synchronous and fast.
  */
-export function buildGlosser(
-  pairs: { source: string; target: string }[],
-  seeds: BtSeed[] = [],
-): Glosser {
+export function buildGlosser(pairs: GlossPair[], seeds: BtSeed[] = []): Glosser {
   // Build alignment model. This is O(pairs × tokens²) but typical Bible-cell
   // corpora have short sentences so it stays well under 50 ms.
-  let model: AlignmentMap
+  let built: BuiltModel | null
   try {
-    model = buildAlignmentModel(pairs, seeds)
+    built = buildAlignmentModel(pairs, seeds)
   } catch {
     // Degrade gracefully if model construction fails (e.g. bizarre input)
-    model = new Map()
+    built = null
+  }
+  const model: AlignmentMap = built?.model ?? new Map()
+
+  /** Pair indices by id, for leave-one-out. */
+  const indicesById = new Map<string, number[]>()
+  pairs.forEach((p, i) => {
+    if (p.id === undefined) return
+    const bucket = indicesById.get(p.id)
+    if (bucket) bucket.push(i)
+    else indicesById.set(p.id, [i])
+  })
+  const hasSeedsFrom = (id: string) => seeds.some((s) => s.originId === id)
+
+  let looRules: { id: string; rules: SeedRules } | null = null
+  const rulesWithout = (id: string): SeedRules => {
+    if (looRules?.id !== id) {
+      looRules = { id, rules: compileSeedRules(seeds.filter((s) => s.originId !== id)) }
+    }
+    return looRules.rules
+  }
+
+  /**
+   * The model as it would be had the pairs/seeds of `excludeId` never been
+   * added, restricted to the target phrases of `tokens` (the only ones the
+   * decoder will ask for). Exact, not approximate: Dice only needs the
+   * co-occurrence of those phrases and the per-source mass, and both can be
+   * recomputed without the excluded pair — the first from the phrase index,
+   * the second by subtracting that pair's own contribution.
+   */
+  const leaveOneOutModel = (tokens: string[], excludeId: string): AlignmentMap => {
+    if (!built) return new Map()
+    const excluded = new Set(indicesById.get(excludeId) ?? [])
+    const rules = hasSeedsFrom(excludeId) ? rulesWithout(excludeId) : built.rules
+
+    const needed = phraseOccurrences(tokens, MAX_NGRAM)
+
+    // Per-source mass contributed by the excluded pairs, to subtract.
+    const massAdj = new Map<string, number>()
+    for (const idx of excluded) {
+      const srcTokens = tokenize(pairs[idx].source)
+      const tgtTokens = tokenize(pairs[idx].target)
+      if (srcTokens.length === 0 || tgtTokens.length === 0) continue
+      const srcPhrases = phraseOccurrences(srcTokens, MAX_NGRAM)
+      for (const tp of phraseOccurrences(tgtTokens, MAX_NGRAM).values()) {
+        for (const [srcPhrase, sp] of srcPhrases) {
+          massAdj.set(srcPhrase, (massAdj.get(srcPhrase) ?? 0) + alignmentWeight(tp, sp))
+        }
+      }
+    }
+
+    // Visit the surviving pairs that contain any needed phrase, in corpus
+    // order so ties break exactly as they would in a rebuilt model.
+    const pairIdxs = new Set<number>()
+    for (const phrase of needed.keys()) {
+      for (const idx of built.phraseIndex.get(phrase) ?? []) {
+        if (!excluded.has(idx)) pairIdxs.add(idx)
+      }
+    }
+    const cooc: CooccurrenceMap = new Map()
+    for (const idx of [...pairIdxs].sort((a, b) => a - b)) {
+      const tgtPhrases = phraseOccurrences(tokenize(pairs[idx].target), MAX_NGRAM)
+      const srcPhrases = phraseOccurrences(tokenize(pairs[idx].source), MAX_NGRAM)
+      for (const [tgtPhrase, tp] of tgtPhrases) {
+        if (!needed.has(tgtPhrase)) continue
+        for (const [srcPhrase, sp] of srcPhrases) {
+          addAlignment(cooc, tgtPhrase, srcPhrase, alignmentWeight(tp, sp))
+        }
+      }
+    }
+
+    const srcMass = built.srcMass
+    const srcMassOf = (src: string) => Math.max(0, (srcMass.get(src) ?? 0) - (massAdj.get(src) ?? 0))
+    const out: AlignmentMap = new Map()
+    for (const phrase of needed.keys()) {
+      const best = scorePhrase(phrase, cooc.get(phrase), srcMassOf, rules)
+      if (best) out.set(phrase, new Map([[best.src, best.alignment]]))
+    }
+    return out
   }
 
   return {
-    gloss(target: string): string {
+    gloss(target: string, options?: GlossOptions): string {
       if (!target || !target.trim()) return ""
 
       let tokens: string[]
@@ -625,11 +759,16 @@ export function buildGlosser(
 
       if (tokens.length === 0) return target
 
+      const excludeId = options?.excludeId
+      const leaveOut =
+        excludeId !== undefined && (indicesById.has(excludeId) || hasSeedsFrom(excludeId))
+
       // Edge case: no corpus → return literal
-      if (model.size === 0) return tokens.join(" ")
+      if (model.size === 0 && !leaveOut) return tokens.join(" ")
 
       try {
-        const glossed = glossTokens(tokens, model, MAX_NGRAM)
+        const active = leaveOut ? leaveOneOutModel(tokens, excludeId) : model
+        const glossed = glossTokens(tokens, active, MAX_NGRAM)
         return glossed.join(" ")
       } catch {
         // Degrade gracefully

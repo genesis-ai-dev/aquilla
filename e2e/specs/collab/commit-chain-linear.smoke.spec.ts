@@ -114,6 +114,93 @@ test("three pending corrections on an already translated verse preserve every pa
   }
 })
 
+/**
+ * Hold a readwrite transaction on the outbox store until the returned release
+ * runs. IndexedDB serializes overlapping readwrite transactions, so every
+ * enqueue the app starts meanwhile stays in flight — the busy-outbox state in
+ * which AQU-1578 lost quick re-edits — without depending on machine speed.
+ */
+async function holdOutboxWrites(page: Page): Promise<() => Promise<void>> {
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("aquilla-cqrs-outbox")
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    const store = db.transaction("outbox", "readwrite").objectStore("outbox")
+    const hold = window as unknown as { __releaseOutbox?: () => void }
+    let released = false
+    hold.__releaseOutbox = () => { released = true }
+    // A transaction stays open while it has requests in flight.
+    const spin = () => { if (!released) store.count().onsuccess = spin }
+    spin()
+    store.transaction.oncomplete = () => db.close()
+  })
+  return async () => {
+    await page.evaluate(() => {
+      (window as unknown as { __releaseOutbox?: () => void }).__releaseOutbox?.()
+    })
+  }
+}
+
+// AQU-1578: fill a verse, Tab on, Shift+Tab straight back and correct it while
+// the first save is still being written to the outbox. The correction used to
+// chain on the lagging head — for an empty verse the optimistic placeholder
+// `""` — and the server dropped it as a stale sibling: the edit vanished and
+// the verse lost its validation.
+for (const { shape, base } of [
+  { shape: "empty verse", base: null },
+  { shape: "already translated verse", base: "BASE-Q" },
+]) {
+  test(`quick re-edit after Tab / Shift+Tab chains on the first save (${shape})`, async ({ alice }, testInfo) => {
+    const jwt = await jwtFor("alice")
+    const seeded = await seedProjectWithFile(jwt, { name: `Quick re-edit ${Date.now()}` })
+    const cellId = seeded.cellIds[CELL_INDEX]
+    const neighbourId = seeded.cellIds[CELL_INDEX + 1]
+    const sync = waitForProjectSyncReady(alice, seeded.projectId)
+    const ws = await openSeededProject(alice, seeded)
+    await sync
+    if (base) {
+      await ws.editCell(CELL_INDEX, base)
+      await expect.poll(() => pendingCellEvents(alice, cellId)).toEqual([])
+    }
+
+    await ws.activateTargetCell(CELL_INDEX)
+    const release = await holdOutboxWrites(alice)
+    try {
+      await ws.replaceActiveTargetText(CELL_INDEX, "QUICK-A")
+      await ws.tabFromTargetCell(CELL_INDEX, "next")
+      await ws.tabFromTargetCell(CELL_INDEX + 1, "previous")
+      await ws.replaceActiveTargetText(CELL_INDEX, "QUICK-A, corrected")
+      await ws.blurEditor()
+      // The blur commit resolves its parent in the same synchronous step that
+      // paints the optimistic text, so once this shows, both saves exist and
+      // neither has reached the outbox.
+      await expect.poll(() => ws.readTargetText(CELL_INDEX)).toBe("QUICK-A, corrected")
+    } finally {
+      await release()
+    }
+
+    const queued = (await pendingCellEvents(alice, cellId))
+      .filter((e) => e.kind === "target.cell.commit")
+    await testInfo.attach("quick-reedit-queued", {
+      body: JSON.stringify(queued, null, 2), contentType: "application/json",
+    })
+    await expectLinearChain(jwt, seeded, cellId, [...(base ? [base] : []), "QUICK-A", "QUICK-A, corrected"])
+    await expect.poll(() => pendingCellEvents(alice, cellId)).toEqual([])
+
+    const resync = waitForProjectSyncReady(alice, seeded.projectId)
+    await alice.reload()
+    await resync
+    await ws.waitForEditor(cellId)
+    await expect.poll(() => ws.readTargetText(CELL_INDEX)).toBe("QUICK-A, corrected")
+    await ws.expectSelfValidated(CELL_INDEX)
+    // The verse Tab passed through was never edited, so nothing was written.
+    const neighbour = await readCellHistory(jwt, seeded, neighbourId)
+    expect(neighbour.filter((e) => e.kind === "target.cell.commit")).toEqual([])
+  })
+}
+
 const valueOf = (payload: unknown): string | undefined =>
   (payload as { value?: string } | null)?.value
 

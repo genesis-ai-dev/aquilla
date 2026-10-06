@@ -25,30 +25,66 @@ import { planSectionShortfall } from "./PlanChapterGrid"
  * Front matter is left OUT. The row says "chapters 12 and 40", and a book
  * title filed before chapter 1 is not a chapter — naming it here would send a
  * reader looking for a numbered tile that does not exist. The grid still
- * shows it, in its own row, labelled as what it is.
+ * shows it, in its own row, labelled as what it is, and the row names it in
+ * its own words (`frontMatterShortUnits`).
  */
 export function shortChaptersByUnit(
   units: readonly PlanUnit[],
   sectionsByFile: ReadonlyMap<string, readonly PlanSection[]>,
   audioFiles: ReadonlySet<string>,
+  /** AQU-955: files that carry text work, from `textFileIds`. Omitted, every
+   *  file does — which is what this said before audio-only projects existed. */
+  textFiles?: ReadonlySet<string>,
 ): Map<string, string[]> {
   const map = new Map<string, string[]>()
   for (const unit of units) {
     const sections = sectionsByFile.get(unit.fileId)
     if (!sections) continue
     const hasAudio = audioFiles.has(unit.fileId)
+    const hasText = textFiles ? textFiles.has(unit.fileId) : true
     const mine = sections.filter((s) => sectionBelongsToUnit(s.key, unit.sectionKey))
     const numbered = numberedBookCodes(mine.map((s) => s.key))
     const short = mine
       .filter(
         (section) =>
           classifyPlanSection(section.key, numbered).kind !== "frontMatter" &&
-          planSectionShortfall(section, hasAudio).worst > 0,
+          planSectionShortfall(section, hasAudio, hasText).worst > 0,
       )
       .map((section) => section.label)
     if (short.length > 0) map.set(planUnitId(unit), short)
   }
   return map
+}
+
+/**
+ * AQU-1493: the units whose book FRONT MATTER is still short, by `planUnitId`
+ * — so the row can say "front matter and chapters 2 and 3" rather than name
+ * only chapters while some of the cells it counts sit before chapter 1. Front
+ * matter holds a book's title and introduction, and now also any line added
+ * above its first verse. Same inputs and the same judge of "short" as
+ * `shortChaptersByUnit`, so the two never disagree about one section.
+ */
+export function frontMatterShortUnits(
+  units: readonly PlanUnit[],
+  sectionsByFile: ReadonlyMap<string, readonly PlanSection[]>,
+  audioFiles: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
+): Set<string> {
+  const short = new Set<string>()
+  for (const unit of units) {
+    const sections = sectionsByFile.get(unit.fileId)
+    if (!sections) continue
+    const hasAudio = audioFiles.has(unit.fileId)
+    const hasText = textFiles ? textFiles.has(unit.fileId) : true
+    const mine = sections.filter((s) => sectionBelongsToUnit(s.key, unit.sectionKey))
+    const numbered = numberedBookCodes(mine.map((s) => s.key))
+    if (mine.some(
+      (section) =>
+        classifyPlanSection(section.key, numbered).kind === "frontMatter" &&
+        planSectionShortfall(section, hasAudio, hasText).worst > 0,
+    )) short.add(planUnitId(unit))
+  }
+  return short
 }
 
 /** The selected unit's own section keys, for the classifier's context. */

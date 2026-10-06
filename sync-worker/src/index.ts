@@ -9,6 +9,7 @@
 
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
+import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
@@ -72,7 +73,10 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
+import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
+import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
@@ -80,6 +84,7 @@ import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
+import { handleMcpProtectedResourceRequest } from "./external/mcp-oauth-metadata"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
@@ -89,8 +94,10 @@ export { ProjectSync } from "./project-do"
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
@@ -119,6 +126,10 @@ declare global {
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
        *  routes speak the D1 `.prepare()/.batch()` API against the shim. */
       AQUILLA_PG?: AquillaDb
+      /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+       *  today's per-table queries), "shadow" (today's answer + access_grants
+       *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+      ACCESS_GRANTS_RESOLVER?: string
       /** Postgres (Neon) via Hyperdrive — the sole datastore. Required: when
        *  absent the worker fails fast (see `fetch`) rather than silently
        *  serving an empty local D1. */
@@ -137,6 +148,8 @@ declare global {
       ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
+      /** AQU-730. Unset locally and in e2e; dev and prod set it in wrangler. */
+      LANE_READ_WALL?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
       /** Exact Worker namespace selected by the deployment profile. */
@@ -231,6 +244,12 @@ function routeProjectSync(request: Request, env: Env): Response | Promise<Respon
  *  working unchanged. Pre-migration this was `/api/sync` under the apex. */
 const APEX_PREFIX = "/sync"
 
+/** The mount prefix a request arrived under ("" when reached directly). */
+function apexPrefixOf(request: Request): string {
+  const { pathname } = new URL(request.url)
+  return pathname === APEX_PREFIX || pathname.startsWith(`${APEX_PREFIX}/`) ? APEX_PREFIX : ""
+}
+
 function stripApexPrefix(request: Request): Request {
   const url = new URL(request.url)
   if (url.pathname !== APEX_PREFIX && !url.pathname.startsWith(`${APEX_PREFIX}/`)) {
@@ -244,7 +263,10 @@ function stripApexPrefix(request: Request): Request {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Must run before CORS / route matching — those test bare paths.
+    // Must run before CORS / route matching — those test bare paths. The
+    // stripped prefix is kept for handlers that must echo the PUBLIC URL
+    // (MCP OAuth discovery advertises where clients reach this worker).
+    const mountPrefix = apexPrefixOf(request)
     request = stripApexPrefix(request)
 
     // OPTIONS must still complete so browsers can receive the guarded error
@@ -291,6 +313,8 @@ const worker = {
       )
     }
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    // AQU-1352 P1: resolveProjectRoleShared reads the resolver mode off this handle.
+    setAccessGrantsMode(pgShim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
     // The runtime injects a full R2Bucket regardless of our narrower
     // LFS_SRC type above — wrap it once here so every downstream route only
     // ever holds a get/head/list handle, never put/delete.
@@ -331,6 +355,11 @@ const worker = {
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
+    // AQU-777: per-cell attachment bytes. Its own R2 prefix and its own
+    // allow-listed content types — see cell-attachments.ts for why this is a
+    // sibling of the audio route rather than a flag on it.
+    const attachmentResponse = await handleCellAttachmentRequest(request, env)
+    if (attachmentResponse) return attachmentResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
@@ -381,6 +410,14 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
+    if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
+    // More specific than /concepts — that route is $-anchored, this one is the
+    // per-term occurrence page (AQU-1192).
+    const conceptOccurrencesResponse = await handleConceptOccurrencesRequest(request, env)
+    if (conceptOccurrencesResponse) return withCors(conceptOccurrencesResponse, request)
+    const terminologyScanResponse = await handleTerminologyScanRequest(request, env)
+    if (terminologyScanResponse) return withCors(terminologyScanResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
@@ -486,7 +523,10 @@ const worker = {
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)
+    // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
+    const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
+    if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
@@ -542,11 +582,11 @@ export default {
     try {
       response = await worker.fetch(request, env, ctx)
     } catch (err) {
-      const url = new URL(request.url)
+      const path = redactLogPath(new URL(request.url).pathname)
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${path}`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
@@ -555,14 +595,17 @@ export default {
     }
     const durationMs = Date.now() - startedAt
     if (durationMs >= SLOW_REQUEST_MS) {
-      const url = new URL(request.url)
+      // OPS-42: `redactLogPath`, not `url.pathname` — [slow-request] fires on
+      // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+      // access-link redeem that merely ran slowly would log a live token.
+      const path = redactLogPath(new URL(request.url).pathname)
       console.warn(
-        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+        `[slow-request] ${request.method} ${path} took ${durationMs}ms (status ${response.status})`,
       )
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${path} (${durationMs}ms)`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.status": response.status,
           "http.duration_ms": durationMs,
         }),

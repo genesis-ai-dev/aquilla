@@ -25,7 +25,7 @@ import {
 import { requiredRoleForCommand, validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
 import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
-import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { ALLOWED_EMIT_KINDS, MATCH_OPTION_KEYS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
 import { BRIEF_FIELD_IDS } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
@@ -88,6 +88,8 @@ describe('command catalog — invariants', () => {
       InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
       DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
       SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
+      HideCell: { kind: 'HideCell', fileId: 'f', cellId: 'c' },
+      ShowCell: { kind: 'ShowCell', fileId: 'f', cellId: 'c' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -165,6 +167,22 @@ describe('command catalog — invariants', () => {
     expect(setBriefDoc).not.toContain('carried over, not cleared')
   })
 
+  it("documents every term match option the validator accepts (AQU-1175)", () => {
+    // Same contract as the CreateProject case below, and the same bug: `match`
+    // was accepted by the event kinds and dropped by the validator, so a
+    // caller had no way to learn the field existed. An option the validator
+    // takes but describe_command never names is that gap reopening.
+    const emitDoc = describeCommand('EmitEvents')!.paramsDoc
+    for (const key of MATCH_OPTION_KEYS) {
+      expect(emitDoc).toContain(key)
+    }
+    // And the two rules that decide whether a staged term does anything: the
+    // option set replaces wholesale, and matching is exact without it.
+    expect(emitDoc).toContain('match')
+    expect(emitDoc).toMatch(/exact/i)
+    expect(emitDoc).toMatch(/wholesale/i)
+  })
+
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {
     // describe_command is how an agent learns the shape before it stages. An
     // accepted field missing from the doc is how the silent-drop bug got its
@@ -183,7 +201,7 @@ describe('get_capabilities — commands index (§6)', () => {
   it('publishes kind/title/tier/minRoleLevel for every agent-reachable command', async () => {
     const cred = {
       credentialId: 'cred-1', userId: '1', username: 'alice',
-      mode: 'act' as const, orgId: null, projectId: null,
+      mode: 'act' as const, access: 'write' as const, orgId: null, projectId: null,
     }
     const result = await callTool('get_capabilities', {}, { AQUILLA_PG: undefined }, cred, 'tok')
     expect(result).not.toBe(Symbol.for('unknown-tool'))

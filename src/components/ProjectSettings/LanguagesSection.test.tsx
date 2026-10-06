@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { LanguagesSection } from "./LanguagesSection"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
+import type { LaneLastChangeResult, ProjectLaneView } from "@/lib/sync/project-settings"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 function renderSection(overrides: Partial<Parameters<typeof LanguagesSection>[0]> = {}) {
@@ -63,12 +64,21 @@ describe("LanguagesSection", () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
-  it("rejects a lane equal to the default target language (case-insensitive)", async () => {
+  it("allows adding the primary target language when it is not yet in targetLanes", async () => {
     const { patch } = renderSection({ defaultTargetLanguage: "French", targetLanes: [] })
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "french" } })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
-    await waitFor(() => expect(screen.getByText(/already the default/i)).toBeTruthy())
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ targetLanes: ["french"] }))
+    expect(screen.queryByText(/already the default/i)).toBeNull()
+  })
+
+  it("rejects re-adding the primary once it is already registered in targetLanes", async () => {
+    const { patch } = renderSection({ defaultTargetLanguage: "French", targetLanes: ["French"] })
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "french" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() => expect(screen.getByText(/already exists/i)).toBeTruthy())
     expect(patch).not.toHaveBeenCalled()
+    expect(screen.queryByText(/already the default/i)).toBeNull()
   })
 
   it("rejects a lane over 64 characters", async () => {
@@ -178,5 +188,252 @@ describe("LanguagesSection", () => {
       screen.getByTestId("add-target-lang-btn"),
       /maintainer or higher can edit shared settings/i,
     )
+  })
+})
+
+// AQU-1464 — the archive confirmation reports when the lane was last translated
+// in, so a PM can tell a dormant lane from one someone is working in right now.
+// Archiving is a hard write-lock (AQU-1462 / AQU-1463), so this is the last
+// chance to notice. Exercised through the lane-ROW mode (`laneRecords`), which is
+// what a cloud project renders; the legacy tag-string mode has no lane id to ask
+// the server about and deliberately shows no activity line.
+describe("LanguagesSection — lane last-change in the archive confirmation (AQU-1464)", () => {
+  const SPANISH: ProjectLaneView = {
+    id: "lane-es",
+    role: "target",
+    name: "Spanish",
+    langCode: "es",
+    legacyTag: "es",
+    position: 1,
+    archivedAt: null,
+  }
+  const DEFAULT_LANE: ProjectLaneView = {
+    id: "lane-default",
+    role: "target",
+    name: "French",
+    langCode: "fr",
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  }
+
+  function renderRows(
+    onLoadLaneLastChange?: (laneId: string) => Promise<LaneLastChangeResult>,
+    lanes: ProjectLaneView[] = [DEFAULT_LANE, SPANISH],
+  ) {
+    const onSetLaneArchived = vi.fn(async () => true)
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={["fr", "es"]}
+        canEdit
+        disabledTooltip={null}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={lanes}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={vi.fn(async () => "ok" as const)}
+        onSetLaneArchived={onSetLaneArchived}
+        onLoadLaneLastChange={onLoadLaneLastChange}
+      />,
+    )
+    return { onSetLaneArchived }
+  }
+
+  it("names the date and the member who made the lane's newest edit", async () => {
+    const at = Date.UTC(2026, 8, 28, 12, 0, 0)
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => ({
+      kind: "ok",
+      lastChange: { at, by: "carol" },
+    }))
+    renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    await waitFor(() => expect(note.textContent).toMatch(/carol/))
+    expect(note.textContent).toMatch(/2026/)
+    // No raw i18n key leaks into the rendered string.
+    expect(note.textContent).not.toMatch(/projectSettings\./)
+    // It asked about THIS lane only — a project-wide lookup would be the bug.
+    expect(load).toHaveBeenCalledWith("lane-es")
+    // Date and name are bidi-isolated (lib/i18n/format.ts): both are Latin /
+    // numeric tokens inside prose, so without the isolates Arabic reorders them
+    // against the sentence. Silent to an English reader, which is why it needs a
+    // test rather than review.
+    expect(note.textContent).toContain("\u2068carol\u2069")
+  })
+
+  it("asks only about the lane being archived, so another lane's edits can't leak in", async () => {
+    const load = vi.fn(async (laneId: string): Promise<LaneLastChangeResult> => ({
+      kind: "ok",
+      lastChange: laneId === "lane-es" ? null : { at: Date.now(), by: "carol" },
+    }))
+    renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    // The default lane has a fresh edit; Spanish does not. Spanish must say so.
+    await waitFor(() => expect(note.textContent).toMatch(/no changes in this lane yet/i))
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledWith("lane-es")
+  })
+
+  it("says a never-edited lane has no changes rather than rendering a 1970 date", async () => {
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => ({ kind: "ok", lastChange: null }))
+    renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    await waitFor(() => expect(note.textContent).toMatch(/no changes in this lane yet/i))
+    expect(note.textContent).not.toMatch(/1970|Invalid Date/i)
+  })
+
+  it("reports a failed lookup as unavailable — never as 'no changes yet' — and still archives", async () => {
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => ({
+      kind: "error",
+      message: "last-change failed (500)",
+    }))
+    const { onSetLaneArchived } = renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    await waitFor(() => expect(note.textContent).toMatch(/last change unavailable/i))
+    // "No changes yet" would read as "dormant, safe to archive" — a conclusion
+    // the server never gave us.
+    expect(note.textContent).not.toMatch(/no changes in this lane yet/i)
+    // The confirmation is not blocked by the failed read.
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
+    await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-es", true))
+  })
+
+  it("treats a thrown lookup the same as a failed one", async () => {
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => {
+      throw new Error("offline")
+    })
+    const { onSetLaneArchived } = renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    await waitFor(() => expect(note.textContent).toMatch(/last change unavailable/i))
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
+    await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-es", true))
+  })
+
+  it("drops the 'by <name>' clause when the newest edit records no editor", async () => {
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => ({
+      kind: "ok",
+      lastChange: { at: Date.UTC(2026, 8, 28, 12, 0, 0), by: null },
+    }))
+    renderRows(load)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const note = await screen.findByTestId("lane-last-change-lane-es")
+    await waitFor(() => expect(note.textContent).toMatch(/2026/))
+    expect(note.textContent).not.toMatch(/\bby\b/i)
+    expect(note.textContent).not.toMatch(/null|undefined/i)
+  })
+
+  it("only looks the date up when the confirmation is open, not on every render", async () => {
+    const load = vi.fn(async (): Promise<LaneLastChangeResult> => ({ kind: "ok", lastChange: null }))
+    renderRows(load)
+    expect(load).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("lane-last-change-lane-es")).toBeNull()
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    await screen.findByTestId("lane-last-change-lane-es")
+    expect(load).toHaveBeenCalledTimes(1)
+    // Cancelling takes the line away and leaves the lane active.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
+    await waitFor(() => expect(screen.queryByTestId("lane-last-change-lane-es")).toBeNull())
+    // Spanish is still an ACTIVE lane — cancelling archived nothing. In row mode
+    // the lane's name lives in its rename input, not in the row's text.
+    expect(
+      screen
+        .getAllByLabelText(/lane name/i)
+        .map((el) => (el as HTMLInputElement).value),
+    ).toContain("Spanish")
+    expect(screen.queryByTestId("archived-lanes-list")).toBeNull()
+  })
+
+  it("omits the activity line entirely when no lookup is wired (local project)", async () => {
+    renderRows(undefined)
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    await waitFor(() => expect(screen.getByRole("button", { name: /confirm archive/i })).toBeTruthy())
+    expect(screen.queryByTestId("lane-last-change-lane-es")).toBeNull()
+  })
+})
+
+// AQU-1600: the lane a project was created with (the "default lane", recorded
+// with an empty legacy tag) used to be pulled out of the archivable list
+// entirely — it had no archive control at all. It is now an ordinary lane. The
+// one rule left is that a project keeps at least one ACTIVE target lane, so
+// the last one's control is disabled instead of offering a click the server
+// would refuse with `last_lane`.
+describe("LanguagesSection — the former default lane archives like any other (AQU-1600)", () => {
+  const DEFAULT_LANE: ProjectLaneView = {
+    id: "lane-default",
+    role: "target",
+    name: "French",
+    langCode: "fr",
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  }
+  const SPANISH: ProjectLaneView = {
+    id: "lane-es",
+    role: "target",
+    name: "Spanish",
+    langCode: "es",
+    legacyTag: "es",
+    position: 1,
+    archivedAt: null,
+  }
+
+  function renderLanes(lanes: ProjectLaneView[], canEdit = true) {
+    const onSetLaneArchived = vi.fn(async () => true)
+    const utils = renderWithTooltips(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={["fr", "es"]}
+        canEdit={canEdit}
+        disabledTooltip={canEdit ? null : "You need Project Lead to change languages."}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={lanes}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={vi.fn(async () => "ok" as const)}
+        onSetLaneArchived={onSetLaneArchived}
+      />,
+    )
+    return { ...utils, onSetLaneArchived }
+  }
+
+  it("offers an archive control on the former default lane and archives it by lane id", async () => {
+    const { onSetLaneArchived } = renderLanes([DEFAULT_LANE, SPANISH])
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(false)
+    fireEvent.click(button)
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
+    await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-default", true))
+  })
+
+  it("lists the archived former default lane with a restore control", () => {
+    renderLanes([{ ...DEFAULT_LANE, archivedAt: "2026-10-03T00:00:00.000Z" }, SPANISH])
+    // No second archive control for a lane that is already archived…
+    expect(screen.queryByTestId("archive-lane-lane-default")).toBeNull()
+    // …and it is restorable from the archived list.
+    const archivedList = screen.getByTestId("archived-lanes-list")
+    expect(archivedList.textContent).toContain("French")
+  })
+
+  it("refuses the project's only active lane, and says why", async () => {
+    const { onSetLaneArchived } = renderLanes([DEFAULT_LANE])
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(true)
+    await expectTooltip(button, /only active lane/i)
+    expect(onSetLaneArchived).not.toHaveBeenCalled()
+  })
+
+  it("refuses an extra lane too when it is the only active one left", () => {
+    renderLanes([{ ...DEFAULT_LANE, archivedAt: "2026-10-03T00:00:00.000Z" }, SPANISH])
+    expect(screen.getByTestId("archive-lane-lane-es").hasAttribute("disabled")).toBe(true)
+  })
+
+  it("still shows the permission reason, not the last-lane one, when the user cannot edit", async () => {
+    renderLanes([DEFAULT_LANE, SPANISH], false)
+    const button = screen.getByTestId("archive-lane-lane-default")
+    expect(button.hasAttribute("disabled")).toBe(true)
+    await expectTooltip(button, /project lead/i)
   })
 })

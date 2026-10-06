@@ -27,6 +27,7 @@ import {
   planUnitExpectsAudio,
   planUnitIsNearlyComplete,
   planUnitLabel,
+  planUnitExpectsText,
   planUnitShortfall,
   planUnitStatus,
   type PlanUnit,
@@ -185,10 +186,12 @@ export const PlanRow = memo(function PlanRow({
   now,
   selected,
   showAudio,
+  textFiles,
   showStatus = false,
   onSelect,
   audioFiles,
   shortChapters,
+  frontMatterShort = false,
   onOpenShortfall,
   assignees,
 }: {
@@ -209,15 +212,27 @@ export const PlanRow = memo(function PlanRow({
    * count stands in, which is right for one row and wrong for a board.
    */
   audioFiles?: ReadonlySet<string>
+  /**
+   * AQU-955: files that carry text work, from `textFileIds` over the WHOLE
+   * board. Optional for the same reason `audioFiles` is; omitted, the unit's
+   * own expectation stands in.
+   */
+  textFiles?: ReadonlySet<string>
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
+  /**
+   * AQU-1493: the book's front matter is short too (its title or intro, or a
+   * line added above its first verse), which no chapter label covers.
+   */
+  frontMatterShort?: boolean
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
   onOpenShortfall?: (unit: PlanUnit) => void
   assignees?: readonly PlanRowAssignee[]
 }) {
   const t = useT()
   const { locale } = useI18n()
-  const status = planUnitStatus(unit, now, audioFiles)
+  const hasText = textFiles ? textFiles.has(unit.fileId) : planUnitExpectsText(unit)
+  const status = planUnitStatus(unit, now, audioFiles, textFiles)
   const translated = planPct(unit.filledCount, unit.totalCount)
   const validated = planPct(unit.validatedCount, unit.totalCount)
   // AQU-1278: against the CUE SHEET on a dubbing project, whose cell count is
@@ -225,16 +240,24 @@ export const PlanRow = memo(function PlanRow({
   const audioTotal = planAudioTotal(unit)
   const recorded = planPct(unit.audioCount, audioTotal)
   const audioValidated = planPct(unit.audioValidatedCount, audioTotal)
-  const note = usePlanRowNote(unit, now, audioFiles)
+  const note = usePlanRowNote(unit, now, audioFiles, textFiles)
   const readoutTips = usePlanReadoutTips()
 
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
-  const shortfall = planUnitShortfall(unit, hasAudio)
-  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles)
+  const shortfall = planUnitShortfall(unit, hasAudio, hasText)
+  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
   const shortfallText = usePlanShortfallText(shortfall)
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
   const leftToDo = nearly ? (shortfallText ?? t("org.projectOverview.plan.nothingLeft")) : null
+  // AQU-1494 (Sam, 2026-10-03): a unit somebody marked done can have work in
+  // it again — a setting that counts headings, a line added, an edit that
+  // un-validated a cell. It stays in Done, because the mark is a person's
+  // decision and the board never takes it back on its own; but it no longer
+  // hides what came back. Same counts and words as every other row.
+  const doneWithWork = unit.doneAt != null && shortfallText !== null
+    ? t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })
+    : null
 
   const label = planUnitLabel(unit)
   const nameCellRef = useRef<HTMLSpanElement>(null)
@@ -283,6 +306,15 @@ export const PlanRow = memo(function PlanRow({
     whereText = rest > 0
       ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
       : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
+  }
+  // AQU-1493: front matter is not a chapter, so it is named in its own words,
+  // first because it comes first in the book. Without this a row whose open
+  // cells sat partly in a book's title or above its first verse named only
+  // chapters, and a row short only there named nothing.
+  if (leftToDo !== null && shortfallText !== null && frontMatterShort) {
+    whereText = whereText
+      ? t("org.projectOverview.plan.shortfallWhereWithFrontMatter", { chapters: whereText })
+      : t("org.projectOverview.plan.frontMatter")
   }
 
   /** Two fragments under the separator a translator chose, or whichever exists. */
@@ -400,6 +432,18 @@ export const PlanRow = memo(function PlanRow({
    * " · " here would be untranslated copy in a .tsx.
    */
   const line2Node: ReactNode = (() => {
+    // Amber, the board's "needs attention" colour, in place of "marked <date>":
+    // the date is in the side panel, and this is the line that changed.
+    if (doneWithWork !== null) {
+      return (
+        <span
+          className={`font-medium ${PLAN_TONE.soon.text}`}
+          data-testid={`plan-done-with-work-${unit.fileId}-${unit.sectionKey}`}
+        >
+          {doneWithWork}
+        </span>
+      )
+    }
     if (line2Shortfall === null) return line2Text ?? "—"
     const node = shortfallNode(line2Shortfall)
     if (line2Text === null) return node
@@ -489,14 +533,19 @@ export const PlanRow = memo(function PlanRow({
         </span>
 
         <span className="flex flex-col gap-1.5">
-          <PlanBar
-            label={t("org.projectOverview.plan.textBarLabel")}
-            outer={translated}
-            inner={validated}
-            tone="text"
-            aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
-            tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
-          />
+          {/* AQU-955: an audio-only file has no text bar. Pinned at 0% it was
+              not a neutral extra — it was the only bar a PM could see on the
+              row, and it said the book had not been started. */}
+          {hasText && (
+            <PlanBar
+              label={t("org.projectOverview.plan.textBarLabel")}
+              outer={translated}
+              inner={validated}
+              tone="text"
+              aria={t("org.projectOverview.plan.textBarsAria", { translated, validated })}
+              tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
+            />
+          )}
           {showAudio && (
             <PlanBar
               label={t("org.projectOverview.plan.audioBarLabel")}

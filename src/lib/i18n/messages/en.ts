@@ -42,8 +42,11 @@ import { billing } from "../namespaces/billing"
 import { knowledgeBase } from "../namespaces/knowledgeBase"
 import { settings } from "../namespaces/settings"
 import { agent } from "../namespaces/agent"
+import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
+import { smartEdits } from "../namespaces/smartEdits"
+import { harmonizer } from "../namespaces/harmonizer"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -70,8 +73,11 @@ export const en = {
   ...knowledgeBase.keys,
   ...settings.keys,
   ...agent.keys,
+  ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
+  ...smartEdits.keys,
+  ...harmonizer.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -46,6 +46,7 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PROJECTS_PANEL_MAX_H =
@@ -79,8 +80,10 @@ function OverviewLoadingTemplate() {
         main={
           <Page size="wide">
             <Skeleton className="mb-8 h-7 w-48" />
+            {/* AQU-1071: seven tiles, matching the loaded strip (the Languages tile
+              * was the seventh) so the layout does not jump on resolve. */}
             <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 6 }).map((_, index) => (
+              {Array.from({ length: 7 }).map((_, index) => (
                 <div
                   key={index}
                   className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
@@ -282,17 +285,25 @@ export function OrgOverview() {
 
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("nav.projects")} value={portfolio.projects.length} />
+                {/* AQU-1071: the org's active target-language count — the figure the
+                  * enterprise billing band is read off. Server-counted on the same rule
+                  * billing bills on, so this tile and the invoice agree. */}
+                <StatTile
+                  label={t("org.orgHome.activeLanguages")}
+                  hint={t("org.orgHome.activeLanguagesHint")}
+                  value={portfolio.activeLanguageCount}
+                />
                 <StatTile
                   label={t("org.orgHome.avgTranslated")}
-                  value={`${Math.round(portfolio.avgTranslatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgTranslatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgValidated")}
-                  value={`${Math.round(portfolio.avgValidatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgValidatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgAudio")}
-                  value={`${Math.round(portfolio.avgAudioPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgAudioPct)}%`}
                 />
                 <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
                 <StatTile

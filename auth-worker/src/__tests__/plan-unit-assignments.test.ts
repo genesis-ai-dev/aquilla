@@ -9,11 +9,35 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { getUnitAssignments } from "../services/assignments"
+import { getUnitAssignments, resolveTargetLaneId } from "../services/assignments"
 import type { Env } from "../types"
+import { planKeysRefreshSql } from "../../../db/shared/plan-keys"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const testEnv = env as unknown as Env
+
+/**
+ * AQU-1609: the unit read is scoped by `lanes.id`, so a test naming a lane by
+ * its legacy tag resolves it the way the route does. The lane rows themselves
+ * are minted by the harness's lane-fill trigger when the fixture's cells are
+ * inserted, so this must run after `seedUnit`.
+ */
+async function laneIdFor(tag: string): Promise<string> {
+  const id = await resolveTargetLaneId(testEnv, "pa", tag)
+  // A miss would silently read as "no cells in that lane" and turn every
+  // progress assertion below into a zero that looks like a product bug.
+  if (id === "") throw new Error(`no target lane for tag '${tag}' in project pa`)
+  return id
+}
+
+/**
+ * AQU-1493: store where each line with no reference counts, as the full
+ * progress recompute does for every projected file (`cell_plan_keys`). The
+ * readers under test join those rows rather than walking the chain.
+ */
+async function storePlanKeys(fileId: string): Promise<void> {
+  await testEnv.AQUILLA_PG.prepare(planKeysRefreshSql()).bind("pa", fileId, "pa", fileId).run()
+}
 
 // Org 1: wendi (owner 700), anna + bob (contributors 400), outsider (nobody).
 // Project 'pa', one file 'f1' holding two books.
@@ -30,9 +54,12 @@ const testEnv = env as unknown as Env
 // Spanish-lane ('es') targets: g1 AND g2 translated and endorsed — the lane
 // that used to double-count.
 //
-// Audio (lane-independent by construction — cell_audio has no target_lang):
-//   g1: TWO live takes, one of them selected + approved  → recorded, validated
-//   g2: one live selected take, not approved             → recorded only
+// Audio (AQU-1591: takes belong to a LANE. These carry no lane_id, which reads
+// as the default lane — the rule the batch backfill applies to a take that
+// predates the column — so they are the DEFAULT lane's takes and the Spanish
+// lane has none):
+//   g1: TWO live takes, the selected one with a vote     → recorded, validated
+//   g2: one live selected take, no votes                 → recorded only
 //   g3: one DELETED take                                 → neither
 async function seedUnit(): Promise<void> {
   await seedUser(1, "wendi")
@@ -77,7 +104,7 @@ async function seedUnit(): Promise<void> {
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, approved, deleted, event_id, created_ts) VALUES
+    `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, validator_count, deleted, event_id, created_ts) VALUES
       ('pa','f1','g1','take-1','main','r2://1',1,1,0,'e-pa',1),
       ('pa','f1','g1','take-2','main','r2://2',0,0,0,'e-pa',2),
       ('pa','f1','g2','take-3','main','r2://3',1,0,0,'e-pa',3),
@@ -103,7 +130,7 @@ async function seedUnit(): Promise<void> {
 describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
   it("scopes a book unit to that book's assignments only", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     // as-bob's cells are all EXO, so it is not work on this unit at all.
     expect(rows.map((r) => r.assignmentId)).toEqual(["as-anna"])
     expect(rows[0]).toMatchObject({
@@ -117,7 +144,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("takes the whole file for a file-grain unit ('')", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     // A file-grain unit IS the file, so both books' assignments belong to it.
     // Newest first, as with every other assignment read.
     expect(rows.map((r) => r.assignmentId)).toEqual(["as-bob", "as-anna"])
@@ -125,7 +152,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("excludes unassigned and completed assignments", async () => {
     await seedUnit()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     const ids = rows.map((r) => r.assignmentId)
     // as-anna-old was unassigned, as-cara-done was marked complete. Both still
     // have assignment_cells rows covering this unit; neither is live work.
@@ -135,7 +162,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 
   it("limits all four counts to that assignment's own cells inside the unit", async () => {
     await seedUnit()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna).toMatchObject({
       // g1 g2 g3 — anna's three, not the file's five.
       cellsTotal: 3,
@@ -147,7 +174,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       // cell — cell_audio keys on four columns where cells keys on five, so a
       // take-level join would fan every count out by the number of takes.
       recorded: 2,
-      // Only g1's SELECTED take is approved; g2's selected take is not, and
+      // Only g1's SELECTED take has a vote; g2's selected take has none, and
       // g3's only take is deleted.
       audioValidated: 1,
     })
@@ -162,17 +189,52 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     // target_lang predicate on the target join, the default lane would see g1
     // twice and count g2 as validated — 3 validated out of 3 cells, a unit
     // reading finished while two thirds of its default-lane work is untouched.
-    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(defaultLane).toMatchObject({ cellsTotal: 3, translated: 2, validated: 1 })
 
     // The Spanish lane is its own answer over the same cells: both g1 and g2
     // are translated and endorsed there.
-    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "es")
+    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(spanish).toMatchObject({ cellsTotal: 3, translated: 2, validated: 2 })
 
-    // Audio has no lane to pick, so it reads the same from either.
-    expect(spanish.recorded).toBe(defaultLane.recorded)
-    expect(spanish.audioValidated).toBe(defaultLane.audioValidated)
+    // AQU-1591: and audio picks a lane now. These takes belong to the default
+    // lane, so Spanish — where nobody has recorded anything — reads zero.
+    // Before, the two lanes read the same number and the Spanish tab claimed
+    // two recorded lines that had never been voiced in Spanish.
+    expect(defaultLane).toMatchObject({ recorded: 2, audioValidated: 1 })
+    expect(spanish).toMatchObject({ recorded: 0, audioValidated: 0 })
+  })
+
+  // AQU-1591, the other direction: a take that DOES name the Spanish lane is
+  // counted there and nowhere else. Without both halves the join could be
+  // passing by filtering everything out.
+  it("counts a take recorded in a lane on that lane's row", async () => {
+    await seedUnit()
+    // The Spanish lane already exists — seeding the 'es' target cells minted it.
+    const esLane = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM lanes WHERE project_id = 'pa' AND role = 'target' AND legacy_tag = 'es'`,
+    ).first<{ id: string }>()
+    expect(esLane?.id).toBeTruthy()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, validator_count, deleted, event_id, created_ts, lane_id)
+       VALUES ('pa','f1','g2','take-es','main','r2://es',1,1,0,'e-pa',5,?)`,
+    ).bind(esLane!.id).run()
+    const [spanish] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
+    expect(spanish).toMatchObject({ recorded: 1, audioValidated: 1 })
+    // ...and the default lane's own numbers do not move.
+    const [defaultLane] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(defaultLane).toMatchObject({ recorded: 2, audioValidated: 1 })
+  })
+
+  // AQU-1591 meeting AQU-1609: the audio CTE names a take's lane by tag and the
+  // caller names the unit's lane by id, so the join turns one into the other.
+  // An id that names no lane — the '' an unresolvable `?lane=` tag becomes —
+  // must turn into NO tag, not the default lane's '': the default lane here
+  // holds two recorded lines, and borrowing them is the failure.
+  it("reads no audio for a lane id that names no lane", async () => {
+    await seedUnit()
+    const [none] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(none).toMatchObject({ cellsTotal: 3, translated: 0, recorded: 0, audioValidated: 0 })
   })
 
   it("honours the project's CURRENT validation threshold, not the stamped flag", async () => {
@@ -184,7 +246,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{\"validationCount\":2}')",
     ).run()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.validated).toBe(0)
     expect(anna.translated).toBe(2)
   })
@@ -206,7 +268,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     ).run()
 
     // Unset: headings count, exactly as they did before the setting existed.
-    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(counting[0].cellsTotal).toBe(4)
 
     // The project opts out; its own answer wins over the org's.
@@ -214,7 +276,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')
        ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(excluding[0].cellsTotal).toBe(3)
   })
 
@@ -231,7 +293,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
       `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')
        ON CONFLICT (org_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(rows[0].cellsTotal).toBe(3)
   })
 
@@ -242,7 +304,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
     await env.AQUILLA_PG.prepare(
       "DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id IN ('g1','g2','g3')",
     ).run()
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(rows).toHaveLength(0)
   })
 })
@@ -253,7 +315,7 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
 describe("per-chapter coverage on a unit's assignments", () => {
   it("names the chapters each assignment covers, in canonical order", async () => {
     await seedUnit()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
     expect(anna.chapters).toEqual([
       // g1 and g2: both translated, g1 endorsed, both recorded, g1 signed off.
@@ -268,7 +330,7 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // The fold's own invariant. A GROUP BY that gained a column without the
     // sum-back would leave the panel's headline numbers reading one chapter's
     // worth of work instead of the assignment's.
-    for (const a of await getUnitAssignments(testEnv, "pa", "f1", "", "")) {
+    for (const a of await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))) {
       const sum = (pick: (c: (typeof a.chapters)[number]) => number) =>
         a.chapters.reduce((n, c) => n + pick(c), 0)
       expect(a.cellsTotal).toBe(sum((c) => c.total))
@@ -291,7 +353,7 @@ describe("per-chapter coverage on a unit's assignments", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','g10')",
     ).run()
-    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 10"])
   })
 
@@ -300,12 +362,15 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // Same cells, two answers. g1 and g2 are both endorsed in Spanish; only g1
     // is in the default lane. A chapter row that lost its lane predicate would
     // report GEN 1 fully validated on the tab where it is half done.
-    const [def] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
-    const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "es")
+    const [def] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor("es"))
     expect(def.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 1 })
     expect(es.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 2 })
-    // Audio has no lane to pick, so it reads the same from either tab.
-    expect(def.chapters[0].recorded).toBe(es.chapters[0].recorded)
+    // AQU-1591: and audio picks a lane too. The takes are the default lane's,
+    // so the Spanish tab's chapter row reports nothing recorded, which is the
+    // truth about Spanish.
+    expect(def.chapters[0].recorded).toBe(2)
+    expect(es.chapters[0].recorded).toBe(0)
   })
 
   it("drops a chapter the headings policy empties and keeps one that is merely untyped", async () => {
@@ -325,14 +390,14 @@ describe("per-chapter coverage on a unit's assignments", () => {
         ('as-anna','f1','g3h'), ('as-anna','f1','g4u')`,
     ).run()
 
-    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(counting[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 3", "GEN 4"])
 
     await env.AQUILLA_PG.prepare(
       `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')
        ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
     ).run()
-    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
     expect(excluding[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 4"])
     expect(excluding[0].cellsTotal).toBe(4)
   })
@@ -342,10 +407,80 @@ describe("per-chapter coverage on a unit's assignments", () => {
     // A file-grain unit holds both books. The GROUP BY carries the assignment,
     // so bob's Exodus chapters must not land in anna's list or the panel would
     // credit her with work she does not hold.
-    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", await laneIdFor(""))
     const byId = new Map(rows.map((r) => [r.assignmentId, r]))
     expect(byId.get("as-anna")!.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
     expect(byId.get("as-bob")!.chapters.map((c) => c.key)).toEqual(["EXO 1"])
+  })
+})
+
+describe("lines added with no reference (AQU-1493)", () => {
+  // The projection counts a line with no canonical_ref in the chapter (and so
+  // the book) of the line above it — the anchor chain, the editor's order. A
+  // person assigned that line has to have it counted here too, under the same
+  // bar.
+  async function seedAddedLines(): Promise<void> {
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', 'genesis.usfm', 'e-pa')",
+    ).run()
+    // f2: GEN 1:1, then a line added below it. f1 (GEN + EXO): a line added
+    // below EXO 1:1.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id) VALUES
+        ('pa','f2','h1','source','s','e-pa',1,'GEN 1:1',NULL),
+        ('pa','f2','h2','source','s','e-pa',1,NULL,'h1'),
+        ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
+        ('as-gen-only', 'pa', 2, 'cells', 'Genesis', '', 2, NULL, 1, 2000, NULL, NULL),
+        ('as-added-exo', 'pa', 3, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-gen-only','f2','h1'), ('as-gen-only','f2','h2'),
+        ('as-added-exo','f1','n1')`,
+    ).run()
+    await storePlanKeys("f1")
+    await storePlanKeys("f2")
+  }
+
+  it("counts the added line toward the book of the line above it", async () => {
+    await seedAddedLines()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", await laneIdFor(""))
+    expect(anna.assignmentId).toBe("as-gen-only")
+    expect(anna.cellsTotal).toBe(2)
+    // …and in that line's chapter, so the panel can name it.
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2]])
+  })
+
+  it("counts a chapter's opening heading in that chapter, not the one above", async () => {
+    // A heading with no reference counts with the verse BELOW it — the one it
+    // introduces — so anna's GEN 2 holds "The Seventh Day" and 2:1.
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id, type) VALUES
+        ('pa','f1','hg2','source','s','e-pa',1,NULL,'g2','heading')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE cells SET anchor_cell_id = 'hg2' WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'g3' AND side = 'source'",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','hg2')",
+    ).run()
+    await storePlanKeys("f1")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(anna.assignmentId).toBe("as-anna")
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2], ["GEN 2", 2]])
+  })
+
+  it("follows the line above in a file of several books", async () => {
+    await seedAddedLines()
+    const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", await laneIdFor(""))
+    expect(exo.map((r) => r.assignmentId)).toContain("as-added-exo")
+    const gen = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(gen.map((r) => r.assignmentId)).not.toContain("as-added-exo")
   })
 })
 

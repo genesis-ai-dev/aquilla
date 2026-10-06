@@ -6,13 +6,15 @@
  * row with `status: "ready"` — until this module runs, `sync-manager.ts`
  * (Phase 3) has nothing to react to and stays inert.
  *
- * Field mapping for `cells`/`files` mirrors `sync-adapter.ts`'s `applyRows` —
- * this is the same server data, just fetched by a one-shot HTTP crawl instead
- * of a WS `event.applied` frame.
+ * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping as
+ * live frames (`sync-adapter.ts`) and later catch-ups (every lane the caller
+ * can see, keyed per lane since AQU-1614), and it records each file's first
+ * `?since=` cursor.
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { Store } from "@livestore/livestore"
 import { events, tables, type schema } from "./schema"
+import { fullSyncFile } from "./catch-up"
 import {
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
@@ -99,12 +101,21 @@ const defaultDeps: DownloadProjectDeps = {
  *  than leave a partial copy masquerading as complete. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
   for (const row of store.query(tables.cells.select().where({ projectId }))) {
-    store.commit(events.cellRemoved({ projectId, fileId: row.fileId, cellId: row.cellId, side: row.side }))
+    store.commit(
+      events.cellRemoved({
+        projectId,
+        fileId: row.fileId,
+        cellId: row.cellId,
+        side: row.side,
+        laneKey: row.laneKey,
+      }),
+    )
   }
   for (const row of store.query(tables.files.select().where({ projectId }))) {
     store.commit(events.fileRemoved({ id: row.id }))
   }
   store.commit(events.projectRemoved({ id: projectId }))
+  store.commit(events.syncCursorsRemoved({ projectId }))
   store.commit(events.offlineProjectRemoved({ projectId }))
 }
 
@@ -170,33 +181,12 @@ export async function downloadProjectOffline(
           sequenceIndex: index,
         }),
       )
-      await deps.streamFileCells(
-        projectId,
-        file.fileId,
-        syncToken,
-        (rows) => {
-          for (const row of rows) {
-            store.commit(
-              events.cellSynced({
-                projectId,
-                fileId: file.fileId,
-                cellId: row.cellId,
-                side: row.side,
-                value: row.value,
-                valueHtml: row.valueHtml,
-                eventId: row.eventId,
-                sourceEventId: row.sourceEventId,
-                validated: row.validated,
-                aiDrafted: row.aiDrafted ?? false,
-                sequenceIndex: row.sequenceIndex ?? 0,
-                canonicalRef: row.canonicalRef,
-              }),
-            )
-          }
-          cellsDone += rows.length
-          setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
-        },
-      )
+      // Same path the catch-up uses, so the first download also mints the
+      // file's `?since=` cursor and later catch-ups can pull deltas.
+      await fullSyncFile(store, projectId, file.fileId, syncToken, deps, (count) => {
+        cellsDone += count
+        setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
+      })
       filesDone = index + 1
       setProgress(projectId, { projectId, filesTotal: files.length, filesDone, cellsDone })
     }
@@ -210,6 +200,26 @@ export async function downloadProjectOffline(
   } finally {
     setProgress(projectId, null)
   }
+}
+
+/**
+ * Rolls back downloads (and removals) that a previous session left half-done:
+ * a reload or quit mid-download leaves the row at `downloading` forever, and
+ * nothing ever clears it — downloadProjectOffline no-ops on it, the sync
+ * manager only runs `ready` projects, and the project menu shows only a
+ * disabled "Downloading…". Call once per store boot, before any download can
+ * start; no download of this session is in flight yet, so any such row is
+ * stale. Safe for `downloading`: offline write routing only applies to
+ * `ready` projects, so there is no queued work to lose. Returns the project
+ * ids it rolled back.
+ */
+export function recoverInterruptedDownloads(store: Store<typeof schema>): string[] {
+  const stuck = store
+    .query(tables.offlineProjects.select())
+    .filter((row) => row.status === "downloading" || row.status === "removing")
+    .map((row) => row.projectId)
+  for (const projectId of stuck) deleteProjectRows(store, projectId)
+  return stuck
 }
 
 /** Count of locally queued writes (any status — `pending`, `flushing`, or

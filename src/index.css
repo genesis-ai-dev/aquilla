@@ -298,10 +298,40 @@
        scroll). Inner panes keep using overscroll-contain for their own
        scroll chaining. */
     overscroll-behavior: none;
+    /* THE DOCUMENT NEVER SCROLLS. AppShell is a fixed-height frame
+       (`h-screen overflow-hidden`) and every pane inside it scrolls on its
+       own, so a scrolled document can only ever slide the whole application
+       off the top of the window and leave blank space behind — which is
+       exactly what it did. Nothing becomes unreachable by forbidding it:
+       content past the frame's edge was already clipped, so scrolling the
+       document revealed emptiness rather than more of the page.
+
+       It was reachable because a wheel over an inner pane with nothing left
+       to scroll chains outward, and the document was taller than the window
+       on three of the five routes measured (the plan board reported 2142px
+       against a 900px viewport) even though every ancestor clips. Found via
+       the plan inspector, whose panel is often short enough that the wheel
+       had somewhere else to go (2026-09-22).
+
+       This refuses the USER gesture, which is the bug. A script can still
+       move the viewport — `overflow` on the root propagates to the viewport,
+       where `hidden` permits programmatic scrolling and `clip` is not
+       propagated at all, so neither keyword closes that door. Worth knowing
+       if a future `scrollIntoView` ever strands the frame.
+
+       SCOPED to `html[data-app-frame]`, which AppShell sets while mounted.
+       The blanket version of this rule broke every page rendered OUTSIDE the
+       frame: /privacy-policy is a 3,400px document in the body, and two
+       thirds of it — its analytics opt-out included — became unreachable. */
   }
   html {
     @apply font-sans;
     overscroll-behavior: none;
+  }
+  /* The frame's no-scroll rule, only while the frame is on screen. */
+  html[data-app-frame],
+  html[data-app-frame] body {
+    overflow: hidden;
   }
   html.dark {
     color-scheme: dark;
@@ -353,6 +383,22 @@ textarea,
 .violation-blot-waived {
   text-decoration-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
   opacity: 0.6;
+}
+
+/* Smart edits: a straight, quieter underline than a rule violation's wavy
+   one — a suggestion from the team's own edits, not a broken rule. */
+.smart-edit-blot {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
+  cursor: pointer;
+}
+.smart-edit-blot-jev { text-decoration-style: dotted; }
+.smart-edit-blot-llm {
+  text-decoration-style: dashed;
+  text-decoration-color: color-mix(in oklch, var(--color-sky-500, oklch(0.685 0.169 237.323)) 75%, transparent);
 }
 
 /* Managed terminology uses one quiet, marker-like treatment. Target terms add
@@ -498,7 +544,11 @@ textarea,
   transition: background-color 80ms linear;
 }
 
-.codex-search-flash {
+/* AQU-1493: an attribute, not a class. The row's className is React's, and
+   React rewrites it whole whenever it changes, which wiped a class added from
+   outside. React leaves alone an attribute it does not render. See
+   src/lib/editor/row-flash.ts. */
+[data-row-flash] {
   animation: codex-search-flash 1.8s ease-out;
   border-radius: 4px;
 }
@@ -531,3 +581,20 @@ textarea,
    — never persisted, never editable. Bold and italic only. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+
+/* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
+   each other, since a validated line shows the same green check for text and
+   audio. Pointing at the audio check outlines the waveform it is about;
+   pointing at the waveform frames its check — in a rounded square, the
+   waveform's own 6px corners, not a circle (Sam, same day). Hooks: `.audio-check` on the
+   validation column (AudioValidationControl), `.voice-card-wave` on the card's
+   waveform (CellVoicePanel). */
+[data-grid-row]:has(.audio-check:hover) .voice-card-wave {
+  outline: 2px solid var(--tl-track-hue);
+  outline-offset: 2px;
+}
+[data-grid-row]:has(.voice-card-wave:hover) .audio-check > * {
+  outline: 2px solid color-mix(in oklab, var(--foreground) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

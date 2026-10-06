@@ -1775,6 +1775,66 @@ describe("TimelineEditor — rows come from the track model", () => {
 
   const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
 
+  it("renders each caption track's own cells and seeks using their timings", () => {
+    const seek = vi.fn()
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      captions: { kind: "source-subtitles", name: "New captions", contentFileId: "cue-file" },
+      other: { kind: "source-subtitles", name: "Other captions", contentFileId: "other-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      tracks={tracks} onRetimeSubtitle={() => {}} onSeekToTime={seek}
+      textTrackCells={{
+        "cue-file": [cell({ id: "new-cue", original: "Attached wording", startTime: 2, endTime: 5 })],
+        "other-file": [cell({ id: "other-cue", original: "Other wording", startTime: 6, endTime: 8 })],
+      }} />)
+    expect(screen.getByTestId("tl-card-new-cue")).toHaveTextContent("Attached wording")
+    expect(screen.getByTestId("tl-card-other-cue")).toHaveTextContent("Other wording")
+    fireEvent.click(screen.getByTestId("tl-card-new-cue"))
+    expect(seek).toHaveBeenLastCalledWith(2)
+  })
+
+  it("opens caption attachment from Sources", () => {
+    const attach = vi.fn()
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}} onRequestImportCaptions={attach} />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Attach captions" }))
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("opens script alignment from Sources with track-editing permission", () => {
+    const align = vi.fn()
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}} onRequestAlignScript={align} canAlignScript />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Align script" }))
+    expect(align).toHaveBeenCalledOnce()
+  })
+
+  it("never fills a loading caption track with the parent file's wording", () => {
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      "source-subtitles": { contentFileId: "cue-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable
+      cells={[cell({ id: "old-cue", original: "Old wording", startTime: 0, endTime: 5 })]}
+      tracks={tracks} onRetimeSubtitle={() => {}} textTrackCells={{}} />)
+    expect(screen.queryByTestId("tl-card-old-cue")).not.toBeInTheDocument()
+  })
+
+  it("shows a failed caption read and retries the exact content file", () => {
+    const retry = vi.fn()
+    const tracks = deriveTracksForFile({ trackOverrides: {
+      captions: { kind: "source-subtitles", name: "Captions", contentFileId: "cue-file" },
+    } })
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      tracks={tracks} onRetimeSubtitle={() => {}} textTrackCells={{}}
+      textTrackErrors={{ "cue-file": new Error("Captions could not load") }}
+      onRetryTextTrack={retry} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Captions could not load")
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Retry" }))
+    expect(retry).toHaveBeenCalledWith("cue-file")
+  })
+
   // The gutter carries no testid of its own, and must not grow one: this
   // refactor's whole contract is that it renders exactly the DOM the hardcoded
   // rows did. It is the grid column before the scrolling track.
@@ -2117,7 +2177,6 @@ describe("TimelineEditor — rows come from the track model", () => {
 
   const editingActions = () => ({
     onAdd: vi.fn((_spec: { kind: string; name: string }) => "new-track-id"),
-    onSetColor: vi.fn(),
     onLeaveFolder: vi.fn(),
     onMoveToScope: vi.fn(),
     onCreateFolderFrom: vi.fn((_ids: readonly string[]) => "new-folder-id"),
@@ -2159,7 +2218,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
       .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
     expect(screen.getByText("Rename")).toBeTruthy()
-    expect(screen.queryByText("Colour")).toBeNull()
+    expect(screen.queryByText("Color")).toBeNull()
     expect(screen.queryByText("New folder from this track")).toBeNull()
     unmount()
 
@@ -2434,50 +2493,76 @@ describe("TimelineEditor — rows come from the track model", () => {
   // The picker dialog that briefly stood between the menu and the colour went
   // with the custom colours that needed it.
   it("recolours every selected track in one call, one value each", () => {
-    const editing = editingActions()
-    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const onSetTrackColor = vi.fn()
+    render(selectable({ trackEditing: editingActions(), onSetTrackColor, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
-    fireEvent.click(screen.getByText("Colour 2 tracks"))
-    fireEvent.click(screen.getByText("Magenta"))
+    fireEvent.click(screen.getByText("Color 2 tracks"))
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Magenta" }))
 
-    expect(editing.onSetColor).toHaveBeenCalledTimes(1)
+    expect(onSetTrackColor).toHaveBeenCalledTimes(1)
     // ONE CALL, ONE VALUE PER TRACK — the payload's shape never depended on
     // where the colour came from. The value is the preset's ID, not its hex:
     // what an id LOOKS like is this build's business, not the project's.
-    const [updates] = editing.onSetColor.mock.calls[0] as [{ trackId: string; color: string }[]]
+    const [updates] = onSetTrackColor.mock.calls[0] as [{ trackId: string; color: string }[]]
     expect([...updates].sort((a, b) => a.trackId.localeCompare(b.trackId))).toEqual([
       { trackId: "target-audio", color: "magenta" },
       { trackId: "trk-es", color: "magenta" },
     ])
   })
 
+  // Sam, 2026-09-26: colour rides the maintainer clearance ALONE, like rename —
+  // the Audio view offers it on projects that never turn track editing on, so
+  // the timeline must not hide it behind the setting either.
+  it("offers a colour with track editing OFF, and nothing that restructures", () => {
+    const onSetTrackColor = vi.fn()
+    render(selectable({ onSetTrackColor, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    fireEvent.click(screen.getByText("Color"))
+    // Swatches only, three across (Sam, 2026-09-28): no names on screen, each
+    // swatch named for screen readers.
+    expect(screen.getByTestId("track-color-swatches").className).toContain("grid-cols-3")
+    expect(screen.queryByText("Cyan")).toBeNull()
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Cyan" }))
+    expect(onSetTrackColor).toHaveBeenCalledWith([{ trackId: "target-audio", color: "cyan" }])
+    fireEvent.contextMenu(named("Spanish"))
+    expect(screen.queryByText(/^Delete/)).toBeNull()
+    expect(screen.queryByText(/folder/i)).toBeNull()
+  })
+
+  it("offers no colour without the clearance", () => {
+    render(selectable({ onRenameTrack: undefined, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    expect(screen.queryByText(/^Color/)).toBeNull()
+  })
+
   // Stage 3c, Sam's revision: ALL of them or none. Colouring "the two of these
   // five that can take one" is a partial success the menu cannot describe.
   it("offers a colour only when EVERY selected track can take one", () => {
-    const editing = editingActions()
-    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    render(selectable({ trackEditing: editingActions(), onSetTrackColor: vi.fn(), tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
     // Two colourable rows on their own: offered.
     fireEvent.click(named("Target audio"))
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
-    expect(screen.getByText("Colour 2 tracks")).toBeInTheDocument()
+    expect(screen.getByText("Color 2 tracks")).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: "Escape" })
 
     // Add the Source text row, which is not colourable — grey is deliberate
     // (Sam) — and the whole item goes rather than silently acting on two.
     fireEvent.click(named("Source text"), { metaKey: true })
     fireEvent.contextMenu(named("Source text"))
-    expect(screen.queryByText(/^Colour/)).toBeNull()
+    expect(screen.queryByText(/^Color/)).toBeNull()
   })
 
   it("offers no colour on a single row that cannot take one", () => {
     render(selectable({ trackEditing: editingActions() }))
     fireEvent.contextMenu(rows()[0])
-    expect(screen.queryByText("Colour")).toBeNull()
+    expect(screen.queryByText("Color")).toBeNull()
   })
 
   // Stage 3c (Sam, 2026-08-24): the verb used to eject the track from the
@@ -3616,7 +3701,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
         })}
         onRetimeSubtitle={() => {}}
         onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
-          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onAdd: vi.fn(), onLeaveFolder: vi.fn(),
           onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
         }}
       />,
@@ -3642,7 +3727,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
         })}
         onRetimeSubtitle={() => {}}
         onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
-          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onAdd: vi.fn(), onLeaveFolder: vi.fn(),
           onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
         }}
       />,
@@ -3780,7 +3865,7 @@ describe("TimelineEditor — the lifted row follows the drop it is aiming at", (
         tracks={folded()}
         onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
         trackEditing={{
-          onAdd: () => "x", onSetColor: () => {}, onLeaveFolder: () => {},
+          onAdd: () => "x", onLeaveFolder: () => {},
           onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {},
         }}
       />,
@@ -4259,5 +4344,76 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(onSeekToTime.mock.calls.length).toBeGreaterThan(0)
     expect(onSeekToTime.mock.calls.length).toBeLessThan(10)
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 240 })
+  })
+})
+
+// ── AQU-1632: the gutter is a scrollport the browser can move on its own ────
+//
+// The header column clips with `overflow-hidden`, which still makes it a
+// scrollport — so tabbing onto a track's ⋯ button below the fold made the
+// browser scroll the HEADERS and nothing else, and the names stopped lining up
+// with their lanes for the rest of the session. The fix refuses to hold an
+// offset of its own: whatever the browser does here is handed to the track
+// column, which is the one thing that owns the vertical position.
+//
+// happy-dom supplies no layout, so it never scrolls anything to reveal a
+// focused element. The test therefore does what the browser would have done —
+// set the gutter's scrollTop and fire the scroll — and asserts on where that
+// offset ends up, which is the whole of the fix.
+describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in step", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  it("hands the browser's gutter scroll to the track column and re-zeroes itself", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+    // `role="list"` is on the inner div that carries the offset — the one
+    // `handleTrackScroll` transforms.
+    const inner = gutter.querySelector('[role="list"]') as HTMLElement
+
+    // Baseline: the track column owns y, and the headers follow it.
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-60px)")
+
+    // Now the browser reveals a focused ⋯ button by scrolling the GUTTER.
+    gutter.scrollTop = 45
+    fireEvent.scroll(gutter)
+
+    // The gutter holds no offset of its own…
+    expect(gutter.scrollTop).toBe(0)
+    // …the track column absorbed it…
+    expect(scroll.scrollTop).toBe(105)
+    // …and once that scroll lands, the headers are back beside their lanes.
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-105px)")
+  })
+
+  it("leaves everything alone when the gutter is already at the origin", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus2" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+
+    scroll.scrollTop = 30
+    fireEvent.scroll(scroll)
+    // A scroll event on a gutter sitting at 0 — the echo of our own re-zeroing
+    // — must not nudge the track column a second time.
+    fireEvent.scroll(gutter)
+    expect(scroll.scrollTop).toBe(30)
   })
 })

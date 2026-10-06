@@ -24,6 +24,32 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── CommentNotificationsSection (preferences → notifications) ── AQU-1193
+    "settings.notifications.groupLabel": "Comment email",
+    "settings.notifications.commentEmailLabel": "Email me about comments",
+    "settings.notifications.commentEmailDescription":
+      "How much comment email Aquilla sends you. Replies on one thread always " +
+      "arrive as a single email conversation, however you set this.",
+    "settings.notifications.option.all": "Every mention and reply",
+    "settings.notifications.option.mentions": "Only when someone @-mentions me",
+    "settings.notifications.option.off": "Never",
+    "settings.notifications.loadFailed": "Could not load your notification setting",
+    "settings.notifications.saveFailed": "Could not save that setting",
+    "settings.notifications.section.title": "Notifications",
+    "settings.notifications.section.description":
+      "Choose when Aquilla emails you about comments.",
+    "settings.transcription.title": "Transcription",
+    "settings.transcription.scope":
+      "This choice applies to your account in this browser.",
+    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hostedDescription":
+      "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
+    "settings.transcription.local": "Local Whisper in this browser",
+    "settings.transcription.localDescription":
+      "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
+    "settings.transcription.capacityExceeded":
+      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
     "settings.structuralCells.description":
@@ -50,6 +76,17 @@ export const settings = defineNamespace({
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
 
+    // ── RepetitionPropagationSection (AQU-1391) ──
+    "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
+    "settings.autoPropagateRepetitions.description":
+      "When on, validating a cell copies its translation into every other cell " +
+      "in the same file whose source text is identical. The filled-in cells are " +
+      "left unvalidated so someone still checks them in context. Individual " +
+      "projects can override this.",
+    "settings.autoPropagateRepetitions.saveFailed": "Save failed",
+    "settings.autoPropagateRepetitions.blocked":
+      "Only org maintainers and owners can change this default.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
@@ -61,6 +98,14 @@ export const settings = defineNamespace({
       "for themselves from the assign-work picker — they still can't assign " +
       "work to anyone else. Leads and maintainers can always assign, to " +
       "anyone, regardless of this setting.",
+    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.description":
+      "When on, a member (contributor and above) who has been restricted to " +
+      "specific target languages can assign work to other people — but only " +
+      "within those languages. Give a mentor or coordinator the languages they " +
+      "look after under Members, and they can hand out chapters there without " +
+      "any other admin rights. Members with no language restriction are " +
+      "unaffected by this setting.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -217,8 +262,20 @@ export const settings = defineNamespace({
 
     // ── OrgSettingsIdentity ──
     "settings.orgIdentity.nameDescription": "Shown across the organization.",
+    "settings.orgIdentity.deleteOrganization": "Delete organization",
+    "settings.orgIdentity.deleteRowDescription":
+      "Permanently delete this organization and everything that belongs only to it. Projects must be removed first.",
+    "settings.orgIdentity.deleteConfirmBody":
+      "This permanently deletes {name}, including its members, invites, and connections. This cannot be undone.",
+    "settings.orgIdentity.deleteBlockedProjects":
+      "This organization still has projects. Remove them before deleting the organization.",
+    "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
+    // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
+    // "Delete '{name}'?" → org.teamDetail.deleteConfirmTitle (identical text)
+    // "Deleting…" → org.teamDetail.deletingButton (identical text)
+    // "Confirm" → common.confirm, "Cancel" → common.cancel
 
     // ── OrgSettingsIndex ──
     // Rendered via <RichMessage> so the embedded <Link to="/preferences"> stays
@@ -372,6 +429,72 @@ export const settings = defineNamespace({
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
         },
+      },
+      "settings.orgIdentity.deleteConfirmBody": {
+        description:
+          "Body of the confirm dialog that deletes an organization. Names the " +
+          "organization so the owner can see which workspace they are about to remove.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.notifications.groupLabel": {
+        description:
+          "Card heading over the single comment-email control on the "
+          + "Preferences → Notifications page.",
+        maxLength: 28,
+      },
+      "settings.notifications.commentEmailLabel": {
+        description:
+          "Label of the dropdown that chooses how much comment email the "
+          + "signed-in user receives.",
+        maxLength: 40,
+      },
+      "settings.notifications.commentEmailDescription": {
+        description:
+          "Help text under the comment-email dropdown. Explains what the "
+          + "setting covers and reassures the reader that thread grouping is "
+          + "not something they have to turn on.",
+      },
+      "settings.notifications.option.all": {
+        description:
+          "Dropdown option: send email for every @-mention AND every reply on "
+          + "a thread the user is part of. The noisiest of the three.",
+        maxLength: 36,
+      },
+      "settings.notifications.option.mentions": {
+        description:
+          "Dropdown option, and the default: send email only when someone "
+          + "@-mentions this user in a comment. '@-mentions' refers to typing "
+          + "@username in a comment — keep the @ symbol.",
+        maxLength: 36,
+      },
+      "settings.notifications.option.off": {
+        description:
+          "Dropdown option: send no comment email at all. One word if the "
+          + "language allows it.",
+        maxLength: 20,
+      },
+      "settings.notifications.loadFailed": {
+        description:
+          "Inline error shown in place of the dropdown when the current "
+          + "setting could not be read from the server.",
+      },
+      "settings.notifications.saveFailed": {
+        description:
+          "Inline error shown under the dropdown when saving the chosen "
+          + "setting failed; the dropdown reverts to its previous value.",
+      },
+      "settings.notifications.section.title": {
+        description:
+          "Nav row title and page heading for the Notifications section of "
+          + "personal Preferences.",
+        maxLength: 24,
+      },
+      "settings.notifications.section.description": {
+        description:
+          "One-line summary under the Notifications nav row on the "
+          + "Preferences index, telling the reader what the section holds.",
       },
       "settings.monday.dismissNoticeAriaLabel": {
         description:

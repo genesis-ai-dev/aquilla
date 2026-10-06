@@ -35,6 +35,13 @@
 // server-side in sync-worker (authorize.ts + assignment-authority.ts); this
 // route only stores/validates the setting.
 //
+// AQU-581: allowScopedLaneAssignment is the lane-delegate sibling of
+// allowSelfAssignment — whether a member below the assignment floor who
+// carries lane scopes (AQU-553) may create assignments for OTHER people
+// inside those lanes. Same boolean shape, same OWNER-only write gate, same
+// default of false. Enforced server-side in sync-worker (authorize.ts +
+// assignment-authority.ts); this route only stores/validates it.
+//
 // AQU-907: egressMinRole (who may use the org-wide Data egress surface —
 // the bulk zip of everything the org has) is another role-ladder
 // permission-policy key on the same OWNER-only write gate. Its effective
@@ -90,6 +97,13 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
   allowSelfAssignment: "allowSelfAssignment",
+  // AQU-581: whether a lane-scoped member below the assignment floor may
+  // assign work to OTHER people inside the lanes they are scoped to.
+  // Boolean-valued like allowSelfAssignment, and OWNER-only on write for the
+  // same reason — this is the org saying who may hand out chapters in a given
+  // target-language lane, and a maintainer must not be able to widen that on
+  // their own.
+  allowScopedLaneAssignment: "allowScopedLaneAssignment",
   // AQU-1037: who may assign file/chapter work or route an AI changeset.
   // Role-ladder valued; defaults to PROJECT_LEAD in each enforcement worker.
   assignmentMinRole: "assignmentMinRole",
@@ -114,7 +128,7 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
  * AQU-496: subset of PERMISSION_POLICY_KEYS validated as a boolean instead of
  * a role-ladder number. Still gated OWNER-only on write (same loop below).
  */
-const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
+const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssignment"])
 
 /**
  * AQU-1083: do chapter headings and section titles count toward progress?
@@ -129,6 +143,16 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
  * may override it; absent on both means count them.
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
+/**
+ * Whether bulk text validation may sign off untouched AI drafts. Like
+ * countStructuralCells it is not a permission policy — it widens what one
+ * validate gesture covers, not who may validate — so it rides the general
+ * MAINTAINER gate and needs only validation. Unset means NO. The rule it
+ * relaxes is client-side (the bulk paths' eligibility filter); the external
+ * Agent API keeps its own no-bypass check in sync-worker (AQU-1184).
+ */
+const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
 
 /**
  * AQU-1083: tell each project's realtime room that its effective settings
@@ -382,11 +406,29 @@ orgSettings.on(
       }
     }
 
+    // [Pen test 2026-10-06] Omission is a change too: the blob is replaced
+    // wholesale, so a Maintainer dropping a stored policy key would reset it to
+    // its default. Below owner, carry omitted keys over from the stored value.
+    if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const stored = existingForPolicyCheck.settings as Record<string, unknown>
+      for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+        if (body.settings[key] === undefined && stored[key] !== undefined) {
+          body.settings[key] = stored[key]
+        }
+      }
+    }
+
     // Validated but not gated: a mistyped value would read as "unset" and move
     // every percentage in the org with nothing on screen to explain it.
     const rawCountStructural = body.settings[COUNT_STRUCTURAL_KEY]
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
+    }
+    // Same reason: a string "true" would read as off and nobody would know why.
+    const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
+    if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
+      return c.json({ error: `${ALLOW_BULK_AI_DRAFTS_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

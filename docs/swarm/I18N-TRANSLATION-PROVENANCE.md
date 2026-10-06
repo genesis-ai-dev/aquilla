@@ -2,6 +2,35 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## All locales topped up from `pnpm i18n:todo` — 2026-10-03
+>
+> The 14,590 untranslated or stale leaves in `th`, `my`, `ms`, `id`, `ar`, `zh-Hans`,
+> `zh-Hant`, `ru` and `fr` were machine-translated by Claude Sonnet agents (65 chunks of up
+> to 250 leaves, each with the translator note from the context sidecar) and merged with
+> `scripts/i18n-catalog.ts import`. **No native speaker has read any of it.** Mechanical
+> checks: 0 missing leaves and 0 `{placeholder}`/tag drift after merge (Arabic and Russian
+> plural forms may drop `{count}`, e.g. the dual). About 670 leaves still show in
+> `i18n:todo` because the agents returned them identical to English (names, cognates,
+> formats); the importer skips those by design. `ms` is standard Bahasa Melayu, not Patani
+> Malay. `my`, `ms` and `ar` still need their reviewers before this is treated as shipped
+> quality.
+
+> ## `fr` (French) — AQU-1432, 2026-09-25
+>
+> Machine-translated by Claude Sonnet agents from the full `pnpm i18n:todo` packet (6,446
+> leaves, 5,660 of 5,810 keys written; the rest are formats, product names, cognates and
+> placeholder-only strings that `parseTranslatedCatalog` skips as identical to English). **No
+> French speaker has read it.** The brief asked for international (not Québécois) French,
+> *vous*, infinitive buttons, French typography, and a fixed glossary (cell → cellule, lane →
+> piste, changeset → ensemble de modifications, termbase → base terminologique,
+> back-translation → rétrotraduction). Mechanical checks: 0 placeholder or tag drift and 0
+> missing leaves after merge. Hand fixes: `org.projectOverview.deadlineDatePlaceholder` stays
+> English because `DatePicker` only parses the en-US shape (the same trap as
+> `common.datePlaceholder`), and ten short labels were tightened to fit their length hints.
+> About 170 strings still exceed a soft length hint, mostly long descriptions. A native
+> review should check these first: role names (réviseur / responsable de projet / mainteneur),
+> the audio voice-tone adjectives, and the milestone gender agreement ("Diapositive précédente").
+
 > ## Correction — the `mfa` catalog was not Patani Malay (AQU-1306)
 >
 > Everything below about `mfa` describes a catalog that **was standard Malay, not Patani

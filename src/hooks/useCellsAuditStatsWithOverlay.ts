@@ -38,8 +38,8 @@ export function useCellsAuditStatsWithOverlay(
 
   const byCellId = useMemo(() => {
     if (pending.length === 0) return base
-    return applyOutboxOverlay({ base, pending })
-  }, [base, pending])
+    return applyOutboxOverlay({ base, pending, lane: opts.lane ?? "" })
+  }, [base, pending, opts.lane])
 
   return { byCellId, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

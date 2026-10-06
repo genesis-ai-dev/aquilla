@@ -31,7 +31,15 @@ import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { memoize } from "../lib/request-memo"
-import { orgPathContribution } from "../../../db/shared/project-roles"
+import {
+  orgPathContribution,
+  parseAccessGrantsMode,
+  resolveWithGrantsMode,
+} from "../../../db/shared/project-roles"
+import {
+  resolveProjectRoleViaGrants,
+  resolveProjectRolesViaGrants,
+} from "../../../db/shared/access-grants"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -189,8 +197,27 @@ async function resolveProjectRoleInternal(
 
   // The grant paths don't depend on archived-ness, so both entry points share
   // one memo slot per (project, user) within a request.
+  // AQU-1352 P1: ACCESS_GRANTS_RESOLVER picks today's per-table resolver, the
+  // access_grants view, or both (shadow). The archive check above already ran,
+  // so the view path resolves with includeArchived and shares this memo slot.
   return memoize(env.requestMemo, `role:${projectId}:${user.id}`, () =>
-    resolveGrantPaths(env, user, projectId, project),
+    resolveWithGrantsMode<ResolvedRole>(
+      parseAccessGrantsMode(env.ACCESS_GRANTS_RESOLVER),
+      { userId: String(user.id), projectId },
+      () => resolveGrantPaths(env, user, projectId, project),
+      () =>
+        resolveProjectRoleViaGrants(
+          env.AQUILLA_PG,
+          { id: String(user.id), email: user.email },
+          projectId,
+          env.ADMIN_EMAILS,
+          true,
+        ),
+      (g) => {
+        const source = g.source as ResolvedRole["source"]
+        return { level: g.level, name: ROLE_NAMES[g.level] ?? "unknown", source }
+      },
+    ),
   )
 }
 
@@ -234,7 +261,27 @@ async function resolveGrantPaths(
         )
       : Promise.resolve<PathResult<{ role_level: number }>>({ row: null, failed: false }),
   ])
+  return roleFromGrantPaths(env, user, project, { override, group, org })
+}
 
+/** What each grant-path query answered for one project. */
+interface GrantPaths {
+  override: PathResult<{ role_level: number }>
+  group: PathResult<{ role_level: number | null }>
+  org: PathResult<{ role_level: number }>
+}
+
+/**
+ * The rules, with no I/O: max-wins over whatever the path queries returned.
+ * resolveProjectRole and resolveProjectRoles both end here, so asking about
+ * one project or a page of them cannot give different answers.
+ */
+function roleFromGrantPaths(
+  env: Env,
+  user: AuthUser,
+  project: ProjectRow,
+  { override, group, org }: GrantPaths,
+): ResolvedRole | null {
   const contributions: PathContribution[] = []
   if (override.row)
     contributions.push({ source: "override", level: override.row.role_level })
@@ -293,6 +340,173 @@ async function resolveGrantPaths(
     name: ROLE_NAMES[winner.level] ?? "unknown",
     source: winner.source,
   }
+}
+
+interface PathRows<T> {
+  rows: T[]
+  failed: boolean
+  error?: unknown
+}
+
+/** Run an `.all()` the way pathFirst runs a `.first()`: an error is a failed path, not a throw. */
+async function pathAll<T>(stmt: AquillaStatement, label: string): Promise<PathRows<T>> {
+  try {
+    return { rows: (await stmt.all<T>()).results ?? [], failed: false }
+  } catch (err) {
+    console.warn(`[resolveProjectRole] ${label} query failed:`, err)
+    return { rows: [], failed: true, error: err }
+  }
+}
+
+/**
+ * resolveGrantPaths' three reads for many projects at once: one statement per
+ * grant path, however many projects are asked about. A failed statement marks
+ * that path failed for every project it would have answered, which is what
+ * the per-project query failing N times amounted to.
+ */
+async function loadGrantPathsForProjects(
+  env: Env,
+  user: AuthUser,
+  projects: readonly ProjectRow[],
+): Promise<Map<string, GrantPaths>> {
+  const paths = new Map<string, GrantPaths>()
+  if (projects.length === 0) return paths
+  const marks = projects.map(() => "?").join(", ")
+  const projectIds = projects.map((project) => project.id)
+  const orgIds = [...new Set(projects.flatMap((p) => (p.org_id == null ? [] : [p.org_id])))]
+  const [override, group, org] = await Promise.all([
+    pathAll<{ project_id: string; role_level: number }>(
+      env.AQUILLA_PG.prepare(
+        `SELECT project_id, role_level FROM project_members
+         WHERE user_id = ? AND project_id IN (${marks})`,
+      ).bind(user.id, ...projectIds),
+      "project_members",
+    ),
+    pathAll<{ project_id: string; role_level: number | null }>(
+      env.AQUILLA_PG.prepare(
+        `SELECT gpg.project_id AS project_id, MAX(gpg.role_level) AS role_level
+         FROM group_project_grants gpg
+         JOIN group_members gm
+           ON gm.group_id = gpg.group_id
+         WHERE gm.user_id = ? AND gpg.project_id IN (${marks})
+         GROUP BY gpg.project_id`,
+      ).bind(user.id, ...projectIds),
+      "group_project_grants",
+    ),
+    orgIds.length > 0
+      ? pathAll<{ org_id: number; role_level: number }>(
+          env.AQUILLA_PG.prepare(
+            `SELECT org_id, role_level FROM org_members
+             WHERE user_id = ? AND org_id IN (${orgIds.map(() => "?").join(", ")})`,
+          ).bind(user.id, ...orgIds),
+          "org_members",
+        )
+      : Promise.resolve<PathRows<{ org_id: number; role_level: number }>>({ rows: [], failed: false }),
+  ])
+  const overrideByProject = new Map(override.rows.map((row) => [row.project_id, row]))
+  const groupByProject = new Map(group.rows.map((row) => [row.project_id, row]))
+  const orgById = new Map(org.rows.map((row) => [Number(row.org_id), row]))
+  for (const project of projects) {
+    paths.set(project.id, {
+      override: {
+        row: overrideByProject.get(project.id) ?? null,
+        failed: override.failed,
+        error: override.error,
+      },
+      group: {
+        row: groupByProject.get(project.id) ?? null,
+        failed: group.failed,
+        error: group.error,
+      },
+      // A project with no org never asked the org path anything, so that path
+      // cannot have failed for it.
+      org:
+        project.org_id == null
+          ? { row: null, failed: false }
+          : {
+              row: orgById.get(Number(project.org_id)) ?? null,
+              failed: org.failed,
+              error: org.error,
+            },
+    })
+  }
+  return paths
+}
+
+/**
+ * resolveProjectRole for a whole page of projects: the same answer for each
+ * id, from a fixed number of statements instead of four (seven with
+ * ACCESS_GRANTS_RESOLVER=shadow) per project. Before this existed the
+ * all-organizations dashboard resolved one caller's 155 projects one at a
+ * time: 1,085 statements queued through an eight-connection pool.
+ *
+ * Every requested id gets an entry. null means what it means for the single
+ * call: missing, archived, or no grant. Nothing here decides a role: the
+ * legacy paths go through roleFromGrantPaths, the view through
+ * resolveFromGrants, and the flag through resolveWithGrantsMode, exactly as
+ * they do for one project. Only the reads are shared. Each side loads at most
+ * once and only if the mode asks for it, so `off` never touches the view and
+ * `on` reads the per-table paths only when the view query throws.
+ *
+ * It neither reads nor fills the per-request memo: the dashboard resolves with
+ * a stand-in user (no email), and that answer must not be handed to a later
+ * resolveProjectRole for the real one.
+ */
+export async function resolveProjectRoles(
+  env: Env,
+  user: AuthUser,
+  projectIds: readonly string[],
+): Promise<Map<string, ResolvedRole | null>> {
+  const roles = new Map<string, ResolvedRole | null>()
+  const ids = [...new Set(projectIds)]
+  if (ids.length === 0) return roles
+
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT id, org_id, created_by, archived_at, is_active FROM projects
+      WHERE id IN (${ids.map(() => "?").join(", ")})`,
+  )
+    .bind(...ids)
+    .all<ProjectRow>()
+  const projects = new Map((results ?? []).map((project) => [project.id, project]))
+  const live = [...projects.values()].filter((project) => !project.archived_at)
+
+  let legacyPaths: Promise<Map<string, GrantPaths>> | undefined
+  let viewRoles: ReturnType<typeof resolveProjectRolesViaGrants> | undefined
+  const mode = parseAccessGrantsMode(env.ACCESS_GRANTS_RESOLVER)
+  await Promise.all(
+    ids.map(async (projectId) => {
+      const project = projects.get(projectId)
+      if (!project || project.archived_at) {
+        roles.set(projectId, null)
+        return
+      }
+      const role = await resolveWithGrantsMode<ResolvedRole>(
+        mode,
+        { userId: String(user.id), projectId },
+        async () => {
+          legacyPaths ??= loadGrantPathsForProjects(env, user, live)
+          const paths = (await legacyPaths).get(projectId)
+          return paths ? roleFromGrantPaths(env, user, project, paths) : null
+        },
+        async () => {
+          viewRoles ??= resolveProjectRolesViaGrants(
+            env.AQUILLA_PG,
+            { id: String(user.id), email: user.email },
+            live.map((p) => p.id),
+            env.ADMIN_EMAILS,
+            true,
+          )
+          return (await viewRoles).get(projectId) ?? null
+        },
+        (g) => {
+          const source = g.source as ResolvedRole["source"]
+          return { level: g.level, name: ROLE_NAMES[g.level] ?? "unknown", source }
+        },
+      )
+      roles.set(projectId, role)
+    }),
+  )
+  return roles
 }
 
 /**

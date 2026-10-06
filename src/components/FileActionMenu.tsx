@@ -1,4 +1,7 @@
-import { Pencil, FolderInput, Trash2, Download, Info, UserCheck, SplitSquareVertical } from "lucide-react"
+import {
+  Pencil, FolderInput, Trash2, Download, Info, UserCheck, SplitSquareVertical,
+  ChevronUp, ChevronDown,
+} from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   MenuGroup,
@@ -14,9 +17,6 @@ interface FileActionMenuProps {
   /** Opens the Export dialog for this file. Always shown — the dialog
    *  explains the block when org policy forbids export (AQU-253). */
   onExport?: () => void
-  /** Optional. Present only for file types we can export back to source
-   *  format with round-trip fidelity (USFM today). */
-  onExportSource?: () => void
   /** AQU-656: mint a token on click, then download the imported bytes. */
   onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller
@@ -28,6 +28,25 @@ interface FileActionMenuProps {
   onSegmentation?: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
   onDelete?: () => void
+  /**
+   * AQU-1569: move this file one position within its own corpus group.
+   *
+   * ABSENT below Project Lead, rather than present-and-failing: the drag
+   * handle is hidden for those roles too, so offering the menu items would
+   * promise a reorder the server is going to refuse.
+   *
+   * `canUp` / `canDown` disable rather than hide the item at the respective
+   * end of the group — a missing item reads as "this file cannot be moved",
+   * a disabled one reads as "not from here", which is the truth.
+   */
+  reorder?: FileReorderActions
+}
+
+export interface FileReorderActions {
+  onUp: () => void
+  onDown: () => void
+  canUp: boolean
+  canDown: boolean
 }
 
 /**
@@ -35,8 +54,8 @@ interface FileActionMenuProps {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork,
-  onSegmentation, onDelete,
+  onShowDetails, onRename, onMove, onExport, onDownloadOriginal, onAssignWork,
+  onSegmentation, onDelete, reorder,
 }: FileActionMenuProps) {
   const t = useT()
   return (
@@ -53,6 +72,16 @@ export function FileActionMenu({
         <MenuItem onClick={onMove}>
           <FolderInput /> {t("fileDetails.moveToCorpus")}
         </MenuItem>
+        {reorder && (
+          <>
+            <MenuItem disabled={!reorder.canUp} onClick={reorder.onUp}>
+              <ChevronUp /> {t("nav.fileRow.moveUp")}
+            </MenuItem>
+            <MenuItem disabled={!reorder.canDown} onClick={reorder.onDown}>
+              <ChevronDown /> {t("nav.fileRow.moveDown")}
+            </MenuItem>
+          </>
+        )}
         {onAssignWork && (
           <MenuItem onClick={onAssignWork}>
             <UserCheck /> {t("dialog.assign.title")}
@@ -66,11 +95,6 @@ export function FileActionMenu({
         {onExport && (
           <MenuItem onClick={onExport}>
             <Download /> {t("nav.workspaceActions.export")}
-          </MenuItem>
-        )}
-        {onExportSource && (
-          <MenuItem onClick={onExportSource}>
-            <Download /> {t("fileDetails.exportSource")}
           </MenuItem>
         )}
         {onDownloadOriginal && (

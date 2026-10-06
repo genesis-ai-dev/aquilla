@@ -104,6 +104,8 @@ describe("GET /export/bundle", () => {
     const res = await handleExportBundleRequest(req, env)
 
     expect(res?.status).toBe(200)
-    expect(cellBinds).toEqual([["p1", "f1", "fr-CA"]])
+    // AQU-1420: the lane is matched on lane_id alone (project, tag); the
+    // target_lang fallback and its second tag bind are gone.
+    expect(cellBinds).toEqual([["p1", "f1", "p1", "fr-CA"]])
   })
 })

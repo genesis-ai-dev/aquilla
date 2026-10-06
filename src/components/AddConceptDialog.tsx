@@ -23,9 +23,10 @@ import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
 import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
-import { countConceptOccurrences, discoverForms } from "@/lib/terminology/discover-forms"
+import { previewConceptMatches } from "@/lib/terminology/discover-forms"
 import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
 import type { ConceptDraft, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 
@@ -35,6 +36,9 @@ import type { ConceptDraft, TermMatchingSettings, TermMatchOptions } from "@/lib
  * more honest than a hand-rolled fake of the interface.
  */
 const EMPTY_CELL_STORE = new CellStore()
+
+/** Quiet period before the match preview rescans the file (AQU-1272). */
+const PREVIEW_DEBOUNCE_MS = 200
 
 const formSchema = z.object({
   term: requiredString("Source term"),
@@ -143,21 +147,24 @@ export function AddConceptPopover({
   const previewConcept = useMemo(() => ({ sourceTerm: term, match, caseSensitive }), [term, match, caseSensitive])
   const resolved = useMemo(() => resolveMatchOptions(previewConcept, termMatching), [previewConcept, termMatching])
   // Gated on `open`: the toolbar mounts this popover the moment source text is
-  // selected, and each of these walks every cell in the file. Nothing is shown
+  // selected, and the scan below walks every cell in the file. Nothing is shown
   // until the user actually opens the form, so nothing is scanned until then.
   const storeVersion = useCellStoreVersion(cellStore ?? EMPTY_CELL_STORE)
   const cells = useMemo(
     () => (open && cellStore ? readAtVersion(storeVersion, () => cellStore.getAllSummaries()) : undefined),
     [open, cellStore, storeVersion],
   )
-  const forms = useMemo(
-    () => (cells ? discoverForms(cells, previewConcept, termMatching) : []),
-    [cells, previewConcept, termMatching],
+  // AQU-1272: the scan is O(cells) and used to run TWICE per keystroke (~28ms
+  // over 1200 cells), which is felt as lag while typing a term. One pass yields
+  // both the forms and the count, and the concept it scans for is debounced —
+  // the preview is a reaction to what you typed, not to each key.
+  const debouncedConcept = useDebouncedValue(previewConcept, PREVIEW_DEBOUNCE_MS)
+  const preview = useMemo(
+    () => (cells ? previewConceptMatches(cells, debouncedConcept, termMatching) : undefined),
+    [cells, debouncedConcept, termMatching],
   )
-  const count = useMemo(
-    () => (cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
-    [cells, previewConcept, termMatching],
-  )
+  const forms = preview?.forms ?? []
+  const count = preview?.cellCount ?? 0
   // Offer the fold-marks toggle only where marks actually exist — on plain
   // Latin text it is a checkbox that can never change an answer.
   const showFoldMarks = useMemo(

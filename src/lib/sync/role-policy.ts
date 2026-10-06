@@ -12,6 +12,9 @@
  * hole — but drift defeats the point, so update both together.
  */
 
+import { laneScopeTags } from "@/lib/lanes/scope-ids"
+import type { LaneIdentity } from "@/lib/lanes/read-wall"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -49,6 +52,17 @@ const REQUIRED_ROLE: Record<string, number> = {
   "source.cell.commit": ROLE.PROJECT_LEAD,
   "source.cell.delete": ROLE.COMMENTER,
   "source.cell.reorder": ROLE.COMMENTER,
+  // AQU-1422: PROJECT_LEAD, in lock-step with the server. Hiding a cell takes it
+  // out of translation and out of every export for EVERYONE, in every lane — the
+  // same class of decision as source.cell.commit, and not the low-floored
+  // create/delete/reorder trio (those sit at COMMENTER because re-import, DCS
+  // repair and diarization all emit them through a user's own outbox).
+  //
+  // THE MIRROR MATTERS HERE PARTICULARLY: this module fails OPEN on an unknown
+  // kind, so a missing row would let a contributor's outbox enqueue a hide that
+  // the server then 403s — the row would vanish optimistically and come back on
+  // reload, which reads as data loss rather than as a refusal.
+  "source.cell.visibility.set": ROLE.PROJECT_LEAD,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -72,10 +86,33 @@ const REQUIRED_ROLE: Record<string, number> = {
   // line a recording belongs to, for everyone.
   "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
+  // AQU-490: REVIEWER, unlike every audio kind above it. Recording a take is
+  // translator work; signing one off is review work, so these two sit with
+  // cell.validate rather than with their audio neighbours.
+  //
+  // Listing them is not cosmetic: `canPerform` FAILS OPEN on a kind it does
+  // not know, so without these a commenter's vote would sail into the outbox
+  // to be 403'd by the server — the control muted for nobody and the write
+  // rejected for everyone below the floor.
+  "cell.audio.validate": ROLE.REVIEWER,
+  "cell.audio.unvalidate": ROLE.REVIEWER,
+
+  // AQU-777: attaching reference images to a cell is editing the cell's working
+  // context, so it sits on the CONTRIBUTOR floor alongside the other per-cell
+  // blob write (cell.audio.attach) rather than the COMMENTER one. Removal
+  // carries the same floor — the issue asks for "a user with edit access".
+  // Mirrored server-side in sync-worker/src/events/role-policy.ts.
+  "cell.attachment.add": ROLE.CONTRIBUTOR,
+  "cell.attachment.remove": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
   "file.corpus.set": ROLE.CONTRIBUTOR,
+  // AQU-1569: a reorder changes the sidebar for EVERY member of the project,
+  // so it sits with file.video.set ("project setup, not an edit") rather than
+  // with the contributor-level file.rename / file.corpus.set, which change one
+  // file's own label. Mirrored server-side in sync-worker role-policy.ts.
+  "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 
@@ -313,31 +350,75 @@ export function canMutateComment(
 }
 
 /**
+ * AQU-581: the caller's own lane-delegate grant — the org's
+ * `allowScopedLaneAssignment` setting plus the caller's own lane/file scopes
+ * (AQU-553). Passed as one object so the two halves can never drift apart at
+ * a call site: the setting alone grants nothing, and scopes alone grant
+ * nothing.
+ */
+export interface LaneDelegateGrant {
+  allowScopedLaneAssignment: boolean
+  scopes: ReadonlyArray<{ kind: "lane" | "file"; value: string }>
+}
+
+/**
+ * The lane values a delegate grant covers — empty when it grants nothing
+ * (setting off, or the caller carries no lane scopes). Exported so the assign
+ * UI can restrict its lane picker to exactly these, rather than offering a
+ * lane the submit check would then refuse.
+ */
+export function laneDelegateLanes(grant: LaneDelegateGrant | undefined): string[] {
+  if (!grant?.allowScopedLaneAssignment) return []
+  return grant.scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+}
+
+/** True when the grant confers assignment authority in at least one lane. */
+function isLaneDelegate(grant: LaneDelegateGrant | undefined): boolean {
+  return laneDelegateLanes(grant).length > 0
+}
+
+/**
  * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
  * offered at all, given the caller's role and the org's `allowSelfAssignment`
- * setting. Mirrors the self-assign carve-out enforced server-side in
- * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
- * boundary; the server re-checks independently on every `assignment.create`.
+ * setting. AQU-581 adds a second way in: a lane-scoped delegate. Mirrors the
+ * carve-outs enforced server-side in `sync-worker/src/events/authorize.ts` —
+ * UX gate only, never the security boundary; the server re-checks
+ * independently on every `assignment.create`.
  *
  * A caller at the org's assignmentMinRole can open it for any assignee.
- * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
- * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
+ * Below that floor, CONTRIBUTOR+ can open it only under one of the org's two
+ * carve-outs — and opening is not submitting either way:
+ * `canSubmitAssignment` narrows a self-assigner to themselves, and a lane
+ * delegate to the lanes their grant names.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  return allowSelfAssignment || isLaneDelegate(laneDelegate)
 }
 
 /**
- * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
- * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
- * and only when allowSelfAssignment is on.
+ * AQU-496 / AQU-581: whether `roleLevel` may submit `assignment.create`
+ * assigning `assigneeUserId` in lane `lane`. Callers at assignmentMinRole may
+ * assign anyone, anywhere. Below-floor callers get in one of two ways,
+ * mirroring the two server carve-outs in
+ * `sync-worker/src/events/authorize.ts`:
+ *
+ *   1. AQU-496 self-assign — `assigneeUserId === callerUserId`, while the org
+ *      has `allowSelfAssignment` on.
+ *   2. AQU-581 lane delegate — assigning ANYONE, but only in a lane the org
+ *      scoped this caller to, and only while `allowScopedLaneAssignment` is
+ *      on. `lane` is the assignment's target-language lane ('' = default);
+ *      omitting it means the default lane, matching the server's read of an
+ *      absent `payload.targetLang`.
+ *
+ * UX gate only — the server re-checks independently on every event.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
@@ -345,11 +426,14 @@ export function canSubmitAssignment(
   callerUserId: number | null | undefined,
   assigneeUserId: number,
   assignmentMinRole: number = ROLE.PROJECT_LEAD,
+  laneDelegate?: LaneDelegateGrant,
+  lane: string = "",
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= assignmentMinRole) return true
-  if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
-  return callerUserId != null && callerUserId === assigneeUserId
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  if (allowSelfAssignment && callerUserId != null && callerUserId === assigneeUserId) return true
+  return laneDelegateLanes(laneDelegate).includes(lane)
 }
 
 /**
@@ -368,6 +452,38 @@ export function canSubmitAssignment(
  */
 export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
+}
+
+/**
+ * The lanes a member below MAINTAINER may open and switch between: their own
+ * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
+ * switcher from everyone below MAINTAINER so a translator stays on the lane
+ * their assignment opens — but a member the org has LIMITED to certain lanes
+ * then opened on the default lane, often the one lane outside their limit,
+ * with no way to reach their own. A lane coordinator (AQU-581) could hand out
+ * Spanish chapters yet not open the Spanish lane to look at them.
+ *
+ * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
+ * via `canSwitchLanes`) or a member with no lane scopes (their assigned lane).
+ * A scope naming no lane the project has yields `[]`: nothing to move to.
+ */
+export function scopedLanesFor(
+  roleLevel: number | null | undefined,
+  scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
+  lanes: readonly string[],
+  /**
+   * AQU-1607: the project's lane rows, which turn the lane ids a scope now
+   * holds into the tags `lanes` is written in. Omitted (a caller with no lane
+   * rows loaded yet) compares the stored value to the tag, which is what a
+   * scope meant before lane ids.
+   */
+  laneRows?: readonly LaneIdentity[] | null,
+): string[] | null {
+  if (canSwitchLanes(roleLevel)) return null
+  const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
+  if (laneScopes.length === 0) return null
+  const allowed = laneScopeTags(laneScopes, laneRows ?? [])
+  return lanes.filter((lane) => allowed.has(lane))
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ interface RulesSettingsSectionProps {
   refreshProject?: () => void
   patchSettings?: UseProjectSettings["patch"]
   roleLevel?: number | null
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function RulesSettingsSection({
@@ -36,6 +38,8 @@ export function RulesSettingsSection({
   refreshProject,
   patchSettings: parentPatchSettings,
   roleLevel: parentRoleLevel,
+  activeLane,
+  onActiveLaneChange,
 }: RulesSettingsSectionProps) {
   const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
@@ -109,11 +113,15 @@ export function RulesSettingsSection({
     localConcepts,
   )
 
-  const { files } = useProjectCells({
+  // The corpus must be read in the lane the page is viewing: an omitted lane
+  // selects the legacy default lane, which is empty for a project translated
+  // into a named lane — "Suggest from edits" then mines nothing.
+  const { files, isLoading: cellsLoading, error: cellsError } = useProjectCells({
     projectId,
     projectFiles,
     getToken,
     enabled: Boolean(jwt) && Boolean(project),
+    lane: activeLane ?? "",
   })
 
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
@@ -156,6 +164,8 @@ export function RulesSettingsSection({
         setBuiltinOverride={setBuiltinOverride}
         infractions={infractions}
         cells={cells}
+        cellsLoading={cellsLoading}
+        cellsError={cellsError}
         completionSettings={project.completionSettings}
         orgRules={orgRules}
         canEditOrgRules={canEditOrgSettings}
@@ -166,6 +176,8 @@ export function RulesSettingsSection({
         requestPromotion={requestPromotion}
         editingRuleId={editingRuleId}
         setEditingRuleId={setEditingRuleId}
+        activeLane={activeLane}
+        onActiveLaneChange={onActiveLaneChange}
       />
     </>
   )

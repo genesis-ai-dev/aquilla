@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CommentsPage } from "./CommentsPage"
@@ -233,5 +233,61 @@ describe("CommentsPage chrome", () => {
     expect(screen.getByText(/^No comments$/i)).toBeInTheDocument()
     expect(screen.queryByText(/No threads match your filters/i)).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Clear filters/i })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-1259 (A): jumping to a comment must land on the row with the thread
+// OPEN. The page's half of that contract is the link it navigates to — the
+// editor reads `comments=1` and opens the drawer (see
+// project-workspace-lane-deeplink).
+describe("CommentsPage — jump to a comment", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockComments.mockReturnValue([])
+  })
+
+  function LocationProbe() {
+    const location = useLocation()
+    return <div data-testid="location">{`${location.pathname}${location.search}`}</div>
+  }
+
+  function renderWithEditorRoute() {
+    return renderWithTooltips(
+      <MemoryRouter initialEntries={["/project/proj-1/comments"]}>
+        <Routes>
+          <Route path="/project/:id/comments" element={<CommentsPage />} />
+          <Route path="*" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  function jumpedTo() {
+    return screen.getByTestId("location").textContent ?? ""
+  }
+
+  it("navigates to the cell with the open-comments flag", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderWithEditorRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+
+    expect(jumpedTo()).toBe("/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1")
+  })
+
+  it("carries the flag for a resolved thread too", () => {
+    // A resolved thread is where "reopen" lives, so the reviewer needs the
+    // drawer open just as much — the AC names both cases explicitly.
+    mockComments.mockReturnValue([makeComment({ resolved: true })])
+    renderWithEditorRoute()
+
+    // Resolved threads are filtered out by default; reveal them the way a
+    // reviewer revisiting old notes does.
+    fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
+    fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
+
+    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+
+    expect(jumpedTo()).toContain("comments=1")
   })
 })

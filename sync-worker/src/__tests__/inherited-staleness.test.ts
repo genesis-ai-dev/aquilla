@@ -17,6 +17,7 @@ import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
 import { handleStaleSourceRequest } from "../events/stale-source-route"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "test-secret"
@@ -53,10 +54,11 @@ async function emit(
 ): Promise<{ id: string; seq: number }> {
   const id = nextId()
   const seq = await nextSeqFor(t, projectId)
+  const parentId = await headParentFor(t, projectId, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, $6, $7, $8, $8, $9)`,
-    [id, projectId, args.fileId ?? null, args.cellId ?? null, kind, args.author ?? "author", JSON.stringify(args.payload), seq, seq],
+     VALUES ($1, 1, $2, $3, $4, $10, $5, $6, $7, $8, $8, $9)`,
+    [id, projectId, args.fileId ?? null, args.cellId ?? null, kind, args.author ?? "author", JSON.stringify(args.payload), seq, seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -64,7 +66,7 @@ async function emit(
     projectId,
     fileId: args.fileId ?? null,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind: kind as PersistedEvent["kind"],
     author: args.author ?? "author",
     payload: args.payload,

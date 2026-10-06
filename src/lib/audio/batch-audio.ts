@@ -256,6 +256,8 @@ export interface SynthAllArgs {
    * Absent ⇒ each cell speaks its own text onto itself.
    */
   resolveTargets?: (cell: CellData) => SynthTarget[]
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 /** AQU-646: a cell needs synthesis when it has translated text but no
@@ -512,10 +514,12 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
       generateCellVoice({
         project,
         cell: t.cell,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
         session,
         username,
         text: t.text,
         voiceCellId: t.voiceCellId,
+        surface: "generate-all", // AQU-1572
       }),
     {
       kind: "synth",

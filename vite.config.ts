@@ -9,6 +9,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
 import { resolveBuildBranch, resolveBuildDate, resolveBuildSha } from "./scripts/build-info.ts"
+import { TRANSFORMERS_ORT_SPECIFIER, resolveTransformersOrtExternWasm } from "./scripts/transformers-ort-extern-wasm.ts"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
 import type { BrandId } from "./src/branding/types.ts"
 
@@ -132,6 +133,16 @@ export default defineConfig(({ mode }) => ({
         replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/index.ts"),
       },
       { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+      // transformers.js fetches its ONNX Runtime WASM from jsDelivr at runtime,
+      // so the copy its default onnxruntime-web build makes Vite emit is dead
+      // weight — and at 25.6 MiB under transformers 4.3.0 it is over the
+      // Cloudflare Workers per-asset limit. Exact match on purpose: mms-worker's
+      // own `onnxruntime-web/wasm` import still needs its bundled WASM. See
+      // scripts/transformers-ort-extern-wasm.ts.
+      {
+        find: new RegExp(`^${TRANSFORMERS_ORT_SPECIFIER}$`),
+        replacement: resolveTransformersOrtExternWasm(import.meta.dirname),
+      },
     ],
   },
   optimizeDeps: {
@@ -204,31 +215,49 @@ export default defineConfig(({ mode }) => ({
     },
   },
   test: {
-    environment: "happy-dom",
-    setupFiles: ["./src/test-setup.ts"],
-    passWithNoTests: false,
-    exclude: [
-      "**/node_modules/**",
-      "dist/**",
-      ".worktrees/**",
-      ".claude/worktrees/**",
-      ".claire/**",
-      "e2e/**",
-      "smart-tests/journeys/**",
-      "smart-tests/.venv/**",
-      // Each worker has its own vitest config + local node_modules. Running
-      // their tests from root pulls in worker-local deps the root install
-      // doesn't have. deploy-workers.yml runs each worker's tests in its
-      // own directory.
-      "auth-worker/**",
-      "sync-worker/**",
-      "agent-worker/**",
-      "worker/**",
-      // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
-      // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
-      // red by design until implemented, so they must not fail the default
-      // suite.
-      "parity/**",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "app",
+          environment: "happy-dom",
+          setupFiles: ["./src/test-setup.ts"],
+          passWithNoTests: false,
+          exclude: [
+            "**/node_modules/**",
+            "dist/**",
+            ".worktrees/**",
+            ".claude/worktrees/**",
+            ".claire/**",
+            "e2e/**",
+            "smart-tests/journeys/**",
+            "smart-tests/adversarial/journeys/**",
+            "smart-tests/.venv/**",
+            // Each worker has its own vitest config + local node_modules. Running
+            // their tests from root pulls in worker-local deps the root install
+            // doesn't have. deploy-workers.yml runs each worker's tests in its
+            // own directory.
+            "auth-worker/**",
+            "sync-worker/**",
+            "agent-worker/**",
+            "worker/**",
+            // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
+            // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
+            // red by design until implemented, so they must not fail the default
+            // suite.
+            "parity/**",
+            // Owned by the "scripts-node" project below.
+            "scripts/**/*.test.mjs",
+          ],
+        },
+      },
+      // `scripts/*.mjs` are plain Node modules run with `node`, never through a
+      // bundler, so they are tested against the real Node built-ins — see
+      // `scripts/vitest.config.mts`. It is a SEPARATE CONFIG FILE on purpose:
+      // an inline project here shares this file's resolved `resolve.alias`, so
+      // vite-plugin-node-polyfills' browser shims reached it regardless of what
+      // the inline entry declared (AQU-1431; AQU-1273 had it inline).
+      "./scripts/vitest.config.mts",
     ],
   },
 }))

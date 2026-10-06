@@ -3,7 +3,6 @@ import {
   FIELD_PLAN,
   annualizedWords,
   checkWordAllowance,
-  countDistinctTargetLanes,
   countWords,
   creditsToWords,
   enterpriseCycleCredits,
@@ -137,7 +136,7 @@ describe("agent credits (APW is internal)", () => {
     expect(periodAllowanceCredits({ plan: "field", addonPacks: 1, languageCount: 1 })).toBe(2_000)
   })
 
-  it("multiplies Enterprise by target-language lanes, 10,000 credits/year each", () => {
+  it("multiplies Enterprise by target lanes, 10,000 credits/year each", () => {
     expect(enterpriseCycleCredits(1)).toBe(769)
     expect(enterpriseCycleCredits(2)).toBe(1_538)
     expect(periodAllowanceCredits({ plan: "enterprise", addonPacks: 0, languageCount: 2 })).toBe(1_538)
@@ -160,16 +159,6 @@ describe("agent credits (APW is internal)", () => {
         includedCreditsOverride: 400,
       }),
     ).toBe(400)
-  })
-
-  it("counts distinct active target-language lanes across projects", () => {
-    expect(
-      countDistinctTargetLanes([
-        { targetLanguage: "fr", targetLanes: ["es", "pt-BR"], archivedLanes: ["es"] },
-        { targetLanguage: "fr", targetLanes: ["pt-br"] },
-        { targetLanguage: "", targetLanes: [] },
-      ]),
-    ).toBe(2)
   })
 
   it("formats agent credits for people, never APW", () => {

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
+import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
 
 const SCHEMA = readFileSync(
@@ -16,9 +17,44 @@ const SCHEMA = readFileSync(
   "utf8",
 )
 
-function pgliteExecutor(db: PGlite): PgExecutor {
-  const wrap = (q: { query: PGlite["query"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
+/**
+ * AQU-1543: the most bound values postgres.js — the driver every worker reaches
+ * Postgres through — will put in one statement. At 65,534 it throws
+ * `MAX_PARAMETERS_EXCEEDED` before anything is sent.
+ *
+ * PGlite has no such client-side check, so without mirroring it here a test can
+ * pass on a statement production cannot even send. That is how a mirror sync
+ * whose single events INSERT bound 12 values × 5,546 rows stayed green in this
+ * suite while failing on every attempt against a real database.
+ */
+export const DRIVER_MAX_BIND_PARAMS = 65_533
+
+export interface TestDbOptions {
+  /** Called with every statement the shim sends, inside and outside
+   *  transactions, before it runs. For tests that pin how a code path SHAPES
+   *  its statements (how many values one of them binds) rather than what the
+   *  statements do. */
+  onStatement?: (sql: string, params: readonly unknown[]) => void
+}
+
+function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
+  const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
+      opts.onStatement?.(sql, params)
+      if (params.length > DRIVER_MAX_BIND_PARAMS) {
+        // Same code and message as postgres.js, so a failure here reads exactly
+        // like the production one it stands in for.
+        throw Object.assign(
+          new Error("MAX_PARAMETERS_EXCEEDED: Max number of parameters (65534) exceeded"),
+          { code: "MAX_PARAMETERS_EXCEEDED" },
+        )
+      }
+      // postgres.js sends a parameterless unsafe() over the simple protocol,
+      // which accepts several statements (migration replays rely on it).
+      if (params.length === 0) {
+        const last = (await q.exec(sql)).at(-1)
+        return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
+      }
       const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
@@ -112,7 +148,7 @@ async function seedRows(pg: PGlite, table: string, rows: ReadonlyArray<object>) 
   }
 }
 
-export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
+export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Promise<TestDb> {
   // A fresh test database is a fresh "isolate": the cells chain cache is
   // module-level and keyed on projectId + ETag, and every spec reuses the
   // same ids/seqs across independent databases, so clear it here or a
@@ -120,11 +156,15 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
   resetChainCacheForTests()
   const pg = new PGlite()
   await pg.exec(SCHEMA)
-  for (const [table, rows] of Object.entries(seed)) {
-    if (!rows || table === "cells_fts") continue // FTS is a generated column in PG
-    await seedRows(pg, table, rows)
+  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
+  await installTestLaneFill((sql) => pg.exec(sql))
+  // Lanes before content rows, so an explicit seed lane wins over a minted one.
+  const seeded = Object.entries(seed).filter(([table, rows]) => rows && table !== "cells_fts")
+  seeded.sort((a, b) => Number(b[0] === "lanes") - Number(a[0] === "lanes"))
+  for (const [table, rows] of seeded) {
+    await seedRows(pg, table, rows!)
   }
-  const db = new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb
+  const db = new PostgresDb(pgliteExecutor(pg, opts)) as unknown as AquillaDb
   return {
     db,
     pg,
@@ -146,6 +186,7 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
         FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
           EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
         END LOOP; END $$;`)
+      await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
     },
     close: () => pg.close(),
   }

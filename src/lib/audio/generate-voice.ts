@@ -31,6 +31,7 @@ import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
 import type { SynthOptions } from "./tts"
@@ -57,10 +58,14 @@ export interface GenerateAndAttachArgs {
   session: FrontierSession
   /** Frontier username — author of the cell.audio.attach event. */
   username: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
   /** Round 8c: TTS is a TAKE — its permanent name, set at birth. */
   label?: string
   diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
+  /** AQU-1572: where the generation was asked for ("recorder", "cell"…). Telemetry only. */
+  surface?: TelemetrySurface
 }
 
 export interface GenerateAndAttachResult {
@@ -119,6 +124,11 @@ export async function generateAndAttachCellVoice(
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       ...(args.label ? { label: args.label } : {}),
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      // AQU-1572
+      audioOrigin: "generate",
+      ttsProvider: provider,
+      surface: args.surface,
       author: args.username,
     })
     // Round 8: shadow-inject so the sparkle chip appears at its real length
@@ -273,6 +283,11 @@ export async function generateAndAttachCellVoice(
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     ...(args.label ? { label: args.label } : {}),
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    // AQU-1572
+    audioOrigin: "generate",
+    ttsProvider: provider,
+    surface: args.surface,
     author: args.username,
   })
   // Round 8: shadow-inject (see the hosted-TTS branch's comment).

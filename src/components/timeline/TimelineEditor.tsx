@@ -21,6 +21,7 @@ import {
 import { createPortal } from "react-dom"
 import {
   AudioLines,
+  Captions,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -155,6 +156,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface TimelineEditorProps {
@@ -250,6 +252,28 @@ export interface TimelineEditorProps {
    *  workspace for the same reason the link-video one does — it owns the upload
    *  and the refresh. Presence renders the control. */
   onRequestImportAudioVtt?(): void
+  onRequestImportCaptions?(): void
+  canImportCaptions?: boolean
+  onRequestAlignScript?(): void
+  canAlignScript?: boolean
+  /**
+   * AQU-1139: open the Extract-subtitles dialog — read a clip's sidecar
+   * subtitle file into THIS file's source lane. Lives up in the workspace with
+   * the other two for the same reason: it owns the emit and the refresh.
+   *
+   * Presence renders the row. The workspace withholds it unless the file is
+   * time-ordered and has no source text of its own — extracting over existing
+   * cues is a reconcile, which is `import-file-target.ts`'s job, not this one's.
+   */
+  onRequestExtractSubtitles?(): void
+  /** False disables it. Same floor and same reasoning as the audio-VTT import:
+   *  the extraction creates cells, so a button below `source.cell.create`
+   *  (PROJECT_LEAD) could only mint a 403. */
+  canExtractSubtitles?: boolean
+  /** How many timed source cells this file already has — the Subtitles row's
+   *  state badge, and the reason the row can read "imported" rather than
+   *  offering an extraction that would duplicate them. */
+  subtitleCueCount?: number
   /** AQU-646 stage 6: the character spreadsheet. */
   onRequestImportCharacters?(): void
   canImportCharacters?: boolean
@@ -456,6 +480,11 @@ export interface TimelineEditorProps {
    *  mount) = the three derived defaults, unchanged from what this editor has
    *  always drawn. */
   tracks?: TimelineTrack[]
+  /** Independently imported text belongs to its referenced hidden cue file. */
+  textTrackCells?: Readonly<Record<string, CellData[]>>
+  textTrackErrors?: Readonly<Record<string, Error>>
+  onRetryTextTrack?(fileId: string): void
+  onRetimeTextTrack?(fileId: string, cellId: string, startSec: number, endSec: number): void
   /**
    * AQU-646 stage 3: give one track a new sort key, because the user dragged
    * its name up or down the gutter (or pressed Alt+Arrow on it). The order is
@@ -482,6 +511,13 @@ export interface TimelineEditorProps {
    */
   onRenameTrack?(trackId: string, name: string): void
   /**
+   * Recolour tracks — one value per track, one write. SEPARATE FROM
+   * `trackEditing` for the same reason as rename (Sam, 2026-09-26): a colour is
+   * how a track looks, the Audio view offers it on projects that never turn
+   * track editing on, and the server treats it as ordinary maintainer work.
+   */
+  onSetTrackColor?(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
+  /**
    * …and everything that RESTRUCTURES the timeline. Present only when the
    * caller has both maintainer clearance and the project's `allowTrackEditing`
    * setting.
@@ -503,9 +539,6 @@ export interface TimelineEditorProps {
     // Stage 2b: every one of these takes a LIST, because the menu acts on the
     // selection. A single right-clicked row is simply a list of one, which
     // keeps one code path rather than a bulk path shadowing a single one.
-    /** Stage 3c: one value PER TRACK — colour is two independent axes now, so
-     *  a bulk change keeps each track's own other half. Still one write. */
-    onSetColor(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
     onLeaveFolder(trackIds: readonly string[]): void
     /** A DRAG that crossed a folder wall: one patch carrying both fields,
      *  because a track arriving in a new scope needs a rank in it and its old
@@ -1012,6 +1045,13 @@ export function TimelineEditor({
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
+  onRequestImportCaptions,
+  canImportCaptions = true,
+  onRequestAlignScript,
+  canAlignScript = false,
+  onRequestExtractSubtitles,
+  canExtractSubtitles = true,
+  subtitleCueCount = 0,
   onRequestImportCharacters,
   canImportCharacters = false,
   characterCount = 0,
@@ -1055,8 +1095,13 @@ export function TimelineEditor({
   audioByCellId,
   legacyMeasure,
   tracks = DEFAULT_TRACKS,
+  textTrackCells,
+  textTrackErrors,
+  onRetryTextTrack,
+  onRetimeTextTrack,
   onReorderTrack,
   onRenameTrack,
+  onSetTrackColor,
   trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
@@ -1161,7 +1206,7 @@ export function TimelineEditor({
   /** Is there anything to put in a track's menu at all? With neither rename
    *  clearance nor the editing setting there is not, and the row renders
    *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || trackEditing)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1268,6 +1313,7 @@ export function TimelineEditor({
       trackMenuScopes({
         targets: menuTargets(trackId),
         canRename: Boolean(onRenameTrack),
+        canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
       }),
     )
@@ -1343,9 +1389,9 @@ export function TimelineEditor({
       targets,
       t,
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
+      onSetColor: onSetTrackColor,
       editing: trackEditing
         ? {
-            onSetColor: trackEditing.onSetColor,
             onLeaveFolder: trackEditing.onLeaveFolder,
             onCreateFolderFrom: (trackIds) => {
               const folderId = trackEditing.onCreateFolderFrom(trackIds)
@@ -1376,7 +1422,9 @@ export function TimelineEditor({
   const [follow, setFollow] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The clipped label column, and the div inside it that carries the vertical
-   *  offset. The gutter does not scroll — see `handleTrackScroll`. */
+   *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
+   *  when the browser scrolls it anyway `handleGutterScroll` hands the offset
+   *  back to the track column (AQU-1632). */
   const gutterRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
   /** The horizontal offset this component has already reacted to. Stage 3 made
@@ -1733,6 +1781,14 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  const independentTextCells = useMemo(
+    () => Object.values(textTrackCells ?? {}).flat(),
+    [textTrackCells],
+  )
+  const independentTextLayout = useMemo(
+    () => buildTimelineLayout("dubbing", independentTextCells, [], null),
+    [independentTextCells],
+  )
   // WHAT KIND OF FILE THIS IS — not what any row draws. Stage 2 killed the band
   // this flag was born for (it was `drawsSourceBand`) and kept every other
   // reader untouched, because not one of them was ever about the band: a VTT
@@ -1979,6 +2035,46 @@ export function TimelineEditor({
         onClick: onRequestImportAudioVtt,
       })
     }
+    if (onRequestImportCaptions) {
+      items.push({
+        id: "caption-track", label: t("importExport.captionTrack.attach"),
+        icon: ClipboardCheck, disabled: !canImportCaptions,
+        badge: canImportCaptions ? undefined : <span className="text-[11px] text-muted-foreground">
+          {t("importExport.captionTrack.enableTracks")}
+        </span>,
+        onClick: onRequestImportCaptions,
+      })
+    }
+    if (onRequestAlignScript) {
+      items.push({
+        id: "align-script", label: t("importExport.scriptAlignment.align"),
+        icon: ClipboardCheck, disabled: !canAlignScript,
+        badge: canAlignScript ? undefined : <span className="text-[11px] text-muted-foreground">
+          {t("importExport.captionTrack.enableTracks")}
+        </span>,
+        onClick: onRequestAlignScript,
+      })
+    }
+    // AQU-1139: between the film and the characters, because that is the order
+    // the work happens in — the clip arrives, then its words, then who says
+    // them. The badge is the state that decides whether the row is worth
+    // clicking: a file that already has its cues needs no extraction.
+    if (onRequestExtractSubtitles) {
+      items.push({
+        id: "subtitles",
+        label: "Subtitles",
+        icon: Captions,
+        disabled: !canExtractSubtitles || subtitleCueCount > 0,
+        badge: (
+          <span className="text-[11px] text-muted-foreground">
+            {subtitleCueCount > 0
+              ? t("editor.timeline.badgeImportedCount", { count: subtitleCueCount })
+              : t("editor.timeline.badgeNotImported")}
+          </span>
+        ),
+        onClick: onRequestExtractSubtitles,
+      })
+    }
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
@@ -2008,6 +2104,9 @@ export function TimelineEditor({
   }, [
     onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
+    onRequestImportCaptions, canImportCaptions, t,
+    onRequestAlignScript, canAlignScript,
+    onRequestExtractSubtitles, canExtractSubtitles, subtitleCueCount,
     onRequestImportCharacters, canImportCharacters, characterCount, audioCharacterCount,
     charactersWriting,
   ])
@@ -2268,7 +2367,7 @@ export function TimelineEditor({
     return out
   }
 
-  const durationSec = layout.totalSec
+  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
@@ -2311,8 +2410,9 @@ export function TimelineEditor({
     () =>
       cells.find((c) => c.id === currentCellId) ??
       audioCues?.find((c) => c.id === currentCellId) ??
+      independentTextCells.find((c) => c.id === currentCellId) ??
       null,
-    [cells, audioCues, currentCellId],
+    [cells, audioCues, independentTextCells, currentCellId],
   )
   // AQU-646 stage 6: who speaks the current chip, and whether the camera is on
   // them. Resolved HERE because this is the one place that holds both halves —
@@ -2445,6 +2545,33 @@ export function TimelineEditor({
     if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
       setFollow(false)
     }
+  }
+
+  /**
+   * AQU-1632: the gutter is `overflow-hidden`, and that still makes it a
+   * scrollport. Nothing scrolls it by hand — but the browser does, on its own,
+   * to reveal a focused descendant: tab onto a track's ⋯ button that sits
+   * below the fold and the header column slides up while the lanes beside it
+   * stay put, because `handleTrackScroll` only ever reads the TRACK column's
+   * scrollTop and writes the gutter's transform from it. The gutter's own
+   * offset was never read back, so the two columns came apart and stayed
+   * apart.
+   *
+   * So: take whatever the browser just did here, zero it, and hand the delta
+   * to the track column instead. That column owns the vertical offset, its
+   * scroll re-writes the transform, and the button the browser was trying to
+   * reveal ends up on screen anyway — with its lane still beside it.
+   * Horizontal is simply undone; the gutter has no x to be at.
+   */
+  function handleGutterScroll() {
+    const gutter = gutterRef.current
+    if (!gutter) return
+    const { scrollTop, scrollLeft } = gutter
+    if (scrollTop === 0 && scrollLeft === 0) return
+    gutter.scrollTop = 0
+    gutter.scrollLeft = 0
+    const el = scrollRef.current
+    if (el && scrollTop !== 0) el.scrollTop += scrollTop
   }
 
   function applyZoom(next: number) {
@@ -3237,6 +3364,12 @@ export function TimelineEditor({
    * slots, and a folder of recorded tracks collapsed to a blank strip.
    */
   function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
+    if (track.contentFileId) {
+      return (textTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
+        const span = independentTextLayout.spanFor(cell, "subtitle")
+        return span ? [{ startSec: span.start, endSec: span.end }] : []
+      })
+    }
     const fromCells = (cellList: readonly CellData[], lane: "subtitle" | "source"): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const cell of cellList) {
@@ -3291,6 +3424,28 @@ export function TimelineEditor({
   // forgot to pass would be a lane that quietly stopped updating.
   function laneForTrack(row: TrackRow): ReactNode {
     const track = row.track
+    if (track.contentFileId && ["source-subtitles", "target-subtitles"].includes(track.kind)) {
+      const contentFileId = track.contentFileId
+      const contentCells = textTrackCells?.[contentFileId] ?? []
+      const error = textTrackErrors?.[contentFileId]
+      if (error) return <div role="alert" className="flex h-[var(--tl-row-h)] items-center gap-3 px-3 text-sm">
+        <span>{error.message}</span>
+        {onRetryTextTrack && <button type="button" className="underline"
+          onClick={() => onRetryTextTrack(contentFileId)}>{t("common.retry")}</button>}
+      </div>
+      return <TimelineLane
+        key={track.id} cells={contentCells} variant="subtitle"
+        {...laneProps} layout={independentTextLayout}
+        retimable={!timingLocked && Boolean(onRetimeTextTrack)}
+        onRetime={(cellId, start, end) => onRetimeTextTrack?.(contentFileId, cellId, start, end)}
+        onSeek={cellId => {
+          const cell = contentCells.find(c => c.id === cellId)
+          const start = cell ? independentTextLayout.seekSecFor(cell) : null
+          if (start !== null) seekTo(start)
+        }}
+        snapEnabled={snapOn}
+      />
+    }
     switch (track.kind) {
       case "source-subtitles":
         // SUB-53: a subtitle span is expressed against the original's clock,
@@ -3453,6 +3608,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
           />
         )
@@ -3506,6 +3666,11 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            // AQU-490: the project's required number of audio validators.
+            // The lane defaults it to 1 when absent, so leaving it out did not
+            // look like a bug — it looked like a fully validated clip after a
+            // single vote, on a project asking for two.
+            validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
           />
@@ -3979,7 +4144,11 @@ export function TimelineEditor({
               through `tl-scroll`'s previousElementSibling, on the stated
               contract that the gutter renders exactly the DOM the hardcoded
               rows did. */}
-          <div ref={gutterRef} className="relative overflow-hidden bg-muted/20">
+          <div
+            ref={gutterRef}
+            className="relative overflow-hidden bg-muted/20"
+            onScroll={handleGutterScroll}
+          >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
                 BORDER. It was `border-r` on this container — but a border
                 paints outside the content box, so no row could ever cover its

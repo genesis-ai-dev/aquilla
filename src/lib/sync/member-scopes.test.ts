@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchMemberScopes,
+  fetchMyScopeGrant,
   isInMemberScope,
   putMemberScopes,
   type MemberScope,
@@ -70,7 +71,7 @@ describe("putMemberScopes", () => {
     )
     const scopes: MemberScope[] = [{ kind: "file", value: "f1" }]
     const got = await putMemberScopes("jwt-123", "proj-1", 42, scopes, API)
-    expect(got).toEqual([{ kind: "file", value: "f1" }])
+    expect(got).toEqual({ scopes: [{ kind: "file", value: "f1" }], laneNames: {} })
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const [url, init] = fetchSpy.mock.calls[0]
@@ -81,11 +82,46 @@ describe("putMemberScopes", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ scopes })
   })
 
-  it("returns [] when the server omits scopes on success", async () => {
+  it("returns an empty view when the server omits scopes on success", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200 }),
     )
-    expect(await putMemberScopes("jwt", "p1", 1, [], API)).toEqual([])
+    expect(await putMemberScopes("jwt", "p1", 1, [], API)).toEqual({ scopes: [], laneNames: {} })
+  })
+
+  // AQU-1607: the lanes a member holds AFTER a save are not the ones they
+  // held before it, so the save's own names are the only ones that can label
+  // a lane just granted. Dropping them printed the lane's id in the chip.
+  it("keeps the lane names the save answers with", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          scopes: [{ kind: "lane", value: "4b67177e" }],
+          laneNames: { "4b67177e": "Spanish B" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )
+    const got = await putMemberScopes("jwt", "p1", 1, [{ kind: "lane", value: "4b67177e" }], API)
+    expect(got).toEqual({
+      scopes: [{ kind: "lane", value: "4b67177e" }],
+      laneNames: { "4b67177e": "Spanish B" },
+    })
+  })
+
+  it("surfaces the values a refused lane scope named", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "lane scopes must name one lane of this project",
+          ambiguous: ["Spanish"],
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      ),
+    )
+    await expect(
+      putMemberScopes("jwt", "p1", 1, [{ kind: "lane", value: "Spanish" }], API),
+    ).rejects.toThrow("lane scopes must name one lane of this project: Spanish")
   })
 
   it("throws with the server's error message on 400", async () => {
@@ -147,5 +183,33 @@ describe("isInMemberScope", () => {
     expect(allowed(scopes, "file-1", "fr")).toBe(true)
     expect(allowed(scopes, "file-2", "fr")).toBe(false)
     expect(allowed(scopes, "file-1", "es")).toBe(false)
+  })
+})
+
+// AQU-581 review: a guest can't read the org's settings, so the lane-assignment
+// setting reaches them with their own scopes.
+describe("fetchMyScopeGrant", () => {
+  const reply = (body: unknown, status = 200) =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    )
+
+  it("GETs `me` and returns the scopes with the org's lane-assignment setting", async () => {
+    const spy = reply({ scopes: [{ kind: "lane", value: "es" }], allowScopedLaneAssignment: true })
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toEqual({
+      scopes: [{ kind: "lane", value: "es" }],
+      allowScopedLaneAssignment: true,
+    })
+    expect(spy.mock.calls[0][0]).toBe(`${API}/api/v2/projects/p1/members/me/scopes`)
+  })
+
+  it("reports the setting as unknown (null) when an older server leaves it out", async () => {
+    reply({ scopes: [] })
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toEqual({ scopes: [], allowScopedLaneAssignment: null })
+  })
+
+  it("returns null on an error status", async () => {
+    reply({ error: "no access to project" }, 403)
+    expect(await fetchMyScopeGrant("jwt", "p1", API)).toBeNull()
   })
 })

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { ReactNode } from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ErrorBoundary } from "./ErrorBoundary"
+import { CHUNK_NOTICE_ID } from "@/lib/chunk-reload"
 
 // ---------------------------------------------------------------------------
 // Mock posthog so captureException calls are interceptable without a real
@@ -62,15 +63,18 @@ describe("ErrorBoundary", () => {
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
-  it("calls posthog.captureException when a child throws", () => {
+  it("calls posthog.captureException once when a child throws", () => {
     render(
-      <ErrorBoundary>
+      <ErrorBoundary label="reference-panel">
         <AlwaysThrows />
       </ErrorBoundary>,
     )
+    expect(posthog.captureException).toHaveBeenCalledOnce()
+    // AQU-1572: flat — captureException's second argument *is* the property
+    // bag, so these land as event properties, not under a nested `properties`.
     expect(posthog.captureException).toHaveBeenCalledWith(
       expect.objectContaining({ message: "test render error" }),
-      expect.objectContaining({ properties: expect.objectContaining({ source: "react_error_boundary" }) }),
+      expect.objectContaining({ source: "react_error_boundary", boundary: "reference-panel" }),
     )
   })
 
@@ -93,47 +97,81 @@ describe("ErrorBoundary", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Window global handler registration tests
+// Window global handler tests. AQU-1572: on the web, posthog-js's
+// `capture_exceptions` already reports uncaught errors and rejections, so these
+// handlers must not capture as well (every error landed twice). In the Tauri
+// desktop shell its autocapture script is blocked by CSP, so there they are the
+// one capture. Either way they still drive chunk-reload recovery.
 // ---------------------------------------------------------------------------
 describe("window error handlers", () => {
-  it("window.onerror handler is registered and forwards to posthog.captureException", () => {
-    const err = new Error("global error")
-    const event = new ErrorEvent("error", { error: err, message: err.message })
-    window.dispatchEvent(event)
-    expect(posthog.captureException).toHaveBeenCalledWith(
-      err,
-      expect.objectContaining({ properties: expect.objectContaining({ source: "window.onerror" }) }),
-    )
-  })
+  function dispatchError(err: Error) {
+    window.dispatchEvent(new ErrorEvent("error", { error: err, message: err.message }))
+  }
 
-  it("unhandledrejection handler is registered and forwards to posthog.captureException", () => {
-    const err = new Error("rejection error")
+  function dispatchRejection(reason: unknown) {
     // happy-dom does not expose PromiseRejectionEvent; synthesise via CustomEvent
     // so the listener receives the same shape our handler expects (event.reason).
-    const event = Object.assign(new CustomEvent("unhandledrejection"), { reason: err })
-    window.dispatchEvent(event)
-    expect(posthog.captureException).toHaveBeenCalledWith(
-      err,
-      expect.objectContaining({ properties: expect.objectContaining({ source: "unhandledrejection" }) }),
-    )
+    window.dispatchEvent(Object.assign(new CustomEvent("unhandledrejection"), { reason }))
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI__
+  })
+
+  it("does not capture an uncaught error on the web — PostHog autocapture owns it", () => {
+    dispatchError(new Error("global error"))
+    expect(posthog.captureException).not.toHaveBeenCalled()
+  })
+
+  it("does not capture an unhandled rejection on the web — PostHog autocapture owns it", () => {
+    dispatchRejection(new Error("rejection error"))
+    expect(posthog.captureException).not.toHaveBeenCalled()
+  })
+
+  it("captures each once in the desktop shell, where autocapture cannot load", () => {
+    ;(window as unknown as Record<string, unknown>).__TAURI__ = {}
+    const err = new Error("global error")
+    const rejection = new Error("rejection error")
+    dispatchError(err)
+    dispatchRejection(rejection)
+    expect(posthog.captureException).toHaveBeenCalledTimes(2)
+    expect(posthog.captureException).toHaveBeenCalledWith(err, { source: "window.onerror" })
+    expect(posthog.captureException).toHaveBeenCalledWith(rejection, { source: "unhandledrejection" })
+  })
+
+  it("still reloads once for a stale chunk reported as an uncaught error or rejection", () => {
+    sessionStorage.clear()
+    const reloadSpy = vi.fn()
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    })
+    dispatchError(new Error("Failed to fetch dynamically imported module: /assets/a-1.js"))
+    dispatchRejection(new Error("Failed to fetch dynamically imported module: /assets/b-2.js"))
+    expect(reloadSpy).toHaveBeenCalledTimes(2)
+    expect(posthog.captureException).not.toHaveBeenCalled()
+    document.getElementById(CHUNK_NOTICE_ID)?.remove()
   })
 })
 
 // ---------------------------------------------------------------------------
-// Chunk-load recovery (RES-3 / audit QW-4): stale lazy chunks after a redeploy
-// get ONE automatic reload (sessionStorage-guarded), then the "App updated"
-// fallback.
+// Chunk-load recovery (RES-3 / audit QW-4 / AQU-1405): stale lazy chunks after
+// a redeploy get ONE automatic reload per failing chunk URL, then the "App
+// updated" fallback. The guard itself is unit-tested in
+// src/lib/chunk-reload.test.ts; these pin the boundary's wiring to it.
 // ---------------------------------------------------------------------------
 describe("chunk-load recovery", () => {
+  const CHUNK_URL = "/assets/app-chunk-BfoUWN3w.js"
+
   function ThrowsChunkError(): ReactNode {
-    throw new Error("Failed to fetch dynamically imported module: /assets/x.js")
+    throw new Error(`Failed to fetch dynamically imported module: ${CHUNK_URL}`)
   }
 
   beforeEach(() => {
     sessionStorage.clear()
   })
 
-  it("reloads once on the first chunk error in a session", () => {
+  it("reloads once on the first failure of a chunk", () => {
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
       value: { ...window.location, reload: reloadSpy },
@@ -145,11 +183,11 @@ describe("chunk-load recovery", () => {
       </ErrorBoundary>,
     )
     expect(reloadSpy).toHaveBeenCalledOnce()
-    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe("1")
+    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe(JSON.stringify([CHUNK_URL]))
   })
 
-  it("shows the 'App updated' fallback instead of reload-looping when the flag is set", () => {
-    sessionStorage.setItem("aq:chunk-reload-attempted", "1")
+  it("shows the 'App updated' fallback instead of reload-looping on the same chunk", () => {
+    sessionStorage.setItem("aq:chunk-reload-attempted", JSON.stringify([CHUNK_URL]))
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
       value: { ...window.location, reload: reloadSpy },
@@ -165,7 +203,7 @@ describe("chunk-load recovery", () => {
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
-  it("non-chunk errors do not consume the chunk-reload flag", () => {
+  it("non-chunk errors do not consume the chunk-reload guard", () => {
     render(
       <ErrorBoundary>
         <AlwaysThrows />

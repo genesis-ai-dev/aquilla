@@ -9,7 +9,9 @@ import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
 import { SyncTokenError, type fetchSyncToken } from "@/lib/sync/sync-token"
 import type { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { FakeZipWorker, zipWorkerFactory } from "./__fixtures__/fake-zip-worker"
 import { purgeEgressExportCache, readEgressCache } from "./export-cache"
+import { audioListingKey } from "./build-project-export"
 import type { buildProjectExport } from "./build-project-export"
 import { runOrgEgress, type RunOrgEgressDeps } from "./org-egress"
 import type {
@@ -241,6 +243,36 @@ describe("runOrgEgress", () => {
     expect(result.manifest.projects.map((p) => p.folder)).toEqual(["Alpha", "Alpha_2"])
   })
 
+  it("hands ALL zip compression to the worker — packaging must never run on the main thread (AQU-1269)", async () => {
+    const worker = new FakeZipWorker()
+    const deps = makeDeps({ createZipWorker: zipWorkerFactory(worker) })
+
+    const first = await runOrgEgress(args(), deps)
+
+    // One pack for the per-project cache zip, one for the org zip. No
+    // generateAsync on the UI thread in between.
+    expect(worker.ops).toEqual(["pack", "pack"])
+    const zip = await loadZip(first.blob)
+    expect(await zip.files["Project-One/fr/f1.txt"].async("string")).toBe("text-f1")
+    expect(zip.files["manifest.json"]).toBeTruthy()
+    // The worker is per-run, so a cache replay inflates there too.
+    const replayWorker = new FakeZipWorker()
+    const second = await runOrgEgress(
+      args(),
+      makeDeps({ createZipWorker: zipWorkerFactory(replayWorker) }),
+    )
+    expect(second.manifest.projects[0].fromCache).toBe(true)
+    expect(replayWorker.ops).toEqual(["unpack", "pack"])
+    expect(replayWorker.terminated).toBe(true)
+  })
+
+  it("still exports when no zip worker can be created — packaging degrades inline", async () => {
+    const result = await runOrgEgress(args(), makeDeps({ createZipWorker: async () => null }))
+
+    const zip = await loadZip(result.blob)
+    expect(await zip.files["Project-One/fr/f1.txt"].async("string")).toBe("text-f1")
+  })
+
   it("an abort cancels the run instead of being swallowed as a project error", async () => {
     const controller = new AbortController()
     controller.abort()
@@ -421,7 +453,29 @@ describe("runOrgEgress — audio + settings freshness (files projection is blind
     )
     expect(fetchAudioAttachments).toHaveBeenCalledTimes(1)
     const deps = buildExport.mock.calls[0][2]
-    expect(deps.audioListings?.get("f1")).toEqual(listing("a1"))
+    // AQU-1591: under the per-(file, lane) key the builder memoizes on. Keyed by
+    // the file alone this was a silent miss — every listing fetched twice, and
+    // each lane handed whichever lane's takes happened to be pre-fetched.
+    expect(deps.audioListings?.get(audioListingKey("f1", ""))).toEqual(listing("a1"))
+  })
+
+  // AQU-1591: a take belongs to one lane, so a run exporting three lanes probes
+  // three listings per file — and the freshness digest then covers exactly the
+  // takes this run will write, rather than every lane's.
+  it("probes one listing per (file, lane) being exported", async () => {
+    const fetchAudioAttachments = vi.fn<
+      NonNullable<RunOrgEgressDeps["fetchAudioAttachments"]>
+    >(async () => listing("a1"))
+    const buildExport = makeBuildExport()
+    await runOrgEgress(
+      args({ options: { ...audioOptions, lanes: ["", "fr", "de"] } }),
+      makeDeps({ buildExport, fetchAudioAttachments }),
+    )
+    expect(fetchAudioAttachments.mock.calls.map((c) => c[3])).toEqual(["", "fr", "de"])
+    const deps = buildExport.mock.calls[0][2]
+    for (const lane of ["", "fr", "de"]) {
+      expect(deps.audioListings?.get(audioListingKey("f1", lane))).toEqual(listing("a1"))
+    }
   })
 
   it("bypasses the cache entirely (no read, no write) when a listing fetch fails, and says so", async () => {

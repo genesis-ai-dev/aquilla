@@ -1,4 +1,4 @@
-import { compareByCanonicalBookOrder, bookCodeFromFileName } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, bookCodeFromFileName, bookCodeFromFileNameStrict } from "@/lib/file-labeling/bible-book-names"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -40,6 +40,17 @@ export interface GroupableFile {
   bookCode?: string
   type?: string
   hasScriptureContent?: boolean
+  /**
+   * AQU-1569: hand-placed position within the file's own group, from
+   * `files.meta.sortIndex` (the `file.reorder` event). Fractional on purpose —
+   * placing a file between two neighbours is the midpoint of their indices, so
+   * two leads moving different files at once do not have to agree on integers.
+   *
+   * Absent on every file until someone reorders that group, which is what
+   * keeps existing projects byte-for-byte identical: the comparator falls
+   * straight through to the name-derived rules below.
+   */
+  sortIndex?: number
 }
 
 // File types whose members may be Scripture books even when the record
@@ -52,8 +63,49 @@ function mayBeScripture(file: GroupableFile): boolean {
   return file.hasScriptureContent === true || (file.type !== undefined && NAME_FALLBACK_TYPES.has(file.type))
 }
 
+/**
+ * Identity string of the synthetic no-marker bucket — the value callers
+ * compare `CorpusGroup.label` against. i18n-exempt control-flow value, not
+ * display text (see the `label` doc comment); `labelKey` carries what the
+ * user reads.
+ */
+export const UNGROUPED_GROUP = "Ungrouped"
+
 function normalize(marker: string): string {
   return marker.trim().toLowerCase()
+}
+
+/**
+ * A `sortIndex` is only usable if it is a real finite number: the value
+ * arrives as raw JSON off the wire (`files.meta`), where a newer client, a
+ * hand-edited blob or a failed parse could leave a string, a NaN or an
+ * Infinity. An unusable index is treated as absent rather than allowed to
+ * poison the sort with a non-transitive comparison.
+ */
+export function usableSortIndex(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * AQU-1569: the hand-placed order, when there is one.
+ *
+ * Returns `null` for "these two say nothing about each other" so the caller
+ * falls through to the automatic rules. Three cases:
+ *
+ * - both placed, different indices → the indices decide;
+ * - both placed, SAME index → `null`, and today's comparator breaks the tie
+ *   (two devices can mint the same midpoint; the order must still be stable);
+ * - one placed → the placed one comes first, so a group that gains an
+ *   unordered file keeps its hand-placed run intact at the top instead of
+ *   scrambling around the newcomer.
+ */
+function sortIndexCompare(a: GroupableFile, b: GroupableFile): number | null {
+  const ai = usableSortIndex(a.sortIndex)
+  const bi = usableSortIndex(b.sortIndex)
+  if (ai !== undefined && bi !== undefined) return ai === bi ? null : ai - bi
+  if (ai !== undefined) return -1
+  if (bi !== undefined) return 1
+  return null
 }
 
 // Bible books in OT/NT corpora are sorted canonically (Genesis → Revelation,
@@ -61,9 +113,43 @@ function normalize(marker: string): string {
 // inside the same corpus fall through the shared comparator to alphabetic. Files
 // in a non-OT/NT named corpus (seasons, custom groupings) stay purely
 // alphabetic.
-function corpusFileCompare(label: string, a: { name: string }, b: { name: string }): number {
+//
+// A hand-placed order (AQU-1569) wins over all of that — it is the one signal
+// that came from a person rather than from a file name.
+function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): number {
+  const placed = sortIndexCompare(a, b)
+  if (placed !== null) return placed
   if (label === "OT" || label === "NT") return compareByCanonicalBookOrder(a.name, b.name)
   return a.name.localeCompare(b.name)
+}
+
+/**
+ * The Bible book a file holds, as a USFM code: its server-backed `bookCode`,
+ * or, for a scripture-capable file without one (a migrated Codex project's
+ * "1CH"), the code read off its name. Undefined for anything else. Shared by
+ * the grouping below and by the translation import's book matching (AQU-1365),
+ * so both agree on which file is which book.
+ */
+export function fileBookCode(file: GroupableFile): string | undefined {
+  return file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+}
+
+/**
+ * True when `fileBookCode` is more than a guess: the file stores its book, or
+ * its name names the book outright ("JON-source", "Judges"), not just starts
+ * or ends with three letters that happen to be a code. AQU-1365 review: the
+ * translation check only offers to update a file's source text in place on
+ * this, since a wrong guess would reconcile one book's verses over another's.
+ */
+export function fileBookCodeIsCertain(file: GroupableFile): boolean {
+  if (file.bookCode) return true
+  return mayBeScripture(file) && bookCodeFromFileNameStrict(file.name) !== undefined
+}
+
+/** The testament a Scripture file's book code puts it in, if it has one. */
+function derivedTestament(file: GroupableFile): string | undefined {
+  const code = fileBookCode(file)
+  return code ? getTestament(code) : undefined
 }
 
 /**
@@ -84,10 +170,29 @@ function corpusFileCompare(label: string, a: { name: string }, b: { name: string
 function resolveMarker(file: GroupableFile): { marker: string; derived: boolean } | null {
   const raw = file.corpusMarker?.trim()
   if (raw) return { marker: raw, derived: false }
-  const code = file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
-  const testament = code ? getTestament(code) : undefined
+  const testament = derivedTestament(file)
   if (testament) return { marker: testament, derived: true }
   return null
+}
+
+/**
+ * AQU-1702: the group label a file WOULD land under if its `corpusMarker`
+ * were `marker` (`null` / blank = cleared). The answer is not always the
+ * marker: clearing a Bible book's marker hands it back to the `derived`
+ * testament fallback above, so "move this to Ungrouped" is a thing the
+ * sidebar cannot always express. A cross-group drag asks this before it
+ * writes, and refuses the drop when the answer is not the group the pointer
+ * was over — never a silent visual-only move.
+ */
+export function groupLabelForMarker(file: GroupableFile, marker: string | null): string {
+  const trimmed = marker?.trim()
+  if (trimmed) return trimmed
+  return derivedTestament(file) ?? UNGROUPED_GROUP
+}
+
+/** Whether two group labels name the same group, by the same rule `groupByCorpus` keys on. */
+export function sameGroup(a: string, b: string): boolean {
+  return normalize(a) === normalize(b)
 }
 
 export function groupByCorpus<T extends GroupableFile>(
@@ -121,7 +226,10 @@ export function groupByCorpus<T extends GroupableFile>(
   // corpusMarker) still read like a Bible: canonical book order first, with
   // non-book files falling back to alphabetic. Previously this bucket was
   // purely alphabetic, which is exactly the sidebar complaint in AQU-582.
-  ungrouped.sort((a, b) => compareByCanonicalBookOrder(a.name, b.name))
+  ungrouped.sort((a, b) => {
+    const placed = sortIndexCompare(a, b)
+    return placed !== null ? placed : compareByCanonicalBookOrder(a.name, b.name)
+  })
 
   const named: CorpusGroup<T>[] = Array.from(groupsByKey.values()).sort((a, b) => {
     if (a.label === "OT" && b.label !== "OT") return -1
@@ -132,9 +240,7 @@ export function groupByCorpus<T extends GroupableFile>(
   })
 
   if (ungrouped.length > 0) {
-    // i18n-exempt control-flow identity value, not display text — labelKey
-    // carries the translated text; see the CorpusGroup.label doc comment.
-    named.push({ label: "Ungrouped", labelKey: "nav.fileList.ungroupedLabel", files: ungrouped })
+    named.push({ label: UNGROUPED_GROUP, labelKey: "nav.fileList.ungroupedLabel", files: ungrouped })
   }
   return named
 }

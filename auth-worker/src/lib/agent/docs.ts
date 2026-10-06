@@ -57,7 +57,7 @@ SELECT s.canonical_ref, s.value AS source_text, t.value AS target_text,
 FROM cells s JOIN cells t
   ON t.project_id = s.project_id AND t.cell_id = s.cell_id AND t.side = 'target'
 WHERE s.project_id = :project AND s.side = 'source'
-  AND s.canonical_ref LIKE 'MRK 4:%'
+  AND s.canonical_ref LIKE '<BOOK> 4:%'
 ORDER BY s.canonical_ref
 
 3. Stale cells (source changed after the target was committed — AD-9):
@@ -79,7 +79,7 @@ WHERE project_id = :project AND file_id = :file
 
 6. Report findings as comments (COMMENTER+):
 emit: [{kind:'comment.create', fileId:':file', cellId:'#c3',
-        payload:{body:'Inconsistent rendering of X vs MRK 4:12 — consider Y.'}}]
+        payload:{body:'Inconsistent rendering of X vs <BOOK> 4:12 — consider Y.'}}]
 Scope defaults to the cell; the server fills commentId. Deterministic rule
 violations are re-checked client-side on every proposal card, so focus your
 comments on judgment calls, not mechanical rules.`
@@ -228,7 +228,9 @@ FROM assignment_cells ac JOIN cells c
   ON c.project_id = :project AND c.file_id = ac.file_id
  AND c.cell_id = ac.cell_id AND c.side = 'target'
 WHERE ac.assignment_id = '#e1'
-(assignment_id values come back from the first query; aliases work.)
+(assignment_id values come back from the first query; aliases work. assignment_cells
+is the snapshot taken when the assignment was created, so for a book or chapter
+assignment this total is a floor — it misses lines added to the file since.)
 
 Members you can assign to:
 SELECT pm.user_id, pm.role_level
@@ -236,7 +238,9 @@ FROM project_members pm
 WHERE pm.project_id = :project ORDER BY pm.role_level DESC
 
 Creating one (PROJECT_LEAD+). scopeKind 'books' = whole file(s);
-'chapters' = chapter slices matched by canonical_ref prefix:
+'chapters' = chapter slices matched by canonical_ref prefix; 'cells' = exactly
+the source cell ids in scope[].cellIds (AQU-1628), required for that kind and
+rejected for the other two:
 emit: [{kind:'assignment.create', payload:{
   assignmentId:'a-fresh-unique-id-string',
   scopeKind:'chapters', scope:[{fileId:'#f1', chapter:'GEN 1'}],
@@ -255,11 +259,12 @@ ORDER BY name LIMIT 100
 - role: 'source' | 'target' (which side of the translation the file holds);
   source_file_id links a target file to its source counterpart.
 - book_code: USFM 3-letter book id for scripture files (GEN, EXO … MAL,
-  MAT, MRK, LUK, JHN … REV).
+  MAT … REV, plus non-canonical codes such as XXA–XXG, FRT,
+  BAK, OTH, INT, CNC, GLO, TDX, NDX). Use only codes this project's files carry.
 
 canonical_ref grammar (scripture cells): '<BOOK> <chapter>:<verse>', e.g.
-'MRK 4:35'. Chapter slice: canonical_ref LIKE 'MRK 4:%'. Whole book:
-LIKE 'MRK %'. Non-scripture media (CSV rows, subtitles) have canonical_ref
+'<BOOK> 4:35'. Chapter slice: canonical_ref LIKE '<BOOK> 4:%'. Whole book:
+LIKE '<BOOK> %'. Non-scripture media (CSV rows, subtitles) have canonical_ref
 NULL — order those by the anchor chain or sequence_index instead.
 
 Cell ordering: cells.anchor_cell_id points at the PREVIOUS cell_id in the
@@ -271,9 +276,9 @@ SELECT t.id AS target_file, s.id AS source_file, t.name
 FROM files t JOIN files s ON s.id = t.source_file_id
 WHERE t.project_id = :project AND t.deleted_at IS NULL
 
-Counters maintained by the projection (cheap overview without scanning
-cells): files.cell_count, filled_count (non-empty targets), approved_count
-(validated), ai_drafted_count, word_count, last_edit_at (ms).
+files.cell_count is distinct cells, shared by every lane. files.filled_count,
+approved_count, ai_drafted_count, and word_count sum every target lane, so
+do not report them as one lane's progress. last_edit_at is epoch ms.
 
 Renaming a file label (CONTRIBUTOR+):
 emit: [{kind:'file.rename', fileId:'#f1', payload:{name:'Mark (draft 2)'}}]

@@ -83,6 +83,13 @@ function applyShadow(
   sync: ShadowSyncView,
 ): CellAudioEntry {
   const base = entry ?? emptyEntry()
+  if (shadow.kind === "deselect") {
+    // Mirrors the projection's `selected = 0` for the whole slot: the slot
+    // simply empties, its takes stay listed (2026-09-28).
+    const selectedBySlot = { ...slotSelections(base) }
+    delete selectedBySlot[shadow.slot]
+    return withProjections({ ...base, selectedBySlot })
+  }
   if (shadow.kind === "remove") {
     const attachments = { ...base.attachments }
     delete attachments[shadow.audioId]
@@ -139,6 +146,7 @@ function applyShadow(
 
 /** Has the server read caught up with what this overlay was asserting? */
 function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticShadow): boolean {
+  if (shadow.kind === "deselect") return !entry || !slotSelections(entry)[shadow.slot]
   if (shadow.kind === "remove") {
     // The read omits deleted rows, so absence IS the confirmation.
     return !entry?.attachments[shadow.audioId]
@@ -226,6 +234,11 @@ function keepShadow(
 export interface UseFileAudioAttachmentsResult {
   byCellId: Map<string, CellAudioEntry>
   isLoading: boolean
+  /** True once this file has an answer: its first read came back (or failed),
+   *  or there is nothing to read — no file, or nobody signed in. Until then an
+   *  empty map means "not read yet", not "no recordings"; a refetch never
+   *  turns it false again. */
+  hasLoaded: boolean
   revalidate: () => void
 }
 
@@ -238,11 +251,24 @@ const EMPTY: Map<string, CellAudioEntry> = new Map()
 // settled fetch is a real read.
 const attachmentsCoalescer = createRequestCoalescer<FileAudioAttachmentsResponse | null>({ joinWindowMs: 250 })
 
+/**
+ * `lane` (AQU-1591) is the target-language lane whose takes to read: its own
+ * dubs plus the shared programme audio, which belongs to every lane the way
+ * source text does. Omitting it reads every lane's takes — the pre-lane wire —
+ * and `''` is the default lane, a real lane and a different request.
+ *
+ * It is part of the read key AND of the coalescer key. Those are the two places
+ * a lane can be dropped silently: a stale `settledKey` would report another
+ * lane's answer as loaded, and a coalescer keyed on project/file alone would
+ * hand the second lane to open a file the FIRST lane's takes, within the join
+ * window, with no request of its own to show for it.
+ */
 export function useFileAudioAttachments(
   projectId: string | null,
   fileId: string | null,
+  lane?: string,
 ): UseFileAudioAttachmentsResult {
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const sessionRef = useRef(session)
   useEffect(() => {
     sessionRef.current = session
@@ -260,6 +286,12 @@ export function useFileAudioAttachments(
 
   const [byCellId, setByCellId] = useState<Map<string, CellAudioEntry>>(EMPTY)
   const [isLoading, setIsLoading] = useState(false)
+  // The project/file whose read last came back. Keyed rather than a boolean so
+  // a file switch reads as "not loaded" at once, with no reset to forget.
+  const [settledKey, setSettledKey] = useState<string | null>(null)
+  const laneKey = lane ?? "\u0000all"
+  const readKey = projectId && fileId ? `${projectId}/${fileId}/${laneKey}` : null
+  const hasLoaded = readKey === null || (!jwt && !sessionLoading) || settledKey === readKey
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -293,9 +325,9 @@ export function useFileAudioAttachments(
       // instances via the module-level coalescer, so the three mounts
       // ProjectWorkspace keeps for one file cost one request each time.
       const [res, outboxRecords] = await Promise.all([
-        attachmentsCoalescer.run(`${projectId}/${fileId}`, async () => {
+        attachmentsCoalescer.run(`${projectId}/${fileId}/${laneKey}`, async () => {
           const token = await getToken(projectId, fileId)
-          return token ? fetchFileAudioAttachments(projectId, fileId, token) : null
+          return token ? fetchFileAudioAttachments(projectId, fileId, token, lane) : null
         }),
         getOutboxRecords(queuedIds),
       ])
@@ -351,9 +383,12 @@ export function useFileAudioAttachments(
       // rather than the editor crashing. The next poke retries.
       if (gen === generationRef.current) setByCellId(EMPTY)
     } finally {
-      if (gen === generationRef.current) setIsLoading(false)
+      if (gen === generationRef.current) {
+        setIsLoading(false)
+        setSettledKey(`${projectId}/${fileId}/${laneKey}`)
+      }
     }
-  }, [projectId, fileId, getToken, jwt])
+  }, [projectId, fileId, lane, laneKey, getToken, jwt])
 
   useEffect(() => {
     doFetchRef.current = doFetch
@@ -415,7 +450,7 @@ export function useFileAudioAttachments(
     })
   }, [fileId])
 
-  return { byCellId, isLoading, revalidate: doFetch }
+  return { byCellId, isLoading, hasLoaded, revalidate: doFetch }
 }
 
 // Fold the per-file audio read (`byCellId`) into a cell list, populating the
@@ -453,6 +488,17 @@ export function mergeCellsWithAudio(
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."
         ...(a.syncFailed ? { syncFailed: true as const } : {}),
+        // AQU-490. THESE MUST BE LISTED. This merge rebuilds every attachment
+        // field by field rather than spreading it, so a field nobody adds here
+        // is dropped on the way to the editor — silently, with no type error,
+        // because every one of them is optional on both sides. The symptom
+        // would be a gutter reading "nobody has validated this" on a take the
+        // server says two people signed off, and nothing at all in a log.
+        ...(a.label != null ? { label: a.label } : {}),
+        ...(a.validatorCount != null ? { validatorCount: a.validatorCount } : {}),
+        ...(a.validators ? { validators: a.validators } : {}),
+        ...(a.role ? { role: a.role } : {}),
+        ...(a.recordedBy != null ? { recordedBy: a.recordedBy } : {}),
       }
     }
     return {

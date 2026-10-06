@@ -13,6 +13,13 @@ interface ConfirmActionDialogProps {
   description: string
   confirmLabel: string
   checkboxLabel?: string
+  /**
+   * False when the description already says the action can do nothing here.
+   * The dialog then shows the description with a single Close button: no
+   * acknowledgement to tick and no confirm that would only fail. Defaults to
+   * true.
+   */
+  canConfirm?: boolean
   /** Button variant for the confirm action. Defaults to "default". */
   variant?: "default" | "destructive"
   onConfirm: () => void
@@ -21,6 +28,7 @@ interface ConfirmActionDialogProps {
 export function ConfirmActionDialog({
   open, onOpenChange, title, description, confirmLabel,
   checkboxLabel,
+  canConfirm = true,
   variant = "default",
   onConfirm,
 }: ConfirmActionDialogProps) {
@@ -35,23 +43,29 @@ export function ConfirmActionDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <label className="flex items-start gap-2 py-2 text-sm">
-          <Checkbox
-            checked={checked}
-            onCheckedChange={(value) => setChecked(value === true)}
-            className="mt-0.5"
-          />
-          <span>{resolvedCheckboxLabel}</span>
-        </label>
+        {canConfirm && (
+          <label className="flex items-start gap-2 py-2 text-sm">
+            <Checkbox
+              checked={checked}
+              onCheckedChange={(value) => setChecked(value === true)}
+              className="mt-0.5"
+            />
+            <span>{resolvedCheckboxLabel}</span>
+          </label>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-          <Button
-            variant={variant}
-            disabled={!checked}
-            onClick={() => { onConfirm(); onOpenChange(false) }}
-          >
-            {confirmLabel}
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {canConfirm ? t("common.cancel") : t("common.close")}
           </Button>
+          {canConfirm && (
+            <Button
+              variant={variant}
+              disabled={!checked}
+              onClick={() => { onConfirm(); onOpenChange(false) }}
+            >
+              {confirmLabel}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

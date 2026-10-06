@@ -97,6 +97,12 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+
+// AQU-581: allowScopedLaneAssignment rides the SAME OWNER-only write gate as
+// allowSelfAssignment above (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) — both are
+// the org deciding who may write `assignment.create` below the assignment
+// floor — and shares its safe default of `false`.
+const DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT = false
 const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
 const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
@@ -224,6 +230,15 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-581: effective lane-delegate assignment authority — true when a
+   * lane-scoped member below the assignment floor may create assignments for
+   * OTHER people inside the lanes they are scoped to. Explicit org setting,
+   * or `false` when unset. Server-enforced; see
+   * `resolveAllowScopedLaneAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowScopedLaneAssignment: boolean
+  /**
    * AQU-1083: do chapter headings and section titles count as translatable
    * content in this org's progress numbers? Explicit org setting, or TRUE when
    * unset — which is what every project did before the setting existed, so
@@ -240,6 +255,16 @@ export interface UseOrgSettings {
    * everything, which is why zero suppresses the prompt entirely.
    */
   countStructuralOverrides: number
+  /**
+   * AQU-1391: the org default for repetition auto-propagation. ON unless the
+   * org opts out; a project may still override it in either direction.
+   */
+  autoPropagateRepetitions: boolean
+  /**
+   * Whether bulk text validation may sign off untouched AI drafts. OFF unless
+   * the org opts in, which keeps the one-at-a-time rule for AI drafts.
+   */
+  allowBulkValidateAiDrafts: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -304,6 +329,9 @@ export interface UseOrgSettings {
  * @param projectRoleLevel  Caller's project-resolved role (AD-12 max-wins). Used for canExport.
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
+/** How often returning to the tab may re-read org settings (see the effect). */
+const REFETCH_ON_RETURN_MS = 10_000
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -348,8 +376,10 @@ export function useOrgSettings(
     return next
   }, [])
 
+  const lastFetchAtRef = useRef(0)
   const refresh = useCallback(async (): Promise<OrgSettingsResponse | null> => {
     if (!orgId || !jwt) return null
+    lastFetchAtRef.current = Date.now()
     const got = await fetchOrgSettings(jwt, orgId)
     if (!aliveRef.current) return null
     writeServer(got)
@@ -383,6 +413,27 @@ export function useOrgSettings(
     void refresh().then(() => { if (!alive) return }).catch(() => {})
     return () => { alive = false }
   }, [orgId, refresh, writeServer])
+
+  // Re-read when the tab comes back into view. The sibling sync above only
+  // reaches instances in THIS tab, so a setting changed in another tab — or
+  // by another maintainer — reached an open editor only on reload: turning
+  // bulk validation of AI drafts OFF left an already-open editor still
+  // offering it. At most once per REFETCH_ON_RETURN_MS, so tabbing back and
+  // forth does not hammer the endpoint.
+  useEffect(() => {
+    if (!orgId || typeof document === "undefined") return
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return
+      if (Date.now() - lastFetchAtRef.current < REFETCH_ON_RETURN_MS) return
+      void refresh().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onReturn)
+    window.addEventListener("focus", onReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn)
+      window.removeEventListener("focus", onReturn)
+    }
+  }, [orgId, refresh])
 
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
@@ -456,9 +507,23 @@ export function useOrgSettings(
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
   const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
+  // and only an explicit opt-out turns repetition propagation off org-wide.
+  const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  // `=== true`, the opposite of the two above: unset is OFF, because AI drafts
+  // have always been reviewed one at a time and an org must opt in.
+  const allowBulkValidateAiDrafts = server?.settings?.allowBulkValidateAiDrafts === true
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
+  // AQU-581: effective lane-delegate assignment authority — explicit org
+  // setting, or false when unset. Rides the SAME OWNER-only write gate as
+  // allowSelfAssignment (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) and shares its
+  // safe default of `false`.
+  const allowScopedLaneAssignment = server?.settings?.allowScopedLaneAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT
 
   const assignmentMinRole = (() => {
     const raw = server?.settings?.assignmentMinRole
@@ -591,8 +656,11 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    allowScopedLaneAssignment,
     countStructuralCells,
     countStructuralOverrides,
+    autoPropagateRepetitions,
+    allowBulkValidateAiDrafts,
     resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,

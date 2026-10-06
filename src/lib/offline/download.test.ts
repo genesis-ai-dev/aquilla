@@ -4,6 +4,7 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import { schema, events, tables } from "./schema"
 import {
   downloadProjectOffline,
+  recoverInterruptedDownloads,
   removeOfflineProject,
   getDownloadProgress,
   __resetDownloadProgressForTests,
@@ -260,5 +261,51 @@ describe("removeOfflineProject", () => {
     )
     store.commit(events.eventQueueStatusSet({ id: "q1", status: "failed" }))
     expect(removeOfflineProject(store, "proj1")).toEqual({ ok: false, reason: "queue-not-empty", queueDepth: 1 })
+  })
+})
+
+describe("recoverInterruptedDownloads", () => {
+  function seedProject(projectId: string, status: "downloading" | "ready" | "removing") {
+    store.commit(events.offlineProjectStatusSet({ projectId, status, syncedAt: null, queueDepth: 0 }))
+    store.commit(events.fileSynced({ id: `${projectId}-f`, projectId, name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    store.commit(
+      events.cellSynced({
+        projectId,
+        fileId: `${projectId}-f`,
+        cellId: "c1",
+        side: "target",
+        targetLang: "",
+        laneId: null,
+        value: "partial",
+        valueHtml: null,
+        eventId: "e1",
+        sourceEventId: null,
+        validated: false,
+        aiDrafted: false,
+        sequenceIndex: 0,
+        canonicalRef: null,
+      }),
+    )
+  }
+
+  it("rolls back a download a previous session left half-done, so it can be retried", () => {
+    seedProject("stuck", "downloading")
+    seedProject("half-removed", "removing")
+    seedProject("fine", "ready")
+
+    expect(recoverInterruptedDownloads(store).sort()).toEqual(["half-removed", "stuck"])
+
+    for (const projectId of ["stuck", "half-removed"]) {
+      expect(store.query(tables.offlineProjects.select().where({ projectId }))).toHaveLength(0)
+      expect(store.query(tables.cells.select().where({ projectId }))).toHaveLength(0)
+      expect(store.query(tables.files.select().where({ projectId }))).toHaveLength(0)
+    }
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "fine" }))).toHaveLength(1)
+    expect(store.query(tables.cells.select().where({ projectId: "fine" }))).toHaveLength(1)
+  })
+
+  it("does nothing when no download was interrupted", () => {
+    seedProject("fine", "ready")
+    expect(recoverInterruptedDownloads(store)).toEqual([])
   })
 })

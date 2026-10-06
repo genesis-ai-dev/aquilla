@@ -1,11 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
+import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
+import {
+  hasPlacedFiles,
+  planFileMove,
+  planFileNudge,
+  planFileOrderReset,
+  type SortIndexWrite,
+} from "@/lib/sidebar/file-sort-index"
+import { planFileRegroup, type FileRegroupPlan } from "@/lib/sidebar/file-regroup"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useEditorScroll } from "@/context/EditorScrollContext"
+import {
+  CorpusGroupFrame,
+  FileDragPreview,
+  FileListRow,
+  FileReorderDnd,
+  GroupFileRows,
+  type GroupDropState,
+} from "./file-list-dnd"
+import {
+  readSidebarGroup,
+  resolveSidebarFileDrop,
+  type SidebarFileDrop,
+} from "./file-list-dnd-model"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
 import {
@@ -18,13 +44,75 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
-import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
+import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
 interface FileStats { translated: number; validated: number; total: number }
+
+/** What the Reset-order confirmation needs to remember while it is open: which
+ *  group is being reset, how to label it, and the writes that will clear it. */
+interface CorpusGroupForReset {
+  label: string
+  displayLabel: string
+  writes: SortIndexWrite[]
+}
+
+/** Stable empty set, so an omitted `assignedFileIds` doesn't allocate per render. */
+const EMPTY_ASSIGNED: ReadonlySet<string> = new Set<string>()
+
+/**
+ * AQU-1702: what the group under the pointer is showing mid-drag.
+ *
+ * `refusal` names why the drop cannot be written, and is what decides between
+ * the drop-target ring and the refusal message:
+ *   * `derived-group` — the file would be filed under `landsIn` and not here
+ *     (a Bible book dropped on Ungrouped goes back to its testament);
+ *   * `unsupported` — this list was given no `onMoveFileToGroup`, so changing
+ *     a file's group is still "Move to corpus…" only.
+ */
+interface DropPreview {
+  group: string
+  /** Slot inside `group`, for the insertion line. Null on a refusal, and when
+   *  the pointer is on the group rather than one of its rows (lands at the end). */
+  toPosition: number | null
+  refusal: "derived-group" | "unsupported" | null
+  /** The group the file would actually land in, on a `derived-group` refusal. */
+  landsIn: string | null
+}
+
+/** The preview a resolved drop produces, or null when no group is involved. */
+function previewDrop(
+  resolution: SidebarFileDrop,
+  plan: (r: Extract<SidebarFileDrop, { kind: "regroup" }>) => FileRegroupPlan | null,
+): DropPreview | null {
+  if (resolution.kind !== "regroup") return null
+  const planned = plan(resolution)
+  if (planned === null) {
+    return { group: resolution.group, toPosition: null, refusal: "unsupported", landsIn: null }
+  }
+  if (!planned.ok) {
+    return {
+      group: resolution.group,
+      toPosition: null,
+      refusal: planned.reason,
+      landsIn: planned.landsIn,
+    }
+  }
+  return { group: resolution.group, toPosition: resolution.toPosition, refusal: null, landsIn: null }
+}
+
+/** Equality, so a pointer move inside the same slot is not a re-render. */
+function sameDropPreview(a: DropPreview | null, b: DropPreview | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.group === b.group
+    && a.toPosition === b.toPosition
+    && a.refusal === b.refusal
+    && a.landsIn === b.landsIn
+}
 
 interface Props {
   projectId: string
@@ -37,8 +125,6 @@ interface Props {
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
-  /** Storage lane used when exporting translated source files. */
-  targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
   onShowDetails?: (fileId: string) => void
@@ -48,6 +134,16 @@ interface Props {
   onExport?: (fileId: string) => void
   /** Opens Assign work scoped to the given file. Hidden when omitted. */
   onAssignWork?: (fileId: string) => void
+  /**
+   * AQU-894: the files the CURRENT USER holds an open assignment on, from
+   * `assignedFileIds()`. Every other row is de-emphasised so "mine" is obvious
+   * in a project with many files — but only while this set is non-empty, so a
+   * team that doesn't assign, and a member with nothing assigned yet, both see
+   * an ordinary file list instead of a wall of grey.
+   *
+   * Omit it (or pass an empty set) to switch the treatment off entirely.
+   */
+  assignedFileIds?: ReadonlySet<string>
   /** Opens the Segmentation dialog for the given file (rendered by the caller). */
   onSegmentation?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
@@ -69,15 +165,56 @@ interface Props {
   canExportByOrgPolicy?: boolean
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
+  /**
+   * AQU-1531: lets another surface put the keyboard cursor in the filter box —
+   * the Agent workbench's "Choose file" button, whose only other effect (show
+   * the Files panel) is invisible when the panel is already showing.
+   */
+  filterFocus?: FileFilterFocusHandle
+  /**
+   * AQU-1569: whether this member may give the project's files a hand-placed
+   * order. PROJECT_LEAD+ — a reorder rewrites the sidebar everyone reads.
+   *
+   * False withholds the affordances entirely (no grip, no Move up/down, no
+   * Reset order) rather than letting them fail on the server, which is what
+   * the acceptance criterion asks for and what stops a contributor wedging
+   * the outbox on a guaranteed 403.
+   */
+  canReorderFiles?: boolean
+  /**
+   * Persist a batch of hand-placed positions. Called with the output of
+   * `planFileMove` / `planFileNudge` / `planFileOrderReset`, never with
+   * positions computed here — the arithmetic lives in one tested module.
+   */
+  onReorderFiles?: (writes: SortIndexWrite[]) => void
+  /**
+   * AQU-1702: move a file into a DIFFERENT corpus group — the group change
+   * and the slot inside the new group, which are two events (`file.corpus.set`
+   * and `file.reorder`) and have to land together or the file appears to jump
+   * somewhere nobody dropped it.
+   *
+   * Omitting it leaves a cross-group drag refused, the way it was before this
+   * existed, rather than silently dropping half the move.
+   */
+  onMoveFileToGroup?: (move: {
+    fileId: string
+    /** Null clears the marker back to Ungrouped. */
+    corpusMarker: string | null
+    writes: SortIndexWrite[]
+  }) => void
 }
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
-  targetLang = "",
+  assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
+  filterFocus,
+  canReorderFiles = false,
+  onReorderFiles,
+  onMoveFileToGroup,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -88,7 +225,21 @@ export function ExpandableFileList({
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+  // AQU-1531: the dock mounts only the active panel, so a "Choose file" click
+  // that opens this panel can only be answered from here, once the box exists.
+  const filterInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!filterFocus) return
+    filterFocus.register(() => filterInputRef.current?.focus())
+    return () => filterFocus.register(null)
+  }, [filterFocus])
   const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
+  // AQU-894: see shouldDimUnassigned — false is the state that leaves every
+  // row alone, and it is what an unassigned caller and a non-assigning team
+  // both land in without either of them configuring anything. An omitted prop
+  // collapses into the same "nothing assigned" case rather than a second one.
+  const assigned = assignedFileIds ?? EMPTY_ASSIGNED
+  const dimUnassigned = shouldDimUnassigned(assigned)
 
   // AQU-1326: this prefetch is deliberately eager, but on a file OPEN it lands
   // just ahead of the cell stream and takes a slot from it — the sidebar's
@@ -117,6 +268,86 @@ export function ExpandableFileList({
     const labels = new Set(groupByCorpus(files).map((g) => g.label))
     return labels.has("OT") && labels.has("NT")
   }, [files])
+  // AQU-1569 — hand-placed file order.
+  //
+  // Deliberately OFF while the filter box has text. `planFileMove` positions a
+  // file within the list it is given, and under a filter that list is a subset:
+  // a renumber computed over it would stamp indices that push every hidden file
+  // of the group to the end. Reordering a list you can only partly see is also
+  // not a thing anyone means to do.
+  const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
+  // AQU-1702: a cross-group drag writes the group AND the slot, so it needs
+  // the handler that can do both. Without it the gesture stays refused.
+  const crossGroupEnabled = reorderEnabled && onMoveFileToGroup !== undefined
+  const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
+  const [drop, setDrop] = useState<DropPreview | null>(null)
+  const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
+
+  function endDrag() {
+    setDrag(null)
+    setDrop(null)
+  }
+
+  function submit(writes: SortIndexWrite[]) {
+    if (writes.length > 0) onReorderFiles?.(writes)
+  }
+
+  /**
+   * What a cross-group drop would write, or null when this list cannot do one
+   * at all (no handler, or the drag left the file list). The arithmetic and
+   * the refusal both come from `planFileRegroup`, so the preview under the
+   * pointer and the write on release are the same decision.
+   */
+  function planRegroup(
+    resolution: Extract<SidebarFileDrop, { kind: "regroup" }>,
+  ): FileRegroupPlan | null {
+    if (!crossGroupEnabled) return null
+    const file = files.find((f) => f.id === resolution.fileId)
+    const target = groups.find((group) => group.label === resolution.group)
+    if (!file || !target) return null
+    return planFileRegroup({
+      file,
+      targetGroup: target.label,
+      targetFiles: target.files.filter((f) => f.id !== file.id),
+      toPosition: resolution.toPosition,
+    })
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    const group = readSidebarGroup(event.active.data.current)
+    if (group === null) return
+    setDrag({ fileId: String(event.active.id), group })
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const resolution = resolveSidebarFileDrop(event.active, event.over)
+    const next = previewDrop(resolution, planRegroup)
+    setDrop((current) => sameDropPreview(current, next) ? current : next)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const resolution = resolveSidebarFileDrop(event.active, event.over)
+    endDrag()
+    if (resolution.kind === "regroup") {
+      const plan = planRegroup(resolution)
+      // A refusal has already said why, under the pointer. Writing nothing
+      // is the whole point of it.
+      if (plan === null || !plan.ok) return
+      onMoveFileToGroup?.({
+        fileId: resolution.fileId,
+        corpusMarker: plan.corpusMarker,
+        writes: plan.writes,
+      })
+      return
+    }
+    if (resolution.kind !== "move") return
+    const target = groups.find((group) => group.label === resolution.group)
+    if (!target) return
+    submit(planFileMove(target.files, resolution.fileId, resolution.toPosition))
+  }
+
+  const draggedName = drag ? files.find((file) => file.id === drag.fileId)?.name ?? "" : ""
+
   const groupEls = useRef(new Map<string, HTMLDivElement>())
   const visibleGroupLabels = useMemo(() => new Set(groups.map((g) => g.label)), [groups])
   function jumpToGroup(label: string) {
@@ -132,6 +363,7 @@ export function ExpandableFileList({
             <SearchIcon />
           </InputGroupAddon>
           <InputGroupInput
+            ref={filterInputRef}
             type="text"
             role="searchbox"
             name="aquilla-file-filter-query"
@@ -185,6 +417,14 @@ export function ExpandableFileList({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <FileReorderDnd
+          enabled={reorderEnabled}
+          overlay={draggedName ? <FileDragPreview name={draggedName} /> : null}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={endDrag}
+        >
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
@@ -205,10 +445,66 @@ export function ExpandableFileList({
             const canEditCorpus =
               showHeader && group.label !== "Ungrouped" && onRenameCorpus !== undefined && !group.derived
             const isEditingCorpus = editingCorpus === group.label
+            // AQU-1569: a group of one has nothing to reorder INSIDE it, and
+            // "Reset order" only means something once a file in it has been
+            // placed. AQU-1702: its one file can still be dragged OUT, so the
+            // grip is offered whenever there is another group to drag it to.
+            const canReorderGroup = reorderEnabled && group.files.length > 1
+            const canDragFromGroup =
+              canReorderGroup || (crossGroupEnabled && groups.length > 1)
+            const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
+            // Every group is a slotted drop target while reordering is on —
+            // including a group of one, which a file from elsewhere can land
+            // above or below.
+            const rowsSortable = reorderEnabled
+            const preview = drop?.group === group.label ? drop : null
+            const dropState: GroupDropState =
+              preview === null ? null : preview.refusal ? "refused" : "target"
+            const dropMessage = preview === null ? null
+              : preview.refusal === "derived-group"
+                ? t("nav.fileList.regroupStaysInGroup", {
+                    name: draggedName,
+                    group: preview.landsIn ?? "",
+                  })
+                : preview.refusal === "unsupported"
+                  ? t("nav.fileList.reorderWrongGroup")
+                  : t("nav.fileList.regroupHint", { name: draggedName, group: displayLabel })
+            // A project whose files are all ungrouped shows no header
+            // (showHeader is false), but its one group can still be given an
+            // order — so the control cannot live only inside the header, or
+            // that project would have no way back to the automatic order.
+            const resetOrderButton = (
+              <AppTooltip content={t("nav.fileList.resetOrder", { group: displayLabel })} side="right">
+                <button
+                  type="button"
+                  className="rounded-md p-0.5 transition-colors hover:text-foreground"
+                  // Confirmed before it runs: the hand-placed order is work,
+                  // it is shared with the whole project, and clearing it
+                  // cannot be undone from here.
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setResetGroup({
+                      label: group.label,
+                      displayLabel,
+                      writes: planFileOrderReset(group.files),
+                    })
+                  }}
+                  aria-label={t("nav.fileList.resetOrder", { group: displayLabel })}
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </button>
+              </AppTooltip>
+            )
             return (
-              <div
+              // The group is the drop boundary: dropping a file inside it
+              // reorders, dropping it on another group moves it there
+              // (AQU-1702). "Move to corpus…" is the same move without a drag.
+              <CorpusGroupFrame
                 key={group.label}
-                ref={(el) => {
+                droppable={reorderEnabled}
+                label={group.label}
+                dropState={dropState}
+                groupRef={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
                 }}
@@ -262,27 +558,62 @@ export function ExpandableFileList({
                         </button>
                       </AppTooltip>
                     )}
+                    {canResetGroup && !isEditingCorpus && resetOrderButton}
                   </div>
                 )}
+                {!showHeader && canResetGroup && (
+                  <div className="flex justify-end px-1 pb-1 text-[10px] text-muted-foreground">
+                    {resetOrderButton}
+                  </div>
+                )}
+                {dropMessage !== null && (
+                  // What the drop will do, in words — the ring alone cannot
+                  // say "this one is refused, and here is why", and a drop
+                  // that silently does nothing is indistinguishable from a
+                  // drop that failed. Shown even on a collapsed group, where
+                  // there are no rows to carry the message otherwise.
+                  <p
+                    role="status"
+                    className="mx-1 mb-1 rounded-md bg-muted px-2 py-1 text-[10px] leading-snug text-muted-foreground"
+                  >
+                    {dropMessage}
+                  </p>
+                )}
                 {!isCollapsed && (
-                  <div className="space-y-0.5">
-                    {group.files.map((file) => {
+                  <GroupFileRows
+                    sortable={rowsSortable}
+                    label={group.label}
+                    fileIds={group.files.map((file) => file.id)}
+                  >
+                    {group.files.map((file, position) => {
                       const canExpand = fileHasSections(file)
                         || (file.id === activeFileId && hasActiveChapters === true)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
+                      // Not while renaming: the row holds a text input, and a
+                      // drag ancestor takes the pointer away from selecting inside it.
+                      const isDraggable = canDragFromGroup && !isEditing
                       return (
-                        <div
+                        <FileListRow
                           key={file.id}
-                          onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
-                          onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          sortable={rowsSortable}
+                          id={file.id}
+                          group={group.label}
+                          draggable={isDraggable}
+                          handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
+                          insertBefore={preview !== null && preview.refusal === null && preview.toPosition === position}
                         >
+                          <div
+                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                          >
                           <FileRow
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}
                             expandable={canExpand}
                             progress={fileProgress.get(file.id)}
+                            unassigned={dimUnassigned && !assigned.has(file.id)}
                             hasSuggestion={suggestionFileIds.has(file.id)}
                             editing={isEditing}
                             onEditCommit={(name) => {
@@ -299,11 +630,6 @@ export function ExpandableFileList({
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
-                            onExportSource={
-                              canExportSourceFile(file, canExportByOrgPolicy)
-                                ? () => { void exportFile(file) }
-                                : undefined
-                            }
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)
                                 ? () => { void downloadImportedOriginal({
@@ -316,6 +642,12 @@ export function ExpandableFileList({
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
+                            reorder={canReorderGroup ? {
+                              onUp: () => submit(planFileNudge(group.files, file.id, -1)),
+                              onDown: () => submit(planFileNudge(group.files, file.id, 1)),
+                              canUp: position > 0,
+                              canDown: position < group.files.length - 1,
+                            } : undefined}
                           />
                           {isExpanded && (
                             <FileSectionGrid
@@ -339,26 +671,48 @@ export function ExpandableFileList({
                               }}
                             />
                           )}
-                        </div>
+                          </div>
+                        </FileListRow>
                       )
                     })}
-                  </div>
+                  </GroupFileRows>
                 )}
-              </div>
+              </CorpusGroupFrame>
             )
           })}
         </div>
+        </FileReorderDnd>
       </div>
+      {/* AQU-1569: clearing a group's hand-placed order is shared and cannot be
+          undone from here, so it asks first. */}
+      <AlertDialog
+        open={resetGroup !== null}
+        onOpenChange={(open) => { if (!open) setResetGroup(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("nav.fileList.resetOrderTitle", { group: resetGroup?.displayLabel ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("nav.fileList.resetOrderDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const pending = resetGroup
+                setResetGroup(null)
+                if (pending) submit(pending.writes)
+              }}
+            >
+              {t("nav.fileList.resetOrderConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
-
-  async function exportFile(file: FileReference) {
-    await exportSourceFile({
-      projectId,
-      file,
-      getToken: getTokenForFile,
-      targetLang,
-    })
-  }
 
 }

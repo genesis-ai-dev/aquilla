@@ -178,9 +178,13 @@ export interface ServerLinkUpstreamChanged {
   untilSeq: number
   /** Files touched by the batch (uncapped — batches are already request-scoped). */
   fileIds: string[]
-  /** Cell ids touched by the batch, capped (see route.ts) — enough to hint a
+  /** Cell ids touched by the batch, capped (see link-notify.ts) — enough to hint a
    *  targeted refetch without growing the frame unbounded for big imports. */
   cellIds: string[]
+  /** AQU-1545: the batch created or renamed a file, so after syncing the
+   *  client must re-read the project's file list, not just the open file's
+   *  cells. Absent from older workers — read as false. */
+  filesChanged?: boolean
 }
 /**
  * Slice D2: relay of contextual-pipeline activity (run state / scene / span
@@ -193,7 +197,19 @@ export interface ServerContextualActivity {
   project: string
   frame: ContextualFrame
 }
+/**
+ * Reply to a client `ping`, sent to that socket only. Liveness for the
+ * client: a socket that stops receiving pongs is half-open (a proxy, NAT or
+ * sleeping laptop dropped one leg) and must be replaced — without this the
+ * client keeps a dead socket forever and silently misses every broadcast.
+ */
+export interface ServerPong {
+  t: "pong"
+  /** Echo of the ping's `ts`, when it sent one. */
+  ts?: number
+}
 export type ProjectDoServerMessage =
+  | ServerPong
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
@@ -266,7 +282,13 @@ export interface ClientPresenceUpdate {
   viewingCell?: string | null
   selection?: PresenceSelection | null
 }
+/** Client heartbeat; answered with `pong` (see ServerPong). */
+export interface ClientPing {
+  t: "ping"
+  ts?: number
+}
 export type ProjectDoClientMessage =
+  | ClientPing
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
@@ -287,6 +309,9 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   if (!obj || typeof obj !== "object") return null
   const m = obj as Record<string, unknown>
   const t = m.t
+  if (t === "ping") {
+    return typeof m.ts === "number" && Number.isFinite(m.ts) ? { t: "ping", ts: m.ts } : { t: "ping" }
+  }
   if (t === "focus.claim") {
     if (typeof m.cellId !== "string") return null
     return {
@@ -438,6 +463,18 @@ export function presenceSnapshot(presence: ReadonlyMap<string, PresenceState>): 
 
 function presenceDiff(user: PresenceState): ServerPresenceDiff {
   return { t: "presence.diff", user: stripPresenceDraft(user) }
+}
+
+/**
+ * AQU-1162: the `connId` a presence frame describes, or `undefined` for frames
+ * that aren't about one connection's presence. Callers use it to skip the
+ * socket the frame is about — a client can't act on its own presence (every
+ * consumer filters self rows back out), so echoing it is pure fan-out cost.
+ */
+export function presenceFrameOwnerConnId(msg: ProjectDoServerMessage): string | undefined {
+  if (msg.t === "presence.diff") return msg.user.connId
+  if (msg.t === "presence.draft") return msg.connId
+  return undefined
 }
 
 function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
@@ -716,6 +753,41 @@ export function applyDisconnect(
   }
   if (hadPresence) emit.push({ t: "presence.left", userId, connId })
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
+}
+
+/**
+ * AQU-1374: reconcile the presence roster against the DO's live sockets.
+ *
+ * Presence rows are created at handshake and removed by applyDisconnect, which
+ * only runs when the socket's `close`/`error` event fires. A connection that
+ * dies without one — a sleeping laptop, a dropped mobile network, a tunnel
+ * killed mid-flight — leaves its row behind forever, because nothing else ever
+ * revisits the map. The client reconnects under a FRESH connId (see
+ * ws-reconciler's `?connId=`, generated per socket session), so each silent
+ * drop adds a row rather than replacing one: one person in one tab was showing
+ * up as six "viewing" peers to everyone else on the project.
+ *
+ * Every row is keyed by the connId of the socket that created it, so a row
+ * whose connId no longer has a live connection is definitively orphaned. That
+ * makes this exact rather than heuristic — unlike a `ts`-based TTL, which would
+ * evict a live but idle user, since the client sends `presence.update` only on
+ * change and has no heartbeat.
+ *
+ * Emits `presence.left` per dropped row, the same frame applyDisconnect sends,
+ * so `PresenceStore.applyPresenceLeft` removes the peer with no client change.
+ */
+export function sweepOrphanedPresence(
+  presence: ReadonlyMap<string, PresenceState>,
+  liveConnIds: ReadonlySet<string>,
+): { presence: Map<string, PresenceState>; emit: ProjectDoServerMessage[] } {
+  const nextPresence = clone(presence)
+  const emit: ProjectDoServerMessage[] = []
+  for (const [connId, cur] of nextPresence) {
+    if (liveConnIds.has(connId)) continue
+    nextPresence.delete(connId)
+    emit.push({ t: "presence.left", userId: cur.userId, connId })
+  }
+  return { presence: nextPresence, emit }
 }
 
 /**

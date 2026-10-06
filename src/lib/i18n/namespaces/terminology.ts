@@ -66,6 +66,12 @@ export const terminology = defineNamespace({
     "terminology.editor.addTerm": "Add term",
     "terminology.editor.addTermDescription":
       "Create a source term and its preferred rendering for this project terminology.",
+    // AQU-872: the same form, seen by someone who may suggest a term but not
+    // approve one. Mirrors `terminology.addConcept.approveNoPermissionHint` on
+    // the in-editor popover, which has said this since AQU-1006.
+    "terminology.editor.addTermSuggestionDescription":
+      "Saved as a suggestion for review. Suggestions are not checked against " +
+      "translations until someone with termbase permission approves them.",
     "terminology.editor.sourceTermLabel": "Source term",
     "terminology.editor.sourceTermPlaceholder": "New source term…",
     "terminology.editor.renderingLabel": "Rendering",
@@ -173,10 +179,27 @@ export const terminology = defineNamespace({
     // reset button reuses onboarding.checklist.aiInstructions.resetToDefault.
     "terminology.livingMemory.section.brief.title": "Brief",
     "terminology.livingMemory.section.brief.description":
-      "Audience, purpose, and scope of this translation",
+      "Optional — who this translation is for and what it must achieve. The AI " +
+      "reads it as context, not as its instructions.",
     "terminology.livingMemory.section.brief.statusNone": "Not started",
     "terminology.livingMemory.section.brief.statusDraft": "Draft",
     "terminology.livingMemory.section.brief.statusComplete": "Complete",
+    // AQU-1672: the status is DERIVED (briefStatus()) and there is nothing to
+    // approve — a user who had just generated a summary read the permanent
+    // "Draft" badge as an unfinished step blocking the AI. Each status says
+    // what it means for the draft prompts, so the badge stops reading as a
+    // pending action.
+    "terminology.livingMemory.section.brief.statusNoneExplainer":
+      "Optional for translating by hand. Autopilot will not start until at least " +
+      "one question is answered.",
+    "terminology.livingMemory.section.brief.statusDraftExplainer":
+      "Already in force — the AI drafts from every answer saved here, and this " +
+      "brief satisfies Autopilot’s start check. “Draft” only means some " +
+      "questions are unanswered or the summary predates your latest edit; there " +
+      "is nothing to approve.",
+    "terminology.livingMemory.section.brief.statusCompleteExplainer":
+      "Every question is answered and the summary matches your latest edit. The " +
+      "AI drafts from this brief.",
     "terminology.livingMemory.section.instructions.description":
       "How the AI should behave when drafting, and the default prediction prompt",
     "terminology.livingMemory.section.instructions.entryCount": plural({
@@ -374,7 +397,10 @@ export const terminology = defineNamespace({
     "terminology.termDetail.verdictNa": "n/a",
     "terminology.termDetail.verdictEnforced": "enforced",
     "terminology.termDetail.verdictInfringed": "infringed",
-    "terminology.termDetail.noOccurrences": "No occurrences found in the loaded cells.",
+    "terminology.termDetail.noOccurrences": "No occurrences of this term in the project.",
+    "terminology.termDetail.loadMore": "Load more occurrences",
+    "terminology.termDetail.atLeastCount": "At least {count} occurrences",
+    "terminology.termDetail.scanSuggestions": "Look through the project for suggested renderings",
     "terminology.termDetail.columnRef": "Ref",
     "terminology.termDetail.loadingExamples": "Loading examples…",
     "terminology.termDetail.addRenderingPlaceholder": "Add rendering…",
@@ -455,16 +481,20 @@ export const terminology = defineNamespace({
       },
     ),
     "terminology.violations.description":
-      "Terminology infractions derived on read over the loaded project cells, grouped " +
-      "by concept. Missing-approved = the source bears the concept but the target has " +
-      "no approved rendering. Forbidden-present = a forbidden rendering appears in the " +
-      "target.",
+      "Terminology infractions for this project, grouped by concept. Missing-approved " +
+      "= the source bears the concept but the target has no approved rendering. " +
+      "Forbidden-present = a forbidden rendering appears in the target.",
+    "terminology.violations.truncated":
+      "This list stopped before the end of the project.",
+    "terminology.editor.suggestFailed": "Could not look through the project. Try again.",
     "terminology.violations.emptyTitle": "No terminology violations.",
     "terminology.violations.emptyDescriptionPre": "Only",
     "terminology.violations.emptyDescriptionPost":
       "concepts with renderings are enforced — set a concept's status to approved to " +
       "start checking.",
     "terminology.violations.kindMissing": "missing",
+    "terminology.violations.unnamedCell": "Untitled cell",
+    "terminology.violations.inFile": "In {file}",
     "terminology.violations.missingCount": plural({
       one: "{count} missing",
       other: "{count} missing",
@@ -571,7 +601,7 @@ export const terminology = defineNamespace({
     "terminology.match.optionsLabel": "Matching options",
     "terminology.match.foldMarks": "Ignore vowel marks and accents",
     "terminology.match.affixes": "Allow prefixes and suffixes",
-    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.caseSensitive": "Match case",
     "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
     "terminology.match.addFormLabel": "Add form",
     "terminology.match.addFormPlaceholder": "Another spelling of this term…",
@@ -996,6 +1026,13 @@ export const terminology = defineNamespace({
           "concept's approved/forbidden renderings; {count} is that count.",
         placeholders: { count: "Number of occurrences that violate the concept's renderings." },
       },
+      "terminology.termDetail.atLeastCount": {
+        description:
+          "Stat line on the term detail header, shown in place of the exact occurrence " +
+          "count when the server scan stopped before the end of the project; {count} is " +
+          "the occurrences found so far, so the real total is that or more.",
+        placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
+      },
       "terminology.reviewQueue.approveAria": {
         description:
           "Accessible name for the checkmark button approving a draft concept; {term} " +
@@ -1050,6 +1087,13 @@ export const terminology = defineNamespace({
           total: "Total infraction count across every concept, already formatted.",
           count: "Number of distinct concepts with at least one violation (the plural selector).",
         },
+      },
+      "terminology.violations.inFile": {
+        description:
+          "Tooltip and screen-reader text on the file affordance of one infringing-cell " +
+          "row in the Violations inbox, naming the file the cell lives in; {file} is the " +
+          "user's own file name (not translated).",
+        placeholders: { file: "The project file's own name, verbatim (not translated)." },
       },
       "terminology.violations.missingCount": {
         description:

@@ -113,16 +113,19 @@ describe('file_section_progress projection', () => {
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     expect(await rows('file_section_progress')).toHaveLength(4)
 
+    // c3 loses its reference. It sits below c2 in the file — the anchor the
+    // editor orders by — so since AQU-1493 it counts in c2's chapter.
     await pg.query(
-      `UPDATE cells SET canonical_ref = NULL
+      `UPDATE cells SET canonical_ref = NULL, anchor_cell_id = 'c2'
         WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c3' AND side = 'source'`,
       [PROJECT, FILE],
     )
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
     // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
-    const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
+    const projected = await rows<{ scope: string; section_key: string; total_count: number }>('file_section_progress')
     expect(projected).toHaveLength(3)
+    expect(projected.find((row) => row.section_key === 'GEN 1')?.total_count).toBe(3)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
     expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
@@ -139,7 +142,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -161,7 +164,7 @@ describe('GET file progress', () => {
     await pg.query(
       `INSERT INTO cell_audio
          (project_id, file_id, cell_id, audio_id, slot, url, event_id, created_ts,
-          selected, deleted, approved, duration_ms)
+          selected, deleted, validator_count, duration_ms)
        VALUES ($1,$2,'c1','a1','take','u1','e1',1, 1,0,1,1000),
               ($1,$2,'c3','a2','take','u2','e2',1, 1,0,0,1000)`,
       [PROJECT, FILE],
@@ -176,7 +179,7 @@ describe('GET file progress', () => {
     expect(body.file).toMatchObject({ audioCount: 2, audioValidatedCount: 1 })
     const gen1 = body.sections.find((section) => section.key === 'GEN 1')!
     const gen2 = body.sections.find((section) => section.key === 'GEN 2')!
-    // GEN 1 holds the approved take, GEN 2 the unapproved one.
+    // GEN 1 holds the validated take, GEN 2 the unvalidated one.
     expect(gen1).toMatchObject({ audioCount: 1, audioValidatedCount: 1 })
     expect(gen2).toMatchObject({ audioCount: 1, audioValidatedCount: 0 })
   })
@@ -191,6 +194,43 @@ describe('GET file progress', () => {
     expect(response.status).toBe(403)
   })
 
+  // AQU-490, found on the live board: a chapter grid read 0 recorded and 0
+  // validated for a whole book whose rows were correct in the database. The
+  // client cache behind that grid is DURABLE and per account, so a false 304
+  // is not a stale second — it lasts until someone clears IndexedDB. Every
+  // recompute that fills in a column without emitting an event looks like
+  // this: a rebuild, a rollout backfill, a manual repair.
+  it('busts the cache when a backfill rewrites the rows without moving the revision', async () => {
+    const { db } = await fixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress`
+    const read = async (ifNoneMatch?: string) => (await handleProgressReadRequest(new Request(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(ifNoneMatch ? { 'If-None-Match': ifNoneMatch } : {}),
+      },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+
+    const first = await read()
+    const cached = first.headers.get('ETag')!
+    // Nothing has changed: the cache is honoured, which is the whole point of
+    // the key and must keep working.
+    expect((await read(cached)).status).toBe(304)
+
+    // The backfill. No event is written, so `revision` cannot move — only the
+    // projection's own clock does.
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 20_000))
+    const after = await read(cached)
+    expect(after.status).toBe(200)
+    expect(after.headers.get('ETag')).not.toBe(cached)
+    expect(after.headers.get('ETag')).toContain(':u20000:')
+    // And the revision really did stay put — otherwise this test would pass
+    // for the wrong reason and prove nothing about the clock.
+    expect(cached).toContain(':7:')
+    expect(after.headers.get('ETag')).toContain(':7:')
+  })
+
   it('invalidates a cached fallback when backfill rows appear at the same revision', async () => {
     const { db } = await fixture()
     const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
@@ -198,19 +238,118 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s3"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:u0:v2:va1:f:s4"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:f:s3"',
+        'If-None-Match': '"progress:file-progress:7:u0:v2:va1:f:s4"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
+  })
+
+  it('reports an empty lane as unfilled when only another lane has translations', async () => {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [{ id: PROJECT, name: 'Genesis', org_id: 1 }],
+      project_settings: [{
+        project_id: PROJECT,
+        settings: JSON.stringify({ countStructuralCells: false, validationCount: 1 }),
+        version: 1,
+      }],
+      lanes: [
+        { id: 'lane-default', project_id: PROJECT, role: 'target', name: 'Spanish', legacy_tag: '' },
+        { id: 'lane-fr', project_id: PROJECT, role: 'target', name: 'French', legacy_tag: 'fr' },
+      ],
+      files: [{
+        id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event',
+        cell_count: 10, structural_cell_count: 2,
+        filled_count: 8, structural_filled_count: 4,
+        approved_count: 3, structural_approved_count: 1,
+      }],
+      file_section_progress: [{
+        project_id: PROJECT, file_id: FILE, scope: 'file', section_key: '',
+        target_lang: 'fr', lane_id: 'lane-fr',
+        total_count: 10, structural_count: 2,
+        filled_count: 8, structural_filled_count: 1,
+        validator_histogram: { '1': 3 },
+        structural_validator_histogram: { '1': 1 },
+        revision: 3, updated_at: 3,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const read = async (lane: string) => {
+      const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress${lane}`
+      const response = (await handleProgressReadRequest(new Request(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+      expect(response.status).toBe(200)
+      return response.json() as Promise<FileProgressResponse>
+    }
+
+    const empty = await read('')
+    expect(empty.source).toBe('file-counter-fallback')
+    expect(empty.file).toMatchObject({ totalCount: 8, filledCount: 0, validatedCount: 0 })
+
+    const french = await read('?lane=fr')
+    expect(french.source).toBe('projection')
+    expect(french.file).toMatchObject({ totalCount: 8, filledCount: 7, validatedCount: 2 })
+  })
+
+  it('uses the files counters when a single-lane project has no progress rows', async () => {
+    const counters = {
+      cell_count: 10, structural_cell_count: 2,
+      filled_count: 8, structural_filled_count: 4,
+      approved_count: 3, structural_approved_count: 1,
+    }
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [
+        { id: PROJECT, name: 'Genesis', org_id: 1 },
+        { id: 'proj-none', name: 'Bare', org_id: 1 },
+      ],
+      project_settings: [
+        {
+          project_id: PROJECT,
+          settings: JSON.stringify({ countStructuralCells: false, validationCount: 2 }),
+          version: 1,
+        },
+        {
+          project_id: 'proj-none',
+          settings: JSON.stringify({ countStructuralCells: false, validationCount: 2 }),
+          version: 1,
+        },
+      ],
+      lanes: [
+        { id: 'lane-default', project_id: PROJECT, role: 'target', name: 'Spanish', legacy_tag: '' },
+      ],
+      files: [
+        { id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event', ...counters },
+        { id: 'file-none', project_id: 'proj-none', name: 'Bare', event_id: 'file-none', ...counters },
+      ],
+    })
+    const read = async (projectId: string, fileId: string) => {
+      const token = await makeTestToken(SECRET, { projectId, fileId })
+      const response = (await handleProgressReadRequest(new Request(
+        `https://worker/api/v1/projects/${projectId}/files/${fileId}/progress`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+      expect(response.status).toBe(200)
+      return response.json() as Promise<FileProgressResponse>
+    }
+    // Parked at the threshold (2): 3 approved minus 1 structural. No lanes
+    // yet is the same case as the one lane above.
+    const oneLane = await read(PROJECT, FILE)
+    expect(oneLane.source).toBe('file-counter-fallback')
+    expect(oneLane.file).toMatchObject({ totalCount: 8, filledCount: 4, validatedCount: 2 })
+    const noLanes = await read('proj-none', 'file-none')
+    expect(noLanes.source).toBe('file-counter-fallback')
+    expect(noLanes.file).toMatchObject({ totalCount: 8, filledCount: 4, validatedCount: 2 })
   })
 
   it('returns compact verse state, with the cell id, only when a chapter is explicitly requested', async () => {
@@ -256,12 +395,23 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:s3"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:u100:v2:va1:s6"')
 
-    const stale = (await handleProgressReadRequest(new Request(url, {
-      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag.replace(':s3', '') },
-    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(stale.status).toBe(200)
+    const notHonoured = async (candidate: string) => (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': candidate },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!.status
+
+    // A client from before shape markers existed at all.
+    expect(await notHonoured(etag.replace(':s6', ''))).toBe(200)
+    // AQU-1493: nor one from before the list carried its unnumbered lines,
+    expect(await notHonoured(etag.replace(':s6', ':s4'))).toBe(200)
+    // nor one from before headings moved to the verse below them and were
+    // flagged `structural` rather than `unnumbered`.
+    expect(await notHonoured(etag.replace(':s6', ':s5'))).toBe(200)
+    // AQU-490: and one from the shape immediately before this, which is the
+    // live case at deploy. `take_signed` kept its name and its type and
+    // changed its question — nothing else in the key moves for that.
+    expect(await notHonoured('"progress:file-progress:GEN%201:7:v2:s3"')).toBe(200)
 
     const current = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag },
@@ -390,11 +540,12 @@ describe('structural aggregates (AQU-1083)', () => {
     endorsement_count: endorsements, word_count: value ? 1 : 0,
   })
 
-  /** A live take. `selected + approved` is what the projection calls validated. */
-  const take = (cellId: string, approved: boolean) => ({
+  /** A live dub take. AQU-490: a SELECTED dub with at least one vote is what
+      the projection calls validated, counted against the threshold on read. */
+  const take = (cellId: string, validated: boolean) => ({
     project_id: P, file_id: F, cell_id: cellId, audio_id: `a-${cellId}`,
     slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0,
-    approved: approved ? 1 : 0, event_id: `au-${cellId}`, created_ts: 3,
+    validator_count: validated ? 1 : 0, event_id: `au-${cellId}`, created_ts: 3,
   })
 
   /** GEN 1: two verses (one filled at 2 endorsements, one empty) plus a chapter
@@ -604,11 +755,11 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
       // not leave it at 3 over a denominator of 2.
       cell_audio: [
         { project_id: P, file_id: F, cell_id: 't1', audio_id: 'a-t1', slot: 'take',
-          url: 'local://t1.webm', selected: 1, deleted: 0, approved: 1, event_id: 'au-t1', created_ts: 3 },
+          url: 'local://t1.webm', selected: 1, deleted: 0, validator_count: 1, event_id: 'au-t1', created_ts: 3 },
         { project_id: P, file_id: F, cell_id: 'v1', audio_id: 'a-v1', slot: 'take',
-          url: 'local://v1.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v1', created_ts: 3 },
+          url: 'local://v1.webm', selected: 1, deleted: 0, validator_count: 0, event_id: 'au-v1', created_ts: 3 },
         { project_id: P, file_id: F, cell_id: 'v2', audio_id: 'a-v2', slot: 'take',
-          url: 'local://v2.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v2', created_ts: 3 },
+          url: 'local://v2.webm', selected: 1, deleted: 0, validator_count: 0, event_id: 'au-v2', created_ts: 3 },
       ],
     })
     await db.db.batch(fullProgressRecomputeStmts(db.db, P, F, 100))
@@ -667,6 +818,7 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
         structural_audio_count: 3, structural_audio_validated_count: 3 },
       1,
       false,
+      1,
     )).toMatchObject({ totalCount: 0, audioCount: 0, audioValidatedCount: 0 })
   })
 
@@ -717,7 +869,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
   })
   const take = (fileId: string, cellId: string, over: Record<string, unknown> = {}) => ({
     project_id: PROJECT, file_id: fileId, cell_id: cellId, audio_id: `take-${cellId}`,
-    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, approved: 0,
+    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, validator_count: 0,
     event_id: `aev-${cellId}`, created_ts: 3, ...over,
   })
   const file = (id: string, over: Record<string, unknown> = {}) =>
@@ -763,7 +915,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
         src('bible', 'v4', { canonical_ref: 'GEN 1:4' }), tgt('bible', 'v4', 'd', 1),
       ],
       cell_audio: [
-        take('bible', 'v1', { approved: 1 }),   // signed off
+        take('bible', 'v1', { validator_count: 1 }), // signed off
         take('bible', 'v2', { deleted: 1 }),    // a deleted take is no take
         take('bible', 'v3'),                    // recorded, not signed off
       ],
@@ -827,7 +979,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
       }),
       cell_audio: [
         take('ep-cues', 'q1'),                  // recorded, not signed off
-        take('ep-cues', 'q3', { approved: 1 }), // signed off
+        take('ep-cues', 'q3', { validator_count: 1 }), // signed off
       ],
     })
     expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'unrecorded', '')).toBe('s2')

@@ -754,6 +754,26 @@ describe("where a take is placed in the export", () => {
     expect(await placedSeconds(result.blob, "es_L0001_NO_CHARACTER.wav")).toBeCloseTo(10.1, 3)
   })
 
+  // 2026-09-29: the cut ran only beside the timestamp, on a timed line, so a
+  // take trimmed in the recorder on an untimed line exported its false start.
+  it("cuts a trimmed take on an untimed line too", async () => {
+    const untimed = cell({
+      id: "c1",
+      selectedAudioId: "a1",
+      attachments: {
+        a1: { url: "frontier-audio://a1.wav", type: "audio", durationMs: 1000, trimStartMs: 250 },
+      },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [untimed], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => secondLongWav(),
+    })
+    expect(result.untimed).toBe(1)
+    const entry = Object.keys((await JSZip.loadAsync(result.blob)).files).find((n) => n.endsWith(".wav"))!
+    expect(await dataBytesOf(result.blob, entry)).toBe(72_000)
+    expect(result.untrimmed).toBe(0)
+  })
+
   it("leaves an untrimmed take byte-for-byte as it was", async () => {
     const result = await exportAudioPerLine({
       cells: [trimmed({})], settings: SETTINGS, projectId: "p1", langCode: "es",

@@ -35,6 +35,16 @@ interface MockToolCall {
 }
 
 let callSeq = 0
+/**
+ * Separate from `callSeq` so every completion gets a distinct id even when it
+ * carries no tool call. `respond()` used to stamp `mock-${Date.now()}-${callSeq}`
+ * while only `toolCall()` advanced the counter — so a contextual run, whose
+ * nodes never emit tool calls, minted the SAME id for every response that
+ * landed inside one millisecond. That surfaced live as five identical ids in a
+ * run's seeded activity (2026-08-28 review). Ids that identify a thing must be
+ * minted by the thing that hands them out.
+ */
+let responseSeq = 0
 
 function toolCall(args: Record<string, unknown>): MockToolCall {
   return {
@@ -55,7 +65,7 @@ function namedToolCall(name: string, args: Record<string, unknown>): MockToolCal
 
 function respond(content: string | null, tool_calls?: MockToolCall[]) {
   return {
-    id: `mock-${Date.now()}-${callSeq}`,
+    id: `mock-${Date.now()}-${++responseSeq}`,
     choices: [
       {
         message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) },
@@ -433,7 +443,29 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   )
 }
 
+export function mockTranscription() {
+  return { text: "Mock transcription", words: [
+    { word: "Mock", start: 0, end: 0.25 },
+    { word: "transcription", start: 0.25, end: 0.5 },
+  ], usage: { cost: 0.0001, seconds: 1 } }
+}
+
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && req.url?.endsWith("/models?output_modalities=transcription")) {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: [
+      { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+    ] }))
+    return
+  }
+  if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
+    req.resume()
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(mockTranscription()))
+    })
+    return
+  }
   if (req.method === "GET" && (req.url === "/" || req.url === "/healthz")) {
     res.writeHead(200, { "Content-Type": "application/json" })
     res.end(JSON.stringify({ ok: true }))

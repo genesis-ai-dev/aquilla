@@ -51,6 +51,8 @@ function apiMap(): Record<string, unknown> {
       header: 'Authorization: Bearer aqk_...',
       note:
         'Same token for REST and MCP. Tokens are minted by a signed-in human at Preferences → Account → "API tokens" in the Aquilla app (or POST /api/v2/credentials on the identity host with a browser-session JWT — NOT with an aqk_ token). 401 means the token is missing, malformed, revoked, or expired.',
+      oauth:
+        'MCP hosts that run OAuth themselves (ChatGPT plugins, Claude, Codex) need no pasted token: the MCP endpoint\'s 401 carries a WWW-Authenticate resource_metadata URL (RFC 9728) naming the identity host as authorization server (authorization code + PKCE S256, clients identified by a client-metadata-document URL). The token it issues is an ordinary aqk_ credential.',
     },
     hosts: {
       thisHost: 'sync — everything under /api/v1/external/* (reads, artifacts, changesets, MCP) lives here.',
@@ -68,7 +70,7 @@ function apiMap(): Record<string, unknown> {
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
-      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, scope. Start here. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
+      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, access (read | write), scope. Start here — a read-only token learns it here rather than from a 403 on a plan it already built. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
       'GET /api/v1/external/orgs': 'List the organizations this credential covers (up to 100): { id, name, role, role_source }. See "orgScopedReads".',
       'GET /api/v1/external/orgs/:orgId/projects': 'List one org’s projects. An org outside the credential’s scope returns scope_denied.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100). Optional ?orgId= narrows to one org.',
@@ -95,10 +97,11 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory': 'What the copilot’s retrieval would inject for that cell’s draft: the brief plus the capped approved-memory index. Retrieval is project-scoped today (no per-cell narrowing) — the response says so in retrieval.scope.',
       'GET /api/v1/external/projects/:projectId/quality': 'Quality signals per file: health score (0-100), coverage (total/filled/validated cells + percentages) and the project rollup. Optional fileId=<id> to scope to one file, lane=<tag> for one target-language lane. Same numbers the in-app health ring and progress surfaces show.',
       'GET /api/v1/external/projects/:projectId/terms/consistency': 'Term-consistency drift: per active concept, how many occurrences used an approved rendering, which cells used which rendering, and which cells used none. Optional fileId=<id>, lane=<tag>, onlyDrift=1 (findings with flagged cells only). Runs the same scan as the in-app "Check file" pass.',
+      'GET /api/v1/external/projects/:projectId/terms': 'The project termbase: one entry per glossary concept with its conceptId, sourceTerm, renderings (preferred|admitted|forbidden), status (active|draft|deprecated), notes, caseSensitive and matchOptions, oldest first. Optional status=<one of those>, includeDeleted=1, limit + cursor. Same rows as the in-app Terminology page. Read it before writing a term: a second term.create for an existing sourceTerm does not merge, and matchOptions.forms is what makes a term match its inflected forms at all (matching is exact without it). Write via an EmitEvents changeset carrying term.* events.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',
-      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, LinkMedia, RenameFile, EmitEvents, PatchSettings, UpdateProjectSettings, CreateProject, CreateOrg, RenameProject, ArchiveProject, UnarchiveProject, InsertCell, DeleteCell, SplitCell, SetSource, SetTranscription, SetTiming, SetTrackOverride — call describe_command (MCP) or see docs/COMMAND-REGISTRY.md for per-kind params, floors, and sole-command rules. See "settings" below for the PatchSettings shape. CreateOrg needs an unscoped credential and takes only { name }; the :projectId in the path is just the changeset’s filing id (no project is created) and its receipt carries orgId.',
+      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, LinkMedia, RenameFile, EmitEvents, PatchSettings, UpdateProjectSettings, CreateProject, CreateOrg, RenameProject, ArchiveProject, UnarchiveProject, InsertCell, DeleteCell, SplitCell, HideCell, ShowCell, SetSource, SetTranscription, SetTiming, SetTrackOverride — call describe_command (MCP) or see docs/COMMAND-REGISTRY.md for per-kind params, floors, and sole-command rules. See "settings" below for the PatchSettings shape. CreateOrg needs an unscoped credential and takes only { name }; the :projectId in the path is just the changeset’s filing id (no project is created) and its receipt carries orgId.',
       'GET /api/v1/external/projects/:projectId/changesets/:id': 'Changeset status/summary/digest/receipt/approvalUrl.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
@@ -125,6 +128,14 @@ function apiMap(): Record<string, unknown> {
       endpoint: `GET ${EXTERNAL_ROOT}/skills/:name`,
       note:
         'A skill sequences EXISTING commands and routes; it adds no capability and stages nothing on its own. project-setup: intake template → one ProjectSetup command → one approval → verification receipt.',
+    },
+    accessCeiling: {
+      note:
+        'AQU-1242: every token carries an access ceiling alongside its autonomy mode. `write` is the original grant. `read` makes the whole API read-only: GET /me reports access: "read", and changeset prepare, changeset commit and artifact upload all answer 403 scope_denied, while reads, search, history and export work normally. It is a CEILING, never a grant — the owner’s live project role is still resolved on every call, so a read-only token can only narrow what its owner could already do.',
+      whyNotMode:
+        'Do not read `mode` as whether you may write. `mode` is the autonomy dial for writes that are already permitted (ask parks them at a human approval, act applies them); `access` is whether writing is possible at all. An ask-mode token still writes — with a human in the loop. A read-only token never does, in either mode.',
+      minting:
+        'Access is fixed when a human mints the token (Preferences → Account → "API tokens") and cannot be raised by any API call. An agent that needs to write must ask its human for a read-write token.',
     },
     orgScopedReads: {
       note:
@@ -195,14 +206,14 @@ function apiMap(): Record<string, unknown> {
         '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
       ],
       rules:
-        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — are writable in the RESTRICTIVE direction ONLY (AQU-1282): a write that TIGHTENS oversight stages like any other, a write that would LOOSEN it returns permission_denied naming the key in details.loosening, and the direction is re-checked against live settings at commit. GET /api/v1/external/commands/PatchSettings has the per-key direction table. UpdateProjectSettings (deprecated whole-blob replace) is still rejected outright if its blob would change any policy key.',
+        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — are writable in the RESTRICTIVE direction ONLY (AQU-1282): a write that TIGHTENS oversight stages like any other, a write that would LOOSEN it returns permission_denied naming the key in details.loosening, and the direction is re-checked against live settings at commit. GET /api/v1/external/commands/PatchSettings has the per-key direction table. UpdateProjectSettings (deprecated whole-blob replace) is still rejected outright if its blob would change any policy key.',
     },
     multiLanguage: {
       note:
         'A project can hold MULTIPLE target languages at once via target-language lanes. A lane is a language tag (e.g. "es", "pt") registered in the project settings array settings.targetLanes; every cell keeps one shared source plus one independent target per lane. Omitting the lane everywhere uses the default lane — single-language callers need no changes. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
       workflow: [
         `1. Register the lanes once: GET .../settings for the live version, then stage { "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> } — field-scoped, so the rest of the settings blob is untouched (see "settings" above).`,
-        '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed.',
+        '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed. The project\'s primary targetLanguage IS the default lane: omitting laneId and passing the primary (any spelling) both write the default row. A regional lane beside the primary (fr-CA in a French project) is its own lane and must be registered.',
         `3. Read per lane: GET .../files/:fileId/cells?lane=es returns source cells plus only that lane's target cells; omit lane for all lanes (each target row carries its targetLang).`,
         '4. Importing a file can seed several lanes at once: each PlanImport cell takes "variants": [{ "laneId": "es", "content": "..." }, { "laneId": "pt", "content": "..." }].',
       ],
@@ -227,7 +238,7 @@ function apiMap(): Record<string, unknown> {
       shape: '{ "error": { "code", "message", "details?" } }',
       codes: {
         permission_denied: '401/403 — bad token, or your live project role is below the operation’s minimum. Do not retry unchanged.',
-        scope_denied: '403 — credential’s org/project scope does not cover this resource.',
+        scope_denied: '403 — credential’s scope does not cover this: either its org/project scope excludes the resource, or it is a READ-ONLY credential (access: "read") and the call writes. Re-reading GET /me tells you which. Neither is retryable and neither is about your project role — a read-only refusal cannot be fixed by anything the agent does, only by a human minting a read-write token.',
         validation_failed: '400 — malformed request; fix per message, do not retry unchanged.',
         not_found: '404 — no such resource (or not visible to you).',
         plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset. details.status distinguishes "stale" (the plan no longer describes reality) from "superseded" (its end-state already exists — a human did the work; nothing to re-prepare).',

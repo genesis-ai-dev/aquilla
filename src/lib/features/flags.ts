@@ -58,6 +58,40 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     default: false,
     legacy: true,
   },
+  agentModes: {
+    labelKey: "agent.mode.flagLabel",
+    descriptionKey: "agent.mode.flagDescription",
+    // Default ON for the same reason as contextualTranslation: this gates
+    // DISCOVERY of the autonomy control, not autonomy itself. The stored mode
+    // is all-off until a human moves a switch, so a visible control costs
+    // nothing — while a hidden one would leave the react loop and the
+    // next-passage button findable only by someone who already knew.
+    default: true,
+  },
+  smartEdits: {
+    labelKey: "smartEdits.flagLabel",
+    descriptionKey: "smartEdits.flagDescription",
+    // Off until the replay eval (scripts/smart-edits-eval.ts) has been run on
+    // real project history and the display thresholds tuned from it. The tiers
+    // it gates are the edit memory (free) and a Jev check (fractions of a cent).
+    default: false,
+  },
+  harmonizer: {
+    labelKey: "harmonizer.flagLabel",
+    descriptionKey: "harmonizer.flagDescription",
+    // Off until checked against real passages: it asks Jev about every passage
+    // where a quotation is left open, and its suggestions sit beside smart
+    // edits in the editor (it rides the same passage request, so it also needs
+    // `smartEdits` on).
+    default: false,
+  },
+  smartEditsLlm: {
+    labelKey: "smartEdits.llmFlagLabel",
+    descriptionKey: "smartEdits.llmFlagDescription",
+    // Opt-in by design: an LLM suggestion spends real credits, so it is only
+    // ever offered to someone who switched this on.
+    default: false,
+  },
 }
 
 /**

@@ -8,6 +8,7 @@ import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glos
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -51,6 +52,37 @@ export function shouldSelfHealZeroFileLink(args: {
 }
 
 /**
+ * The zero-file self-heal itself, once `shouldSelfHealZeroFileLink` has said
+ * to fire. Pulled out of the effect so its three outcomes can be tested
+ * without mounting the workspace.
+ *
+ * AQU-1544: a failed attempt used to be dropped, leaving a linked project
+ * with an unexplained empty file list for whoever opened it — the person who
+ * linked it, or a teammate later. It is now parked in `link-seed-status`,
+ * which is what puts LinkSeedFailedBanner (and its "Try again") on screen.
+ * And when a link flow has ALREADY parked a failure for this project (the
+ * Import dialog and the create dialog each retry once before giving up), no
+ * further automatic attempt is made: it would only repeat the failure behind
+ * the banner's back.
+ */
+export async function selfHealZeroFileLink(args: {
+  projectId: string
+  jwt: string
+  triggerSync: (jwt: string, projectId: string) => Promise<boolean>
+  refresh: () => void
+}): Promise<"skipped" | "healed" | "failed"> {
+  const { projectId, jwt, triggerSync, refresh } = args
+  if (isLinkSeedFailed(projectId)) return "skipped"
+  const ok = await triggerSync(jwt, projectId)
+  if (ok) {
+    refresh()
+    return "healed"
+  }
+  markLinkSeedFailed(projectId)
+  return "failed"
+}
+
+/**
  * A deterministic check run describes ONE file's cells. If the user switches
  * files while the (async) run is in flight, its result must not be committed —
  * it would clobber the now-active file's state with the prior file's findings.
@@ -61,16 +93,6 @@ export function shouldApplyCheckResult(
   activeFileId: string | null,
 ): boolean {
   return resultFileId != null && resultFileId === activeFileId
-}
-
-/** Sidebar Agent rail click: focus the workbench only while it is the
- *  active center surface. A leftover Agent tab in the strip (after
- *  minimize / switching to a file) must not steal the click — that is
- *  dock mode again. */
-export function resolveSidebarAgentClick(
-  workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
 }
 
 /**
@@ -206,6 +228,7 @@ export function buildGlosserSeeds(args: {
       source: record.btText,
       target: record.forText || cell.translated,
       weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
     })
   }
 
@@ -283,4 +306,82 @@ export function nextPaintGate(
       || (!freshFile && input.cellCount > 0)
   if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
   return { file, sawLoad, open }
+}
+
+/**
+ * Everything a WebSocket reconnect must pull back (AQU-845, AQU-817).
+ *
+ * The per-project DO holds no durable state and never replays (AD-1), so every
+ * `event.applied` frame that lands while a client's socket is down is lost to
+ * that client permanently. A reopen is the only signal that such a gap may
+ * exist, so each broadcast-fed projection has to be re-read there or it stays
+ * stale until a full page reload.
+ *
+ * Comments were the projection this list forgot: AQU-845 wired cells, audit
+ * stats and file progress, but a comment frame missed during a redeploy, a DO
+ * eviction, a blip or a sleeping laptop left the reader's thread list frozen —
+ * the AQU-817 report of a contributor's comment never reaching another member
+ * in the same cell. Extracted so the fan-out is pinned by a test rather than
+ * living only inside the 11.5k-line shell's async connect effect.
+ */
+export interface ReconnectResyncTargets {
+  revalidateCells(): void
+  revalidateAuditStats(): void
+  invalidateProjectFileProgress(): void
+  /** AQU-817 — comments are broadcast-only too. */
+  refreshComments(): void | Promise<void>
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runReconnectResync(targets: ReconnectResyncTargets): void {
+  targets.revalidateCells()
+  targets.revalidateAuditStats()
+  targets.invalidateProjectFileProgress()
+  // useComments.refresh() resolves even on failure (it sets its own isError),
+  // but each leg is isolated anyway: one projection's transient read failure
+  // must not skip the others, and must not surface as an unhandled rejection.
+  void Promise.resolve(targets.refreshComments()).catch(() => {
+    // The next focus return or reconnect retries.
+  })
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}
+
+/**
+ * What a live-linked project re-reads after a push-triggered mirror sync
+ * (AQU-479's `link.upstream-changed`) has landed.
+ *
+ * The sync writes this project's events server-side without an
+ * `event.applied` broadcast, so nothing else tells this client what it
+ * changed. The open file's cells are always re-read (the existing QA-BUG-2
+ * step). AQU-1545 adds the rest: the sync recomputed the touched files'
+ * progress, so the cached figures are dropped and re-read — a hidden cell
+ * stops counting as work without a reload — and when a frame said the
+ * upstream created or renamed a file, the project is re-read so the file list
+ * shows it (the same re-read a same-project `file.*` frame triggers).
+ *
+ * Decided from the frames, never from what this client's own sync request
+ * reports it mirrored: the fold may have been run by another trigger (a second
+ * tab, a teammate in the same project, the file-open lazy pull), in which case
+ * this client's request is answered by an empty one and would refresh nothing.
+ */
+export interface PushedLinkSyncTargets {
+  revalidateCells(): void
+  refreshProject(): void
+  invalidateProjectFileProgress(): void
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runAfterPushedLinkSync(
+  outcome: { synced: boolean; filesChanged: boolean },
+  targets: PushedLinkSyncTargets,
+): void {
+  targets.revalidateCells()
+  if (!outcome.synced) return
+  if (outcome.filesChanged) targets.refreshProject()
+  targets.invalidateProjectFileProgress()
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
 }

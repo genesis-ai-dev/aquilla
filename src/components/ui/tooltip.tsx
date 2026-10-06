@@ -9,8 +9,6 @@ import { cn } from "@/lib/utils"
 type TooltipSide = "top" | "bottom" | "left" | "right"
 type TooltipAlign = NonNullable<TooltipPrimitive.Positioner.Props["align"]>
 
-const DEFAULT_TOOLTIP_DELAY = 600
-
 function TooltipProvider({
   delay = 0,
   ...props
@@ -78,17 +76,27 @@ function AppTooltip({
   content,
   side = "bottom",
   align = "center",
-  delay = DEFAULT_TOOLTIP_DELAY,
+  delay,
   disabled = false,
   className,
+  disabledTriggerClassName,
 }: {
   children: ReactElement
   content: ReactNode
   side?: TooltipSide
   align?: TooltipAlign
+  /** Per-tooltip open delay. Leave unset to inherit the provider's: Base UI
+   *  ≥1.8 lets a trigger's own delay win over its provider's (base-ui#5444),
+   *  so a default here would silently override App.tsx's provider. */
   delay?: number
   disabled?: boolean
   className?: string
+  /** Layout classes for the stand-in trigger that wraps a natively-disabled
+   *  child (see the note below). The wrapper defaults to `inline-flex`, which
+   *  is right for an icon button; a child that sizes itself against its parent
+   *  — `className="w-full"` — needs that width echoed here, or it collapses to
+   *  the wrapper's shrink-to-fit width. */
+  disabledTriggerClassName?: string
 }) {
   // Empty content → no tooltip chrome. Keep the early return: callers that
   // pass no content never toggle it, so remounting the child is fine.
@@ -105,9 +113,57 @@ function AppTooltip({
   // pass `disabled` through. Early-returning `children` remounts the trigger
   // — and if that trigger is a PopoverTrigger, the popover flashes at (0,0)
   // until the new anchor is measured.
+
+  // AQU-959 — a natively-disabled child cannot be the trigger.
+  //
+  // Base UI binds the tooltip's hover/focus listeners to the trigger element
+  // itself. A `disabled` element fires no pointer events at all in a real
+  // browser (and `buttonVariants` additionally sets
+  // `disabled:pointer-events-none`), so the explanation for WHY the control is
+  // greyed out — the only thing the user actually needs — could never open. A
+  // partner hit a silently dead "New voice" mid-demo and the call stalled until
+  // the host changed her role by hand.
+  //
+  // So keep the child exactly as the caller wrote it (still `disabled`: not
+  // clickable, not submittable) and let a wrapper span be the trigger. Hover
+  // lands on the wrapper, which the child cannot swallow precisely because it
+  // has no pointer events, and `tabIndex={0}` gives keyboard users the same
+  // sentence — a disabled button is not focusable, so without it they get
+  // nothing.
+  //
+  // ⚠️ Testing this: happy-dom and jsdom DO dispatch pointer events on disabled
+  // elements, so hovering a disabled button opens the tooltip with or without
+  // this wrapper. Assert that the trigger is not itself `[disabled]`; asserting
+  // the hover is a false green.
+  const childDisabled = (children.props as { disabled?: boolean }).disabled === true
+  const triggerNode = childDisabled ? (
+    <span
+      data-slot="tooltip-disabled-trigger"
+      tabIndex={0}
+      className={cn("inline-flex", disabledTriggerClassName)}
+    >
+      {trigger}
+    </span>
+  ) : (
+    trigger
+  )
+
+  // The key starts a fresh trigger whenever the child turns disabled or
+  // enabled. That swaps the element the tooltip hangs on (the stand-in span
+  // above, or the child itself), and Base UI attaches its hover listeners to
+  // the trigger element only once, when the trigger mounts: without the key
+  // they stayed on the element that was just removed, so hover never opened
+  // the tooltip again while focus still did. Seen on the selection bar's
+  // "Validate text" when the selection began on a line it cannot validate
+  // (2026-10-03). The child is remounted by the swap either way, so the key
+  // costs nothing extra.
   return (
     <Tooltip disabled={disabled}>
-      <TooltipTrigger render={trigger} delay={delay} />
+      <TooltipTrigger
+        key={childDisabled ? "disabled-child" : "child"}
+        render={triggerNode}
+        delay={delay}
+      />
       <TooltipContent side={side} align={align} className={className}>
         {content}
       </TooltipContent>

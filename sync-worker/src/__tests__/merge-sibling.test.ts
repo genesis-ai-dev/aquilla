@@ -9,10 +9,11 @@
 //   - the donor's rows and the host's default lane are never touched.
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest"
-import { mergeSibling, deterministicMergeEventId } from "../events/merge-sibling-route"
+import { mergeSibling, deterministicMergeEventId, handleMergeSiblingRequest } from "../events/merge-sibling-route"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { EventKind } from "../events/types"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { makeTestToken } from "./helpers/auth"
 
 const HOST = "host-proj"
 const DONOR = "donor-proj"
@@ -220,5 +221,52 @@ describe("mergeSibling — fold donor default lane into a host lane", () => {
     expect(result.merged).toBe(0)
     expect(result.skipped.map((s) => s.cellId).sort()).toEqual(["a", "b"])
     expect((await cellsFor(t, HOST)).filter((r) => r.side === "target")).toHaveLength(0)
+  })
+})
+
+describe("handleMergeSiblingRequest — donor authorization (pen test 2026-09-29)", () => {
+  const SECRET = "test-secret"
+  async function post(opts: { userId: number; src?: string }) {
+    const token = await makeTestToken(SECRET, {
+      userId: opts.userId,
+      projectId: HOST,
+      fileId: "__project__",
+      role: 500,
+      ...(opts.src ? { src: opts.src } : {}),
+    })
+    const req = new Request(`https://x.test/api/v1/projects/${HOST}/merge-sibling`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ donorProjectId: DONOR, lane: "fr" }),
+    })
+    return handleMergeSiblingRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET })
+  }
+
+  it("403s a host project_lead with no role on the donor, and copies nothing", async () => {
+    await seedContent(t, ["c1"], [])
+    // user 7 leads the host only; the donor is created_by=1.
+    await t.pg.query(`INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, 7, 500)`, [HOST])
+    const res = await post({ userId: 7 })
+    expect(res?.status).toBe(403)
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(0)
+  })
+
+  it("allows a user who is project_lead on both host and donor", async () => {
+    await seedContent(t, ["c1"], [])
+    for (const p of [HOST, DONOR]) {
+      await t.pg.query(`INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, 7, 500)`, [p])
+    }
+    const res = await post({ userId: 7 })
+    expect(res?.status).toBe(200)
+  })
+
+  // AQU-1550: the identity route's service token now names the caller. A
+  // platform operator has no membership row on any project, so the route marks
+  // the token `src: "platform"` — the one case this check stands aside for.
+  it("allows a platform operator who has no role on the donor", async () => {
+    await seedContent(t, ["c1"], [])
+    const res = await post({ userId: 7, src: "platform" })
+    expect(res?.status).toBe(200)
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(1)
   })
 })

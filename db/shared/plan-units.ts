@@ -21,18 +21,24 @@
 // canonical_ref: the projection already decided which files are Scripture and
 // which books they hold, and asking twice invites the two answers to differ.
 
+import { countedFileSql } from "./counted-files"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 /**
  * Which files can hold plan units.
  *
- * Tombstoned files are out. So are audio-cue siblings: that role marks the
- * hidden companion file the audio workflow creates, which never appears in a
- * file list and is not something anyone plans. Every other live file is a
- * legitimate unit — `kind` is not a usable discriminator here because it falls
- * back through `role` and then to 'codex'.
+ * Tombstoned files are out. So are the hidden companion files — the cue sheet
+ * the audio workflow records against, a linked video's caption track — which
+ * never appear in a file list and are not something anyone plans. Every other
+ * live file is a legitimate unit; `kind` is not a usable discriminator here
+ * because it falls back through `role` and then to 'codex'.
+ *
+ * AQU-1626 moved the rule itself to db/shared/counted-files.ts, where every
+ * other surface that measures work now reads it from. This alias stays because
+ * the name reads better at the two call sites below, not because the plan board
+ * has a definition of its own.
  */
-export const PLAN_UNIT_FILE_PREDICATE = `f.deleted_at IS NULL AND COALESCE(f.role, '') <> 'audio-cues'`
+export const PLAN_UNIT_FILE_PREDICATE = countedFileSql('f')
 
 /**
  * One row per planning unit, as a subquery.
@@ -109,6 +115,11 @@ export interface PlanUnitRow {
   // recorded headings exactly as it subtracts the headings themselves.
   structural_audio_count: number
   structural_audio_validated_count: number
+  // AQU-490: buckets of the per-cell minimum vote count across selected dub
+  // takes, so the board applies the project's required validator count on read
+  // instead of trusting a stored verdict that a threshold change invalidates.
+  audio_validator_histogram: Record<string, number> | string
+  structural_audio_validator_histogram: Record<string, number> | string
   /**
    * The denominator the audio counts are measured against: the CUE SHEET's
    * cell count where one is linked, and NULL where none is — which is the
@@ -189,6 +200,20 @@ export function readPlanUnitsSql(extraScope = ""): string {
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validated_count, 0)
                  ELSE COALESCE(pd.structural_audio_validated_count, 0) END
               AS structural_audio_validated_count,
+            -- AQU-490. These are AUDIO columns, so they take the ps/pd shape of
+            -- the four above and NOT the pl that the text histogram beside
+            -- them uses. pl is the LANE row: right for text, wrong for audio,
+            -- because a recording is shared by every target language and a
+            -- dubbing project's takes live on the cue sheet rather than on the
+            -- unit's own file. Reaching for pl by reflex is the exact bug
+            -- AQU-1278 fixed for the counts -- a dubbed episode read zero
+            -- audio on the board while its cue sheet was fully recorded.
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validator_histogram, '{}'::jsonb)
+                 ELSE COALESCE(pd.audio_validator_histogram, '{}'::jsonb) END
+              AS audio_validator_histogram,
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validator_histogram, '{}'::jsonb)
+                 ELSE COALESCE(pd.structural_audio_validator_histogram, '{}'::jsonb) END
+              AS structural_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
             -- audio against the text total, exactly as it always has.
             CASE WHEN cs.id IS NOT NULL

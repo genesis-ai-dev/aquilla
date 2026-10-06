@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -39,9 +39,13 @@ import { useProjectDirectory } from "@/hooks/useProjectDirectory"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { partitionSharedProjects, toSharedPortfolioRow } from "@/lib/frontier/shared-projects"
+import { fetchArchivedProjectsResult } from "@/lib/sync/cloud-projects"
+import { toArchivedProjectRow, withArchivedProjects } from "./archived-project-rows"
+import type { OrgProjectRow } from "./OrgProjectsDataTable"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader } from "@/components/ui/page"
+import { Archive } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { readProjectLens } from "./OrgHome"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -83,6 +87,15 @@ export function OrgProjectsPage() {
   // AQU-1043: last-edit recency narrowing, composed with all three below.
   const [updatedFilter, setUpdatedFilter] = useState<UpdatedFilter>(UPDATED_FILTER_ANY)
   const [projectQuery, setProjectQuery] = useState("")
+  // AQU-1070: off by default — the projects list stays the *active* working set
+  // unless a PM asks to see what was stood down.
+  const [showArchived, setShowArchived] = useState(false)
+  // Tagged with the org it was read for, so switching orgs can never splice a
+  // previous org's archived rows into the new one's list while the refetch runs.
+  const [archived, setArchived] = useState<{ orgId: number | null; rows: OrgProjectRow[] }>({
+    orgId: null,
+    rows: [],
+  })
   const [directoryTick, setDirectoryTick] = useState(0)
   const projectLens = readProjectLens()
 
@@ -129,6 +142,25 @@ export function OrgProjectsPage() {
       )
   }, [isGuestOrg, guestOrgId, accessibleProjects, orgs, activeOrgId, username, projectQuery])
 
+  // AQU-1070: the archived list is its own endpoint (the portfolio/directory
+  // reads filter archived rows out server-side), so it is fetched on demand
+  // rather than always. Race-guarded like the other read hooks — a stale
+  // response from a previous org or a previous toggle never lands.
+  const archivedRequestRef = useRef(0)
+  useEffect(() => {
+    if (!showArchived || !jwt || isGuestOrg || activeOrgId == null) return
+    const ticket = ++archivedRequestRef.current
+    const orgId = activeOrgId
+    const orgName = activeOrg?.name ?? null
+    void fetchArchivedProjectsResult(jwt, orgId).then((result) => {
+      if (archivedRequestRef.current !== ticket) return
+      setArchived({
+        orgId,
+        rows: result.ok ? result.projects.map((project) => toArchivedProjectRow(project, orgName)) : [],
+      })
+    })
+  }, [showArchived, jwt, isGuestOrg, activeOrgId, activeOrg?.name, directoryTick])
+
   const pmByProjectId = useMemo(
     () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
     [accessibleProjects],
@@ -173,7 +205,13 @@ export function OrgProjectsPage() {
     orgName: activeOrg?.name ?? "Workspace",
     pm: pmByProjectId.has(project.id) ? pmByProjectId.get(project.id) ?? null : project.pm,
   }))
-  const sourceProjects = isGuestOrg ? guestProjects : memberProjects
+  const liveProjects = isGuestOrg ? guestProjects : memberProjects
+  // Archived rows join the same list the filters and search run over, so
+  // narrowing behaves identically whether or not the toggle is on.
+  const sourceProjects =
+    showArchived && archived.orgId === activeOrgId
+      ? withArchivedProjects(liveProjects, archived.rows)
+      : liveProjects
   const statusFilteredProjects = isPageLoading
     ? []
     : portfolio.filterByStatus(statusFilter, sourceProjects)
@@ -263,21 +301,36 @@ export function OrgProjectsPage() {
                   // Updated) live in one Sort by menu — one submenu each. The
                   // toolbar row is still a flex/wrap track: further sibling
                   // controls slot in next to it, no wrapper needed.
-                  <ProjectSortMenu
-                    status={statusFilter}
-                    onStatusChange={setStatusFilter}
-                    pm={activePmFilter}
-                    pmUsernames={pmUsernames}
-                    showUnassignedPm={showUnassignedPm}
-                    viewerUsername={username}
-                    onPmChange={setPmFilter}
-                    role={activeRoleFilter}
-                    roleNames={roleNames}
-                    onRoleChange={setRoleFilter}
-                    updated={activeUpdatedFilter}
-                    onUpdatedChange={setUpdatedFilter}
-                    className="bg-card"
-                  />
+                  <>
+                    <ProjectSortMenu
+                      status={statusFilter}
+                      onStatusChange={setStatusFilter}
+                      pm={activePmFilter}
+                      pmUsernames={pmUsernames}
+                      showUnassignedPm={showUnassignedPm}
+                      viewerUsername={username}
+                      onPmChange={setPmFilter}
+                      role={activeRoleFilter}
+                      roleNames={roleNames}
+                      onRoleChange={setRoleFilter}
+                      updated={activeUpdatedFilter}
+                      onUpdatedChange={setUpdatedFilter}
+                      className="bg-card"
+                    />
+                    {!isGuestOrg && (
+                      <Button
+                        variant={showArchived ? "secondary" : "outline"}
+                        size="sm"
+                        aria-pressed={showArchived}
+                        data-testid="show-archived-toggle"
+                        className={showArchived ? undefined : "bg-card"}
+                        onClick={() => setShowArchived((on) => !on)}
+                      >
+                        <Archive className="size-4" />
+                        {t("org.orgProjectsPage.showArchived")}
+                      </Button>
+                    )}
+                  </>
                 }
                 toolbarTrailing={
                   !isGuestOrg && activeOrgId != null ? (

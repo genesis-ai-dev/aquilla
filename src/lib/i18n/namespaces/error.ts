@@ -23,6 +23,10 @@ export const error = defineNamespace({
     "error.network.badRequest": "The request was invalid{contextSuffix}. Check your input and try again.",
     "error.network.sessionExpired": "Your session expired — sign in again.",
     "error.network.forbidden": "You don't have permission to do that{contextSuffix}.",
+    "error.network.roleRequired": "You are {role} here ({origin}). {required} is required.",
+    "error.network.roleRequiredNoOrigin": "You are {role} here. {required} is required.",
+    "error.network.roleRequiredNoRole": "You don't have a role here. {required} is required.",
+    "error.network.elevationRequired": "Verify with your admin code, then try again.",
     "error.network.notFound": "That item no longer exists{contextSuffix}.",
     "error.network.conflict": "A conflict occurred{contextSuffix} — please refresh and try again.",
     "error.network.gone": "That item has been permanently removed{contextSuffix}.",
@@ -194,6 +198,32 @@ export const error = defineNamespace({
         placeholders: {
           contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
         },
+      },
+      "error.network.elevationRequired": {
+        description:
+          "AQU-1322: HTTP 403 shown to a platform admin whose change was refused until they " +
+          "complete the emailed admin-code step-up. Tells them what to do next.",
+      },
+      "error.network.roleRequired": {
+        description:
+          "AQU-1352: HTTP 403 when the server says which role is required. Names the viewer's " +
+          "current role, where it came from (e.g. Direct, Via group, Org-wide), and the required role.",
+        placeholders: {
+          role: "The viewer's current role name, e.g. Contributor.",
+          origin: "Where the role comes from, e.g. 'Via group' or 'Org-wide'.",
+          required: "The role name required for the action, e.g. Maintainer.",
+        },
+      },
+      "error.network.roleRequiredNoOrigin": {
+        description: "AQU-1352: like error.network.roleRequired when the role's origin is unknown.",
+        placeholders: {
+          role: "The viewer's current role name.",
+          required: "The role name required for the action.",
+        },
+      },
+      "error.network.roleRequiredNoRole": {
+        description: "AQU-1352: HTTP 403 when the viewer holds no role at this scope.",
+        placeholders: { required: "The role name required for the action." },
       },
       "error.network.notFound": {
         description:

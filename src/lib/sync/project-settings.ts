@@ -13,6 +13,7 @@ import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
+import type { DirectionMode } from "@/lib/text-direction"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,6 +50,20 @@ export type CellEditingTier =
 export interface ProjectWideSettings {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * AQU-1471: the project's DEFAULT text direction per side — the answer to
+   * "this project's target language is right-to-left", asked once instead of
+   * once per file.
+   *
+   * "auto", and an ABSENT key, mean "take it from the language"
+   * (`languageDefaultDirection`), which is what every project did before these
+   * keys existed. A per-file direction still wins over this, and nothing copies
+   * this onto the file rows: resolution happens on every read
+   * (db/shared/text-direction.ts states the order), so switching
+   * `targetLanguage` to Arabic moves every file that has no override with it.
+   */
+  sourceTextDirection?: DirectionMode
+  targetTextDirection?: DirectionMode
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
@@ -70,9 +85,23 @@ export interface ProjectWideSettings {
    * did before this existed.
    */
   countStructuralCells?: boolean
+  /**
+   * AQU-1391: does validating a cell copy its translation into the other cells
+   * in the same file whose source text is identical?
+   *
+   * ABSENT means "use the organization's default" (which is ON unless the org
+   * opted out) — the same three-state shape as `countStructuralCells` above,
+   * and for the same reason: null would be a fourth thing the resolver has no
+   * meaning for, so choosing the default deletes the key.
+   */
+  autoPropagateRepetitions?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /** AQU-490: the audio twins. Separate keys, never fallbacks for each other. */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-1068: who may add and remove cells in this project's files?
    *
@@ -225,8 +254,10 @@ export interface ProjectWideSettings {
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
   /**
-   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
-   * Opaque BCP-47-ish tags; order = display order.
+   * Complete target-language lane registry, including the project's primary
+   * lane (the same tag as `targetLanguage`). There is no implicit '' default
+   * lane — every lane is an explicit entry. Opaque BCP-47-ish tags; order =
+   * display order (primary first).
    */
   targetLanes?: string[]
   /**
@@ -251,9 +282,24 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** Typing " or ' in the translation editor produces curly quotes in the
+   *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
+   *  (the default) leaves straight quotes alone. */
+  smartQuotes?: boolean
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
+  /**
+   * The agent team's autonomy dial (v3 of the agent social workspace):
+   * whether the team may pick up work on its own (`initiative`), whether it
+   * responds to human edits it sees land (`react`), and what either loop is
+   * allowed to do (`scope`). Absent means ALL OFF — the behaviour of every
+   * project that never opted in — and is read that way server-side too, so a
+   * missing key can never be mistaken for consent. Project-wide rather than
+   * device-local on purpose: autonomy only one collaborator could see would
+   * be autonomy nobody agreed to. See `@/lib/agent/agent-mode`.
+   */
+  agentMode?: import("@/lib/agent/agent-mode").AgentMode
   /**
    * AQU-646: may anyone below maintainer move a chip on the timeline?
    *
@@ -349,10 +395,27 @@ export function resolveCellEditingFloor(
   }
 }
 
+/**
+ * Who last saved the shared settings, as the identity worker sends it: the
+ * saver's user id (`project_settings.updated_by`, a number, or a string id for
+ * an agent-sourced save). The object form is what this type used to promise
+ * and the server never sent; it stays accepted so a server that does send a
+ * name is shown it. Read it through `settingsEditorName`.
+ */
+export type ProjectSettingsEditor = number | string | { id: number; username: string } | null
+
+/** The saver's username when the response carries one, else null. A bare id
+ *  is not a name: the General page printed "Last edited by undefined" by
+ *  reading `.username` off a number (walk 10-02). */
+export function settingsEditorName(editor: ProjectSettingsEditor | undefined): string | null {
+  if (editor == null || typeof editor !== "object") return null
+  return typeof editor.username === "string" && editor.username !== "" ? editor.username : null
+}
+
 export interface ProjectSettingsResponse {
   version: number
   updatedAt: string
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   settings: ProjectWideSettings
   /**
    * AQU-1083: the org default this project inherits when `settings` carries no
@@ -364,6 +427,25 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /**
+   * Whether the org lets bulk text validation take untouched AI drafts. On
+   * this response for the same reason as the line above, and because a project
+   * member outside the org cannot read the org's settings at all. Null when
+   * the project has no org; optional on an older server.
+   */
+  orgAllowBulkValidateAiDrafts?: boolean | null
+  /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
+  lanes?: ProjectLaneView[]
+}
+
+export interface ProjectLaneView {
+  id: string
+  role: "source" | "target"
+  name: string
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: string | null
 }
 
 export type PatchResult =
@@ -377,6 +459,149 @@ function authHeaders(jwt: string): HeadersInit {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
   }
+}
+
+export type RenameLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
+export async function renameProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  name: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<RenameLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+      {
+        method: "PATCH",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ name }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) {
+    return { kind: "error", message: `rename failed (${res.status})` }
+  }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+export type CreateLaneResult =
+  | { kind: "ok"; lane: ProjectLaneView }
+  | { kind: "duplicate" }
+  | { kind: "error"; message: string }
+
+/** POST /api/v2/projects/:id/lanes. Language-edit floor. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  input: { name: string; language: string },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CreateLaneResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify(input),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
+  const body = (await res.json()) as { lane: ProjectLaneView }
+  return { kind: "ok", lane: body.lane }
+}
+
+/** POST /api/v2/projects/:id/lanes/:laneId/archive. */
+export async function setProjectLaneArchived(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  archived: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/archive`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ archived }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `archive failed (${res.status})` }
+  return { kind: "ok" }
+}
+
+/** AQU-1464: the newest target edit in one lane, as the archive dialog shows it. */
+export interface LaneLastChange {
+  /** Epoch milliseconds of the edit. */
+  at: number
+  /** The editing member's username, or null when the row records no editor. */
+  by: string | null
+}
+
+/**
+ * `lastChange: null` means the lane has genuinely never been edited — the
+ * server answered. An `error` means the lookup FAILED and the answer is
+ * unknown; callers must say so rather than rendering "no changes yet", which
+ * would read as a safe-to-archive signal the server never gave.
+ */
+export type LaneLastChangeResult =
+  | { kind: "ok"; lastChange: LaneLastChange | null }
+  | { kind: "error"; message: string }
+
+/**
+ * GET /api/v2/projects/:id/lanes/:laneId/last-change. Language-edit floor —
+ * the same one that guards archiving, so a Contributor gets 403 → `error`.
+ */
+export async function fetchLaneLastChange(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<LaneLastChangeResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/last-change`,
+      { method: "GET", headers: authHeaders(jwt) },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `last-change failed (${res.status})` }
+  let body: { lastChange?: { at?: unknown; by?: unknown } | null }
+  try {
+    body = (await res.json()) as typeof body
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  const raw = body.lastChange
+  if (!raw) return { kind: "ok", lastChange: null }
+  // Defend the formatter: a non-finite or non-positive stamp would render as an
+  // "Invalid date" or a 1970 date, which is worse than admitting we don't know.
+  const at = typeof raw.at === "number" ? raw.at : Number(raw.at)
+  if (!Number.isFinite(at) || at <= 0) return { kind: "ok", lastChange: null }
+  return { kind: "ok", lastChange: { at, by: typeof raw.by === "string" && raw.by ? raw.by : null } }
 }
 
 /**

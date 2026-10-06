@@ -9,7 +9,7 @@
 // onto a line to assign it. The row's ⋯ menu (and a right-click) edits /
 // makes-narrator / deletes.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -241,7 +241,10 @@ export function VoiceLibraryPanel({
           AQU-365: disabled below the maintainer floor (viewers/contributors
           get a tooltip explaining why, not a silent no-op after a modal). */}
       <div className="border-t p-3">
-        <AppTooltip content={voiceDenialReason ?? undefined}>
+        <AppTooltip
+          content={voiceDenialReason ?? undefined}
+          disabledTriggerClassName="w-full"
+        >
           <Button
             type="button"
             variant="outline"
@@ -418,11 +421,6 @@ function VoiceRow({
   const rowProps = {
     role: "button" as const,
     tabIndex: 0,
-    draggable: true,
-    onDragStart: (e: DragEvent) => {
-      e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
-      e.dataTransfer.effectAllowed = "copy"
-    },
     onClick: onSelect,
     onKeyDown: (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() }
@@ -450,6 +448,3 @@ function VoiceRow({
     </>
   )
 }
-
-/** DnD mime carrying a voice id dragged from a row onto a production line. */
-export const VOICE_ASSIGN_MIME = "application/x-frontier-voice-assign"

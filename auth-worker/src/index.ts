@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   DELETE /api/v2/orgs/:orgId   (owner; 409 while any project row remains)
 //   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
@@ -73,38 +74,54 @@ import invitesRoutes from "./routes/invites"
 import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
+import meRoutes from "./routes/me"
+import accessRoutes from "./routes/access"
+import orgAccessRoutes from "./routes/org-access"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import marketingSeedRoutes from "./routes/marketing-seed"
 import chatRoutes from "./routes/chat"
+import transcriptionRoutes from "./routes/transcription"
 import agentRoutes from "./routes/agent"
 import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
+import aiSeamsRoutes from "./routes/ai-seams"
+import aiPassageTagsRoutes from "./routes/ai-passage-tags"
+import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import agentConnectRoutes from "./routes/agent-connect"
+import { mcpOAuthPublicRoutes, mcpOAuthConsentRoutes } from "./routes/mcp-oauth"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
+import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
+import teamRoutes from "./routes/team"
+import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
-import { sweepStrandedContextualRuns } from "./routes/contextual"
+import { pruneExpiredTraces } from "./lib/contextual/traces"
+import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
+import { runReactSweep } from "./lib/react-loop"
 import {
   deploymentEnvironmentError,
   scheduledDeploymentEnvironmentError,
@@ -113,8 +130,10 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 
 const app = new Hono<HonoEnv>()
 
@@ -124,7 +143,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -186,11 +205,12 @@ app.use("*", async (c, next) => {
   try {
     await next()
   } catch (err) {
+    const path = redactLogPath(c.req.path)
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${path}`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.duration_ms": Date.now() - startedAt,
         "error.message": err instanceof Error ? err.message : String(err),
       }),
@@ -199,14 +219,18 @@ app.use("*", async (c, next) => {
   }
   const durationMs = Date.now() - startedAt
   if (durationMs >= SLOW_REQUEST_MS) {
+    // OPS-42: `redactLogPath`, not `c.req.path` — [slow-request] fires on
+    // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+    // access-link redeem that merely ran slowly would log a live token.
+    const path = redactLogPath(c.req.path)
     console.warn(
-      `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+      `[slow-request] ${c.req.method} ${path} took ${durationMs}ms (status ${c.res.status})`,
     )
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${path} (${durationMs}ms)`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.status": c.res.status,
         "http.duration_ms": durationMs,
       }),
@@ -232,10 +256,13 @@ app.get("/", (c) =>
       "/api/v2/contact/newsletter",
       "/api/v2/health",
       "/api/v1/chat/completions",
+      "/api/v1/audio/transcriptions",
       "/api/v1/chat/ab-feedback",
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
+      "/api/v1/ai/seams/classify",
+      "/api/v1/ai/passage-tags/classify",
     ],
   }),
 )
@@ -252,6 +279,9 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/users", accessRoutes)
+app.route("/api/v2/me", meRoutes)
+app.route("/api/v2/orgs", orgAccessRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -277,6 +307,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 // file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
 // keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
 app.route("/api/v2/projects", agentMemoryRoutes)
+// AI intervention audit trail (AQU-1656): prompts, outputs and examples
+// behind each AI draft. Sibling router (routes/ai-interventions.ts).
+app.route("/api/v2/projects", aiInterventionRoutes)
 // Scene briefs (contextual translation pipeline §9). Sibling router — same
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)
@@ -286,10 +319,24 @@ app.route("/api/v2/projects", contextualRoutes)
 // Decision routes — the agent → user channel's HTTP surface (seam design
 // §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
 app.route("/api/v2/projects", contextualDecisionsRoutes)
+// Durable team channel — the shared, project-scoped message store behind the
+// one-channel agent workspace (routes/team.ts). Sibling router, same base as
+// contextual.ts; the autopilot tick writes activity into it server-side.
+app.route("/api/v2/projects", teamRoutes)
+// Human-expert handoffs — the ask that runs the other way down that channel:
+// a contributor needs a person, and the agent work waiting on the answer is
+// resumed explicitly (AQU-1052, routes/team-handoffs.ts). Sibling router,
+// same base.
+app.route("/api/v2/projects", teamHandoffRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Team chat history — the caller's own past agent conversations, listed and
+// reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
+// read-only, and scoped to (project, user) so it never surfaces another
+// member's chats.
+app.route("/api/v2/projects", agentSessionRoutes)
 // Knowledge base — project + org document upload/extract/index/read/search
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
@@ -305,6 +352,9 @@ app.route("/api/v2/invites", invitesRoutes)
 // request forms) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
+// AQU-1028: in-app feedback (message + optional screenshot). Session JWT
+// required, per-user throttle inside (routes/feedback.ts).
+app.route("/api/v2/feedback", feedbackRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
 app.route("/api/v2", billingWorkspaceRoutes)
@@ -319,6 +369,11 @@ app.route("/api/v2/monday", mondayRoutes)
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
 app.route("/api/v2/agent-connect", agentConnectRoutes)
+// OAuth 2.1 + PKCE for MCP hosts (ChatGPT plugin, Claude, Codex): RFC 8414
+// metadata, /oauth/authorize → SPA consent, /oauth/token → aqk_ credential.
+// The consent page's session calls live under /api/v2/mcp-oauth.
+app.route("/", mcpOAuthPublicRoutes)
+app.route("/api/v2/mcp-oauth", mcpOAuthConsentRoutes)
 // One-time human approval assertion for ask-mode changesets (AQU-533 §3).
 // Browser-session-authenticated — distinct from the API-credential-gated
 // agent surface in sync-worker's /api/v1/external/projects/*/changesets.
@@ -328,6 +383,7 @@ app.route("/api/v2/changesets", changesetApprovalsRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+app.route("/api/v1/audio", transcriptionRoutes)
 // Unknown-text import classification. Deliberately separate from chat: the
 // server owns the prompt and accepts only bounded file metadata + a sample.
 app.route("/api/v1/import", importClassifyRoutes)
@@ -342,6 +398,22 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1386: seam classification for meaning-unit drafting. Session-authed;
+// batches a window of cell boundaries into one Jev decision call and falls back
+// to punctuation whenever the model is unavailable or unconfident.
+app.route("/api/v1/ai/seams", aiSeamsRoutes)
+// AQU-657: document-understanding tags over AQU-1387's passage spine. Same
+// session auth, same Jev batching and same heuristic fallback as the seam
+// route; answers who is in a passage, whether it opens a scene, whether it is
+// speech, and which passages it leans on.
+app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
+// Smart edits: suggestions distilled from the project's own human edits
+// (memory → Jev verify). Same session auth and per-user window as the seam
+// route; never fails its caller.
+app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+// Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
+// first). One batched Jev call per passage; never fails its caller.
+app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
@@ -410,6 +482,8 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // AQU-1352 P1: resolveProjectRoleShared (internal AI routes) reads the mode off this handle.
+  setAccessGrantsMode(shim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
   // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their
@@ -429,8 +503,13 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   }
 }) as typeof app.fetch
 
-// Cron (wrangler.toml [triggers], every 5 minutes): flush Monday board links
-// whose push was debounced (dirty_at set), oldest first, capped at 20 per run.
+// Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
+// of work, each isolated so one failing cannot take the others down:
+//   1. flush Monday board links whose push was debounced (dirty_at set),
+//      oldest first, capped at 20 per run;
+//   2. sweep stranded contextual runs (dead driver / parked with spans left);
+//   3. the v3 react watcher — projects with agentMode.react on react to human
+//      expert input that landed in the event log.
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
@@ -473,6 +552,8 @@ const scheduled = async (
     // revoked_tokens hygiene lives here now, off the request path (it used to
     // be a random 2%-of-logouts DELETE). Non-throwing.
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
+    // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
+    await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.
@@ -485,6 +566,22 @@ const scheduled = async (
       }
     } catch (err) {
       console.error("[contextual cron] sweep failed:", err)
+    }
+    // React watcher (v3): projects with agentMode.react on respond to human
+    // expert input landing in the event log. Same contract as the sweep above
+    // — bounded, best-effort, and NEVER allowed to fail the cron; its driver
+    // promise joins sweepDone so the shared connection outlives the runs it
+    // starts.
+    try {
+      const react = await runReactSweep(runEnv, { startRun: startReactionRun, wakeRun: wakeReactionRun })
+      const previous = sweepDone
+      sweepDone = Promise.allSettled([previous, react.done]).then(() => {})
+      if (react.reactions.length > 0) {
+        console.log(`[react cron] started ${react.reactions.length} reaction run(s)`)
+        ctx.waitUntil(react.done)
+      }
+    } catch (err) {
+      console.error("[react cron] sweep failed:", err)
     }
   } finally {
     if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))

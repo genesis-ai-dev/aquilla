@@ -170,10 +170,8 @@ describe("Clone voice button → New voice modal (AQU-1001)", () => {
             project={project}
             projectId="proj-1"
             settings={settings}
-            voices={[narrator]}
             session={{ jwt: "x" } as unknown as never}
             username="tester"
-            onAssign={() => {}}
             onAfterGenerate={() => {}}
             onMakeCharacter={() => {
               setSeed(cell.id)

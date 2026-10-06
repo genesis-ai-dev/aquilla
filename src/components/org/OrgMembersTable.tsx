@@ -1,11 +1,13 @@
 import { useCallback, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
+import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
+import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +38,7 @@ import type { OrgMember } from "@/lib/frontier/orgs"
 import {
   ALL_ROLE_LEVELS,
   humanRoleName,
+  ORG_ROLE_CHANGE_OPTIONS,
   ORG_ROLE_OPTIONS,
   ROLE,
   roleDisplayText,
@@ -50,6 +53,17 @@ type AddDialogTab = "members" | "invite"
 // Shown on the disabled row-menu Remove item when the caller is not an org owner.
 const REMOVE_REQUIRES_OWNER_TOOLTIP =
   "Only org owners can remove members from the organization. Ask an owner to remove someone."
+
+// AQU-952: promoting someone to Owner is the workspace-handover path — a
+// partner that Frontier pre-loaded a workspace for can be given full admin
+// without rebuilding the workspace. It is additive (the promoting owner keeps
+// their own ownership, so the loaded workspace is never orphaned) and this
+// dialog cannot undo it: the row menu hides Change role and Remove for members
+// who are already owners.
+const PROMOTE_TO_OWNER_WARNING =
+  "Owners get full control of this workspace, including billing, members and deletion. " +
+  "You keep your own ownership, so the workspace is never left unowned. " +
+  "This cannot be undone here — an owner's role and membership are locked in this table once granted."
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
@@ -93,8 +107,11 @@ export function OrgMembersTable({
   addMany,
   onRequestRemove,
   loading = false,
+  orgName,
 }: {
   orgId: number
+  /** AQU-1352: names the "Effective here" scope in the member inspector. */
+  orgName?: string
   members: OrgMember[]
   callerOrgRoleLevel: number | null
   canAddToProjects: boolean
@@ -188,7 +205,17 @@ export function OrgMembersTable({
                   <ChevronRight className="size-3.5" />
                 )}
               </button>
-              <UsernameWithAvatar username={m.username} size="xs" nameClassName="font-normal" />
+              <MemberInspectorTrigger
+                userId={m.userId}
+                username={m.username}
+                from={{ type: "org", id: String(orgId) }}
+                herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
+                onManageAccess={() => {
+                  if (!expanded.has(m.userId)) toggleExpand(m.userId)
+                }}
+              >
+                <UsernameWithAvatar username={m.username} size="xs" nameClassName="font-normal" />
+              </MemberInspectorTrigger>
             </div>
           )
         },
@@ -211,21 +238,26 @@ export function OrgMembersTable({
         id: "role",
         accessorFn: (m) => m.role.level,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
-        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        meta: { className: "w-[11rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
           const label = <RoleLabel name={m.role.level} />
-          if (isOwner) return label
+          // AQU-1352 §3.7 rule 1: org is the top scope, so org rows are always direct.
+          const badge = <GrantOriginBadge origin={{ kind: "direct" }} />
+          if (isOwner) return <span className="inline-flex items-center gap-2">{label}{badge}</span>
           return (
-            <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
-              <span
-                tabIndex={0}
-                className="inline-flex cursor-help"
-                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
-              >
-                {label}
-              </span>
-            </AppTooltip>
+            <span className="inline-flex items-center gap-2">
+              <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
+                <span
+                  tabIndex={0}
+                  className="inline-flex cursor-help"
+                  aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
+                >
+                  {label}
+                </span>
+              </AppTooltip>
+              {badge}
+            </span>
           )
         },
       },
@@ -262,7 +294,7 @@ export function OrgMembersTable({
               </DialogDescription>
             </DialogHeader>
             <RoleSelect
-              options={ORG_ROLE_OPTIONS}
+              options={ORG_ROLE_CHANGE_OPTIONS}
               value={roleChangeLevel ? Number(roleChangeLevel) : null}
               onValueChange={(level) => setRoleChangeLevel(String(level))}
               className="w-full!"
@@ -272,6 +304,12 @@ export function OrgMembersTable({
                   : "New role"
               }
             />
+            {Number(roleChangeLevel) === ROLE.OWNER && (
+              <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
+                <AlertTriangle className="mt-px size-4 shrink-0 text-amber-600" />
+                <span>{PROMOTE_TO_OWNER_WARNING}</span>
+              </p>
+            )}
             {roleError && (
               <p role="alert" className="text-xs text-destructive">{roleError}</p>
             )}

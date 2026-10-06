@@ -5,11 +5,9 @@ import {
   type BillingPlan,
   type BillingStatus,
   type ResolvedFieldPlan,
-  type TargetLaneProject,
   type WordBlockReason,
   FIELD_PLAN,
   checkWordAllowance,
-  countDistinctTargetLanes,
   periodAllowanceCredits,
   periodAllowanceWords,
   periodDaysBetween,
@@ -210,19 +208,6 @@ export async function resetWordUsage(db: AquillaDb, orgId: number, since?: strin
   }
 }
 
-function parseLaneList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string")
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
 export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Promise<OrgBillingOverrides> {
   const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
   try {
@@ -287,30 +272,79 @@ export async function writeOrgBillingOverrides(
   }
 }
 
-export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
+/**
+ * Target-lane counts for the org dashboard and the tenants table. One query
+ * for every org asked about. `combined` is the sum of `byOrg`.
+ *
+ * A project with zero `lanes` rows counts as one target lane when
+ * `target_language` is non-empty. Once any lane row exists, settings are ignored.
+ */
+export interface OrgTargetLaneCounts {
+  byOrg: Map<number, number>
+  combined: number
+}
+
+export async function countTargetLanesByOrg(
+  db: AquillaDb,
+  orgIds: readonly number[],
+): Promise<OrgTargetLaneCounts> {
+  const unique = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  const empty: OrgTargetLaneCounts = { byOrg: new Map(), combined: 0 }
+  if (unique.length === 0) return empty
   try {
+    const placeholders = unique.map(() => "?").join(", ")
     const { results } = await db
       .prepare(
-        `SELECT ps.target_language,
-                ps.target_lanes,
-                (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
-           FROM project_settings ps
-           JOIN projects p ON p.id = ps.project_id
-          WHERE p.org_id = ? AND p.archived_at IS NULL`,
+        `SELECT p.org_id AS org_id,
+                COALESCE(SUM(
+                  CASE
+                    WHEN COALESCE(lc.lane_rows, 0) > 0 THEN COALESCE(lc.active_targets, 0)
+                    WHEN NULLIF(BTRIM(ps.target_language), '') IS NOT NULL THEN 1
+                    ELSE 0
+                  END
+                ), 0) AS lane_count
+           FROM projects p
+           LEFT JOIN project_settings ps ON ps.project_id = p.id
+           LEFT JOIN (
+             SELECT l.project_id,
+                    COUNT(*)::int AS lane_rows,
+                    COUNT(*) FILTER (WHERE l.role = 'target' AND l.archived_at IS NULL)::int AS active_targets
+               FROM lanes l
+               JOIN projects lp ON lp.id = l.project_id
+              WHERE lp.org_id IN (${placeholders})
+              GROUP BY l.project_id
+           ) lc ON lc.project_id = p.id
+          WHERE p.org_id IN (${placeholders})
+            AND p.archived_at IS NULL
+            AND COALESCE(p.is_active, TRUE)
+          GROUP BY p.org_id`,
       )
-      .bind(orgId)
-      .all<{ target_language: string | null; target_lanes: unknown; archived_lanes: unknown }>()
-    const projects: TargetLaneProject[] = (results ?? []).map((row) => ({
-      targetLanguage: row.target_language,
-      targetLanes: parseLaneList(row.target_lanes),
-      archivedLanes: parseLaneList(row.archived_lanes),
-    }))
-    return countDistinctTargetLanes(projects)
+      .bind(...unique, ...unique)
+      .all<{ org_id: number; lane_count: number | string }>()
+    const counted = new Map<number, number>()
+    for (const row of results ?? []) {
+      counted.set(Number(row.org_id), Number(row.lane_count) || 0)
+    }
+    const byOrg = new Map<number, number>()
+    // Every org asked about gets an answer, including the ones with no projects
+    // — an absent entry would read as "unknown" at the call site, not as zero.
+    let combined = 0
+    for (const orgId of unique) {
+      const n = counted.get(orgId) ?? 0
+      byOrg.set(orgId, n)
+      combined += n
+    }
+    return { byOrg, combined }
   } catch (err) {
-    if (isMissingTableError(err)) return 0
-    console.error("[billing] countOrgTargetLanes error:", err)
-    return 0
+    if (isMissingTableError(err)) return empty
+    console.error("[billing] countTargetLanesByOrg error:", err)
+    return empty
   }
+}
+
+export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
+  const { byOrg } = await countTargetLanesByOrg(db, [orgId])
+  return byOrg.get(orgId) ?? 0
 }
 
 export async function readWordSnapshot(
@@ -330,14 +364,14 @@ export async function readWordSnapshot(
 ): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
-  const [wordsUsed, trailingYearWords, overrides, autoLanguageCount] = await Promise.all([
+  const [wordsUsed, trailingYearWords, overrides, autoLaneCount] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
     sumWordsSince(db, orgId, nDaysAgoUtc(364)),
     readOrgBillingOverrides(db, orgId),
     countOrgTargetLanes(db, orgId),
   ])
   const wordsPerCredit = catalog?.wordsPerCredit ?? 100
-  const languageCount = overrides.billedLanguageCount ?? autoLanguageCount
+  const languageCount = overrides.billedLanguageCount ?? autoLaneCount
   const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords
   const addonWords = catalog?.addonWords ?? FIELD_PLAN.addonWords
   const allowanceWords = periodAllowanceWords({

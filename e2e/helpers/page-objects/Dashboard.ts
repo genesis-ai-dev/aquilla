@@ -55,10 +55,8 @@ export class Dashboard {
     // while /i tolerates label casing ("Project title" vs "Project Title").
     await dialog.getByLabel(/^Project title$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
-    // Self-contained projects support extra target-language lanes and label
-    // the primary field "Target language(s)"; linked-target projects retain
-    // the singular label. Accept both accessible names.
-    await dialog.getByLabel(/^Target language(?:\(s\))?$/i).fill(target)
+    // Create-dialog target field is always "Target Language(s)".
+    await dialog.getByLabel(/^Target Language\(s\)$/i).fill(target)
     const createResponse = this.page.waitForResponse((response) => {
       const request = response.request()
       if (request.method() !== "POST" || !response.ok()) return false
@@ -94,7 +92,9 @@ export class Dashboard {
     // org setup checklist. They all open the same create dialog, so scope to the
     // first (the header) to avoid a strict-mode violation.
     await this.page.getByRole("button", { name: /new project/i }).first().click()
-    const dialog = this.page.getByRole("dialog")
+    // By name, not bare role: AQU-1352's "Created … in …" success toast is also
+    // role="dialog", so a bare lookup matches two elements once create succeeds.
+    const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     return dialog
   }

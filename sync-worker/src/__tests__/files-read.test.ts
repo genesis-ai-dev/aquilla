@@ -269,6 +269,63 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file).toMatchObject({ fileType: "vtt", role: "audio-cues", anchorFileId: "f-text" })
   })
 
+  // AQU-1626. The sidebar has always filtered these out by role client-side, so
+  // this API was the one surface that handed them to a caller — and an agent
+  // reading it had no such filter, so a 500-cue caption track read back as 500
+  // files' worth of untranslated work. The by-id fetch above is deliberately
+  // NOT filtered: the audio workflow follows `anchor_file_id` straight to its
+  // cue sheet, and both halves of that pair have to stay reachable.
+  it("leaves hidden companion files out of the listing while by-id still returns them", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", kind: "vtt", cell_count: 12 },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text", cell_count: 500,
+        },
+        {
+          id: "f-track", project_id: "proj-a", name: "ep-101 · captions",
+          role: "timeline-content", kind: "vtt", anchor_file_id: "f-text", cell_count: 500,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const auth = { headers: { Authorization: `Bearer ${token}` } }
+    const list = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", auth), envWith(db),
+    ))!
+    const listed = (await list.json()) as { files: Array<{ fileId: string }> }
+    expect(listed.files.map((f) => f.fileId)).toEqual(["f-text"])
+
+    const byId = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/f-cues", auth), envWith(db),
+    ))!
+    expect(byId.status).toBe(200)
+    expect((await byId.json() as { file: { fileId: string } }).file.fileId).toBe("f-cues")
+  })
+
+  // Deleting the parent of a hidden companion tombstones the companion too, so
+  // without the same rule Recently deleted grew a "· audio cues" row for a
+  // person to puzzle over — and offered to restore machinery on its own.
+  it("leaves hidden companion files out of the trash listing too", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", kind: "vtt", deleted_at: 1700000000000 },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text", deleted_at: 1700000000000,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files?trash=1",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = (await res.json()) as { files: Array<{ fileId: string }> }
+    expect(body.files.map((f) => f.fileId)).toEqual(["f-text"])
+  })
+
   it("returns 404 for an unknown file id", async () => {
     const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })
@@ -344,6 +401,277 @@ describe("the audio-cue timebase a file was imported with", () => {
     expect(await readFiles(metaWith({ fromFps: "24" }))).toBeNull()
     expect(await readFiles(metaWith("nonsense"))).toBeNull()
     expect(await readFiles(metaWith({ scale: "1.001" }))).toBeNull()
+  })
+})
+
+describe("GET /files with the lane read wall", () => {
+  it("replaces the default-lane counters when that lane was not granted", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 80, filled_count: 20, approved_count: 9,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", total_count: 70, filled_count: 20, validator_histogram: { "1": 9 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", total_count: 10, filled_count: 3, validator_histogram: { "1": 2 },
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [{ lane: "eslane01", level: 400 }],
+    })
+    const req = new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleFilesReadRequest(req, {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: SECRET,
+      LANE_READ_WALL: "1",
+    }))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number; approvedCount: number }> }
+    expect(body.files[0]).toMatchObject({ cellCount: 10, filledCount: 3, approvedCount: 2 })
+  })
+
+  it("takes the shared denominator once when several non-default lanes are granted", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+        { id: "frlane01", project_id: "proj-a", role: "target", name: "French Team", legacy_tag: "fr" },
+      ],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ countStructuralCells: false }),
+        version: 1,
+      }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 80, filled_count: 20, approved_count: 9,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", total_count: 40, structural_count: 4,
+          filled_count: 20, structural_filled_count: 2,
+          validator_histogram: { "1": 9 }, structural_validator_histogram: { "1": 2 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", lane_id: "eslane01",
+          total_count: 40, structural_count: 4,
+          filled_count: 3, structural_filled_count: 1,
+          validator_histogram: { "1": 2 }, structural_validator_histogram: { "1": 1 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "fr", lane_id: "frlane01",
+          total_count: 40, structural_count: 4,
+          filled_count: 5, structural_filled_count: 0,
+          validator_histogram: { "1": 1 }, structural_validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [
+        { lane: "eslane01", level: 400 },
+        { lane: "frlane01", level: 400 },
+      ],
+    })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, LANE_READ_WALL: "1" },
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      files: Array<{ cellCount: number; filledCount: number; approvedCount: number }>
+    }
+    // 40 − 4 once, not twice. Filled and approved are the two lanes' own work.
+    expect(body.files[0]).toMatchObject({ cellCount: 36, filledCount: 7, approvedCount: 2 })
+  })
+
+  it("does not borrow another lane's fill when the default lane has no progress row", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "frlane01", project_id: "proj-a", role: "target", name: "French", legacy_tag: "fr" },
+      ],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ countStructuralCells: false }),
+        version: 1,
+      }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, structural_cell_count: 2,
+        filled_count: 8, structural_filled_count: 4,
+        approved_count: 3, structural_approved_count: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+        target_lang: "fr", lane_id: "frlane01",
+        total_count: 10, structural_count: 2,
+        filled_count: 8, structural_filled_count: 1,
+        validator_histogram: { "1": 3 },
+        structural_validator_histogram: { "1": 1 },
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-gen", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      file: { cellCount: number; filledCount: number; approvedCount: number }
+    }
+    expect(body.file).toMatchObject({ cellCount: 8, filledCount: 0, approvedCount: 0 })
+  })
+
+  it("uses the files counters for one target lane and not when a second lane is archived", async () => {
+    const file = {
+      name: "Genesis",
+      cell_count: 10, structural_cell_count: 2,
+      filled_count: 8, structural_filled_count: 4,
+      approved_count: 3, structural_approved_count: 1,
+    }
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srconly1", project_id: "proj-one", role: "source", name: "Source" },
+        { id: "onlylane", project_id: "proj-one", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "live0001", project_id: "proj-two", role: "target", name: "Spanish", legacy_tag: "" },
+        {
+          id: "arch0001", project_id: "proj-two", role: "target", name: "French", legacy_tag: "fr",
+          archived_at: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+      project_settings: [
+        { project_id: "proj-one", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+        { project_id: "proj-two", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+      ],
+      files: [
+        { id: "file-one", project_id: "proj-one", ...file },
+        { id: "file-two", project_id: "proj-two", ...file },
+      ],
+    })
+    const read = async (projectId: string, fileId: string) => {
+      const token = await makeTestToken(SECRET, { projectId, fileId })
+      const res = (await handleFilesReadRequest(
+        new Request(`https://w/api/v1/projects/${projectId}/files/${fileId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      return (await res.json()) as { file: { cellCount: number; filledCount: number; approvedCount: number } }
+    }
+    // 8 − 4 filled, 3 − 1 approved. A source lane does not count.
+    expect((await read("proj-one", "file-one")).file).toMatchObject({
+      cellCount: 8, filledCount: 4, approvedCount: 2,
+    })
+    expect((await read("proj-two", "file-two")).file).toMatchObject({
+      cellCount: 8, filledCount: 0, approvedCount: 0,
+    })
+  })
+
+  it("sorts and reports lastEditAt from the granted lanes", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+      ],
+      files: [
+        {
+          id: "file-gen", project_id: "proj-a", name: "Genesis",
+          last_edit_at: 9000,
+        },
+        {
+          id: "file-exo", project_id: "proj-a", name: "Exodus",
+          last_edit_at: 2000,
+        },
+      ],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", last_edit_at: 1000, revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", last_edit_at: 9000, revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-exo", scope: "file", section_key: "",
+          target_lang: "", last_edit_at: 5000, revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-exo", scope: "file", section_key: "",
+          target_lang: "es", last_edit_at: 1500, revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [{ lane: "deflane1", level: 400 }],
+    })
+    const req = new Request("https://w/api/v1/projects/proj-a/files?limit=1", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = (await handleFilesReadRequest(req, {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: SECRET,
+      LANE_READ_WALL: "1",
+    }))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      files: Array<{ fileId: string; lastEditAt: number | null }>
+      nextCursor: string | null
+    }
+    // Default-lane clocks are Exodus 5000, Genesis 1000. The file clocks
+    // (9000, 2000) would have put Genesis first.
+    expect(body.files).toHaveLength(1)
+    expect(body.files[0]).toMatchObject({ fileId: "file-exo", lastEditAt: 5000 })
+    expect(body.nextCursor).toBeTruthy()
+
+    const page2 = (await handleFilesReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files?limit=1&cursor=${body.nextCursor}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, LANE_READ_WALL: "1" },
+    ))!
+    const rest = (await page2.json()) as {
+      files: Array<{ fileId: string; lastEditAt: number | null }>
+      nextCursor: string | null
+    }
+    expect(rest.files).toHaveLength(1)
+    expect(rest.files[0]).toMatchObject({ fileId: "file-gen", lastEditAt: 1000 })
+    expect(rest.nextCursor).toBeNull()
   })
 })
 

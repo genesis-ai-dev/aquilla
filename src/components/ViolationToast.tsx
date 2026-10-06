@@ -81,7 +81,17 @@ export function ViolationToast({
     })
     activeGenerationRef.current = generation
 
+    // AQU-1634: Escape closes the card. The toast itself never holds focus, so
+    // the listener is on the window; closing through `toast.close` runs the
+    // same generation-guarded `onClose` as the dismiss button.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      toast.close(toastId)
+    }
+    window.addEventListener("keydown", onKeyDown)
+
     return () => {
+      window.removeEventListener("keydown", onKeyDown)
       if (activeGenerationRef.current === generation) {
         activeGenerationRef.current = 0
       }

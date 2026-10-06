@@ -32,6 +32,7 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualRunEvent,
   type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
@@ -50,6 +51,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
@@ -62,6 +64,7 @@ import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
@@ -144,6 +147,23 @@ export interface LlmCallUsage {
   tokensPerSecond?: number
 }
 
+/** One model call's full content, for the step inspector's trace view. Fired
+ *  once per call (after retries settle), success or failure. Unlike
+ *  LlmCallUsage this carries the prompt and the reply, so it must only reach
+ *  stores the project already trusts with that text (lib/contextual/traces.ts). */
+export interface LlmCallTrace extends LlmCallUsage {
+  system: string
+  user: string
+  /** The model's reply; null when the call failed. */
+  output: string | null
+  /** Machine error code ("provider_http_error status=429"); null on success.
+   *  Never the provider's error body — see the note in makeLlmCall. */
+  error: string | null
+  /** OpenRouter generation id, for looking the call up on the provider side. */
+  generationId?: string
+  attempts: number
+}
+
 /** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
  *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
 function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -176,6 +196,9 @@ export function makeLlmCall(cfg: {
   models: ContextualModels
   signal?: AbortSignal
   onUsage?: (u: LlmCallUsage) => void
+  /** Same contract as onUsage (never throws, fires once per call), but with
+   *  the prompt and reply attached. */
+  onTrace?: (t: LlmCallTrace) => void
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
@@ -213,6 +236,29 @@ export function makeLlmCall(cfg: {
       }
     }
     const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+    let attempts = 0
+    const trace = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+      result: { output: string | null; error: string | null; generationId?: string },
+    ): void => {
+      if (!cfg.onTrace) return
+      try {
+        cfg.onTrace({
+          ...u,
+          ...result,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+          system: req.system,
+          user: req.user,
+          attempts,
+        })
+      } catch {
+        /* tracing must never break the run it is recording */
+      }
+    }
 
     // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
     // rate limit, or a self-hosted server whose slots are all occupied) answers
@@ -252,6 +298,7 @@ export function makeLlmCall(cfg: {
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
+      attempts = attempt
       let outcome: Attempt
       try {
         // The gate holds a slot only for the round-trip, never across the
@@ -285,8 +332,10 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
+        const code = cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error"
+        trace(failed, { output: null, error: code })
         await hold()
-        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+        throw new Error(code)
       }
       if (outcome.ok) {
         body = outcome.body
@@ -303,6 +352,7 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        trace(failed, { output: null, error: `${code} status=${outcome.status}` })
         await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
@@ -313,14 +363,17 @@ export function makeLlmCall(cfg: {
     }
     if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
-    report({
+    const usage = {
       promptTokens: body.usage?.prompt_tokens ?? 0,
       completionTokens: body.usage?.completion_tokens ?? 0,
       costCents: (body.usage?.cost ?? 0) * 100,
       ok: body.usage !== undefined,
       ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
-    })
-    return body.choices?.[0]?.message?.content ?? ""
+    }
+    report(usage)
+    const output = body.choices?.[0]?.message?.content ?? ""
+    trace(usage, { output, error: null, ...(body.id ? { generationId: body.id } : {}) })
+    return output
   }
 }
 
@@ -449,15 +502,32 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
 
 /** Persist one live progress frame as a bounded product-activity fact. The
  * draft frame intentionally loses draft ids/text here: only count + cell ids
- * cross the durable telemetry boundary. */
+ * cross the durable telemetry boundary.
+ *
+ * This is the single server-side path that records narrative activity, so it
+ * is also where the shared team channel is fed (lib/team-ingest.ts). The
+ * write-through is best-effort by construction — `ingestRunActivity` never
+ * throws — so a channel outage cannot stop a run. */
 export async function persistContextualProgressFrame(
   db: AquillaDb,
   scope: { projectId: string; fileId: string },
   frame: ContextualProgressFrame,
 ): Promise<void> {
+  const event = await appendProgressFrameEvent(db, scope, frame)
+  if (event) await ingestRunActivity(db, event)
+}
+
+/** Every frame kind maps to exactly one durable event today. The `undefined`
+ *  tail is for a frame kind added later and not yet mapped: it records
+ *  nothing and feeds nothing, rather than half-writing. */
+async function appendProgressFrameEvent(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string },
+  frame: ContextualProgressFrame,
+): Promise<ContextualRunEvent | undefined> {
   switch (frame.type) {
     case "contextual.run.state":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -465,9 +535,8 @@ export async function persistContextualProgressFrame(
         status: frame.status,
         details: { done: frame.done, total: frame.total, failed: frame.failed ?? 0 },
       })
-      return
     case "contextual.span.start":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -476,9 +545,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         status: "started",
       })
-      return
     case "contextual.phase":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -487,9 +555,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         phase: frame.phase,
       })
-      return
     case "contextual.scene":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -502,9 +569,8 @@ export async function persistContextualProgressFrame(
           ambiguityCount: frame.ambiguityCount,
         },
       })
-      return
     case "contextual.drafts":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -518,9 +584,8 @@ export async function persistContextualProgressFrame(
           truncated: frame.truncated === true,
         },
       })
-      return
     case "contextual.memories":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -528,9 +593,8 @@ export async function persistContextualProgressFrame(
         status: frame.failed === true ? "failed" : "complete",
         details: { count: frame.count },
       })
-      return
     case "contextual.span":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -827,6 +891,8 @@ export interface TickDeps {
   /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
    *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
   concurrency?: number
+  /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
+  triage?: TriageCall
 }
 
 export interface TickResult {
@@ -1026,6 +1092,19 @@ async function processSpan(
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // Finding codes + a "needs a human?" call per flagged cell, stored on
+        // the draft for the PR view. Never blocks staging (triage.ts).
+        const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
+        const verdictsByCell = await triageVerdicts(
+          fresh.map((c) => ({
+            cellId: c.cellId,
+            ref: pairById.get(c.cellId)?.canonicalRef ?? null,
+            source: pairById.get(c.cellId)?.source ?? "",
+            text: c.text,
+            findings: c.findings ?? [],
+          })),
+          deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
+        )
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
@@ -1034,6 +1113,7 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
+            verdicts: verdictsByCell.get(c.cellId) ?? {},
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,

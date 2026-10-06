@@ -6,33 +6,42 @@
  * and the server-session id, so the full-screen workbench renders the SAME
  * conversation and an in-flight run survives dock unmounts. This component
  * owns only presentation wiring: composer, attachments, proposal Apply.
+ * Unsent prose/chips and uploaded artifact references belong to the author's
+ * project-scoped Team chat draft, shared by the dock and embedded Team view.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bot, Paperclip, X } from "lucide-react"
+import { Bot, CheckIcon, CopyIcon, Paperclip, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { InputGroupButton } from "@/components/ui/input-group"
-import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
-import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
-import { expandSlashCommand } from "@/lib/agent/slash-commands"
+import type { ContextChip } from "@/lib/agent/context-chip"
+import { composeAgentSend } from "@/lib/agent/compose-send"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
+import { composerDraftKey, composerDraftStore, useComposerDraft, type ComposerDraftScope } from "@/lib/agent/composer-drafts"
+import { TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
+import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
-import type { AgentProposal } from "@/lib/agent/protocol"
+import type { AgentProposal, FileCandidate } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
+import { chatTranscript } from "@/lib/agent/transcript"
 import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerEndOnSignal,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentEmptyState } from "./AgentEmptyState"
-import { AGENT_PROMPT_HINTS } from "./prompt-hints"
+import { AgentUsageRing } from "./AgentUsageRing"
+import type { CreditsDialProps } from "./CreditsDial"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
 import { passageRowsFor } from "./cards/registry"
@@ -45,14 +54,21 @@ export interface AgentDockViewProps {
   jwt: string | null
   /** Current username — author on applied events. */
   author: string
+  /** Org credit gauge for the composer's usage ring (maintainer+ only;
+   *  everyone else sees the latest run's budget %). */
+  credits?: CreditsDialProps | null
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
   /** Current file/cell location — automatically sent as run context. */
-  context: { fileId?: string; cellId?: string }
+  context: { fileId?: string; cellId?: string; lane?: string }
   /** Project's active rules for proposal lint. */
   rules: TranslationRule[]
   /** Live cell lookup from useCells. */
   resolveCell?: (cellId: string) => CellData | undefined
+  /** AQU-1630: project's "Allow self-validation" setting, so a prepared
+   *  validation of this reader's own line reads as not applicable rather than
+   *  failing on Apply. */
+  allowSelfValidation?: boolean
   /** Post-apply hook: flush outbox + revalidate the touched cells. */
   onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
   /** One-tap prompts shown above the composer (e.g. Summarize book/chapter). */
@@ -74,16 +90,28 @@ export interface AgentDockViewProps {
   /** Workbench seam: jump to the Memory tab from a memory/brief proposal
    *  notice. Omitted in the dock panel, which has no Memory tab. */
   onReviewMemory?: () => void
+  /** Contextual dispatches/decisions, inside the shared conversation scroller. */
+  conversationPrelude?: ReactNode
 }
 
-export function AgentDockView({
+export function AgentDockView(props: AgentDockViewProps) {
+  const draftScope: ComposerDraftScope = {
+    owner: props.author, projectId: props.projectId, conversationId: TEAM_CHAT_CONVERSATION,
+  }
+  return <ScopedAgentDockView key={composerDraftKey(draftScope)} {...props} draftScope={draftScope} />
+}
+
+function ScopedAgentDockView({
+  draftScope,
   projectId,
   jwt,
   author,
+  credits,
   roleLevel,
   context,
   rules,
   resolveCell,
+  allowSelfValidation,
   onApplied,
   suggestedActions,
   pendingPrompt,
@@ -92,86 +120,98 @@ export function AgentDockView({
   onPendingChipConsumed,
   renderProposalOverride,
   onReviewMemory,
-}: AgentDockViewProps) {
+  conversationPrelude,
+}: AgentDockViewProps & { draftScope: ComposerDraftScope }) {
   const t = useT()
-  const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
-  const [promptHintIndex, setPromptHintIndex] = useState(0)
+  const { state, send, stop, startNewChat, noteActivity } = useAgentSession(projectId, author)
+  // Bumped on every own-send: the scroller snaps to the end so the sent
+  // message (and the reply about to stream) is in view even if the user had
+  // scrolled up to read history.
+  const [sendSignal, setSendSignal] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
-
-  // Teach by example in the one place the examples are useful: the empty
-  // composer. Once a conversation exists, return to a quiet generic hint.
+  const draftStore = composerDraftStore(draftScope)
+  const { attachments, attachmentError: attachError } = useComposerDraft(draftStore)
+  const mountedRef = useRef(true)
   useEffect(() => {
-    if (state.runs.length > 0) return
-    const timer = window.setInterval(() => {
-      setPromptHintIndex((index) => (index + 1) % AGENT_PROMPT_HINTS.length)
-    }, 4500)
-    return () => window.clearInterval(timer)
-  }, [state.runs.length])
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   // Composer attach-file affordance (AQU-AGENT Wave-2). Chosen files are
   // uploaded as project artifacts immediately; the returned {artifactId,
   // fileName} pairs ride the next run request so the harness can load_artifact
   // them into the sandbox. Attachments clear once a prompt is sent.
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [attachments, setAttachments] = useState<{ artifactId: string; fileName: string }[]>([])
   const [uploading, setUploading] = useState(false)
-  const [attachError, setAttachError] = useState<string | null>(null)
 
   const handleFilesChosen = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0 || !jwt) return
-      setAttachError(null)
+      draftStore.setAttachmentError(null)
       setUploading(true)
       try {
         for (const file of Array.from(files)) {
           const uploaded = await uploadAgentArtifact(jwt, projectId, file)
-          setAttachments((prev) => [...prev, { artifactId: uploaded.artifactId, fileName: uploaded.fileName }])
+          draftStore.addAttachment({ artifactId: uploaded.artifactId, fileName: uploaded.fileName })
         }
       } catch (err) {
-        setAttachError(
+        draftStore.setAttachmentError(
           err instanceof ArtifactUploadError ? err.message : "Could not attach that file. Try again.",
         )
       } finally {
-        setUploading(false)
+        if (mountedRef.current) setUploading(false)
       }
     },
-    [jwt, projectId],
+    [jwt, projectId, draftStore],
   )
 
   const removeAttachment = useCallback((artifactId: string) => {
-    setAttachments((prev) => prev.filter((a) => a.artifactId !== artifactId))
-  }, [])
+    draftStore.removeAttachments([artifactId])
+  }, [draftStore])
 
   const sendPrompt = useCallback(
     (text: string, chips: ContextChip[] = []) => {
-      if ((!text.trim() && chips.length === 0) || !jwt) return
-      // Slash commands expand into vetted prompts; the bubble keeps the typed
-      // command (CLI-style). Chips skip expansion — a chip message is already
-      // a specific ask, not a command.
-      const expanded = chips.length === 0 ? expandSlashCommand(text) : null
-      // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
-      // legend) is what the model receives.
-      const { wire, display } = expanded
-        ? { wire: expanded, display: text.trim() }
-        : serializeWithChips(text, chips)
-      // Read the profile at send time (fresh, no extra re-render). The server
-      // re-caps every field; this just avoids sending an empty object.
+      const batch = draftStore.getSnapshot().attachments
+      // The dock and embedded Team chat use the same composition contract.
+      const options = composeAgentSend({
+        text,
+        chips,
+        jwt,
+        projectId,
+        context,
+        artifacts: batch,
+      })
+      if (!options) return false
+      send(options)
+      setSendSignal((s) => s + 1)
+      // Attachments belong to the message that carried them — clear after send.
+      if (batch.length > 0) draftStore.removeAttachments(batch.map((attachment) => attachment.artifactId))
+      return true
+    },
+    [jwt, send, projectId, context, draftStore],
+  )
+
+  // AQU-1468: a file button under the agent's "which file?" question. Sends the
+  // choice as a new turn scoped to that file, same as typing the name. Only
+  // the newest run's buttons work, and only while nothing is streaming.
+  const latestRunId = state.runs[state.runs.length - 1]?.localId
+  const chooseFile = useCallback(
+    (runLocalId: string, candidate: FileCandidate) => {
+      if (!jwt || state.isStreaming || runLocalId !== latestRunId) return
+      const text = t("agent.run.useFileMessage", { name: candidate.name })
       const translatorProfile = profileForPrompt(getTranslatorProfile())
       send({
-        wire,
-        display,
+        wire: text,
+        display: text,
         jwt,
         request: {
           projectId,
-          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
+          context: { fileId: candidate.id },
           ...(translatorProfile ? { translatorProfile } : {}),
-          ...(attachments.length > 0 ? { artifacts: attachments } : {}),
         },
       })
-      // Attachments belong to the message that carried them — clear after send.
-      if (attachments.length > 0) setAttachments([])
     },
-    [jwt, send, projectId, context, attachments],
+    [jwt, state.isStreaming, latestRunId, send, projectId, t],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -184,10 +224,21 @@ export function AgentDockView({
   }, [pendingPrompt, jwt, sendPrompt, onPendingPromptConsumed])
 
   // Insert a chip handed in from the editor's "Ask AI" selection action.
+  //
+  // AQU-1653: "Ask AI" is a fresh question about the passage the reader just
+  // selected, so it starts a NEW chat rather than appending to whatever the
+  // last conversation was about — safe now that the old chat is saved on the
+  // server and reopenable from the chat menu. Two cases keep the current chat:
+  // an empty one (there is nothing to start away from) and a streaming one
+  // (a new chat aborts the run in flight, which the reader did not ask for).
   useEffect(() => {
     if (!pendingChip) return
+    if (state.runs.length > 0 && !state.isStreaming) startNewChat()
     composerRef.current?.insertChip(pendingChip)
     onPendingChipConsumed?.()
+    // Deliberately keyed on the chip alone: re-running when runs/isStreaming
+    // change would start a second new chat for one "Ask AI".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingChip, onPendingChipConsumed])
 
   const applyContext: ApplyContext = {
@@ -205,9 +256,12 @@ export function AgentDockView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {state.runs.length === 0 ? (
+      {state.runs.length === 0 && !conversationPrelude ? (
         jwt ? (
-          <AgentEmptyState onPromptSelect={(text) => composerRef.current?.insertText(text)} />
+          <AgentEmptyState
+            projectId={projectId}
+            onPromptSelect={(text) => composerRef.current?.insertText(text)}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />
@@ -215,15 +269,21 @@ export function AgentDockView({
           </div>
         )
       ) : (
-        <MessageScrollerProvider>
+        // Stick-to-bottom (2026-08-31 review): follow new content while the
+        // reader is at the bottom; any upward scroll breaks the follow and the
+        // ArrowDown button re-engages it. scrollAnchor is deliberately OFF —
+        // anchoring the sent message to the top would hold the viewport still
+        // while tool activity streams below the fold.
+        <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
           <MessageScroller className="flex-1">
+            <MessageScrollerEndOnSignal signal={sendSignal} />
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
-                {state.runs.map((run) => (
+                {conversationPrelude}
+                {state.runs.map((run, runIndex) => (
                   <MessageScrollerItem
                     key={run.localId}
                     messageId={run.localId}
-                    scrollAnchor
                     className="border-b border-border/40 pb-4 last:border-b-0"
                   >
                     <AgentRunView
@@ -238,6 +298,7 @@ export function AgentDockView({
                             resolveCell={resolveCell}
                             applyContext={applyContext}
                             onApplied={onApplied}
+                            allowSelfValidation={allowSelfValidation}
                           />
                         )
                       }
@@ -263,6 +324,15 @@ export function AgentDockView({
                       }}
                       onReviewMemory={onReviewMemory}
                       onChangesetApplied={onApplied}
+                      onChooseFile={(candidate) => chooseFile(run.localId, candidate)}
+                      fileChoiceEnabled={
+                        Boolean(jwt) && !state.isStreaming && run.localId === latestRunId
+                      }
+                      onSuggestionSend={
+                        runIndex === state.runs.length - 1 && jwt
+                          ? (text) => sendPrompt(text)
+                          : undefined
+                      }
                     />
                   </MessageScrollerItem>
                 ))}
@@ -276,12 +346,14 @@ export function AgentDockView({
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton className="shadow-sm" />
+            {state.runs.length > 0 && <CopyChatButton text={() => chatTranscript(state.runs)} />}
           </MessageScroller>
         </MessageScrollerProvider>
       )}
 
       <ChatComposer
         ref={composerRef}
+        draftScope={draftScope}
         isStreaming={state.isStreaming}
         isConfigured={Boolean(jwt)}
         onSend={({ text, chips }) => sendPrompt(text, chips)}
@@ -289,11 +361,7 @@ export function AgentDockView({
         compact
         suggestedActions={suggestedActions}
         queueWhileStreaming
-        placeholder={
-          state.runs.length === 0
-            ? `${t("agent.emptyState.tryAsking")}: ${AGENT_PROMPT_HINTS[promptHintIndex]}`
-            : t("agent.dock.composerPlaceholder")
-        }
+        placeholder={t("agent.dock.composerPlaceholder")}
         attachmentBar={
           attachments.length > 0 || attachError ? (
             <div className="flex flex-col gap-1">
@@ -353,9 +421,40 @@ export function AgentDockView({
             >
               {uploading ? <Spinner /> : <Paperclip />}
             </InputGroupButton>
+            <AgentUsageRing credits={credits} runs={state.runs} isStreaming={state.isStreaming} />
           </>
         }
       />
     </div>
+  )
+}
+
+/** Copies the whole conversation as plain text. Hover-revealed on pointer
+ *  devices (like the step inspector), always visible on touch. */
+function CopyChatButton({ text }: { text: () => string }) {
+  const t = useT()
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  const label = t(copied ? "agent.dock.copiedChat" : "agent.dock.copyChat")
+  return (
+    <AppTooltip content={label} side="left" delay={150}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        data-testid="agent-copy-chat"
+        className="absolute right-2 top-2 z-10 bg-background/80 shadow-sm [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/message-scroller:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100"
+        onClick={() => {
+          void navigator.clipboard?.writeText(text()).then(() => setCopied(true), () => {})
+        }}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </AppTooltip>
   )
 }

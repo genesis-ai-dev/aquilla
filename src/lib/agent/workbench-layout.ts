@@ -28,8 +28,7 @@ export function readAgentWorkbenchLayout(projectId: string): Layout {
   try {
     const stored = window.localStorage.getItem(storageKey(projectId))
     const normalized = stored ? normalizeLayout(JSON.parse(stored)) : null
-    // Ignore a zero-width agent column (legacy layouts from when collapse
-    // dismissed the workbench). The live pane is not collapsible.
+    // Ignore legacy collapsed layouts; the chat pane now always has a usable minimum.
     return normalized && normalized.agent > 0 ? normalized : { ...DEFAULT_LAYOUT }
   } catch {
     return { ...DEFAULT_LAYOUT }

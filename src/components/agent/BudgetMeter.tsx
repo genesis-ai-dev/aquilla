@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { formatCredits } from "@/lib/credits"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentBudget } from "@/lib/agent/run-state"
+import { budgetPct } from "./budget-pct"
 
 export function BudgetMeter({ budget }: { budget: AgentBudget }) {
   const t = useT()
@@ -46,7 +47,7 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
     )
   }
 
-  const pct = budget.capCredits > 0 ? Math.min(100, (budget.spentCredits / budget.capCredits) * 100) : 0
+  const { pct, pctLabel } = budgetPct(budget)
   return (
     <div
       className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
@@ -57,9 +58,7 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
       <div className="h-1 w-16 overflow-hidden rounded-full bg-muted">
         <div className={cn("h-full bg-sky-500", pct > 85 && "bg-amber-500")} style={{ width: `${pct}%` }} />
       </div>
-      <span>
-        {formatCredits(budget.spentCredits)} / {formatCredits(budget.capCredits)}
-      </span>
+      <span>{t("agent.budget.pctUsed", { pct: pctLabel })}</span>
     </div>
   )
 }

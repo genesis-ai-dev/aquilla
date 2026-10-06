@@ -163,9 +163,31 @@ describe("the date column", () => {
   })
 
   it("says when a done unit was marked, rather than how stale it is", () => {
-    renderBoard([unit({ doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
+    // Finished: a unit marked done with work in it says that instead (AQU-1494).
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
     // Scoped to the row: the Done group header also contains the word "marked".
     const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).getByText(/^marked /)).toBeInTheDocument()
+  })
+
+  it("says when a unit marked done has work in it again, and keeps it in Done (AQU-1494)", () => {
+    // Sam, 2026-10-03: Ruth was marked done, then a setting started counting
+    // its headings and it was six cells short — and the row still read only
+    // "marked <date>". It stays in Done (the mark is a person's decision), but
+    // the row says what came back, in the words every other row uses.
+    renderBoard([unit({ totalCount: 93, filledCount: 87, validatedCount: 87, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(screen.getByTestId("plan-group-done")).getByTestId("plan-row-f1-")).toBe(row)
+    const note = within(row).getByTestId("plan-done-with-work-f1-")
+    expect(note).toHaveTextContent(/^Marked done \u00b7 6 cells to translate$/)
+    expect(note.className).toContain("text-amber-700")
+    expect(within(row).queryByText(/^marked /)).toBeNull()
+  })
+
+  it("keeps a finished unit marked done as just 'marked <date>' (AQU-1494)", () => {
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).queryByTestId("plan-done-with-work-f1-")).toBeNull()
     expect(within(row).getByText(/^marked /)).toBeInTheDocument()
   })
 
@@ -623,6 +645,23 @@ describe("what the third column says", () => {
     expect(dateCell()).toHaveTextContent("4, 9, 17 and 2 more")
   })
 
+  it("names the front matter, first, when cells before chapter 1 are short too (AQU-1493)", () => {
+    // A line added above a book's first verse counts in its front matter. The
+    // row used to name only the chapters, or nothing when only it was short.
+    withProps([nearlyDone()], {
+      shortChaptersByUnit: new Map([["f1:", ["2", "3"]]]),
+      frontMatterShortUnits: new Set(["f1:"]),
+    })
+    expect(dateCell()).toHaveTextContent("front matter and chapters 2 and 3")
+  })
+
+  it("names the front matter alone when no chapter is short (AQU-1493)", () => {
+    withProps([nearlyDone()], { frontMatterShortUnits: new Set(["f1:"]) })
+    expect(dateCell()).toHaveTextContent("4 cells to validate")
+    expect(dateCell()).toHaveTextContent("front matter")
+    expect(dateCell()).not.toHaveTextContent("chapter")
+  })
+
   it("says a finished unit is not marked done, rather than that it has no date", () => {
     withProps([unit({ filledCount: 100, validatedCount: 100, lastEditAt: NOW - 3600_000 })])
     const cell = dateCell()
@@ -744,7 +783,10 @@ describe("the row's link follows the audio once the text is done (round 5)", () 
     const onOpenShortfall = vi.fn()
     render(
       <PlanBoard
-        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96 })]}
+        // AQU-490: the takes that EXIST are signed off, so the only thing
+        // outstanding is the four not yet recorded — which is what this
+        // test is about. Before the flip, unvalidated takes were invisible.
+        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96, audioValidatedCount: 96 })]}
         now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
         onOpenShortfall={onOpenShortfall}
       />,

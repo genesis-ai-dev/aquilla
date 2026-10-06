@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { importMacula, importObs, importTranslationNotes } from "./import"
+import { isTranslationNotesFile } from "./notes/note-files"
 
 const MACULA = `ref\ttext\tlemma\tmorph\tstrongnumber
 GEN 1:1!1\tבְּרֵאשִׁית\tרֵאשִׁית\tHR/Ncfsa\tH7225`
@@ -81,6 +82,38 @@ describe("specialty import durability", () => {
       .map((request) => JSON.parse(String(request.init?.body)))
       .some((body) => body.complete && typeof body.publishEventId === "string")
     expect(published).toBe(true)
+  })
+
+  // AQU-527 seam: the notes sidebar only reads files `isTranslationNotesFile`
+  // accepts. The importer sends `fileType: "tsv"` AND `kind: "translation-notes"`;
+  // the server stores `kind ?? fileType` and the files read route answers
+  // `fileType: kind ?? role` (sync-worker `files-read-route.ts`) — so the row the
+  // sidebar sees says "translation-notes", not "tsv". This passes what the real
+  // importer posts through that resolution into the sidebar's own predicate, so
+  // a renamed kind fails here instead of silently emptying the panel.
+  it("creates a Translation Notes file the notes sidebar recognises", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, init })
+      return successfulResponse(url)
+    }))
+
+    await importTranslationNotes(
+      new File([NOTES], "tn_GEN.tsv", { type: "text/tab-separated-values" }),
+      { projectId: "p1", author: "alice", getToken: async () => "tok" },
+    )
+
+    const posted = requests
+      .filter((request) => request.url.endsWith("/import"))
+      .map((request) => JSON.parse(String(request.init?.body)) as {
+        file?: { fileType?: string; role?: string; kind?: string }
+      })
+      .find((body) => body.file)?.file
+    expect(posted).toBeDefined()
+    const storedKind = posted?.kind ?? posted?.fileType ?? null
+    const fileTypeOnRead = storedKind ?? posted?.role ?? "codex"
+    expect(fileTypeOnRead).toBe("translation-notes")
+    expect(isTranslationNotesFile({ fileType: fileTypeOnRead })).toBe(true)
   })
 
   it("does not publish a silently incomplete OBS collection", async () => {

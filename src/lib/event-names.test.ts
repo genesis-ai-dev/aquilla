@@ -57,6 +57,12 @@ import {
   INVITE_SENT,
   SETUP_CHECKLIST_COMPLETED,
   OMNIVOICE_VOICES_MIGRATED,
+  BATCH_VALIDATE_ATTEMPTED,
+  CELL_VALIDATED,
+  CELL_UNVALIDATED,
+  AUDIO_ATTACHED,
+  AUDIO_GENERATED,
+  AUDIO_RECORDED,
 } from "./event-names"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -90,6 +96,12 @@ describe("event-names constants", () => {
     INVITE_SENT,
     SETUP_CHECKLIST_COMPLETED,
     OMNIVOICE_VOICES_MIGRATED,
+    BATCH_VALIDATE_ATTEMPTED,
+    CELL_VALIDATED,
+    CELL_UNVALIDATED,
+    AUDIO_ATTACHED,
+    AUDIO_GENERATED,
+    AUDIO_RECORDED,
   ]
 
   it("all event name constants are non-empty strings", () => {

@@ -1,3 +1,6 @@
+import { openExternal } from '@/lib/open-external'
+vi.mock('@/lib/open-external', () => ({ openExternal: vi.fn() }))
+import { BillingPlanReview } from './BillingPlanReview'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -84,4 +87,77 @@ it('clears review when the billing interval changes', async () => {
   await user.click(screen.getByRole('combobox', { name: 'Plan billing period' }))
   await user.click(screen.getByRole('option', { name: 'Monthly' }))
   expect(screen.queryByRole('region', { name: 'Review selected plan' })).not.toBeInTheDocument()
+})
+
+// AQU-1524: the review panel opens inside the Compare new plans card, so it must
+// be an inset section of that card — not a second bordered card nested in it.
+it('renders the plan review inset inside the Compare new plans card rather than as a nested card', async () => {
+  responses()
+  const user = userEvent.setup()
+  render(<BillingOffers jwt="jwt" orgId={7} />)
+  await user.click(await screen.findByRole('button', { name: 'Review Team 20×' }))
+  const region = screen.getByRole('region', { name: 'Review selected plan' })
+  expect(await within(region).findByText('Translation team')).toBeVisible()
+  expect(region.querySelector('[data-slot="settings-card"]')).toBeNull()
+  expect(region.closest('[data-slot="settings-card"]')).not.toBeNull()
+  expect(region.className).toContain('px-4')
+})
+
+it('submits the reviewed server price and keeps checkout errors recoverable', async () => {
+  const enabled = { ...review, checkoutEnabled: true }
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/review')) return Response.json(enabled)
+    expect(url).toContain('/orgs/7/billing/workspace/checkout')
+    expect(JSON.parse(String(init?.body))).toEqual({ ...selection,
+      confirmedPriceVersion: enabled.ready ? enabled.priceVersion : '',
+      confirmedTotalAmount: 720000, confirmedCurrency: 'usd' })
+    return Response.json({ error: 'checkout_conflict' }, { status: 409 })
+  })
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(<BillingPlanReview jwt="jwt" orgId={7} selection={selection} onDismiss={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Continue to Stripe' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Review the plan again')
+  expect(screen.getByRole('button', { name: 'Continue to Stripe' })).toBeEnabled()
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+
+it('opens the validated Stripe destination after reviewing the real server payload', async () => {
+  const enabled = { ...review, checkoutEnabled: true }
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/review')
+    ? Response.json(enabled)
+    : Response.json({ url: 'https://checkout.stripe.com/c/pay/cs_live_example', sandbox: false })))
+  const user = userEvent.setup()
+  render(<BillingPlanReview jwt="jwt" orgId={7} selection={selection} onDismiss={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Continue to Stripe' }))
+  expect(openExternal).toHaveBeenCalledWith('https://checkout.stripe.com/c/pay/cs_live_example')
+})
+it('only re-reviews a replacement after Stripe confirms expiration', async () => {
+  const enabled = { ...review, checkoutEnabled: true }
+  const fetch = vi.fn(async (url: string) => url.endsWith('/review')
+    ? Response.json(enabled) : url.endsWith('/expire')
+      ? Response.json({ status: 'expired' })
+      : Response.json({ error: 'checkout_conflict' }, { status: 409 }))
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(<BillingPlanReview jwt="jwt" orgId={7} selection={selection} onDismiss={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Continue to Stripe' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel previous checkout and review again' }))
+  await screen.findByRole('button', { name: 'Continue to Stripe' })
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/review'))).toHaveLength(2)
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+it('keeps a completed payment pending instead of replacing it', async () => {
+  const enabled = { ...review, checkoutEnabled: true }
+  const fetch = vi.fn(async (url: string) => url.endsWith('/review')
+    ? Response.json(enabled) : url.endsWith('/expire')
+      ? Response.json({ status: 'payment_pending' })
+      : Response.json({ error: 'checkout_conflict' }, { status: 409 }))
+  vi.stubGlobal('fetch', fetch)
+  const user = userEvent.setup()
+  render(<BillingPlanReview jwt="jwt" orgId={7} selection={selection} onDismiss={() => {}} />)
+  await user.click(await screen.findByRole('button', { name: 'Continue to Stripe' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel previous checkout and review again' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Payment confirmation is pending')
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/review'))).toHaveLength(1)
 })

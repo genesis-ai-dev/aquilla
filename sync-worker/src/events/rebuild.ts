@@ -17,12 +17,11 @@
 
 import {
   buildEventProjectionStmts,
-  isChainArbitrated,
-  isChainMutatingKind,
-  laneOfEvent,
   projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
+import { ChainHeadReplay } from './chain-head-replay'
+import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
@@ -103,27 +102,15 @@ export async function handleRebuildProjectionRequest(
     return new Response('failed to read events from DB', { status: 500 })
   }
 
-  // 3. Head compare-and-swap in-memory tracking: the current chain head per
-  //    (project, file, cell, side, lane) — the same row key `cells` uses.
-  //    Source and target sides, plus named target lanes, each have their own
-  //    head. A delete clears the head (the row is gone; the next event on
-  //    that key applies regardless of parent, exactly as the live INSERT
-  //    path does). `source.cell.mirror` is not chain-arbitrated but DOES
-  //    move the source head (under its monotonic upstream_seq guard), so a
-  //    later source event chained on a mirror id must see it as the head.
-  const headAt = new Map<string, string>()
-  const mirrorSeqAt = new Map<string, number>()
-  const parsedPayload = (row: EventRow): unknown => {
-    try {
-      return JSON.parse(row.payload)
-    } catch {
-      return null
-    }
-  }
-  const headKey = (row: EventRow, payload: unknown): string => {
-    const side = row.kind.startsWith('source.') ? 'source' : 'target'
-    return `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${side}\0${laneOfEvent(row.kind, payload)}`
-  }
+  // 3. Head compare-and-swap, tracked in memory per (file, cell, side, lane)
+  //    — the same row key `cells` uses. Shared with the live-link mirror fold
+  //    (AQU-1574); see chain-head-replay.ts.
+  //
+  //    AQU-1612: the project's target lane rows go in so replay resolves each
+  //    event's lane by `laneId` first and falls back to the `targetLang` tag.
+  //    Pre-1612 events carry only the tag and key exactly as they always did,
+  //    so a full replay still reproduces the live projection byte for byte.
+  const replay = new ChainHeadReplay(await loadTargetLanes(db, projectId))
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0
@@ -156,36 +143,29 @@ export async function handleRebuildProjectionRequest(
     // cell.validate (parent_id NULL) is not a chain step, and a parent-null
     // cell DELETE (a migration retraction, AQU-747/910) is a tombstone that
     // applies unconditionally (AQU-931).
-    let isWinner = true
-    if (row.cell_id && isChainMutatingKind(row.kind)) {
-      const key = headKey(row, parsedPayload(row))
-      if (isChainArbitrated(row.kind, row.parent_id)) {
-        const head = headAt.get(key)
-        isWinner = head === undefined || head === row.parent_id
-      }
-      if (isWinner) {
-        if (row.kind.endsWith('.delete')) headAt.delete(key)
-        else headAt.set(key, row.id)
-      }
-    } else if (row.kind === 'source.cell.mirror' && row.cell_id) {
-      const payload = parsedPayload(row) as { upstream?: { seq?: number } } | null
-      const seq = payload?.upstream?.seq
-      const key = headKey(row, payload)
-      const last = mirrorSeqAt.get(key)
-      if (typeof seq === 'number' && (last === undefined || seq > last)) {
-        mirrorSeqAt.set(key, seq)
-        headAt.set(key, row.id)
-      }
-    }
-
-    if (!isWinner) continue
-
-    let payload: unknown
+    //
+    // An unreadable payload replays with a null one (lane ''), and only fails
+    // the rebuild if the event won — a stale sibling is skipped either way.
+    let payload: unknown = null
+    let parseError: unknown = null
     try {
       payload = JSON.parse(row.payload)
     } catch (err) {
+      parseError = err
+    }
+    const isWinner = replay.apply({
+      id: row.id,
+      kind: row.kind,
+      fileId: row.file_id,
+      cellId: row.cell_id,
+      parentId: row.parent_id,
+      payload,
+    })
+    if (!isWinner) continue
+
+    if (parseError !== null) {
       return new Response(
-        `failed to parse payload for event ${row.id}: ${String(err)}`,
+        `failed to parse payload for event ${row.id}: ${String(parseError)}`,
         { status: 500 },
       )
     }

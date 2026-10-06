@@ -18,91 +18,10 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
-
-/**
- * Overlay synced project-wide settings onto the server-returned ProjectRecord.
- * Mutates a shallow copy — never the input.
- */
-function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): ProjectRecord {
-  let next: ProjectRecord | null = null
-  const draft = () => {
-    next ??= { ...record }
-    return next
-  }
-  const assign = <K extends keyof ProjectRecord>(key: K, value: ProjectRecord[K] | null | undefined) => {
-    if (value == null) return
-    if (record[key] === value) return
-    draft()[key] = value
-  }
-  assign("sourceLanguage", settings.sourceLanguage)
-  assign("targetLanguage", settings.targetLanguage)
-  // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
-  // never renders (found by the add-target-language e2e journey).
-  assign("targetLanes", settings.targetLanes)
-  // AQU-601: archived-lane markers overlay alongside the registry so the
-  // workspace switcher can hide archived lanes by default.
-  assign("archivedLanes", settings.archivedLanes)
-  if (settings.systemPrompt != null) {
-    if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
-      draft().completionSettings = buildCompletionSettings(
-        record.completionSettings,
-        { systemPrompt: settings.systemPrompt },
-      )
-    }
-  }
-  assign("rules", settings.rules)
-  assign("rulePenalties", settings.rulePenalties)
-  assign("algorithmicChecks", settings.algorithmicChecks)
-  assign("terminology", settings.terminology)
-  assign("termMatching", settings.termMatching)
-  assign("fileGenres", settings.fileGenres)
-  // AQU-207: confirmed/invalidated interlinear alignments. Must reach the
-  // workspace or the glosser and the alignment panel both read an empty list:
-  // a confirmation then persisted server-side but never fed the BT, never
-  // rendered as decided, and the next PATCH replaced the array instead of
-  // extending it (the panel's dedupe reads this same field).
-  assign("alignmentSeeds", settings.alignmentSeeds)
-  assign("livingMemoryEntries", settings.livingMemoryEntries)
-  assign("translationBrief", settings.translationBrief)
-  assign("validationCount", settings.validationCount)
-  assign("validationCountAudio", settings.validationCountAudio)
-  assign("validationRoleFloor", settings.validationRoleFloor)
-  assign("validationNamedUsers", settings.validationNamedUsers)
-  assign("allowSelfValidation", settings.allowSelfValidation)
-  assign("cellEditingFloor", settings.cellEditingFloor)
-  // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
-  // or the add-track button and the colour menu would be invisible everywhere,
-  // since they render only when this is on.
-  assign("allowTrackEditing", settings.allowTrackEditing)
-  // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
-  // overview or the gate reads false everywhere and an opted-in project would
-  // see no Autopilot at all — the surfaces render only when this is on (or the
-  // legacy device-local flag was already stored true).
-  assign("autopilotEnabled", settings.autopilotEnabled)
-  assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
-  assign("draftContext", settings.draftContext)
-  // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
-  // timeline against the imported file's clock or lay the verses out end to end.
-  assign("audioTimingMode", settings.audioTimingMode)
-  // AQU-646: the timeline lock. Must reach the workspace or the chips would be
-  // draggable for everyone until someone opened Project Settings.
-  assign("timingLocked", settings.timingLocked)
-  // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
-  // and the target-import panel drop front matter when it's on.
-  assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
-  if (settings.ttsSettings != null) {
-    // Server carries voice profiles (no apiKey); keep any device-local apiKey.
-    const merged = { ...record.ttsSettings, ...settings.ttsSettings }
-    if (JSON.stringify(record.ttsSettings ?? {}) !== JSON.stringify(merged)) {
-      draft().ttsSettings = merged
-    }
-  }
-  return next ?? record
-}
+import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
 
 /**
  * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
@@ -262,6 +181,24 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     return cleanup
   }, [refresh])
 
+  // AQU-1570: another surface in this tab changed the project on the server —
+  // typically Project Settings, a route modal over this page, linking a source
+  // project whose files have just arrived. Re-resolve, or the page behind the
+  // dialog keeps its old file list until a reload. A newer announcement
+  // supersedes an older one still in flight, as a newer effect run would.
+  useEffect(() => {
+    let cancelInFlight: (() => void) | null = null
+    const unsubscribe = subscribeProjectRecordChanged((changedId) => {
+      if (changedId !== projectId) return
+      cancelInFlight?.()
+      cancelInFlight = refresh()
+    })
+    return () => {
+      unsubscribe()
+      cancelInFlight?.()
+    }
+  }, [projectId, refresh])
+
   // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
   // completionSettings, aiProviderChosen) are written by Project settings /
   // Set up AI, which open as a route-modal OVER a still-mounted
@@ -316,8 +253,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(
-    () => project ? overlaySettings(project, syncedSettings) : null,
-    [project, syncedSettings],
+    () => project ? overlaySettings(project, syncedSettings, projectSettings.lanes) : null,
+    [project, syncedSettings, projectSettings.lanes],
   )
 
   return {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
+import { isReleaseBranch } from "./release-plan.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -25,6 +26,42 @@ const deploymentManifest = JSON.parse(
 
 function readRepoFile(...segments: string[]): string {
   return readFileSync(path.join(REPO_ROOT, ...segments), "utf8")
+}
+
+// AQU-1539: the deploy-credential contract below must hold for EVERY job that
+// runs a `deploy:aquilla*` command, not a hand-maintained list of job names, so
+// a newly added deploy surface cannot reintroduce the gap unnoticed.
+function workflowJobs(workflow: string): { name: string; body: string }[] {
+  const jobsIndex = workflow.indexOf("\njobs:\n")
+  expect(jobsIndex).toBeGreaterThan(-1)
+  const jobsBlock = workflow.slice(jobsIndex + "\njobs:\n".length)
+  const headings = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):$/gm)]
+  expect(headings.length).toBeGreaterThan(0)
+  return headings.map((heading, index) => ({
+    name: heading[1],
+    body: jobsBlock.slice(
+      heading.index!,
+      index + 1 < headings.length ? headings[index + 1].index! : undefined,
+    ),
+  }))
+}
+
+// The step, not the job: a `deploy:aquilla*` command only sees the `env:` of the
+// step that runs it, so credentials parked on a sibling step do not count.
+// Whole-line comments are dropped first — the workflow documents these very
+// commands and secret names in prose, and a comment is not a credential.
+function workflowSteps(job: string): string[] {
+  const indices = [...job.matchAll(/^ {6}- /gm)].map((match) => match.index!)
+  return indices
+    .map((start, index) =>
+      job.slice(start, index + 1 < indices.length ? indices[index + 1] : undefined),
+    )
+    .map((step) =>
+      step
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n"),
+    )
 }
 
 function tomlBlock(config: string, marker: string): string {
@@ -67,7 +104,7 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["workflow_dispatch", "main", "production", "production", "api.aquilla.app"],
+    ["workflow_dispatch", "release/2026/09/23", "production", "production", "api.aquilla.app"],
     ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
     ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
   ])(
@@ -86,7 +123,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["feature/example", "development", "staging", "", "release"])(
+  it.each(["feature/example", "development", "staging", "", "release", "main", "release/2026/9/23", "release/2026/09/23/hotfix"])(
     "rejects unauthorized live deployment ref %j",
     (refName) => {
       const result = spawnSync(
@@ -100,26 +137,29 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  it.each(["main", "dev"])(
-    "enforces the expected %s branch for explicit live deployments",
-    (expectedBranch) => {
+  it.each([
+    ["release/2026/09/23", "release"],
+    ["dev", "dev"],
+  ])(
+    "allows %s for the %s deploy guard",
+    (branch, guardArg) => {
       const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
       const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
 
       try {
-        expect(spawnSync("git", ["init", "-b", expectedBranch], { cwd: tempRepo }).status).toBe(0)
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
 
-        const allowed = spawnSync("bash", [guard, expectedBranch], {
+        const allowed = spawnSync("bash", [guard, guardArg], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(allowed.status).toBe(0)
 
         const rejected = spawnSync("bash", [guard, "feature/example"], {
           cwd: tempRepo,
           encoding: "utf8",
-          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: expectedBranch },
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
         })
         expect(rejected.status).not.toBe(0)
         expect(rejected.stderr).toContain("requires branch 'feature/example'")
@@ -128,6 +168,87 @@ describe("worker deployment environment contract", () => {
       }
     },
   )
+
+  // Production must only ship from a dated release branch so every live version maps to a calver tag.
+  it.each(["main", "dev", "release/2026/9/23", "release/latest"])(
+    "refuses a production deploy from %s",
+    (branch) => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync("bash", [guard, "release"], {
+          cwd: tempRepo,
+          encoding: "utf8",
+          env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch },
+        })
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("release/YYYY/MM/DD")
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    },
+  )
+
+  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // day. Four checkers each decide whether a branch name counts as a release
+  // branch: the three shell scripts here, plus isReleaseBranch in
+  // release-plan.mjs. One shared table is what keeps their four regexes in
+  // step; a shared helper alone doesn't catch a script that forgot to call it.
+  describe.each([
+    ["release/2026/09/24", true],
+    ["release/2026/09/24-01", true],
+    ["release/2026/9/23", false],
+    ["release/2026/09/24-1", false],
+    ["release/2026/09/24-001", false],
+    ["release/latest", false],
+  ])("release branch name %j", (branch, accepted) => {
+    it(`isReleaseBranch returns ${accepted}`, () => {
+      expect(isReleaseBranch(branch)).toBe(accepted)
+    })
+
+    it(`verify-deploy-branch.sh ${accepted ? "accepts" : "rejects"} it as "release"`, () => {
+      const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+      try {
+        expect(spawnSync("git", ["init", "-b", branch], { cwd: tempRepo }).status).toBe(0)
+        const result = spawnSync(
+          "bash",
+          [path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh"), "release"],
+          { cwd: tempRepo, encoding: "utf8", env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: branch } },
+        )
+        expect(result.status === 0).toBe(accepted)
+      } finally {
+        rmSync(tempRepo, { recursive: true, force: true })
+      }
+    })
+
+    it(`tag-release.sh ${accepted ? "accepts" : "rejects"} it as the current branch`, () => {
+      // Run outside any git repo so `git symbolic-ref` fails and the script
+      // falls back to GITHUB_REF_NAME instead of this repo's real branch.
+      const result = spawnSync("bash", [path.join(REPO_ROOT, "scripts", "tag-release.sh")], {
+        cwd: tmpdir(),
+        encoding: "utf8",
+        env: { GITHUB_REF_NAME: branch, GITHUB_ACTIONS: "true" },
+      })
+      if (accepted) {
+        expect(result.stderr).not.toContain("requires a release/YYYY/MM/DD branch")
+      } else {
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain("requires a release/YYYY/MM/DD branch")
+      }
+    })
+
+    it(`resolve-deployment-target.sh ${accepted ? "accepts" : "rejects"} it as a live ref`, () => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", branch],
+        { encoding: "utf8", env: {} },
+      )
+      expect(result.status === 0).toBe(accepted)
+      if (accepted) expect(result.stdout).toContain("wrangler_environment=production")
+    })
+  })
 
   it("keeps account_id above the first TOML table", () => {
     const config = readRepoFile("sync-worker", "wrangler.toml")
@@ -139,11 +260,11 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh main"],
-    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh main"],
-    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh release"],
+    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh release"],
   ])(
     "keeps the unnamed profile in %s away from production",
     (file, localName, productionName, guardCommand) => {
@@ -156,6 +277,32 @@ describe("worker deployment environment contract", () => {
       expect(topLevel).not.toContain(`name = "${productionName}"`)
       expect(production).toContain(`name = "${productionName}"`)
       expect(productionBuild).toContain(`command = "${guardCommand}"`)
+    },
+  )
+
+  // Wrangler would inherit the top-level [observability] block, but each deployed
+  // env declares its own so a top-level edit can't switch Workers Logs off.
+  it.each(
+    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml"]
+      .flatMap((file) => ["production", "development"].map((profile) => [file, profile])),
+  )("keeps Workers Logs enabled in %s [env.%s]", (file, profile) => {
+    const config = readRepoFile(...file.split("/"))
+    const observability = tomlBlock(config, `[env.${profile}.observability]`)
+
+    expect(observability).toContain("enabled = true")
+  })
+
+  // AQU-1166: the two DB-heavy Workers run near Hyperdrive→Neon rather than at the
+  // requester's edge PoP. [placement] is not inherited by env blocks either, so a
+  // deployed profile that omits its own copy silently loses co-location.
+  it.each(["sync-worker/wrangler.toml", "auth-worker/wrangler.toml"])(
+    "co-locates %s with Postgres via Smart Placement in every deployed profile",
+    (file) => {
+      const config = readRepoFile(...file.split("/"))
+
+      for (const marker of ["[placement]", "[env.production.placement]", "[env.development.placement]"]) {
+        expect(tomlBlock(config, marker)).toContain('mode = "smart"')
+      }
     },
   )
 
@@ -316,7 +463,7 @@ describe("worker deployment environment contract", () => {
     const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
-    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
+    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh release")
     expect(agentPackage.scripts?.deploy).toContain("--env=production")
     expect(agentPackage.scripts?.["deploy:staging"]).toBeUndefined()
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
@@ -379,13 +526,13 @@ describe("worker deployment environment contract", () => {
     const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
 
     for (const row of [
-      "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
+      "| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
       "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
     ]) {
       expect(matrix).toContain(row)
     }
 
-    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`release/YYYY/MM/DD` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
@@ -451,7 +598,7 @@ describe("worker deployment environment contract", () => {
     const scripts = rootPackage.scripts ?? {}
 
     for (const [target, environment, branch] of [
-      ["aquilla", "production", "main"],
+      ["aquilla", "production", "release"],
       ["aquilla:dev", "development", "dev"],
     ] as const) {
       for (const [surface, manifestSurface] of [
@@ -477,6 +624,19 @@ describe("worker deployment environment contract", () => {
     expect(scripts["deploy:aquilla:spa"]).toContain("cloudflare-version-deploy.mjs web production")
     expect(scripts["deploy:aquilla:sync"]).toContain("cloudflare-version-deploy.mjs sync production")
     expect(scripts["deploy:aquilla:auth"]).toContain("cloudflare-version-deploy.mjs identity production")
+
+    // AQU-1405: every SPA deploy carries the previous build's hashed chunks
+    // forward (and republishes asset-manifest.json) BEFORE upload — otherwise a
+    // tab open across the deploy 404s the chunks its index.html names.
+    for (const [script, origin] of [
+      ["deploy:aquilla:spa", "https://aquilla.app"],
+      ["deploy:aquilla:dev:spa", "https://dev.aquilla.app"],
+    ] as const) {
+      const command = scripts[script]
+      expect(command).toContain(`node scripts/retain-previous-assets.mjs dist ${origin}`)
+      expect(command.indexOf("retain-previous-assets.mjs"))
+        .toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+    }
 
     for (const brand of ["codex", "honeycomb", "context"]) {
       const command = scripts[`deploy:${brand}`]
@@ -535,6 +695,9 @@ describe("worker deployment environment contract", () => {
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
     expect(build).toContain("pnpm exec tsc -b")
+    // esbuild bundles the Workers without type-checking them.
+    expect(build).toContain("pnpm --dir auth-worker run type-check")
+    expect(build).toContain("pnpm --dir sync-worker run type-check")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
     const hook = readRepoFile(".husky", "pre-push")
@@ -583,6 +746,104 @@ describe("worker deployment environment contract", () => {
     expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs")
   })
 
+  // AQU-682 / AQU-1157: the Neon migration guard covered the Workers only, so a
+  // dev deploy whose schema-guard failed still published the SPA —
+  // dev.aquilla.app served new front-end code against old Workers and an
+  // un-migrated database (2026-09-03, 14:26-14:32). A deployment is one unit:
+  // if the target schema is behind, NOTHING publishes, web included.
+  it("blocks every deploy surface — web included — on the target Neon schema guard", () => {
+    const scripts = (JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }).scripts ?? {}
+
+    for (const [script, guard] of [
+      ["deploy:aquilla:spa", "npm run neon:status:prod"],
+      ["deploy:aquilla:sync", "npm run neon:status:prod"],
+      ["deploy:aquilla:auth", "npm run neon:status:prod"],
+      ["deploy:aquilla:dev:spa", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:sync", "npm run neon:status:dev"],
+      ["deploy:aquilla:dev:auth", "npm run neon:status:dev"],
+    ] as const) {
+      const command = scripts[script]
+      expect(command).toContain(guard)
+      // The guard is read-only and runs before anything is built or uploaded.
+      expect(command.indexOf(guard)).toBeLessThan(command.indexOf("cloudflare-version-deploy.mjs"))
+      expect(command).not.toContain("neon:apply")
+    }
+
+    for (const command of Object.values(scripts).filter((value) => value.includes("deploy:aquilla"))) {
+      expect(command).not.toContain("neon:apply")
+    }
+
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    const jobStart = (name: string) => {
+      const index = workflow.indexOf(`\n  ${name}:\n`)
+      expect(index).toBeGreaterThan(-1)
+      return index
+    }
+    const job = (name: string, next: string) =>
+      workflow.slice(jobStart(name), jobStart(next))
+
+    // schema-guard runs for every selectable surface, not just the Workers.
+    const guardJob = job("schema-guard", "web")
+    for (const surface of ["web", "sync", "auth"]) {
+      expect(guardJob).toContain(`needs.detect.outputs.${surface} == 'true'`)
+    }
+    expect(guardJob).not.toContain("neon:apply")
+
+    // ...and every deploy job waits on it and skips when it did not pass.
+    for (const [name, next] of [
+      ["web", "sync-worker"],
+      ["sync-worker", "auth-worker"],
+    ] as const) {
+      const deployJob = job(name, next)
+      expect(deployJob).toContain("needs: [target, detect, schema-guard]")
+      expect(deployJob).toContain("!failure() && !cancelled()")
+    }
+    const authJob = workflow.slice(jobStart("auth-worker"))
+    expect(authJob).toContain("needs: [target, detect, schema-guard]")
+    expect(authJob).toContain("!failure() && !cancelled()")
+
+    // AQU-1539: EVERY deploy step must carry the credentials its own in-script
+    // guard reads, or the guard fails closed in CI for the wrong reason — a
+    // missing-credential error instead of a pending-migration report. The two
+    // Worker steps carried only the Cloudflare secrets, so `web` published the
+    // SPA while `sync-worker`/`auth-worker` died before uploading anything:
+    // the same partial deployment AQU-682/AQU-1157 closed, from the other side.
+    // The job list is derived from the workflow, so a new deploy surface is
+    // covered the moment it is added.
+    const deploySteps = workflowJobs(workflow).flatMap((deployJob) =>
+      workflowSteps(deployJob.body)
+        .filter((step) => /run:[\s\S]*deploy:aquilla/.test(step))
+        .map((step) => ({ job: deployJob.name, step })),
+    )
+    expect(deploySteps.map((entry) => entry.job)).toEqual(["web", "sync-worker", "auth-worker"])
+    for (const { job: jobName, step } of deploySteps) {
+      for (const secret of [
+        "NEON_PG_HOST",
+        "NEON_PG_DB",
+        "NEON_PG_ROLE",
+        "NEON_PG_PASSWORD",
+        "NEON_API_KEY",
+        "NEON_DEV_PG_HOST",
+        "NEON_DEV_PG_DB",
+        "NEON_DEV_PG_ROLE",
+        "NEON_DEV_PG_PASSWORD",
+      ]) {
+        expect(step, `${jobName} deploy step is missing ${secret}`).toContain(`${secret}:`)
+      }
+      // Both targets are reachable from one step, so both credential sets are
+      // required regardless of which branch the operator dispatched from.
+      expect(step).toContain("deploy:aquilla")
+      expect(step).not.toContain("neon:apply")
+    }
+
+    // The operator-facing order is written down where deploys are run from.
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+    expect(matrix).toContain("**Migrate first, then deploy.**")
+    expect(matrix).toContain("Every surface — web, identity and sync alike — runs the target")
+  })
+
   it("installs root and worker dependencies before deployable worker checks", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
 
@@ -600,11 +861,17 @@ describe("worker deployment environment contract", () => {
 
   it("installs Chromium before running IDML browser conformance in CI", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
-    const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
+    const installBrowser = workflow.indexOf("uses: ./.github/actions/playwright-chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+
+    // The shared action caches the browser and installs Chromium's system
+    // libraries only when it cannot start without them (apt is the slow step).
+    const action = readRepoFile(".github", "actions", "playwright-chromium", "action.yml")
+    expect(action).toContain("pnpm exec playwright install chromium")
+    expect(action).toContain("pnpm exec playwright install-deps chromium")
   })
 })
 

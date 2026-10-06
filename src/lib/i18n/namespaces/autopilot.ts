@@ -50,6 +50,8 @@ export const autopilot = defineNamespace({
     "autopilot.time.checkedNever": "Not checked yet",
     "autopilot.time.checkedAt": "Checked {time}",
     "autopilot.lane.projectDefault": "Project default",
+    "autopilot.lane.label": "Target lane",
+    "autopilot.lane.selectAria": "Target language Autopilot will draft",
     "autopilot.phase.reading": "Reading context…",
     "autopilot.phase.drafting": "Drafting…",
     "autopilot.phase.checking": "Checking…",
@@ -534,7 +536,7 @@ export const autopilot = defineNamespace({
     "autopilot.graph.title": "Process",
     "autopilot.graph.aria": "Autopilot process graph",
     "autopilot.graph.spanHelp":
-      "Autopilot works on a short piece of text, usually 8 to 12 cells. This lets it read the text around that piece.",
+      "Autopilot works on a short piece of text, about 8 to 12 cells. This lets it read the text around that piece.",
     "autopilot.graph.spanHelpAria": "What a span is",
     "autopilot.graph.liveSpans": "Now: {spans}",
     "autopilot.graph.noLiveSpan": "Autopilot is not working on a passage now.",
@@ -602,7 +604,7 @@ export const autopilot = defineNamespace({
     // — Staged proposal card: the human approval gate on agent writes ————
     "autopilot.proposal.unsupportedKind":
       "not supported yet — apply this kind in the app directly",
-    "autopilot.proposal.currentlyEmpty": "(currently empty)",
+    "autopilot.proposal.currentlyEmpty": "(empty)",
     "autopilot.proposal.newRow": "(new row)",
     "autopilot.proposal.discarded": "Discarded: {summary}",
     "autopilot.proposal.applyFailed": "Apply failed",
@@ -620,6 +622,16 @@ export const autopilot = defineNamespace({
       other: "Affects {count} later passages.",
     }),
     "autopilot.decisions.answer": "Answer",
+    "autopilot.decisions.context.loading": "Finding the passage…",
+    "autopilot.decisions.context.unavailable": "Couldn't load where this applies.",
+    "autopilot.decisions.context.openInEditor": "Open in editor",
+    "autopilot.decisions.context.showPassage": plural({
+      one: "Show {count} verse",
+      other: "Show {count} verses",
+    }),
+    "autopilot.decisions.context.hidePassage": "Hide verses",
+    "autopilot.decisions.context.showSurrounding": "Show surrounding verses",
+    "autopilot.decisions.context.untranslated": "Not translated yet",
     "autopilot.decisions.answerPlaceholder": "Your decision…",
     "autopilot.decisions.dismiss": "Not needed",
     "autopilot.decisions.assign": "Ask someone else",
@@ -640,7 +652,7 @@ export const autopilot = defineNamespace({
     "autopilot.readiness.level.missing": "Missing",
     "autopilot.readiness.terminology.label": "Key terms",
     "autopilot.readiness.terminology.none":
-      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may word them differently.",
+      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may use different words for them.",
     "autopilot.readiness.terminology.some": plural({
       one: "{count} key term has an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
       other: "{count} key terms have an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
@@ -684,6 +696,15 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.lane.label": {
+        description:
+          "Inline label before the target-language lane Autopilot will draft on the project overview card. A noun phrase naming WHICH language a run would work on — it must not imply a run is under way, because the card shows it while paused and stopped too. Sits beside a short dropdown.",
+        maxLength: 24,
+      },
+      "autopilot.lane.selectAria": {
+        description:
+          "Screen-reader name for the dropdown that chooses which of the project's target-language lanes a project-wide Autopilot run will draft.",
+      },
       "autopilot.proposal.unsupportedKind": {
         description: "Explanation beside an agent event kind the current app cannot apply.",
       },
@@ -1104,6 +1125,10 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.review.passageDrafts": withPlaceholders(
         "Count badge on one passage group in the expanded backlog.",
         { count: "Number of staged drafts in that passage." },
+      ),
+      "autopilot.decisions.context.showPassage": withPlaceholders(
+        "Button on a question card that expands the verses the question is about.",
+        { count: "Number of verses the question is about." },
       ),
       "autopilot.decisions.blastRadius": withPlaceholders(
         "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",

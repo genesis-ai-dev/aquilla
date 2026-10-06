@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
-import { checkRules, checkRulesForCell, rulesForLane, lanesWithRules, filterRulesForDisplay } from "./rule-engine"
+import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -393,26 +394,50 @@ describe("rulesForLane", () => {
 })
 
 
-// AQU-609: the Rules-surface lane filter. WHY: with up to ~150 target lanes a
-// filter over ALL project lanes would be as unusable as the unfiltered list —
-// options must derive from lanes that actually hold rules, and the filter is
-// display-only (evaluation stays with rulesForLane).
-describe("lane display filter", () => {
+// AQU-1509: every rule card on the Rules surface states its scope relative to
+// the lane being viewed. WHY: a lane rule must never read as if it applies in
+// another lane (users edit the wrong lane's rules), and the classification
+// must agree with evaluation (`rulesForLane`) — "all" / "this" rules are
+// exactly the ones the editor enforces in that lane.
+describe("ruleLaneScope", () => {
   const proj = makeRule({ id: "p1", scope: "project", check: { type: "target-forbids", targetPattern: "x" } })
-  const fr1 = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
-  const fr2 = makeRule({ id: "fr2", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "y" } })
+  const org = makeRule({ id: "o1", scope: "org", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
   const def = makeRule({ id: "def", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "z" } })
+  const bare = makeRule({ id: "bare", scope: "lane", check: { type: "target-forbids", targetPattern: "z" } })
 
-  it("lanesWithRules lists each lane once, in first appearance order, ignoring non-lane rules", () => {
-    expect(lanesWithRules([proj, fr1, def, fr2])).toEqual(["fr", ""])
-    expect(lanesWithRules([proj])).toEqual([])
+  it("non-lane rules apply in every lane", () => {
+    expect(ruleLaneScope(proj, "fr")).toBe("all")
+    expect(ruleLaneScope(org, "")).toBe("all")
   })
 
-  it("filterRulesForDisplay: all / project-wide / one lane (incl. the default lane)", () => {
-    const rules = [proj, fr1, fr2, def]
-    expect(filterRulesForDisplay(rules, "all").map((r) => r.id)).toEqual(["p1", "fr1", "fr2", "def"])
-    expect(filterRulesForDisplay(rules, "project").map((r) => r.id)).toEqual(["p1"])
-    expect(filterRulesForDisplay(rules, "lane:fr").map((r) => r.id)).toEqual(["fr1", "fr2"])
-    expect(filterRulesForDisplay(rules, "lane:").map((r) => r.id)).toEqual(["def"])
+  it("a lane rule is 'this' only in its own lane, including the default lane", () => {
+    expect(ruleLaneScope(fr, "fr")).toBe("this")
+    expect(ruleLaneScope(fr, "")).toBe("other")
+    expect(ruleLaneScope(def, "")).toBe("this")
+    expect(ruleLaneScope(def, "fr")).toBe("other")
+    // A lane rule with no `lane` field belongs to the default lane.
+    expect(ruleLaneScope(bare, "")).toBe("this")
+  })
+
+  it("agrees with rulesForLane: 'other' rules are exactly the ones evaluation drops", () => {
+    const rules = [proj, org, fr, def, bare]
+    for (const lane of ["", "fr", "es"]) {
+      const applied = new Set(rulesForLane(rules, lane).map((r) => r.id))
+      for (const r of rules) {
+        expect(ruleLaneScope(r, lane) !== "other").toBe(applied.has(r.id))
+      }
+    }
+  })
+})
+
+// AQU-1705: the editor's half of the shared verdict table. auth-worker's
+// agent-lint.test.ts runs the same rows through the agent's lintDraft, so the
+// model is told about exactly the violations the person sees.
+describe("checkRulesForCell — verdicts the agent's lint must match", () => {
+  it.each(RULE_LINT_PARITY_CASES)("$name", ({ ruleId, check, source, target, flagged }) => {
+    const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
+    const infractions = checkRulesForCell(cell, "f1", [makeRule({ id: ruleId, check })])
+    expect(infractions.map((i) => i.ruleId)).toEqual(flagged ? [ruleId] : [])
   })
 })

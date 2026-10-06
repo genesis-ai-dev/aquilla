@@ -41,6 +41,18 @@ function parseRule(source: string, path: string): Record<string, string> {
 
 const STATIC_HEADERS = parseRule(HEADERS_FILE, "/*")
 
+describe("YouTube iframe API script policy", () => {
+  it.each([
+    ["worker", REPORT_ONLY_CSP],
+    ["static assets", STATIC_HEADERS["Content-Security-Policy-Report-Only"]],
+  ])("permits the YouTube API in %s script-src", (_surface, policy) => {
+    const directive = policy.split("; ").find((part) =>
+      part.startsWith("script-src "),
+    )
+    expect(directive?.split(" ")).toContain("https://www.youtube.com")
+  })
+})
+
 describe("public/_headers — covers what the Worker cannot", () => {
   it("declares a catch-all rule (anything narrower would leave paths bare)", () => {
     expect(Object.keys(STATIC_HEADERS).length).toBeGreaterThan(0)

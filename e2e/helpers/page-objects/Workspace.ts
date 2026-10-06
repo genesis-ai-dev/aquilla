@@ -7,6 +7,10 @@ import { type Page, type Locator, expect } from "@playwright/test"
 // 60-second per-test ceiling so a genuinely stuck editor still fails promptly.
 const EDITOR_READY_TIMEOUT_MS = 30_000
 
+// A target cell's editable surface — see `editCell` for the two shapes.
+const EDITABLE_TARGET_SELECTOR =
+  'textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]'
+
 interface FilePayload {
   name: string
   mimeType: string
@@ -49,6 +53,51 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importYouTubeCaptions(url: string, payload: FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Import a caption export", { exact: true }).check()
+    await dialog.getByLabel("Your caption export").setInputFiles(payload)
+    await dialog.getByRole("button", { name: "Preview captions" }).click()
+    await expect(dialog.getByRole("button", { name: "Import captions" }))
+      .toBeEnabled({ timeout: 10_000 })
+    await dialog.getByRole("button", { name: "Import captions" }).click()
+    await this.waitForImportSettled()
+  }
+
+  async importYouTubePicture(url: string, name: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await dialog.getByRole("button", { name: "Link video", exact: true }).click()
+    await this.waitForImportSettled()
+  }
+
+  async previewYouTubeOriginalMedia(url: string, filePath: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+    const dialog = this.page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^YouTube video/i }).click()
+    await dialog.getByLabel("YouTube video link").fill(url)
+    await dialog.getByLabel("Use original audio or video", { exact: true }).check()
+    await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
+    await dialog.getByRole("button", { name: "Preview import" }).click()
+    await expect(this.page.getByRole("button", { name: "Import media and link video" }))
+      .toBeVisible({ timeout: 30_000 })
+  }
+
+  async confirmYouTubeOriginalMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Import media and link video" }).click()
+    await this.waitForImportSettled()
+  }
+
   async importPayload(payload: FilePayload): Promise<void> {
     await this.previewImportPayload(payload)
     await this.confirmImportPreview()
@@ -65,12 +114,102 @@ export class Workspace {
       .toBeVisible({ timeout: 10_000 })
   }
 
-  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
-   * (they have no text cells to show) and upload immediately on selection, so
-   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
     await this.chooseImportFiles(filePath)
     await this.waitForImportSettled()
+  }
+
+  /** Review companion captions before publishing the media file. */
+  async previewMediaWithCaptions(
+    media: FilePayload,
+    captions: FilePayload,
+  ): Promise<void> {
+    await this.chooseImportFiles([media, captions])
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async previewEmbeddedMedia(media: FilePayload): Promise<void> {
+    await this.chooseImportFiles(media)
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmMediaPreview(mediaName: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Continue import", exact: true }).click()
+    // Existing sidebar rows cannot prove this import completed.
+    await expect(this.page.getByTestId("shell-dock")
+      .getByRole("button", { name: mediaName, exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await expect(this.modalDialogs()).toHaveCount(0)
+  }
+
+  /** Every open dialog except toasts. AQU-1352's "Created … in …" success toast
+   * is also role="dialog" and outlives the import, so a bare role lookup cannot
+   * prove the import dialog closed. */
+  modalDialogs(): Locator {
+    return this.page.getByRole("dialog").and(this.page.locator(':not([data-slot="toast"])'))
+  }
+
+  sourceAudioClips(): Locator {
+    return this.page.locator('[data-variant="dialogue"] [data-testid^="tl-card-"]')
+  }
+
+  async previewCaptionTrack(captions: FilePayload): Promise<void> {
+    await this.page.getByTestId("tl-sources-menu").click()
+    await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async confirmCaptionTrack(overwrite = false): Promise<void> {
+    await this.page.getByRole("button", {
+      name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
+    }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  async zoomTimelineIn(): Promise<void> {
+    await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
+  }
+
+  async declineWhisperDownload(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Whisper/i })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+
+  linkedVideo(): Locator {
+    return this.page.getByTestId("video-pane-media")
+  }
+
+  async playMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: /Play all/i }).click()
+  }
+
+  async pauseMedia(): Promise<void> {
+    await this.page.getByRole("button", { name: "Pause", exact: true }).click()
+  }
+
+  async waitForLinkedVideo(): Promise<void> {
+    await expect(this.linkedVideo()).toBeVisible()
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement) =>
+      element.readyState), { timeout: EDITOR_READY_TIMEOUT_MS }).toBeGreaterThanOrEqual(2)
+  }
+
+  async seekLinkedVideo(seconds: number): Promise<void> {
+    const duration = await this.linkedVideo().evaluate((element: HTMLVideoElement) => element.duration)
+    const slider = this.page.getByRole("slider", { name: "Seek", exact: true })
+    const bounds = await slider.boundingBox()
+    expect(bounds).not.toBeNull()
+    await slider.click({ position: { x: bounds!.width * seconds / duration,
+      y: bounds!.height / 2 } })
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement, time) =>
+      element.seeking ? 1 : Math.abs(element.currentTime - time), seconds))
+      .toBeLessThan(0.05)
   }
 
   /** Select and commit one translation through the eBible corpus picker. */
@@ -185,7 +324,9 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+  private async chooseImportFiles(
+    filePath: string | FilePayload | string[] | FilePayload[],
+  ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
@@ -214,11 +355,11 @@ export class Workspace {
     const importError = this.page.getByText(/^Import failed:/i).first()
     let outcome = "pending"
     await expect.poll(async () => {
-      if (await importError.isVisible().catch(() => false)) {
+      if (await importError.isVisible()) {
         outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
         return "settled"
       }
-      if (await fileActions.isVisible().catch(() => false)) {
+      if (await fileActions.isVisible()) {
         outcome = "success"
         return "settled"
       }
@@ -397,14 +538,27 @@ export class Workspace {
     })
   }
 
+  async showFilesSidebar(): Promise<void> {
+    const files = this.page.getByRole("button", { name: "Files", exact: true })
+    await expect(files).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Media view selects Voices; ensure Files without toggling an open panel.
+    if (await files.getAttribute("aria-pressed") !== "true") await files.click()
+    await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  async openMediaView(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "Media", exact: true })
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
+  }
+
   cellRow(index = 0): Locator {
     return this.page.locator("[data-cell-id]").nth(index)
   }
 
   private editableTarget(index: number): Locator {
-    return this.targetColumn(index)
-      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
-      .first()
+    return this.targetColumn(index).locator(EDITABLE_TARGET_SELECTOR).first()
   }
 
   private targetColumn(index: number): Locator {
@@ -415,44 +569,82 @@ export class Workspace {
     return this.targetColumn(index).locator("[data-target-read-view]").first()
   }
 
+  /** The one surface that takes an activating click right now: the mounted
+   * editor, or the read view while it accepts activation. The column renders
+   * exactly one of the two. A read view is `aria-readonly` while an AI draft
+   * is still saving (or another user holds the focus lock); a click there is
+   * a no-op by design, so it is not a match and callers wait it out. */
+  private activatableTarget(index: number): Locator {
+    return this.targetColumn(index)
+      .locator(`[data-target-read-view]:not([aria-readonly="true"]), ${EDITABLE_TARGET_SELECTOR}`)
+      .filter({ visible: true })
+      .first()
+  }
+
   async activateTargetCell(index: number): Promise<Locator> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
 
-    const target = this.editableTarget(index)
-    let activatedFromReadView = false
-    if (!(await target.isVisible())) {
-      const readView = this.targetReadView(index)
-      await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-      await readView.click()
-      activatedFromReadView = true
-    }
+    // Exactly ONE click, on whichever surface is activatable when the click
+    // lands. Do not sample "editor or read view?" first and then act on the
+    // answer: the app swaps the two on its own — the sparkle flow mounts and
+    // focuses the editor when its draft's save settles — so the sampled read
+    // view can be gone by the time it is clicked. The locator re-resolves on
+    // every retry of this single action instead.
+    //
+    // One click also keeps first activation honest: a read-view click is the
+    // user's one activation, and clicking the newly mounted editor again
+    // would normalize IDML's caret through handleClick and hide
+    // focus-placement regressions that only occur on first activation.
+    await this.activatableTarget(index).click({ timeout: EDITOR_READY_TIMEOUT_MS })
 
+    const target = this.editableTarget(index)
     await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
-    // A read-view click is the user's one activation. Clicking the newly
-    // mounted editor again normalizes IDML's caret through handleClick and can
-    // hide focus-placement regressions that only occur on first activation.
-    if (!activatedFromReadView) {
-      await target.click()
-    }
     await expect(target).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
     return target
   }
 
-  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
-    // Blurring commits immediately. Register the response waiter before the
-    // blur so a fast local worker cannot complete the request first.
-    const committed = this.page.waitForResponse((response) => {
-      if (response.request().method() !== "POST" || !response.ok()) return false
+  private async commitTargetCellEdit(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    const isEventsPost = (url: string, method: string): boolean => {
+      if (method !== "POST") return false
       try {
-        return new URL(response.url()).pathname.endsWith("/events")
+        return new URL(url).pathname.endsWith("/events")
       } catch {
         return false
       }
+    }
+    // Blurring commits immediately. Register waiters before the blur so a
+    // fast local worker cannot complete the request first.
+    const committed = this.page.waitForResponse((response) => {
+      return response.ok() && isEventsPost(response.url(), response.request().method())
     }, { timeout: 20_000 })
+    let requestAt = 0
+    const requestSeen = this.page.waitForRequest((request) => {
+      return isEventsPost(request.url(), request.method())
+    }, { timeout: 20_000 }).then(() => {
+      requestAt = Date.now()
+    })
+    const blurStarted = Date.now()
     await this.page.locator("aside").click()
-    await committed
+    const response = await committed
+    await requestSeen
+    const ackedAt = Date.now()
+    // Cell-write latency is request-sent → ack (the AQU-1005 seq-lock convoy
+    // shows up here). Blur→ack also includes TipTap idle debounce and
+    // Playwright protocol delay across many contexts — that is not the lock.
+    const timing = response.request().timing()
+    const timedRoundTrip =
+      timing.responseEnd >= 0 && timing.requestStart >= 0
+        ? Math.round(timing.responseEnd - timing.requestStart)
+        : 0
+    const writeMs = timedRoundTrip > 0
+      ? timedRoundTrip
+      : (requestAt > 0 ? ackedAt - requestAt : ackedAt - blurStarted)
     await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+    return { writeMs, ackedAt }
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -470,6 +662,16 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /** Like `editCell`, but returns blur → `POST /events` ack timing. */
+  async editCellMeasuringWrite(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    await this.activateTargetCell(index)
+    await this.page.keyboard.type(text)
+    return this.commitTargetCellEdit(index, text)
   }
 
   /**
@@ -942,12 +1144,6 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Download original$/i }).click()
   }
 
-  /** Translation-injected USFM round-trip from the file options overflow. */
-  async clickExportSource(): Promise<void> {
-    await this.openFileOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /Export source/i }).click()
-  }
-
   /** First editor row whose source column contains `sourceSubstring`. */
   async cellIndexWithSource(sourceSubstring: string): Promise<number> {
     const rows = this.page.locator("[data-cell-id]")
@@ -1020,6 +1216,17 @@ export class Workspace {
     const target = this.editableTarget(index)
     await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     await target.fill(text)
+  }
+
+  /** Keyboard cell navigation from an ACTIVE editor: Tab steps to the next
+   * cell, Shift+Tab to the previous one. Leaving the cell commits it. Waits
+   * for the destination's editor to take focus. */
+  async tabFromTargetCell(index: number, direction: "next" | "previous"): Promise<Locator> {
+    await expect(this.editableTarget(index)).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.keyboard.press(direction === "next" ? "Tab" : "Shift+Tab")
+    const destination = this.editableTarget(direction === "next" ? index + 1 : index - 1)
+    await expect(destination).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
+    return destination
   }
 
   /** Leave the active editor by clicking sidebar chrome. Unlike editCell this

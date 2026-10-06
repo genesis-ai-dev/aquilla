@@ -28,11 +28,12 @@ function useRenderNote(): (
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
 ) => string | null {
   const t = useT()
   const { locale } = useI18n()
-  return (unit, now, audioFiles) => {
-    const note = planUnitNote(unit, now, audioFiles)
+  return (unit, now, audioFiles, textFiles) => {
+    const note = planUnitNote(unit, now, audioFiles, textFiles)
     if (!note) return null
     switch (note.kind) {
       case "marked":
@@ -140,8 +141,10 @@ export function usePlanStatusNote(
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  /** AQU-955: the set from `textFileIds`; see `planUnitStatus`. */
+  textFiles?: ReadonlySet<string>,
 ): string | null {
-  return useRenderNote()(unit, now, audioFiles)
+  return useRenderNote()(unit, now, audioFiles, textFiles)
 }
 
 /**
@@ -166,12 +169,14 @@ export function usePlanRowNote(
   unit: PlanUnit,
   now: number,
   audioFiles?: ReadonlySet<string>,
+  /** AQU-955: the set from `textFileIds`; see `planUnitStatus`. */
+  textFiles?: ReadonlySet<string>,
 ): string | null {
   const { locale } = useI18n()
-  const note = planUnitNote(unit, now, audioFiles)
-  const rendered = useRenderNote()(unit, now, audioFiles)
+  const note = planUnitNote(unit, now, audioFiles, textFiles)
+  const rendered = useRenderNote()(unit, now, audioFiles, textFiles)
   const activity = unit.lastEditAt != null ? formatRelativeTime(unit.lastEditAt, locale, now) : null
-  const nearlyComplete = planUnitStatus(unit, now, audioFiles) === "nearly_complete"
+  const nearlyComplete = planUnitStatus(unit, now, audioFiles, textFiles) === "nearly_complete"
   if (!note) return activity
   if (note.kind === "no_target" && !nearlyComplete) return activity
   return rendered
@@ -220,4 +225,21 @@ export function usePlanReadoutTips(): (
           inner: t("org.projectOverview.plan.readoutAudioValidated", vars(validated)),
         }
   }
+}
+
+/**
+ * AQU-1493: "Front matter" as a label standing on its own — the tile under the
+ * chapter grid and the title of that tile's card — in sentence case, like
+ * "Chapter 3" beside it (Sam, 2026-10-03: the tile read lower case while the
+ * card it opens read "Front matter"). The catalogue word stays lower case for
+ * the places it runs inside a phrase, such as a row's "front matter and
+ * chapters 1 and 2". Cased here rather than a second catalogue string that
+ * differs only in case, which most target languages would translate twice for
+ * nothing — and which the duplicate-value check would refuse.
+ */
+export function useFrontMatterLabel(): string {
+  const t = useT()
+  const { locale } = useI18n()
+  const words = t("org.projectOverview.plan.frontMatter")
+  return words.charAt(0).toLocaleUpperCase(locale) + words.slice(1)
 }

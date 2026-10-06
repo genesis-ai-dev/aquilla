@@ -1,10 +1,11 @@
 // AQU-479 push accelerator: `link.upstream-changed` notify hook tests.
 //
-// The hook (route.ts's notifyLiveDownstreamsOfUpstreamChanges, wired via
-// ctx.waitUntil after the ProjectSync event.applied fan-out) must:
+// The hook (link-notify.ts's notifyLiveDownstreamsOfUpstreamChanges, wired
+// from route.ts via ctx.waitUntil after the ProjectSync event.applied fan-out)
+// must:
 //   - fire a frame per live (non-clone) downstream when a commit batch
-//     contains lane-relevant kinds (source.cell.*, cell.retime, cast.assign,
-//     file.create)
+//     contains a kind that downstream's link mirrors (link-sync.ts's
+//     laneKindsFor — the ONE list, AQU-1545)
 //   - NOT fire for clone-mode downstreams
 //   - NOT fire when the batch is comment/validation/audio-only (no lane-
 //     relevant kind touched)
@@ -20,10 +21,13 @@ vi.mock("partyserver", () => ({
   }),
 }))
 
+import { handleEventsWriteRequest } from "../events/route"
 import {
-  handleEventsWriteRequest,
   __resetLinkNotifyDownstreamCacheForTests,
-} from "../events/route"
+  collectLaneTouches,
+  isLinkLaneKind,
+} from "../events/link-notify"
+import { laneKindsFor } from "../events/link-sync"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 import type { RawEvent } from "../events/types"
@@ -110,11 +114,74 @@ async function seedUpstreamFile(t: TestDb): Promise<void> {
   await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Upstream', 1)`, [UPSTREAM])
 }
 
-async function seedDownstream(t: TestDb, id: string, mode: "live" | "clone"): Promise<void> {
+async function seedDownstream(
+  t: TestDb,
+  id: string,
+  mode: "live" | "clone",
+  consumes: "source" | "target" | null = null,
+): Promise<void> {
   await t.pg.query(
-    `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode) VALUES ($1, $2, 1, $3, $4)`,
-    [id, id, UPSTREAM, mode],
+    `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode, source_link_consumes)
+     VALUES ($1, $2, 1, $3, $4, $5)`,
+    [id, id, UPSTREAM, mode, consumes],
   )
+}
+
+function visibilitySet(hidden: boolean, id: string): RawEvent<"source.cell.visibility.set"> {
+  return {
+    id,
+    schemaVersion: 1,
+    kind: "source.cell.visibility.set",
+    projectId: UPSTREAM,
+    fileId: "file-x",
+    cellId: "cell-1",
+    parentId: null,
+    author: "lead",
+    payload: { hidden },
+    clientTs: 1000,
+  }
+}
+
+function fileRename(name: string): RawEvent<"file.rename"> {
+  return {
+    id: "evt-file-rename-1",
+    schemaVersion: 1,
+    kind: "file.rename",
+    projectId: UPSTREAM,
+    fileId: "file-x",
+    parentId: null,
+    author: "lead",
+    payload: { name },
+    clientTs: 1000,
+  } as RawEvent<"file.rename">
+}
+
+function targetCommit(): RawEvent<"target.cell.commit"> {
+  return {
+    id: "evt-tgt-commit-1",
+    schemaVersion: 1,
+    kind: "target.cell.commit",
+    projectId: UPSTREAM,
+    fileId: "file-x",
+    cellId: "cell-1",
+    parentId: null,
+    author: "alice",
+    payload: { value: "translated" },
+    clientTs: 1000,
+  } as RawEvent<"target.cell.commit">
+}
+
+/** Commit `events` to the upstream through the real route and return the
+ *  `link.upstream-changed` frames the notify hook sent. */
+async function commitAndCollectFrames(t: TestDb, events: unknown[]): Promise<UpstreamChangedFrame[]> {
+  const { env, bodies } = makeProjectSyncEnv(t.db)
+  const { ctx, flush } = makeCtx()
+  const res = await handleEventsWriteRequest(await makeRequest(events, await makeToken()), env, ctx)
+  expect(res?.status).toBe(200)
+  const body = (await res!.clone().json()) as { rejected: unknown[] }
+  expect(body.rejected).toEqual([])
+  await flush()
+  return upstreamChangedFrames(bodies)
 }
 
 interface UpstreamChangedFrame {
@@ -125,6 +192,7 @@ interface UpstreamChangedFrame {
   untilSeq: number
   fileIds: string[]
   cellIds: string[]
+  filesChanged?: boolean
 }
 
 function upstreamChangedFrames(
@@ -348,5 +416,159 @@ describe("AQU-479 link.upstream-changed notify hook", () => {
     } finally {
       await t.close()
     }
+  })
+})
+
+// AQU-1545: hide/show (AQU-1453) and file rename (AQU-1358) became part of what
+// a live link mirrors, but the notify hook kept its own copy of the kind list
+// and never learned them — an open downstream saw neither until a reload.
+describe("AQU-1545 link.upstream-changed for hide/show and rename", () => {
+  beforeEach(() => {
+    __resetLinkNotifyDownstreamCacheForTests()
+  })
+
+  it("an upstream hide notifies a live downstream with the hidden cell", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+
+      const frames = await commitAndCollectFrames(t, [visibilitySet(true, "evt-hide-1")])
+
+      expect(frames).toHaveLength(1)
+      expect(frames[0]).toMatchObject({ project: "proj-down-live", upstream: UPSTREAM })
+      expect(frames[0].fileIds).toEqual(["file-x"])
+      expect(frames[0].cellIds).toEqual(["cell-1"])
+      // A cell-level change: the downstream re-reads cells, not its file list.
+      expect(frames[0].filesChanged).toBe(false)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("an upstream show notifies a live downstream too", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+
+      await commitAndCollectFrames(t, [visibilitySet(true, "evt-hide-1")])
+      const frames = await commitAndCollectFrames(t, [visibilitySet(false, "evt-show-1")])
+
+      expect(frames).toHaveLength(1)
+      expect(frames[0].cellIds).toEqual(["cell-1"])
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("an upstream file rename notifies a live downstream with the file", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+
+      const frames = await commitAndCollectFrames(t, [fileRename("Renamed upstream file")])
+
+      expect(frames).toHaveLength(1)
+      expect(frames[0].fileIds).toEqual(["file-x"])
+      expect(frames[0].cellIds).toEqual([])
+      // The file list moved — the downstream must re-read it after syncing.
+      expect(frames[0].filesChanged).toBe(true)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("a clone-mode copy hears nothing about a hide, a show or a rename", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-clone", "clone")
+
+      const frames = await commitAndCollectFrames(t, [
+        visibilitySet(true, "evt-hide-1"),
+        visibilitySet(false, "evt-show-1"),
+        fileRename("Renamed upstream file"),
+      ])
+
+      expect(frames).toEqual([])
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("a link that consumes the upstream's translations hears about a translation; a source link does not", async () => {
+    // Same drift, other shape: a consumes='target' link mirrors target.cell.commit
+    // (link-sync's LANE_KINDS_TARGET_EXTRA), but the old copy only listed the
+    // source lane, so that downstream was never told either.
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-source", "live", "source")
+      await seedDownstream(t, "proj-down-target", "live", "target")
+
+      const frames = await commitAndCollectFrames(t, [targetCommit()])
+
+      expect(frames.map((f) => f.downstream)).toEqual(["proj-down-target"])
+      expect(frames[0].cellIds).toEqual(["cell-1"])
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("a source-lane change reaches both link shapes", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-source", "live", "source")
+      await seedDownstream(t, "proj-down-target", "live", "target")
+
+      const frames = await commitAndCollectFrames(t, [visibilitySet(true, "evt-hide-1")])
+
+      expect(frames.map((f) => f.downstream).sort()).toEqual(["proj-down-source", "proj-down-target"])
+    } finally {
+      await t.close()
+    }
+  })
+})
+
+describe("AQU-1545 the notify and the mirror sync share one definition of an upstream change", () => {
+  // The mirror sync's freshness probe reads laneKindsFor to decide whether to
+  // run; the notify must fire for exactly those kinds, per link shape. If either side
+  // grows a kind the other lacks, an open downstream either never hears about
+  // a change it mirrors (this bug) or syncs on noise it never mirrors.
+  for (const shape of ["source", "target"] as const) {
+    it(`notifies for every kind a '${shape}' link mirrors`, () => {
+      for (const kind of laneKindsFor(shape)) {
+        expect({ kind, notifies: isLinkLaneKind(kind, shape) }).toEqual({ kind, notifies: true })
+      }
+    })
+  }
+
+  it("never notifies for kinds no link mirrors", () => {
+    for (const kind of ["comment.create", "cell.audio.attach", "cell.backtranslation.set", "file.corpus.set"]) {
+      expect({ kind, source: isLinkLaneKind(kind, "source"), target: isLinkLaneKind(kind, "target") }).toEqual({
+        kind,
+        source: false,
+        target: false,
+      })
+    }
+  })
+
+  it("a source link is not notified for the translation-lane kinds only a target link mirrors", () => {
+    const sourceKinds = new Set(laneKindsFor("source"))
+    const targetOnly = laneKindsFor("target").filter((k) => !sourceKinds.has(k))
+    expect(targetOnly.length).toBeGreaterThan(0)
+    for (const kind of targetOnly) expect(isLinkLaneKind(kind, "source")).toBe(false)
+  })
+
+  it("collects every mirrored kind from a request and drops the rest", () => {
+    const frames = [
+      ...laneKindsFor("target").map((kind, i) => ({ kind, project: UPSTREAM, cell: `c${i}` })),
+      { kind: "comment.create", project: UPSTREAM, cell: "noise" },
+    ]
+    const touches = collectLaneTouches(frames).get(UPSTREAM) ?? []
+    expect(touches.map((x) => x.kind)).toEqual([...laneKindsFor("target")])
   })
 })

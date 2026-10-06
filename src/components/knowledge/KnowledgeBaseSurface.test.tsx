@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
-import type { KnowledgeDocument } from "@/lib/frontier/knowledge-base"
+import {
+  KB_INDEX_STALE_MS,
+  KnowledgeBaseApiError,
+  type KnowledgeDocument,
+} from "@/lib/frontier/knowledge-base"
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -14,8 +18,12 @@ const api = vi.hoisted(() => ({
   reindex: vi.fn(),
 }))
 
-vi.mock("@/lib/frontier/knowledge-base", () => {
+// Only the network calls are faked — the staleness rule is real behaviour under
+// test, not a stub (AQU-1376).
+vi.mock("@/lib/frontier/knowledge-base", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/frontier/knowledge-base")>()
   return {
+    ...actual,
     listKnowledgeDocuments: api.list,
     getKnowledgeDocument: api.detail,
     getKnowledgeDocumentContent: api.content,
@@ -60,7 +68,14 @@ beforeEach(() => {
   }))
   api.content.mockResolvedValue("Use formal language.")
   api.original.mockResolvedValue(new Blob(["original"]))
-  api.upload.mockResolvedValue(doc({ id: "uploaded", name: "new.md", indexStatus: "pending" }))
+  // A just-created row comes back with updated_at = now(), which is what keeps it
+  // on the "Indexing…" side of the staleness window (AQU-1376).
+  api.upload.mockResolvedValue(doc({
+    id: "uploaded",
+    name: "new.md",
+    indexStatus: "pending",
+    updatedAt: new Date().toISOString(),
+  }))
   api.remove.mockResolvedValue(undefined)
   api.reindex.mockResolvedValue(undefined)
 })
@@ -109,6 +124,45 @@ describe("KnowledgeBaseSurface", () => {
     expect(screen.getByText("Indexing…")).toBeInTheDocument()
   })
 
+  // AQU-1499: a partner's .docx can be refused for a reason that names its own
+  // fix (re-save it from Word). The generic "Try again." alone sends them back
+  // round a retry that cannot succeed, so the server's reason is shown with it.
+  it("shows the server's reason when an upload is rejected", async () => {
+    const reason =
+      "could not extract text: the document is too complex to read: word/document.xml is 39.5 MB, " +
+      'over the 64 MB limit. Re-saving the file from Word ("Save As" a new .docx) usually shrinks it.'
+    api.upload.mockRejectedValue(new KnowledgeBaseApiError(422, reason))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(["bytes"], "The Real God_Arabic (1).docx")
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() =>
+      expect(toastMock.add).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", description: reason }),
+      ),
+    )
+  })
+
+  it("reports an upload failure the server did not explain with the generic message alone", async () => {
+    api.upload.mockRejectedValue(new Error("network down"))
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [new File(["x"], "notes.md")] } })
+
+    await waitFor(() => expect(toastMock.add).toHaveBeenCalled())
+    const options = toastMock.add.mock.calls.at(-1)?.[0] as { description?: string }
+    expect(options.description).toBeUndefined()
+  })
+
   it("opens the extracted document content in an accessible dialog", async () => {
     api.list.mockResolvedValue([doc()])
     render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
@@ -132,5 +186,57 @@ describe("KnowledgeBaseSurface", () => {
 
     await waitFor(() => expect(api.remove).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", "project-doc"))
     await waitFor(() => expect(screen.queryByText("style-guide.md")).not.toBeInTheDocument())
+  })
+  // AQU-1376: a doc whose indexing job died shows the same "Indexing…" as one
+  // that is genuinely mid-run, with no retry — QA had to escalate to ops.
+  it("offers the uploader a retry on a doc whose indexing job never came back", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "stalled-doc",
+        name: "stalled.md",
+        indexStatus: "pending",
+        docSummary: null,
+        updatedAt: new Date(Date.now() - (KB_INDEX_STALE_MS + 60_000)).toISOString(),
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("stalled.md")).closest('[data-slot="card"]') as HTMLElement
+    // Distinct from "Indexing…" — the state is readable without backend access.
+    expect(within(card).getByText("Indexing stalled")).toBeInTheDocument()
+    expect(within(card).queryByText("Indexing…")).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Try indexing again" }))
+    await waitFor(() => expect(api.reindex).toHaveBeenCalledWith(
+      { kind: "project", id: "project-1" },
+      "jwt",
+      "stalled-doc",
+    ))
+    // The retry restarts the window: the row goes back to plain "Indexing…" and
+    // stops offering the button that just fired.
+    await waitFor(() => expect(within(card).getByText("Indexing…")).toBeInTheDocument())
+    expect(within(card).queryByRole("button", { name: "Try indexing again" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("leaves a doc that is still genuinely indexing as pending, with no retry", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "fresh-doc",
+        name: "fresh.md",
+        indexStatus: "pending",
+        docSummary: null,
+        updatedAt: new Date(Date.now() - 5_000).toISOString(),
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+    // A premature retry would cancel a run that was about to land.
+    expect(within(card).queryByRole("button", { name: "Try indexing again" }))
+      .not.toBeInTheDocument()
   })
 })

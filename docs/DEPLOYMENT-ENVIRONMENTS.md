@@ -8,11 +8,13 @@ profile or fall back from an unknown branch.
 
 | Deployment | Git branch | Wrangler profile | SPA | API host | SPA Worker | Identity Worker | Sync Worker | Neon branch | R2 snapshot bucket |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |
+| Production | `release/YYYY/MM/DD` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
-`/sync/*` through the sync Worker. Staging is retired from the deployable
+`/sync/*` through the sync Worker. The identity Worker also owns
+`/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
@@ -28,13 +30,25 @@ projection state lives only in Neon Postgres.
 | Production | `pnpm run deploy:aquilla` | `pnpm run verify:live:production` |
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
-Production and development deploy scripts refuse to run from any branch except
-`main` and `dev`, respectively. Every surface selects `production` or
+Production deploy scripts refuse to run from anything but a `release/YYYY/MM/DD`
+branch; development deploy scripts refuse anything but `dev`. Every surface selects `production` or
 `development` explicitly. The shared deployer uploads
 a version, validates its exact ID and bindings, promotes it, reapplies
 routes/triggers, and confirms the same ID owns 100% traffic before public
-verification. Identity and sync deploys also run the target Neon schema guard
-before publishing.
+verification. Every surface — web, identity and sync alike — runs the target
+Neon schema guard before publishing, so a deployment is one unit: a pending
+migration or schema drift stops the SPA upload too, rather than leaving the
+site on new front-end code against old Workers and an un-migrated database
+(AQU-682/AQU-1157). Each deploy job in `Manual Deploy Workers` therefore carries
+the target's `NEON_*` credentials, not just the Cloudflare pair: without them the
+guard fails closed on a missing credential instead of reporting the schema state,
+which published the SPA while neither Worker could go out (AQU-1539).
+
+**Migrate first, then deploy.** `npm run neon:apply:dev` / `neon:apply:prod`
+applies pending `db/postgres/migrations/` files to the target Neon branch; only
+then does any deploy command get past its guard. Migrations are never applied
+automatically by a deploy path or by an agent — that is a deliberate human step
+(`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -52,13 +66,60 @@ copy between environments: provisioning a key on `aquilla-identity` leaves
 from that surface's directory:
 
 ```bash
+# from the repo root — identity and sync only (see "Rotating a secret" for why)
+printf %s "$KEY" | pnpm run secrets:rotate <identity|sync> <production|development> <NAME>
+
 # from the surface directory (auth-worker/, sync-worker/, or the repo root for web)
-printf %s "$KEY" | npx wrangler secret put <NAME> --env <production|development>
 npx wrangler secret list --env <production|development>   # names only, never values
 ```
 
 Use `printf %s`, not `echo` — `echo` appends a newline and stores it as part of the
 secret, which fails as an opaque upstream `401` rather than a missing-key error.
+
+### Rotating a secret (AQU-1361)
+
+**Never rotate an identity or sync secret with bare `wrangler secret put`.** That command
+is a one-shot: it patches the live Worker and immediately shifts traffic to a new version
+Cloudflare derives from the running one. The derived version keeps the script etag and
+every binding — and drops the custom version tag. Both API Workers' environment guards
+(`auth-worker/src/environment-guard.ts`, `sync-worker/src/environment-guard.ts`) require
+`CF_VERSION_METADATA.tag` to name the Worker and environment serving a first-party API
+host, so the rotation lands a hard `503 Worker deployment configuration does not match
+this API environment` with correct secrets and correct bindings. That is what took dev
+sync offline on 2026-09-22.
+
+`scripts/cloudflare-secret-rotate.mjs` is the supported path, and it keeps the guard
+fail-closed rather than loosening it:
+
+```bash
+printf %s "$KEY" | pnpm run secrets:rotate sync development SYNC_SECRET_KEY
+```
+
+1. **Stage** — `wrangler versions secret put --tag <worker>-<environment>-<sha>` creates a
+   new version carrying the rotated secret *and* the deployment tag, without shifting any
+   traffic.
+2. **Verify** — the staged version's actual bindings are checked against
+   `config/cloudflare-deployments.json` (Hyperdrive id, R2 buckets, plain-text vars,
+   required secrets) before it can serve. A mismatch aborts with nothing promoted.
+3. **Promote** — that exact version id goes to 100%, then `verify-worker-deployment.mjs`
+   confirms it is the single active version and `verify-live-environment.mjs` re-checks the
+   live endpoints.
+
+The secret value is piped through wrangler's inherited stdin, so it never enters the Node
+process, its logs, or its error messages. The script refuses a surface other than
+`identity`/`sync`, a name absent from that Worker's required secrets in the manifest, and
+any output it cannot parse a version id from. A secret that is live on a Worker but not
+listed for that environment — `INWORLD_API_KEY` on `aquilla-sync-worker-dev`, say — is
+refused by name: add it to the manifest (and the table above) first, so the manifest stays
+the source of truth the deployers enforce. **Web secrets** rotate by re-running
+`deploy:aquilla:spa` / `deploy:aquilla:dev:spa` after the `wrangler secret put` — the web
+version is verified against an immutable preview origin, which a patched version has none
+of.
+
+A rotation that has already gone out the old way is recovered the same way any untagged
+version is: re-run that surface's verified deployment
+(`pnpm run deploy:aquilla:dev:sync`, …), which stages and promotes a properly tagged
+version with the new secret value intact.
 
 `config/cloudflare-deployments.json` is the source of truth for which secrets each
 Worker requires, and the deployers enforce it: `cloudflare-version-deploy.mjs` verifies
@@ -70,8 +131,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
 
@@ -95,6 +156,40 @@ only as a `500 "OPENROUTER_API_KEY is not configured"` from each of those routes
 is what made the whole AI workflow unusable on `dev.aquilla.app` (AQU-762). Setting it
 on one environment does nothing for the other.
 
+## Cutting a release
+
+`dev` is the trunk and targets development. Production ships from dated release
+branches cut from `dev`; `main` is retired.
+
+1. `node scripts/release-plan.mjs` decides whether to cut, and names the
+   branch and the `dev` sha to cut it from — not necessarily the tip of `dev`
+   at cut time, and never below what production already runs (it reads the
+   cherry-picks on the newest calver tag, which is not on `dev`, to learn
+   which `dev` PRs shipped). A release branch may carry the plain cut date,
+   `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
+   date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
+   for how a slice is built and when it deploys itself versus waiting for a
+   person).
+2. QA tests the branch's preview.
+3. From a clean checkout of that branch, checked out by name (not a detached
+   HEAD — the branch guard and the tag script both need it), run
+   `pnpm run deploy:aquilla`. After the live checks pass,
+   `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes the tag. The
+   date and the first NN come from the branch: `release/YYYY/MM/DD-02` is
+   tagged `YYYY.MM.DD.02`, and a plain `release/YYYY/MM/DD` branch starts at
+   `00`. If that number is already taken, the tag takes one past the highest
+   in the series. Redeploying an already-tagged commit reuses its tag. The
+   annotated tag message includes the release branch, deployed commit SHA,
+   GitHub commit/checks URLs, and the Workers Builds preview URL for that
+   release branch, tying the production tag back to the QA preview artifact.
+4. Hotfix: cherry-pick onto the branch that was deployed, push, and redeploy.
+   It gets the next NN in that date's tag series.
+
+Prod lags `dev` by design, so migrations must be backward-compatible across one
+release (add first, remove in a later release). Apply the release's migrations
+to the target Neon branch *before* step 3 — every surface's deploy guard fails
+closed on a pending migration, and nothing publishes until it passes.
+
 ## Deployment ownership
 
 Live Aquilla deployments require an explicit human/operator action. No push to
@@ -102,7 +197,7 @@ GitHub and no Cloudflare Git integration is authorized to deploy live traffic.
 The canonical full-environment entrypoints are the local commands above, run from
 a clean checkout whose HEAD exactly matches the corresponding remote branch:
 
-- `main` -> `production`
+- `release/YYYY/MM/DD` -> `production`
 - `dev` -> `development`
 
 The optional `.github/workflows/deploy-workers.yml` workflow is
@@ -111,7 +206,7 @@ identity, and sync path once GitHub-hosted runners are available, and resolves i
 through `scripts/resolve-deployment-target.sh`. Unsupported refs fail before any
 schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
-only `main`.
+only `release/*/*/*`.
 
 Cloudflare Workers Builds owns automatic compile-only pull-request previews through the
 dedicated `aquilla-web-preview` Worker. All six production/development Workers
@@ -129,7 +224,7 @@ not the full suites. QA tests the published preview; preview success does not
 certify automated test results.
 
 Every Workers Builds preview uses its branch's auth and sync code with shared
-development Hyperdrive/R2 storage, including builds of `main`. The web Worker's
+development Hyperdrive/R2 storage, including builds of release branches. The web Worker's
 single repository connection deploys all three using `wrangler preview`.
 Repository code converts slash-named branches into a stable, lowercase, hashed
 preview name. These previews never replace a live Worker. They are NOT a working
@@ -221,7 +316,7 @@ An environment change is one atomic contract change. Update and verify all of:
    that environment is deployed.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
 6. GitHub branch protection Cloudflare check contexts and the `production`
-   Environment branch policy (`main` only).
+   Environment branch policy (`release/*/*/*` only).
 7. This matrix and the Workers Builds runbook.
 8. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
 9. The live verifier for production and development before promotion.

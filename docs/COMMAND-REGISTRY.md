@@ -97,7 +97,8 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `languageEditMinRole` makes the catalog conservative rather than permissive.
 - **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
   `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
-  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  their audio twins `validationRoleFloorAudio`, `validationNamedUsersAudio` and
+  `allowSelfValidationAudio` (AQU-1571), `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
   `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
   are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
   oversight stages like any other (still ask-mode, still human-approved); one that would
@@ -157,6 +158,13 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   their own kinds, so the audit trail keeps "edited" apart from "made binding"); a `term.create`
   naming a live concept is rejected rather than upserted over it; a `term.approve` of a non-draft
   is rejected rather than applied as a projection no-op.
+  `match` (AQU-1175) carries the per-concept matching options — `forms`, `excludedForms`,
+  `affixes`, `foldMarks` — on create and update, and is what makes a term match anything beyond
+  its lemma; matching is exact without it, so a term staged without `forms` in an inflected
+  language flags none of its inflected surfaces. It replaces wholesale when present and is left
+  untouched when absent (the `renderings` rule), `{}` clears it, and an unrecognized key inside
+  it is REJECTED rather than dropped — the validator used to omit `match` entirely, which is
+  exactly how a `forms`/`form` typo would otherwise clear a caller's options behind a 200.
 - Explicitly NOT allowlisted: `target.cell.commit` (use SetTranslation), `source.cell.*`,
   `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`,
   cell structure (split/merge/insert/delete), membership, and project lifecycle. Rules and Living

@@ -16,7 +16,9 @@
 //
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"
-// and log — the UI shows a retry path.
+// and log — the UI shows a retry path. Exception (AQU-1541): the project-invite
+// helpers rethrow the "elevation required" UserError so the caller can show the
+// admin-code message.
 //
 // Preview functions (previewServerInvite, previewMultiInvite) return a
 // discriminated result so callers can distinguish:
@@ -28,6 +30,7 @@
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 import { UserError } from "@/lib/errors/user-error"
+import { isElevationRequiredError, throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 /**
  * Invite tokens are bearer credentials — anyone holding one can join the
@@ -185,6 +188,7 @@ export async function createServerInvite(
         body: JSON.stringify(body),
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(
         `[invites] createServerInvite ${projectId} → HTTP ${res.status}`
@@ -193,6 +197,7 @@ export async function createServerInvite(
     }
     return (await res.json()) as ServerInviteCreated
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] createServerInvite failed:", err)
     return null
   }
@@ -291,7 +296,8 @@ export interface ActiveProjectInvite {
 
 /**
  * GET /api/v2/projects/:projectId/invites — list active (unused + unexpired) invites.
- * Requires project_lead+ role on the project. Returns null on auth/permission error.
+ * Requires project_lead+ role on the project. Returns null on auth/permission error;
+ * throws the UserError when a platform admin needs the step-up code.
  */
 export async function listProjectInvites(
   jwt: string,
@@ -305,6 +311,7 @@ export async function listProjectInvites(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] listProjectInvites ${projectId} → HTTP ${res.status}`)
       return null
@@ -312,6 +319,7 @@ export async function listProjectInvites(
     const body = (await res.json()) as { invites: ActiveProjectInvite[] }
     return body.invites
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] listProjectInvites failed:", err)
     return null
   }
@@ -319,7 +327,8 @@ export async function listProjectInvites(
 
 /**
  * DELETE /api/v2/projects/:projectId/invites/:token — revoke an unused invite.
- * Returns true when the invite was deleted, false on 403/404 or network error.
+ * Returns true when the invite was deleted, false on 403/404 or network error;
+ * throws the UserError when a platform admin needs the step-up code.
  */
 export async function revokeProjectInvite(
   jwt: string,
@@ -335,6 +344,7 @@ export async function revokeProjectInvite(
         headers: { Authorization: `Bearer ${jwt}` },
       }
     )
+    await throwIfElevationRequired(res)
     if (!res.ok) {
       console.warn(`[invites] revokeProjectInvite ${tokenFingerprint(token)} → HTTP ${res.status}`)
       return false
@@ -342,6 +352,7 @@ export async function revokeProjectInvite(
     const body = (await res.json()) as { removed: boolean }
     return body.removed
   } catch (err) {
+    if (isElevationRequiredError(err)) throw err
     console.warn("[invites] revokeProjectInvite failed:", err)
     return false
   }

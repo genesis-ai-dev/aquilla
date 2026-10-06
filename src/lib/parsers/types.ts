@@ -39,6 +39,24 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
+/** The domain kind an imported TMX file is stored under (`importedFileKind`).
+ *  Like `"codex"` above it reaches the client as `file.type` without being a
+ *  member of `FileType`. */
+export const TRANSLATION_MEMORY_FILE_KIND = "translation-memory"
+
+/**
+ * Is this file an imported translation memory?
+ *
+ * Takes the wire string rather than `FileType` on purpose: a TMX imported
+ * through the app arrives as `"translation-memory"`, which a `type === "tmx"`
+ * test never matches (AQU-1393 — the Examples panel showed a real TMX as an
+ * ordinary project file). `"tmx"` still counts: rows created with the parser id
+ * as their kind — API imports, and files that predate the domain kind.
+ */
+export function isTranslationMemoryFile(type: string): boolean {
+  return type === TRANSLATION_MEMORY_FILE_KIND || type === "tmx"
+}
+
 /** Content-aware section capability. `hasScriptureContent` is persisted in
  * the normalized import manifest for Scripture-shaped spreadsheets and custom
  * formats; native Scripture types remain compatible with older records. */
@@ -480,6 +498,20 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /**
+   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
+   * still use `legacyTag` ('' is the default target lane). Absent until the
+   * settings read returns them.
+   */
+  lanes?: {
+    id: string
+    role: "source" | "target"
+    name: string
+    langCode: string | null
+    legacyTag: string | null
+    position: number
+    archivedAt: string | null
+  }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
@@ -576,33 +608,36 @@ export interface ProjectRecord {
   /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"
-   * Server enforcement: sync-worker cell.validate branch must check the
-   * validator's syncRole.level against the floor before accepting the event.
-   * SWARM-TODO(server-enforcement): apply validationRoleFloor in
-   *   sync-worker/src/routes/sync.ts — the cell.validate event-projection
-   *   branch. Fetch the validator's role from the project member list (or
-   *   the sync-token claim) and reject if role.level < floor.
+   * Enforced by the server on every `cell.validate` (sync-worker
+   * src/events/route.ts, FRO-189) and mirrored client-side by
+   * `textValidationScope` (AQU-1571) so the UI never offers a refused vote.
    */
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   /**
    * Optional allowlist of usernames that may cast validation votes.
-   * When present AND non-empty, only listed users' votes count toward the
-   * threshold (AND'd with validationRoleFloor).
-   * SWARM-TODO(server-enforcement): apply validationNamedUsers in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. If list is
-   *   non-empty, reject votes from users not in the list.
+   * When present AND non-empty, only listed users may validate (AND'd with
+   * validationRoleFloor). Enforced and mirrored as the floor above.
    */
   validationNamedUsers?: string[]
   /**
    * When true (default), a contributor may validate their own commit and
    * the vote counts toward the threshold.
-   * When false, self-votes are silently ignored in threshold counting.
-   * SWARM-TODO(server-enforcement): apply allowSelfValidation in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. Compare
-   *   validator identity to the last-editor identity; skip if equal and
-   *   allowSelfValidation is false.
+   * When false, the server refuses a vote from the cell's last editor in the
+   * validated lane (route.ts, FRO-189/AQU-1571); the client blocks it up
+   * front with `isOwnTextEdit` and skips auto-validate-on-edit.
    */
   allowSelfValidation?: boolean
+  /**
+   * AQU-490: the audio twins of the three above. SEPARATE keys, by Sam's
+   * ruling — a project can want two ears on a recording and one on a
+   * translation, or trust a different set of people with each. Neither set is
+   * ever read as a fallback for the other; absent means unrestricted on both
+   * sides. All three are enforced server-side (sync-worker route.ts), as the
+   * text trio is.
+   */
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsersAudio?: string[]
+  allowSelfValidationAudio?: boolean
   /**
    * AQU-186: minimum role to trigger a harmonization sweep on this project.
    * Default (absent) = project_lead (500). Configurable up to maintainer (600).
@@ -660,6 +695,11 @@ export interface ProjectRecord {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: which of the upstream's files the link follows — null/absent =
+   *  the whole project — and the upstream's current file count, for the
+   *  "N of M files" the Source link card states. */
+  sourceLinkFileIds?: string[] | null
+  sourceLinkUpstreamFileCount?: number | null
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every
@@ -706,6 +746,9 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /** Curly quotes as you type in the translation editor. Synced via
+   *  ProjectWideSettings; absent/false leaves straight quotes alone. */
+  smartQuotes?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */
@@ -728,6 +771,19 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /**
+   * AQU-1569: hand-placed position within this file's sidebar corpus group,
+   * from files.meta.sortIndex (set via the `file.reorder` event). Fractional
+   * on purpose — see `src/lib/sidebar/file-sort-index.ts`.
+   *
+   * Absent means "nobody has reordered this group", which is the state of
+   * every file until a Project Lead drags one, and the reason an untouched
+   * project's sidebar is unchanged by this feature. Consume it only through
+   * `groupByCorpus` / the helpers in `file-sort-index.ts`, never by sorting on
+   * it directly: an unplaced file has to sort AFTER a placed one, which a bare
+   * numeric sort on an `undefined` cannot express.
+   */
+  sortIndex?: number
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string
@@ -850,6 +906,7 @@ export function isSubtitleImportFile(
  * timeline's Source-audio row) reach it explicitly by id.
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
+export const TIMELINE_CONTENT_ROLE = "timeline-content"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -858,6 +915,11 @@ export const AUDIO_CUES_ROLE = "audio-cues"
  */
 export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
   return file?.role === AUDIO_CUES_ROLE
+}
+
+/** Internal cue files appear as tracks in their parent media timeline. */
+export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE
 }
 
 /**
@@ -1009,6 +1071,9 @@ export interface CellHistoryEntry {
   isStale?: boolean
   /** Local outbox state; absent once the server history has acknowledged it. */
   syncState?: "pending" | "failed"
+  /** AQU-1656: ai_interventions row holding this AI draft's prompt and raw
+   *  model output (from the commit's `ai_draft.interventionId`). */
+  interventionId?: string
 }
 
 export interface CommentMessage {

@@ -66,6 +66,7 @@ import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
@@ -113,12 +114,24 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
     // stay: they are the credential's own reach, not a person.
     ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
+    // AQU-1242: a read-only token has to learn that from /me. Otherwise its
+    // first discovery of the ceiling is a 403 on a plan it already built, and
+    // an agent cannot tell that refusal apart from a role problem it might
+    // usefully retry.
+    access: cred.access,
     orgId: cred.orgId,
+    ...(cred.orgIds !== undefined ? { orgIds: cred.orgIds } : {}),
     projectId: cred.projectId,
     credentialId: cred.credentialId,
     hints: {
+      access:
+        cred.access === "read"
+          ? "read-only token: every write surface (changeset prepare/commit, artifact upload) answers 403 scope_denied. Reads, search and export work normally. Nothing you do can change this project."
+          : "read-write token: you may stage and commit changesets, subject to the mode below and your live project role.",
       mode:
-        cred.mode === "ask"
+        cred.access === "read"
+          ? "not applicable on a read-only token: there is nothing to approve because nothing can be staged."
+          : cred.mode === "ask"
           ? "ask mode: you can prepare changesets but a commit needs a human approval at the approvalUrl first (commit returns 428 confirmation_required until then)."
           : "act mode: commit applies a prepared changeset immediately.",
       next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. Managing a whole workspace? GET /api/v1/external/orgs, then /api/v1/external/orgs/:orgId/projects, and search several at once with GET /api/v1/external/search?q=&projectIds=a,b. GET /api/v1/external for the full API map.",
@@ -183,7 +196,10 @@ async function handleExternalProjectDetail(
 
   // authenticateAndScope already 404s an unknown project id; a null here means
   // the project was deleted between the two reads.
-  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role)
+  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role, {
+    flag: env.LANE_READ_WALL,
+    userId: Number(authed.ctx.credential.userId),
+  })
   if (!detail) return externalError("not_found", "project not found", 404)
   return Response.json(detail)
 }
@@ -222,6 +238,48 @@ async function handleExternalFiles(
 
   const body = (await internalRes.json()) as { files: unknown[] }
   return Response.json(paginate(body.files, offset, limit))
+}
+
+/**
+ * AQU-1426: give every cell row an EXPLICIT `hidden` boolean before it leaves
+ * the agent boundary.
+ *
+ * The internal serializer OMITS the key on a visible row on purpose (AQU-1422) —
+ * it serves the SPA, where a 30k-cell Bible file would pay ~15 bytes a row for a
+ * field that is false on all but a handful. An agent reading the API has the
+ * opposite problem: an absent key is indistinguishable from "this server does
+ * not know about hiding", and the whole point of the flag is that an agent can
+ * SEE what is parked and skip it. So the explicit boolean is stamped here, at
+ * the boundary, exactly where the authorship scrub is — not by loosening the
+ * shared serializer.
+ *
+ * The flag lives on the SOURCE row only (hiding is per cell, not per lane), so a
+ * cell's visibility is resolved from its source row and stamped onto every row
+ * of that cell — a target row of a parked cell reads `hidden: true` rather than
+ * making the caller join the two itself. A cell with no source row IN THIS
+ * PAYLOAD (a `since=` delta read can carry a lone target row) keeps no `hidden`
+ * key at all: reporting `false` there would be asserting a visibility this
+ * response never read.
+ */
+export function stampCellVisibility(cells: readonly unknown[]): unknown[] {
+  const isRow = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v)
+  const hiddenByCell = new Map<string, boolean>()
+  for (const row of cells) {
+    if (!isRow(row) || row.side !== "source") continue
+    const cellId = row.cellId
+    if (typeof cellId !== "string") continue
+    hiddenByCell.set(cellId, row.hidden === true)
+  }
+  if (hiddenByCell.size === 0) return [...cells]
+  return cells.map((row) => {
+    if (!isRow(row)) return row
+    const cellId = row.cellId
+    if (typeof cellId !== "string") return row
+    const hidden = hiddenByCell.get(cellId)
+    if (hidden === undefined) return row
+    return { ...row, hidden }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -270,12 +328,14 @@ async function handleExternalFileCells(
   // edited by Anna" is the whole point — so the scrub happens HERE, at the
   // agent boundary, rather than in the shared serializer.
   const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
-  const cells = await scrubAuthorField(
-    body.cells ?? [],
-    "lastEditor",
-    policy,
-    env.SYNC_SECRET_KEY,
-    projectId,
+  const cells = stampCellVisibility(
+    await scrubAuthorField(
+      body.cells ?? [],
+      "lastEditor",
+      policy,
+      env.SYNC_SECRET_KEY,
+      projectId,
+    ),
   )
   await recordAgentRead(env.AQUILLA_PG, {
     credentialId: authed.ctx.credential.credentialId,
@@ -416,9 +476,19 @@ async function handleExternalProjectSettings(
   // is an agent-facing surface and the id identifies a human translator. The
   // blob + version are all `ifMatchVersion` needs. A project with no settings
   // row yet reads as `{}` at version 0 — patch against 0 to create it.
+  // AQU-1421: the blob's lane registry is cut to this caller's grants when the
+  // read wall is on. The version stays the live one so PatchSettings still matches.
+  const settings = await filterSettingsBlobForMember(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
-    settings: current.settings,
+    settings,
     version: current.version,
     updatedAt: current.updatedAt,
   })

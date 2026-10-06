@@ -16,18 +16,23 @@
 //
 // Nothing here is new behavior beyond that — it is read-routes.ts's gate, moved.
 
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
 import type { SyncTokenClaims } from "../auth"
 import { ROLE } from "../events/role-policy"
+import { loadLaneGrants } from "../../../db/shared/lane-visibility"
+import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
-import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 
 export interface ExternalReadsEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730. Unset locally and in e2e. Deployed dev and prod set "1". */
+  LANE_READ_WALL?: string
 }
 
 /** Credential-only gate (no project in play yet) — used by /me, /projects and
@@ -47,11 +52,7 @@ export async function authenticateCredential(
     }
   }
 
-  const credential = await validateApiCredential(
-    env.AQUILLA_PG as AquillaDb,
-    token,
-    request.headers.get("CF-Connecting-IP"),
-  )
+  const credential = await validateApiCredentialRequest(env.AQUILLA_PG as AquillaDb, request)
   if (!credential) {
     // Collapses invalid/revoked/expired into one generic message — the code
     // (permission_denied) is what callers branch on, not the message text.
@@ -122,7 +123,7 @@ export async function scopeCredentialToProject(
       response: externalError("scope_denied", "credential is not scoped to this project", 403),
     }
   }
-  if (credential.orgId !== null && credential.orgId !== projectOrgId) {
+  if (!credentialAllowsOrganization(credential, projectOrgId)) {
     return {
       ok: false,
       response: externalError("scope_denied", "credential is not scoped to this org", 403),
@@ -149,14 +150,24 @@ export async function mintInternalToken(
   fileId: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
+  const userId = Number(ctx.credential.userId)
+  // The cells and files routes trust laneGrants on this token. The identity
+  // worker puts them on the SPA's sync token. This internal stand-in has to
+  // do the same, or a below-Maintainer agent sees no target lane once the
+  // wall is on. Wall off: leave the claim absent, matching today's token.
+  const laneGrants =
+    env.AQUILLA_PG && laneReadWallEnabled(env.LANE_READ_WALL) && ctx.role < READ_WALL_MAINTAINER
+      ? await loadLaneGrants(env.AQUILLA_PG, projectId, userId)
+      : undefined
   const claims: SyncTokenClaims = {
-    userId: Number(ctx.credential.userId),
+    userId,
     projectId,
     fileId,
     role: ctx.role,
     aud: "sync",
     iat: now,
     exp: now + 30,
+    ...(laneGrants ? { laneGrants } : {}),
   }
   return sign(claims as unknown as Record<string, unknown>, env.SYNC_SECRET_KEY as string, "HS256")
 }

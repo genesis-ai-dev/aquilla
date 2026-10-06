@@ -3,6 +3,10 @@
  * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
  * Target-only — source cells are never created or modified.
  *
+ * Opened from the Import dialog's "A translation" path (AQU-1365), which picks
+ * the destination file, opens it, and hands the dropped file over as
+ * `initialFile` so this panel starts at step 2.
+ *
  * Flow:
  *   1. User drops/picks a file
  *   2. USFM → refs are intrinsic, straight to review (match by canonical ref)
@@ -15,21 +19,34 @@
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
  */
 
-import { useCallback, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { ChevronDown } from "lucide-react"
+import { flushSync } from "react-dom"
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { Skeleton } from "@/components/ui/skeleton"
+import { SegmentTabs } from "@/components/ui/tabs"
+import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
+import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
+import { cn } from "@/lib/utils"
 import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
-  subtitleToTargetRows,
+  subtitleToTargetRowsWithReport,
   CUE_TARGET_EXTENSIONS,
-  vttToTargetRows,
+  vttToTargetRowsWithReport,
+  type ChapterSpan,
+  type ContestOverrides,
   type FileTargetCellRef,
+  type FileTargetMatchedCell,
   type FileTargetMatchResult,
+  type TargetOrphan,
   type TargetRow,
 } from "@/lib/import-file-target"
 import {
@@ -38,13 +55,28 @@ import {
   type SpreadsheetSheet,
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
+import { targetSheetRows } from "@/lib/import/target-sheet-rows"
+import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
+import { FileTargetLanePicker } from "./FileTargetLanePicker"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 
 export interface FileTargetImportPanelProps {
   projectId: string
   username: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** AQU-1631: lanes this import may be sent to, in registry order. Fewer than
+   *  two (or absent) hides the picker — there is nothing to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** Switches the destination lane. The host points this at the editor's own
+   *  lane setter: the review step's current translations, conflict ticks and
+   *  AD-2 commit parents all come from the OPEN lane's cells, so the chosen
+   *  lane and the loaded cells must be the same one. */
+  onTargetLangChange?: (lane: string) => void
+  /** True while the chosen lane's cells are still loading — the file picker
+   *  waits, so a match never runs against the previous lane's event heads. */
+  laneCellsLoading?: boolean
   /** Display name of the open file — shown so the user knows the import scope. */
   fileName: string
   /** The open file's cells, in display order. */
@@ -61,9 +93,33 @@ export interface FileTargetImportPanelProps {
    *  target rows exclude book-name/title/TOC + intro-block cells, staying
    *  aligned with source cells imported under the same setting. */
   excludeFrontMatter?: boolean
+  /** Told where a back arrow should lead from the current step, or `null` on
+   *  the first step. The host draws the arrow in its dialog title, the way the
+   *  source import dialog does, so a wrong file is one click from the file
+   *  picker instead of Cancel and the menu again. */
+  onBackChange?: (back: FileTargetPanelBack | null) => void
+  /** AQU-1365: a file already chosen by the host. Read once on mount, so the
+   *  drop step is skipped. */
+  initialFile?: File
+  /** AQU-1365: where Back from the first step after the drop leads, when the
+   *  host chose the file. Replaces the panel's own return to its drop step. */
+  onBackToFileChoice?: () => void
+  /** AQU-1365: the project file holding `bookCode`, when exactly one does.
+   *  With `onUseFile`, a file meant for another book offers to go there. */
+  fileForBook?: (bookCode: string) => { id: string; name: string } | undefined
+  /** AQU-1365: re-run this same upload against another file. */
+  onUseFile?: (fileId: string) => void
 }
 
-type PanelStep = "file" | "sheet" | "mapping" | "review"
+export interface FileTargetPanelBack {
+  /** Accessible name for the arrow: where it goes. */
+  label: string
+  onBack: () => void
+  /** True while an import is being applied. */
+  disabled: boolean
+}
+
+type PanelStep = "file" | "sheet" | "mapping" | "matching" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
@@ -87,10 +143,377 @@ function sourceArtifactFormat(fileName: string) {
   return "csv" as const
 }
 
+/** What one incoming row is called on the review screen: a subtitle file's
+ *  cues, a USFM file's verses, a spreadsheet's rows (AQU-1375). */
+type RowKind = "cue" | "verse" | "row"
+
+function incomingRowKind(fileName: string): RowKind {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
+  if (USFM_EXTENSIONS.has(ext)) return "verse"
+  return "row"
+}
+
+/** The books and chapters a file covers, the way the review names them:
+ *  "Exodus 1", "Genesis 1–50", "Exodus 1 and Leviticus 2". More than three
+ *  books are cut short with an ellipsis — the point is which file this is. */
+function formatChapterSpans(spans: ChapterSpan[], locale: string): string {
+  const named = spans.slice(0, 3).map(({ bookCode, firstChapter, lastChapter }) =>
+    `${getBookName(bookCode) ?? bookCode} ${firstChapter === lastChapter ? firstChapter : `${firstChapter}–${lastChapter}`}`)
+  const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(named)
+  return spans.length > 3 ? `${list}…` : list
+}
+
+/** A row's label on the review screen: its own reference or timecode, or —
+ *  when it has none — its place in the file, "Row 3" or "Cue 3" in the
+ *  reader's language (AQU-1375). A USFM verse always has a reference. */
+function rowLabel(t: TFunction, locale: string, kind: RowKind, ref: string, rowIndex: number | undefined): string {
+  if (ref || rowIndex === undefined) return ref
+  return t(kind === "cue" ? "importExport.review.cueNumber" : "importExport.review.rowNumber", {
+    number: formatNumber(rowIndex + 1, locale),
+  })
+}
+
+/** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
+ *  and "1:00:00" (h:mm:ss) past it — a broadcast file's hour reads as a
+ *  timecode, not as 3,600 seconds. Direction is said by the sentence. */
+function formatShift(offsetMs: number, locale: string): string {
+  const ms = Math.abs(offsetMs)
+  if (ms < 60_000) {
+    return formatNumber(ms / 1000, locale, {
+      style: "unit",
+      unit: "second",
+      unitDisplay: "long",
+      maximumFractionDigits: 2,
+    })
+  }
+  const totalSeconds = Math.round(ms / 1000)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${Math.floor(totalSeconds / 3600)}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}`
+}
+
+/** Resolves once the browser has painted: a frame, then a task after it. Heavy
+ *  matching runs only after this, so the skeleton it replaces is actually on
+ *  screen — set state and compute in one go, and the page freezes on the OLD
+ *  screen instead (a 1,062-line file took ~2.8s at 6x CPU throttling). The
+ *  skeleton's state must be COMMITTED first (flushSync): React may otherwise
+ *  commit it after the frame this waits for, and the matching starts unseen. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => setTimeout(resolve, 0))
+    else setTimeout(resolve, 0)
+  })
+}
+
+/** Placeholder rows shaped like review rows, pulsing while matching runs. */
+function SkeletonRows({ count = 6 }: { count?: number }) {
+  return (
+    <div className="divide-y" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="flex items-start gap-2 px-3 py-2">
+          <Skeleton className="mt-0.5 size-3.5 rounded-sm" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-2.5 w-44 max-w-full" />
+            <Skeleton className="h-2.5 w-64 max-w-full" />
+            <Skeleton className="h-3.5 w-56 max-w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The amber pill a review row uses for anything a person should check. */
+const AMBER_PILL = "border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
+
+/** Another cue that fits a contested row's line, shown when the row is opened
+ *  so the two can be compared, and swapped, in place. */
+interface Rival {
+  /** Its place in the uploaded file — what a swap pins to a line. */
+  rowIndex: number
+  ref: string
+  text: string
+  /** The line it is on now, or null while it sits in "Cues that didn't find a line". */
+  onLine: { cellId: string; sourceText: string } | null
+}
+
+const NO_OVERRIDES: ContestOverrides = { pins: [], contests: [] }
+
+/** Groups of row indices, merged wherever two share a row. */
+function mergeContests(groups: ReadonlyArray<readonly number[]>): number[][] {
+  const merged: number[][] = []
+  for (const group of groups) {
+    const into = merged.filter((m) => m.some((at) => group.includes(at)))
+    const union = [...new Set([...group, ...into.flat()])]
+    for (const m of into) merged.splice(merged.indexOf(m), 1)
+    merged.push(union)
+  }
+  return merged
+}
+
+/** A collapsible list under the review's counts. Its entries are built only
+ *  while it is open: a file an hour off leaves ~1,000 cues unmatched and ~1,000
+ *  lines uncovered, and building both hidden lists froze the page ~1.2s at 6x
+ *  CPU throttling. */
+function LazyDetails({ summary, children }: { summary: string; children: () => ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details className="mt-2 text-xs" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer text-muted-foreground">{summary}</summary>
+      {open && children()}
+    </details>
+  )
+}
+
+/** One pairing in the review list. Memoised: ticking one row re-renders only it. */
+const ReviewRow = memo(function ReviewRow({
+  m,
+  kind,
+  checked,
+  onToggle,
+  expanded,
+  onToggleExpanded,
+  rivals,
+  onSwap,
+  onSwapSameTiming,
+}: {
+  m: FileTargetMatchedCell
+  kind: RowKind
+  checked: boolean
+  onToggle: (cellId: string) => void
+  expanded: boolean
+  onToggleExpanded: (cellId: string) => void
+  /** Present on a contested row: the other cues that fit its line. */
+  rivals: Rival[] | undefined
+  onSwap: (cellId: string, rival: Rival) => void
+  onSwapSameTiming: (cellId: string) => void
+}) {
+  const { t, locale } = useI18n()
+  // The label wraps only the tickbox and the text. The pills sit beside it,
+  // outside it: a button inside a <label> can tick the row on click in some
+  // environments (jsdom does, even with preventDefault).
+  return (
+    <div
+      data-review-cell={m.cellId}
+      className={cn("px-3 py-2 hover:bg-muted/30", m.alreadyThere && "opacity-60")}
+    >
+      <div className="flex items-start gap-2">
+        <label className="flex min-w-0 flex-1 items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded"
+            checked={checked}
+            disabled={m.alreadyThere}
+            onChange={() => onToggle(m.cellId)}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="font-mono text-[10px] text-muted-foreground">
+              {rowLabel(t, locale, kind, m.ref, m.rowIndex)}
+              {m.writtenAs && (
+                <span className="ms-1.5 text-muted-foreground/70">
+                  {t("importExport.review.rowWrittenAs", { ref: m.writtenAs })}
+                </span>
+              )}
+              {m.alreadyThere && (
+                <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
+              )}
+            </p>
+            {/* The line's own timecode, present only when it disagrees
+                with the cue's — so drift announces itself, and a clean
+                file doesn't print every timecode twice. */}
+            <p className="truncate text-[10px] text-muted-foreground/80">
+              {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
+              {m.sourceText}
+            </p>
+            {m.flag === "sourceDiffers" && (
+              <p className="truncate text-[10px] text-amber-600">
+                {t("importExport.review.rowIncomingSource", { text: m.incomingSource ?? "" })}
+              </p>
+            )}
+            <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
+            {m.hasConflict && (
+              <p className="truncate text-[10px] text-amber-600">
+                {t("importExport.review.replacesExisting", { text: m.currentText })}
+              </p>
+            )}
+          </div>
+        </label>
+        {/* Everything to check about a row sits in its corner. "Contested"
+            opens the comparison below; a timing pill means only the line's
+            own timing is kept. */}
+        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.cellRef) && (
+          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+            {rivals && (
+              <Badge
+                className={cn(AMBER_PILL, "cursor-pointer font-sans hover:bg-amber-500/25")}
+                title={t("importExport.review.contestedToggleHint")}
+                render={<button type="button" aria-expanded={expanded} onClick={() => onToggleExpanded(m.cellId)} />}
+              >
+                {t("importExport.review.rowContestedPill")}
+                <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} aria-hidden />
+              </Badge>
+            )}
+            {m.flag === "sharedTiming" && (
+              <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
+                {t("importExport.review.rowSharedTimingPill")}
+              </Badge>
+            )}
+            {m.flag === "sharedTiming" && !!m.sharedWith?.length && (
+              <Button
+                size="xs"
+                variant="outline"
+                className="h-5 px-1.5 text-[10px]"
+                title={t("importExport.review.swapSameTimingHint")}
+                onClick={() => onSwapSameTiming(m.cellId)}
+              >
+                {t("importExport.review.swap")}
+              </Button>
+            )}
+            {m.cellRef && (
+              <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
+            )}
+            {m.flag === "sourceDiffers" && (
+              <Badge className={AMBER_PILL} title={t("importExport.review.rowSourceDiffers")}>
+                {t("importExport.review.rowSourceDiffersPill")}
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
+      {/* Opened: the other cues that fit this line, each where it is now,
+          with a Swap that puts it on this line instead. */}
+      {expanded && rivals && (
+        <div className="ms-6 mt-2 space-y-2 border-s-2 border-amber-400/60 ps-3">
+          <p className="text-[10px] font-medium text-muted-foreground">{t("importExport.review.rivalHeading")}</p>
+          {rivals.map((rival) => (
+            <div key={rival.rowIndex} data-rival={rival.rowIndex} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {rowLabel(t, locale, kind, rival.ref, rival.rowIndex)}
+                </p>
+                <p className="truncate text-xs text-foreground/80">{rival.text}</p>
+                <p className="truncate text-[10px] text-muted-foreground/80">
+                  {rival.onLine
+                    ? t("importExport.review.rivalOnLine", { source: rival.onLine.sourceText })
+                    : t("importExport.review.rivalNotPlaced")}
+                </p>
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                title={t("importExport.review.swapHint")}
+                onClick={() => onSwap(m.cellId, rival)}
+              >
+                {t("importExport.review.swap")}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})
+
+/** Above this many rows only the rows on screen are drawn. Below it every row
+ *  is, which is cheap and keeps every row in the page for find-in-page. A
+ *  1,062-line episode drawn whole froze the page ~0.9s at 6x CPU throttling. */
+const VIRTUALIZE_ABOVE = 150
+/** A typical row's height before it is measured. */
+const REVIEW_ROW_ESTIMATE_PX = 64
+
+interface ReviewRowListProps {
+  matched: FileTargetMatchedCell[]
+  kind: RowKind
+  selected: Set<string>
+  onToggle: (cellId: string) => void
+  expanded: Set<string>
+  onToggleExpanded: (cellId: string) => void
+  rivals: Map<string, Rival[]>
+  onSwap: (cellId: string, rival: Rival) => void
+  onSwapSameTiming: (cellId: string) => void
+}
+
+const REVIEW_LIST_CLASS = "min-h-0 flex-1 overflow-y-auto rounded-md border"
+
+function ReviewRowList(props: ReviewRowListProps) {
+  if (props.matched.length > VIRTUALIZE_ABOVE) return <VirtualReviewRowList {...props} />
+  return (
+    <div className={REVIEW_LIST_CLASS}>
+      <div className="divide-y">
+        {props.matched.map((m) => (
+          <ReviewRowFor key={m.cellId} m={m} {...props} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One row, with the list's shared props resolved for it. */
+function ReviewRowFor({ m, kind, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
+  return (
+    <ReviewRow
+      m={m}
+      kind={kind}
+      checked={selected.has(m.cellId)}
+      onToggle={onToggle}
+      expanded={expanded.has(m.cellId)}
+      onToggleExpanded={onToggleExpanded}
+      rivals={rivals.get(m.cellId)}
+      onSwap={onSwap}
+      onSwapSameTiming={onSwapSameTiming}
+    />
+  )
+}
+
+function VirtualReviewRowList(props: ReviewRowListProps) {
+  const { matched } = props
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const virtualizer = useVirtualizer({
+    count: matched.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => matched[index]?.cellId ?? index,
+    estimateSize: () => REVIEW_ROW_ESTIMATE_PX,
+    // A row that reports no height (not laid out yet, or jsdom) keeps the
+    // estimate rather than collapsing to 0 and pulling hundreds into view.
+    measureElement: (element) => element.getBoundingClientRect().height || REVIEW_ROW_ESTIMATE_PX,
+    overscan: 8,
+    initialRect: { width: 560, height: 480 },
+    // jsdom/happy-dom report 0×0 for CSS-sized scrollports; coerce so rows
+    // mount there too (as ChapterNavigator does).
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => {
+        cb({ width: rect.width > 0 ? rect.width : 560, height: rect.height > 0 ? rect.height : 480 })
+      }),
+  })
+  return (
+    <div ref={scrollRef} className={REVIEW_LIST_CLASS}>
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const m = matched[item.index]
+          return (
+            <div
+              key={item.key}
+              data-index={item.index}
+              ref={virtualizer.measureElement}
+              className="absolute inset-x-0 top-0 border-b"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              <ReviewRowFor m={m} {...props} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function FileTargetImportPanel({
   projectId,
   username,
   targetLang,
+  laneOptions,
+  onTargetLangChange,
+  laneCellsLoading = false,
   fileName,
   cells,
   getToken,
@@ -99,8 +522,13 @@ export function FileTargetImportPanel({
   onError,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  onBackChange,
+  initialFile,
+  onBackToFileChoice,
+  fileForBook,
+  onUseFile,
 }: FileTargetImportPanelProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
@@ -108,16 +536,173 @@ export function FileTargetImportPanel({
   const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
+  // A subtitle file's parsed cues, kept so the review's shift tickbox can
+  // re-run the match with the shift on or off.
+  const [subtitleRows, setSubtitleRows] = useState<{ rows: TargetRow[]; skippedCues: number } | null>(null)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
+  // The shift tickbox's new value while the list re-matches under it; null
+  // when nothing is pending.
+  const [rematching, setRematching] = useState<boolean | null>(null)
+  // Bumped by every match started and by leaving the review, so a match that
+  // finishes after the user moved on is dropped instead of shown.
+  const matchRun = useRef(0)
+  // Contests: which rows are opened for comparison, and the swaps made.
+  // Both survive a re-match (a swap, or the shift tickbox); a new file clears them.
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [overrides, setOverrides] = useState<ContestOverrides>(NO_OVERRIDES)
+  // "To check": show only the rows left unticked for a reason. Kept across a
+  // re-match; a new file starts on "All".
+  const [onlyToCheck, setOnlyToCheck] = useState(false)
 
-  const showReview = useCallback((result: FileTargetMatchResult, byOrder: boolean) => {
+  // Back goes one step: review → column mapping for a spreadsheet (the column
+  // choice is what you'd fix, without re-uploading) and → the file picker for
+  // everything else; mapping → the sheet list when the workbook had several.
+  // Leaving the review drops its ticks, since they belong to that pairing.
+  useEffect(() => {
+    if (!onBackChange) return
+    if (step === "file") {
+      onBackChange(null)
+      return
+    }
+    const toFilePicker = onBackToFileChoice
+      ? {
+          // The host chose the file (AQU-1365), so going back means choosing
+          // again there, not this panel's own drop step.
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            onBackToFileChoice()
+          },
+        }
+      : {
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            setRematching(null)
+            setMatchResult(null)
+            setSelectedCellIds(new Set())
+            setSheets([])
+            setSelectedSheet(null)
+            setSourceFile(null)
+            setSubtitleRows(null)
+            setExpandedRows(new Set())
+            setOverrides(NO_OVERRIDES)
+            setOnlyToCheck(false)
+            setError(null)
+            setStep("file")
+          },
+        }
+    const back =
+      step === "review" && selectedSheet
+        ? {
+            label: t("importExport.fileTarget.backToColumnMapping"),
+            onBack: () => {
+              matchRun.current++
+              setRematching(null)
+              setMatchResult(null)
+              setSelectedCellIds(new Set())
+              setSubtitleRows(null)
+              setExpandedRows(new Set())
+              setOverrides(NO_OVERRIDES)
+              setError(null)
+              setStep("mapping")
+            },
+          }
+        : step === "mapping" && sheets.length > 1
+          ? {
+              label: t("importExport.fileTarget.backToSheetList"),
+              onBack: () => {
+                setSelectedSheet(null)
+                setError(null)
+                setStep("sheet")
+              },
+            }
+          : toFilePicker
+    onBackChange({ ...back, disabled: applying })
+  }, [step, selectedSheet, sheets.length, applying, onBackChange, onBackToFileChoice, t])
+
+  const showReview = useCallback((
+    result: FileTargetMatchResult,
+    byOrder: boolean,
+    /** A swap passes the ticks to keep; otherwise they're seeded afresh. */
+    keepTicks?: Set<string>,
+  ) => {
     setMatchResult(result)
     setMatchedByOrder(byOrder)
-    // Pre-select only non-conflicting cells — overwriting an existing
-    // translation requires an explicit tick.
-    setSelectedCellIds(new Set(result.matched.filter((m) => !m.hasConflict).map((m) => m.cellId)))
+    // Pre-select only rows that are safe to take as they stand. Overwriting an
+    // existing translation needs an explicit tick; so does a contested row
+    // (AQU-1360) and a row whose source differs from its line's (AQU-1375);
+    // and a row whose text the line already holds has nothing to import at all.
+    setSelectedCellIds(new Set(
+      keepTicks
+        ? result.matched.filter((m) => keepTicks.has(m.cellId) && !m.alreadyThere).map((m) => m.cellId)
+        : result.matched
+          // A same-timing pair whose cues all found a line is a heads-up, not
+          // a decision: ticked, with its pill and a Swap (Sam, 09-23).
+          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && !m.sharedTimingUnpaired)
+          .map((m) => m.cellId),
+    ))
     setStep("review")
+  }, [])
+
+  // For each contested row, the other cues that fit its line: rows elsewhere
+  // in the list, and cues in "Cues that didn't find a line".
+  const rivalsByCell = useMemo(() => {
+    const byContest = new Map<number, Array<Rival & { cellId?: string }>>()
+    const add = (n: number, member: Rival & { cellId?: string }) =>
+      byContest.set(n, [...(byContest.get(n) ?? []), member])
+    for (const m of matchResult?.matched ?? []) {
+      if (m.contest === undefined || m.rowIndex === undefined) continue
+      add(m.contest, {
+        rowIndex: m.rowIndex, ref: m.ref, text: m.incomingText, cellId: m.cellId,
+        onLine: { cellId: m.cellId, sourceText: m.sourceText },
+      })
+    }
+    for (const o of matchResult?.orphans ?? []) {
+      if (o.contest === undefined || o.rowIndex === undefined) continue
+      add(o.contest, { rowIndex: o.rowIndex, ref: o.ref, text: o.text, onLine: null })
+    }
+    const rivals = new Map<string, Rival[]>()
+    for (const members of byContest.values()) {
+      for (const self of members) {
+        if (!self.cellId) continue
+        rivals.set(self.cellId, members
+          .filter((other) => other.rowIndex !== self.rowIndex)
+          .map(({ rowIndex, ref, text, onLine }) => ({ rowIndex, ref, text, onLine })))
+      }
+    }
+    return rivals
+  }, [matchResult])
+
+  const toggleExpanded = useCallback((cellId: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(cellId)) next.delete(cellId)
+      else next.add(cellId)
+      return next
+    })
+  }, [])
+
+  const toggleCell = useCallback((cellId: string) => {
+    setSelectedCellIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(cellId)) next.delete(cellId)
+      else next.add(cellId)
+      return next
+    })
+  }, [])
+
+  /** Show the matching skeleton and let it paint before the matching blocks
+   *  the page. False when the user moved on meanwhile. */
+  const showMatching = useCallback(async () => {
+    const run = ++matchRun.current
+    setExpandedRows(new Set())
+    setOverrides(NO_OVERRIDES)
+    setOnlyToCheck(false)
+    flushSync(() => setStep("matching"))
+    await nextPaint()
+    return run === matchRun.current
   }, [])
 
   const handleFile = useCallback(async (file: File) => {
@@ -127,11 +712,12 @@ export function FileTargetImportPanel({
     try {
       assertSourceUploadByteLength(file.size)
       if (USFM_EXTENSIONS.has(ext)) {
-        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), {
-          excludeFrontMatter,
-        })
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const rows = usfmToTargetRows(text, { excludeFrontMatter })
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noVersesInUsfm"))
+          setStep("file")
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
@@ -140,22 +726,30 @@ export function FileTargetImportPanel({
         // positionally (cue N → cell N) — the review screen surfaces any
         // misalignment before commit via the same order-match warning used
         // for spreadsheets without a ref column.
-        const rows = vttToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const { rows, skippedCues } = vttToTargetRowsWithReport(text)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInVtt"))
+          setStep("file")
           return
         }
-        showReview(matchTargetRowsByOrder(rows, cells), true)
+        setSubtitleRows({ rows, skippedCues })
+        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
         // the same ref-less path as VTT — timecode overlap when the file's
         // cells carry timings (AQU-1143), cue N → cell N otherwise.
-        const rows = subtitleToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), ext)
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
+        if (!(await showMatching())) return
+        const { rows, skippedCues } = subtitleToTargetRowsWithReport(text, ext)
         if (rows.length === 0) {
           setError(t("importExport.fileTarget.noCuesInSubtitle"))
+          setStep("file")
           return
         }
-        showReview(matchTargetRowsByOrder(rows, cells), true)
+        setSubtitleRows({ rows, skippedCues })
+        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
@@ -183,18 +777,39 @@ export function FileTargetImportPanel({
     } catch (err) {
       const message = err instanceof Error ? err.message : t("importExport.errors.failedToParseFile")
       setError(message)
+      setStep("file")
       onError?.(message, "parse")
     }
-  }, [cells, showReview, onError, excludeFrontMatter, t])
+  }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
+
+  // AQU-1365: the host's file is read once. The ref, not the effect's deps,
+  // makes it once: StrictMode re-runs mount effects, and a later `cells`
+  // change re-creates handleFile.
+  const initialFileRead = useRef(false)
+  // While it is read, the matching skeleton stands in for the drop step, which
+  // the person never asked to see.
+  const [readingInitialFile, setReadingInitialFile] = useState(Boolean(initialFile))
+  useEffect(() => {
+    if (!initialFile || initialFileRead.current) return
+    initialFileRead.current = true
+    void handleFile(initialFile).then(() => setReadingInitialFile(false))
+  }, [initialFile, handleFile])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
     const dataRows = hasHeader ? selectedSheet.rows.slice(1) : selectedSheet.rows
-    // Keep empty rows in place — order matching needs every row to hold its slot.
-    const rows: TargetRow[] = dataRows.map((r) => ({
-      ref: mapping.labelCol !== null ? (r[mapping.labelCol] ?? "").trim() || undefined : undefined,
-      text: (r[mapping.targetCol!] ?? "").trim(),
-    }))
+    const { rows, timed } = targetSheetRows(dataRows, mapping)
+    // Start and end columns put a subtitle spreadsheet through the timing
+    // matcher (AQU-1375), shift tickbox and swaps included, as a subtitle file
+    // would go. A reference column still wins unless the open file's lines
+    // are timed too: a verse sheet carrying audio timings keeps matching by
+    // verse on a file of untimed verses.
+    const linesTimed = cells.length > 0 && cells.every((c) => c.startMs !== undefined && c.endMs !== undefined)
+    if (timed && (mapping.labelCol === null || linesTimed)) {
+      setSubtitleRows({ rows, skippedCues: 0 })
+      showReview(matchTargetRowsByOrder(rows, cells), true)
+      return
+    }
     const byOrder = mapping.labelCol === null
     showReview(
       byOrder ? matchTargetRowsByOrder(rows, cells) : matchTargetRowsByRef(rows, cells),
@@ -244,6 +859,24 @@ export function FileTargetImportPanel({
     }
   }
 
+  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
+  if (step === "matching" || (step === "file" && readingInitialFile)) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
+        <div className="shrink-0">
+          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
+          <Skeleton className="mt-1.5 h-3 w-48" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+          <SkeletonRows />
+        </div>
+        <div className="flex shrink-0 justify-end">
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Step: file selection ────────────────────────────────────────────────────
   if (step === "file") {
     return (
@@ -254,24 +887,50 @@ export function FileTargetImportPanel({
             {t("importExport.fileTarget.description")}
           </p>
         </div>
+        {/* AQU-1631: the destination language is a choice, not whatever the
+            editor had open. Picked before the file so a wrong lane costs a
+            click rather than an import; see FileTargetLanePicker for why the
+            choice moves the editor's lane with it. */}
+        {laneOptions && onTargetLangChange && (
+          <FileTargetLanePicker
+            options={laneOptions}
+            value={targetLang ?? ""}
+            onValueChange={(lane) => {
+              if (lane === (targetLang ?? "")) return
+              setError(null)
+              onTargetLangChange(lane)
+            }}
+            loading={laneCellsLoading}
+          />
+        )}
         <div
           className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted p-8 gap-3"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault()
+            // The chosen lane's cells are what the incoming rows match
+            // against; until they land a drop would align to the lane the
+            // user just switched away from.
+            if (laneCellsLoading) return
             const file = e.dataTransfer.files[0]
             if (file) handleFile(file)
           }}
         >
           <p className="text-sm text-muted-foreground">{t("importExport.fileTarget.dropZoneHint")}</p>
           <label>
-            <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors",
+                laneCellsLoading ? "pointer-events-none opacity-50" : "hover:bg-accent",
+              )}
+            >
               {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
+              accept={FILE_TARGET_ACCEPT}
               className="sr-only"
+              disabled={laneCellsLoading}
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) handleFile(file)
@@ -333,63 +992,331 @@ export function FileTargetImportPanel({
 
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
-    const { matched, orphans, unmatchedSourceCount } = matchResult
+    const { matched, orphans, uncovered, timebase, looseFit, elsewhere, skippedCues = 0 } = matchResult
+    // AQU-1365: a file for one other book that exactly one project file
+    // holds can go there instead. The import follows the file the person
+    // chose and never moves by itself, so it is offered, not done.
+    const elsewhereBooks = elsewhere ? [...new Set(elsewhere.incoming.map((span) => span.bookCode))] : []
+    const otherFile = elsewhereBooks.length === 1 && onUseFile ? fileForBook?.(elsewhereBooks[0]) : undefined
+    const switchTo = otherFile && otherFile.id !== cells[0]?.fileId ? otherFile : undefined
     const conflicts = matched.filter((m) => m.hasConflict)
-    // AQU-1143: a ref-less match that aligned by cue timecode is not the
-    // fragile top-to-bottom pairing this warns about — don't send the user off
-    // to eyeball 500 rows for a drift that cannot have happened.
-    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
+    const alreadyThere = matched.filter((m) => m.alreadyThere)
+    // "To check": the rows left unticked for a reason a person has to settle —
+    // a contest, a shared timing, a source that differs, or text that would be
+    // replaced. Membership follows the flag, not the tick, so a row never
+    // vanishes while being worked on. "Timing differs" alone is not a reason:
+    // the pairing still holds, and on a shifted file every row has it.
+    const toCheck = matched.filter(
+      (m) => m.flag === "contested" || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.hasConflict,
+    )
+    // The counts above the list split the pairings the same way (AQU-1375):
+    // "matched" are the ones that need no decision, then those to check, then
+    // conflicts — which are to check too, but already have a count of their
+    // own. "5 matched" over an Import button saying 4 read as a dropped row.
+    const flaggedToCheck = toCheck.length - conflicts.length
+    const filtering = onlyToCheck && toCheck.length > 0
+    const shown = filtering ? toCheck : matched
+    // Select all acts on the rows shown; rows already there have nothing to import.
+    const shownSelectable = shown.filter((m) => !m.alreadyThere)
+    const allShownSelected =
+      shownSelectable.length > 0 && shownSelectable.every((m) => selectedCellIds.has(m.cellId))
+    const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
+    const unplaced = orphans.length - brokenTimecodes
+    // AQU-1143: a ref-less match that aligned by cue timecode (or, AQU-1375,
+    // by source text) is not the fragile top-to-bottom pairing this warns
+    // about — don't send the user off to eyeball 500 rows for a drift that
+    // cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy === "order"
+    const reasonLabel = (orphan: TargetOrphan): string | null => {
+      switch (orphan.reason) {
+        case "backwardsTimecode": return t("importExport.review.reasonBackwardsTimecode")
+        case "lostItsLine": return t("importExport.review.reasonLostItsLine")
+        case "noLineInReach": return t("importExport.review.reasonNoLineInReach")
+        case "noReference": return t("importExport.review.reasonNoReference")
+        case "refNotInFile": return t("importExport.review.reasonRefNotInFile")
+        case "refRepeated": return t("importExport.review.reasonRefRepeated")
+        case "sourceNotInFile": return t("importExport.review.reasonSourceNotInFile")
+        case "bridgeOverSeparateLines":
+          return orphan.verses ? t("importExport.review.reasonBridgeOverSeparateLines", orphan.verses) : null
+        case "partOfBridgedLine":
+          return orphan.verses ? t("importExport.review.reasonPartOfBridgedLine", orphan.verses) : null
+        default: return null
+      }
+    }
+    const rowKind = sourceFile ? incomingRowKind(sourceFile.name) : "row"
+    const unmatchedListTitle = t(
+      rowKind === "cue"
+        ? "importExport.review.unmatchedListTitle"
+        : rowKind === "verse"
+          ? "importExport.review.unmatchedVersesListTitle"
+          : "importExport.review.unmatchedRowsListTitle",
+    )
+    // A whole-file shift is offered as a tickbox (ticked when the matcher
+    // applied it), its label folding in any frame-rate change that comes with
+    // it; the frame-rate note stands alone only for a stretch without a shift.
+    // Neither names the rates or the percentage: what a person needs is that
+    // it happened and how much it helped (Sam, 09-23).
+    const { offsetCorrection } = matchResult
+    const offsetApplied = (timebase?.offsetMs ?? 0) !== 0
+    const offsetLabel = offsetCorrection
+      ? t(
+          offsetCorrection.offsetMs < 0
+            ? offsetCorrection.scale === 1 ? "importExport.review.offsetEarlier" : "importExport.review.offsetEarlierWithRate"
+            : offsetCorrection.scale === 1 ? "importExport.review.offsetLater" : "importExport.review.offsetLaterWithRate",
+          {
+            amount: formatShift(offsetCorrection.offsetMs, locale),
+            count: formatCount(offsetCorrection.closeAfter - offsetCorrection.closeBefore, locale),
+          },
+        )
+      : null
+    const timebaseNote = timebase && timebase.offsetMs === 0
+      ? t("importExport.review.frameRateAdjusted", {
+          count: formatCount(timebase.closeAfter - timebase.closeBefore, locale),
+        })
+      : null
 
-    function toggleCell(cellId: string) {
-      setSelectedCellIds((prev) => {
-        const next = new Set(prev)
-        if (next.has(cellId)) next.delete(cellId)
-        else next.add(cellId)
-        return next
-      })
+    // Flip the box at once, show skeleton rows, and re-match from the
+    // corrections already found — the tickbox can't change them, so the
+    // ~25-pass search never runs twice.
+    // Swap: put the rival on this row's line. If the rival sat on another line,
+    // this row's cue goes there; if it sat in the unmatched list, this row's
+    // cue goes there instead. Re-matched with the choice pinned, so every
+    // pill stays true, from the corrections already found (one pass).
+    /** Re-match with new pins (row index → line), replacing any pins those
+     *  rows or lines had; `contest` keeps a swapped contest together. */
+    function repin(entries: Array<readonly [number, string]>, contest: number[] | null, keep: Set<string>) {
+      if (!subtitleRows || !matchResult) return
+      const rowsTouched = new Set(entries.map(([rowIndex]) => rowIndex))
+      const linesTouched = new Set(entries.map(([, cellId]) => cellId))
+      const pins = [
+        ...overrides.pins.filter(([rowIndex, cellId]) => !rowsTouched.has(rowIndex) && !linesTouched.has(cellId)),
+        ...entries,
+      ]
+      const next = { pins, contests: contest ? mergeContests([...overrides.contests, contest]) : overrides.contests }
+      setOverrides(next)
+      const known = { rate: matchResult.rateCorrection ?? null, offset: matchResult.offsetCorrection ?? null }
+      showReview(
+        {
+          ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: offsetApplied, known, overrides: next }),
+          skippedCues: subtitleRows.skippedCues,
+        },
+        true,
+        keep,
+      )
+    }
+
+    function swap(cellId: string, rival: Rival) {
+      const row = matched.find((m) => m.cellId === cellId)
+      if (row?.rowIndex === undefined) return
+      const other = rival.onLine?.cellId
+      // Both lines the swap touched come out unticked: swapping a contest says
+      // which cue belongs there, not that it should be imported.
+      repin(
+        [[rival.rowIndex, cellId], ...(other ? [[row.rowIndex, other] as const] : [])],
+        [row.rowIndex, ...(rivalsByCell.get(cellId) ?? []).map((r) => r.rowIndex)],
+        new Set([...selectedCellIds].filter((id) => id !== cellId && id !== other)),
+      )
+    }
+
+    // A same-timing row trades lines with its partner — the next in the
+    // group, in list order, so with three or more repeated swaps cycle.
+    // Ticks stay as they were: the pair was going to be imported anyway.
+    function swapSameTiming(cellId: string) {
+      const row = matched.find((m) => m.cellId === cellId)
+      if (row?.rowIndex === undefined || !row.sharedWith?.length) return
+      const listOrder = new Map(matched.map((m, i) => [m.cellId, i]))
+      const group = [cellId, ...row.sharedWith].sort((a, b) => listOrder.get(a)! - listOrder.get(b)!)
+      const partnerCell = group[(group.indexOf(cellId) + 1) % group.length]
+      const partner = matched.find((m) => m.cellId === partnerCell)
+      if (partner?.rowIndex === undefined) return
+      repin([[row.rowIndex, partnerCell], [partner.rowIndex, cellId]], null, new Set(selectedCellIds))
+    }
+
+    async function toggleOffset(apply: boolean) {
+      if (!subtitleRows || !matchResult) return
+      const known = { rate: matchResult.rateCorrection ?? null, offset: matchResult.offsetCorrection ?? null }
+      const run = ++matchRun.current
+      flushSync(() => setRematching(apply))
+      await nextPaint()
+      if (run !== matchRun.current) return
+      showReview(
+        {
+          ...matchTargetRowsByOrder(subtitleRows.rows, cells, { applyOffset: apply, known, overrides }),
+          skippedCues: subtitleRows.skippedCues,
+        },
+        true,
+      )
+      setRematching(null)
     }
 
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 py-2">
         <div className="shrink-0">
           <p className="text-sm font-medium">{t("importExport.review.title")}</p>
+          {/* AQU-1360: anything other than a clean pairing is amber. Unmatched
+              and uncovered counts used to share the grey of "8 matched", so a
+              file that mostly failed looked exactly like a perfect one. */}
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{t("importExport.review.matchedCount", { count: matched.length })}</span>
-            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: conflicts.length })}</span>}
-            {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
-            {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
+            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length - toCheck.length, locale) })}</span>
+            {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: formatCount(alreadyThere.length, locale) })}</span>}
+            {flaggedToCheck > 0 && <span className="text-amber-600">{t("importExport.review.toCheckCount", { count: formatCount(flaggedToCheck, locale) })}</span>}
+            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: formatCount(conflicts.length, locale) })}</span>}
+            {unplaced > 0 && (
+              <span className="text-amber-600">
+                {t(
+                  rowKind === "cue"
+                    ? "importExport.review.unmatchedCueCount"
+                    : rowKind === "verse"
+                      ? "importExport.review.unmatchedVerseCount"
+                      : "importExport.review.unmatchedRowCount",
+                  { count: formatCount(unplaced, locale) },
+                )}
+              </span>
+            )}
+            {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: formatCount(brokenTimecodes, locale) })}</span>}
+            {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: formatCount(uncovered.length, locale) })}</span>}
+            {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: formatCount(skippedCues, locale) })}</span>}
           </div>
           {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.orderMatchWarning")}
+              {t(
+                matchResult.untimed === "lines"
+                  ? rowKind === "cue"
+                    ? "importExport.review.orderMatchLinesUntimedCues"
+                    : "importExport.review.orderMatchLinesUntimedRows"
+                  : matchResult.untimed === "rows"
+                    ? "importExport.review.orderMatchRowsUntimed"
+                    : "importExport.review.orderMatchWarning",
+              )}
             </p>
+          )}
+          {matchResult.alignedBy === "source" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">{t("importExport.review.sourceAligned")}</p>
+          )}
+          {/* AQU-1375: on an order match, unequal counts are the likeliest
+              sign that every row after some point is one line off. */}
+          {showOrderMatchWarning && matchResult.countMismatch && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {t(rowKind === "cue" ? "importExport.review.countMismatchCues" : "importExport.review.countMismatchRows", {
+                rows: formatCount(matchResult.countMismatch.rows, locale),
+                lines: formatCount(matchResult.countMismatch.lines, locale),
+              })}
+            </p>
+          )}
+          {looseFit && (
+            <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
+          )}
+          {/* AQU-1375: a file for another book or chapter used to say only
+              "0 matched". */}
+          {elsewhere && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {elsewhere.file.length > 0
+                ? t("importExport.review.elsewhere", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                    file: formatChapterSpans(elsewhere.file, locale),
+                  })
+                : t("importExport.review.elsewhereNoReferences", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                  })}
+              {switchTo && onUseFile && (
+                <>
+                  {" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    disabled={applying}
+                    onClick={() => onUseFile(switchTo.id)}
+                  >
+                    {t("importExport.review.useOtherFile", { fileName: switchTo.name })}
+                  </Button>
+                </>
+              )}
+            </p>
+          )}
+          {offsetLabel && subtitleRows && (
+            <label className="mt-1.5 flex items-start gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded"
+                checked={rematching ?? offsetApplied}
+                disabled={rematching !== null}
+                onChange={(e) => void toggleOffset(e.target.checked)}
+              />
+              <span>{offsetLabel}</span>
+            </label>
+          )}
+          {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
+
+          {orphans.length > 0 && (
+            <LazyDetails summary={`${unmatchedListTitle} (${formatCount(orphans.length, locale)})`}>
+              {() => (
+                <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                  {orphans.map((o, i) => (
+                    <li key={`${o.rowIndex}-${i}`} className="px-3 py-1.5">
+                      <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                        {rowLabel(t, locale, rowKind, o.ref, o.rowIndex)}
+                        {reasonLabel(o) && (
+                          <span className="font-sans text-amber-600">{reasonLabel(o)}</span>
+                        )}
+                      </p>
+                      <p className="truncate text-foreground/80">{o.text}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </LazyDetails>
+          )}
+          {uncovered.length > 0 && (
+            <LazyDetails summary={`${t("importExport.review.uncoveredListTitle")} (${formatCount(uncovered.length, locale)})`}>
+              {() => (
+                <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
+                  {uncovered.map((u) => (
+                    <li key={u.cellId} className="px-3 py-1.5">
+                      {u.cellRef && <p className="font-mono text-[10px] text-muted-foreground">{u.cellRef}</p>}
+                      <p className="truncate text-foreground/80">{u.sourceText}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </LazyDetails>
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
-          <div className="divide-y">
-            {matched.map((m) => (
-              <label key={m.cellId} className="flex items-start gap-2 px-3 py-2 hover:bg-muted/30">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 rounded"
-                  checked={selectedCellIds.has(m.cellId)}
-                  onChange={() => toggleCell(m.cellId)}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="font-mono text-[10px] text-muted-foreground">{m.ref}</p>
-                  <p className="truncate text-[10px] text-muted-foreground/80">{m.sourceText}</p>
-                  <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
-                  {m.hasConflict && (
-                    <p className="truncate text-[10px] text-amber-600">
-                      {t("importExport.review.replacesExisting", { text: m.currentText })}
-                    </p>
-                  )}
-                </div>
-              </label>
-            ))}
+        {/* The one signal that rows need a decision (their pills say which):
+            shown whenever any do, even if that is every row. */}
+        {toCheck.length > 0 && (
+          <SegmentTabs
+            className="shrink-0"
+            aria-label={t("importExport.review.showFilterAriaLabel")}
+            value={filtering ? "toCheck" : "all"}
+            onValueChange={(v) => setOnlyToCheck(v === "toCheck")}
+            options={[
+              { value: "all", label: t("importExport.review.showAll", { count: formatCount(matched.length, locale) }) },
+              { value: "toCheck", label: t("importExport.review.showToCheck", { count: formatCount(toCheck.length, locale) }) },
+            ]}
+          />
+        )}
+
+        {rematching !== null ? (
+          <div className="min-h-0 flex-1 overflow-hidden rounded-md border" aria-busy="true">
+            <span className="sr-only" role="status">{t("importExport.review.matching")}</span>
+            <SkeletonRows />
           </div>
-        </div>
+        ) : (
+          <ReviewRowList
+            matched={shown}
+            kind={rowKind}
+            selected={selectedCellIds}
+            onToggle={toggleCell}
+            expanded={expandedRows}
+            onToggleExpanded={toggleExpanded}
+            rivals={rivalsByCell}
+            onSwap={swap}
+            onSwapSameTiming={swapSameTiming}
+          />
+        )}
 
         {error && <p className="shrink-0 text-xs text-destructive">{error}</p>}
 
@@ -398,20 +1325,25 @@ export function FileTargetImportPanel({
             type="button"
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => {
-              const allIds = new Set(matched.map((m) => m.cellId))
-              const allSelected = allIds.size > 0 && [...allIds].every((id) => selectedCellIds.has(id))
-              setSelectedCellIds(allSelected ? new Set() : allIds)
+              setSelectedCellIds((prev) => {
+                const next = new Set(prev)
+                for (const m of shownSelectable) {
+                  if (allShownSelected) next.delete(m.cellId)
+                  else next.add(m.cellId)
+                }
+                return next
+              })
             }}
           >
-            {selectedCellIds.size === matched.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
+            {allShownSelected ? t("importExport.review.deselectAll") : t("common.selectAll")}
           </button>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
             <Button
-              disabled={selectedCellIds.size === 0 || applying}
+              disabled={selectedCellIds.size === 0 || applying || rematching !== null}
               onClick={handleApply}
             >
-              {t("importExport.review.importCellCount", { count: selectedCellIds.size })}
+              {t("importExport.review.importCellCount", { count: formatCount(selectedCellIds.size, locale) })}
             </Button>
           </div>
         </div>

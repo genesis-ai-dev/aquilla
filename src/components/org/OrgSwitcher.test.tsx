@@ -37,7 +37,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
@@ -316,6 +318,29 @@ describe("OrgSwitcher", () => {
     // A query that matches nothing shows an empty state.
     fireEvent.change(search, { target: { value: "zzzzz" } })
     await waitFor(() => expect(screen.getByText(/no organizations found/i)).toBeInTheDocument())
+  })
+
+  // A user's own workspace is where they land and create by default, so it is
+  // pinned above the alphabetical list and tagged so it reads as "home", not
+  // as one more org they happen to own.
+  it("pins the personal workspace first with a Personal tag", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Zed's workspace", role: { level: 700, name: "owner" }, personal: true },
+      { id: 3, name: "Bravo Org", role: { level: 600, name: "maintainer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("combobox", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+    await screen.findByLabelText(/find an organization/i)
+
+    const options = screen.getAllByRole("option").map((n) => n.textContent ?? "")
+    const memberRows = options.filter((t) => /Org|workspace/.test(t))
+    expect(memberRows[0]).toContain("Zed's workspace")
+    expect(memberRows[0]).toContain("Personal")
+    expect(memberRows[1]).toContain("Alpha Org")
+    expect(memberRows[1]).not.toContain("Personal")
+    expect(memberRows[2]).toContain("Bravo Org")
   })
 
   // AQU-759 (regression guard for AQU-473): filtering also narrows guest orgs

@@ -39,8 +39,11 @@ import { billing } from "./billing"
 import { knowledgeBase } from "./knowledgeBase"
 import { settings } from "./settings"
 import { agent } from "./agent"
+import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
+import { smartEdits } from "./smartEdits"
+import { harmonizer } from "./harmonizer"
 
 export const NAMESPACES = [
   common,
@@ -66,6 +69,9 @@ export const NAMESPACES = [
   knowledgeBase,
   settings,
   agent,
+  agentDraftReview,
   workspace,
   segmentation,
+  smartEdits,
+  harmonizer,
 ] as const

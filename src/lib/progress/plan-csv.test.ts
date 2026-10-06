@@ -60,7 +60,9 @@ describe("planRowsToCsv", () => {
       unit({ fileId: "f2", fileName: "Close", targetDate: "2026-09-05" }),
       // 400 cells, so the window is max(ceil(400 × 0.06), 7) = 24. Twelve cells
       // await validation and ten await a take: the worse medium is inside it.
-      unit({ fileId: "f3", fileName: "Almost", filledCount: 400, validatedCount: 388, audioCount: 390 }),
+      // AQU-490: audio is judged on VALIDATED takes now, so a nearly-complete
+      // row needs its takes signed off as well as recorded.
+      unit({ fileId: "f3", fileName: "Almost", filledCount: 400, validatedCount: 388, audioCount: 390, audioValidatedCount: 388 }),
       unit({ fileId: "f4", fileName: "Under way" }),
       unit({ fileId: "f5", fileName: "Untouched", filledCount: 0, validatedCount: 0, audioCount: 0 }),
       unit({ fileId: "f6", fileName: "Signed off", doneAt: NOW, doneBy: "randall" }),
@@ -91,7 +93,7 @@ describe("planRowsToCsv", () => {
     const done = { totalCount: 400, filledCount: 400, validatedCount: 400 }
     const csv = planRowsToCsv(
       [
-        unit({ fileId: "bible", fileName: "Whole Bible", sectionKey: "GEN", ...done, audioCount: 400 }),
+        unit({ fileId: "bible", fileName: "Whole Bible", sectionKey: "GEN", ...done, audioCount: 400, audioValidatedCount: 400 }),
         unit({ fileId: "bible", fileName: "Whole Bible", sectionKey: "EXO", ...done, audioCount: 0 }),
       ],
       NOW,

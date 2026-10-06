@@ -11,13 +11,15 @@
  *    unless `queueWhileStreaming`, where Send stays live (the session store
  *    queues the prompt behind the in-flight run) next to Stop.
  *  - `insertChip` (imperative handle) inserts a chip at the caret, de-duped.
+ *  - Scoped drafts preserve the document across navigation/reload; a successful
+ *    handoff consumes only the submitted revision. Mounting never takes focus.
  *
  * Send is driven off the ProseMirror `view` (not a captured `editor` closure)
  * so the latest props are read via refs and there is no stale-closure hazard.
  */
 
 import {
-  forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode,
+  forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode,
 } from "react"
 import { useEditor, EditorContent } from "@tiptap/react"
 import type { EditorView } from "@tiptap/pm/view"
@@ -31,6 +33,10 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { ContextChipNode } from "@/lib/richtext/context-chip-node"
 import { serializeDocJSON, type ContextChip } from "@/lib/agent/context-chip"
+import {
+  composerDraftKey, composerDraftStore, createComposerDraftStore, useComposerDraft,
+  type ComposerDraftScope,
+} from "@/lib/agent/composer-drafts"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SuggestedAction {
@@ -49,7 +55,11 @@ export interface ChatComposerHandle {
 export interface ChatComposerProps {
   isStreaming: boolean
   isConfigured: boolean
-  onSend: (payload: { text: string; chips: ContextChip[] }) => void
+  /** Resolving/returning false retains the draft (the caller reports why).
+   *  Rejecting/throwing also retains it and shows a fallback inline error. */
+  onSend: (payload: { text: string; chips: ContextChip[] }) => void | boolean | Promise<void | boolean>
+  /** Omit for an ephemeral composer; agent destinations must provide a scope. */
+  draftScope?: ComposerDraftScope
   onStop: () => void
   compact?: boolean
   suggestedActions?: SuggestedAction[]
@@ -66,30 +76,63 @@ export interface ChatComposerProps {
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
-  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder, attachmentBar, attachAction },
+  props,
+  ref,
+) {
+  // Key the editor itself, not an effect that can persist the previous document
+  // under the next destination before hydration completes.
+  return <ScopedChatComposer key={props.draftScope ? composerDraftKey(props.draftScope) : "ephemeral"} {...props} ref={ref} />
+})
+
+const ScopedChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ScopedChatComposer(
+  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder, attachmentBar, attachAction, draftScope },
   ref,
 ) {
   const t = useT()
-  const [isEmpty, setIsEmpty] = useState(true)
+  const [draftStore] = useState(() => draftScope ? composerDraftStore(draftScope) : createComposerDraftStore())
+  const draft = useComposerDraft(draftStore)
+  const { text: draftText, chips: draftChips } = serializeDocJSON(draft.document)
+  const isEmpty = !draftText.trim() && draftChips.length === 0
 
   // Latest props for the view-driven send path (avoids stale closures in the
   // editor's keydown handler, which is bound once at editor creation).
   const onSendRef = useRef(onSend)
-  onSendRef.current = onSend
   const flagsRef = useRef({ isStreaming, isConfigured, queueWhileStreaming })
-  flagsRef.current = { isStreaming, isConfigured, queueWhileStreaming }
+  useLayoutEffect(() => {
+    onSendRef.current = onSend
+    flagsRef.current = { isStreaming, isConfigured, queueWhileStreaming }
+  }, [onSend, isStreaming, isConfigured, queueWhileStreaming])
 
   function sendFromView(view: EditorView) {
     const { isStreaming, isConfigured, queueWhileStreaming } = flagsRef.current
-    if ((isStreaming && !queueWhileStreaming) || !isConfigured) return
-    const { text, chips } = serializeDocJSON(view.state.doc.toJSON() as { type?: string; content?: unknown[] })
+    if (draftStore.getSnapshot().isSending || (isStreaming && !queueWhileStreaming) || !isConfigured) return
+    const { text, chips } = serializeDocJSON(view.state.doc.toJSON())
     if (!text.trim() && chips.length === 0) return
-    onSendRef.current({ text, chips })
-    view.dispatch(view.state.tr.delete(0, view.state.doc.content.size))
-    setIsEmpty(true)
+    const revision = draftStore.getSnapshot().documentRevision
+    draftStore.setSending(true)
+    draftStore.setSendError(null)
+    const finish = (accepted: void | boolean) => {
+      if (accepted !== false) draftStore.consumeDocument(revision)
+      draftStore.setSending(false)
+    }
+    const fail = () => {
+      finish(false)
+      draftStore.setSendError("Could not send your message. Your draft has been kept; try again.")
+    }
+    try {
+      const result = onSendRef.current({ text, chips })
+      if (result && typeof result === "object" && "then" in result) {
+        void result.then(finish, fail)
+      } else {
+        finish(result)
+      }
+    } catch {
+      fail()
+    }
   }
 
   const editor = useEditor({
+    content: draft.document,
     editable: isConfigured,
     extensions: [
       StarterKit.configure({
@@ -118,7 +161,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       },
     },
     onUpdate({ editor }) {
-      setIsEmpty(editor.isEmpty)
+      draftStore.setDocument(editor.getJSON())
     },
   })
 
@@ -127,10 +170,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     editor?.setEditable(isConfigured)
   }, [editor, isConfigured])
 
-  // Focus on mount once configured.
-  useEffect(() => {
-    if (editor && isConfigured) editor.commands.focus()
-  }, [editor, isConfigured])
+  useLayoutEffect(() => {
+    if (!editor) return
+    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(draft.document)) {
+      editor.commands.setContent(draft.document, { emitUpdate: false })
+    }
+  }, [editor, draft.document])
 
   useImperativeHandle(ref, () => ({
     insertChip(chip: ContextChip) {
@@ -151,12 +196,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         .focus()
         .insertContent([{ type: "contextChip", attrs: chip }, { type: "text", text: " " }])
         .run()
-      setIsEmpty(editor.isEmpty)
     },
     insertText(text: string) {
       if (!editor) return
-      editor.chain().focus().insertContent(text).run()
-      setIsEmpty(editor.isEmpty)
+      editor.chain().focus().insertContent({ type: "text", text }).run()
     },
   }), [editor])
 
@@ -187,6 +230,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           </div>
         )}
         {attachmentBar}
+        {draft.persistenceError && (
+          <p role="alert" className="text-xs text-destructive">
+            {draft.persistenceError}
+          </p>
+        )}
+        {draft.sendError && (
+          <p role="alert" className="text-xs text-destructive">
+            {draft.sendError}
+          </p>
+        )}
         <InputGroup>
           <div className="relative w-full min-w-0 flex-1">
             <EditorContent editor={editor} />
@@ -210,7 +263,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   <AppTooltip content={t("workspace.chatComposer.queueTooltip")}>
                     <InputGroupButton
                       type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                      disabled={isEmpty} aria-label={t("workspace.chatComposer.queueMessage")}
+                      disabled={isEmpty || draft.isSending || !isConfigured} aria-label={t("workspace.chatComposer.queueMessage")}
                     >
                       <ArrowUp />
                     </InputGroupButton>
@@ -229,7 +282,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <AppTooltip content={t("autopilot.steering.send")}>
                 <InputGroupButton
                   type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                  disabled={isEmpty || !isConfigured} className="ms-auto" aria-label={t("autopilot.steering.send")}
+                  disabled={isEmpty || draft.isSending || !isConfigured} className="ms-auto" aria-label={t("autopilot.steering.send")}
                 >
                   <ArrowUp />
                 </InputGroupButton>

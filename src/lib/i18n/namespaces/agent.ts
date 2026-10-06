@@ -34,6 +34,8 @@ export const agent = defineNamespace({
     "agent.dock.attachFileAriaLabel": "Attach file",
     "agent.dock.attachFileTitle": "Attach a file for the agent",
     "agent.dock.removeAttachmentAriaLabel": "Remove {fileName}",
+    "agent.dock.copyChat": "Copy chat",
+    "agent.dock.copiedChat": "Copied",
 
     // ── Rename-suggestions banner (SuggestionBanner) — unrelated feature
     //    (Bible-book / episode file naming), keyed here because this agent
@@ -50,13 +52,19 @@ export const agent = defineNamespace({
       "The agent works inside this project — it can search, draft, and check. Every change arrives as a proposal {you} review and apply.",
     "agent.emptyState.introYou": "you",
     "agent.emptyState.tryAsking": "Try asking",
+    "agent.emptyState.promptHint":
+      "Tapping an example fills the message box — nothing is sent until you press Enter.",
+    "agent.emptyState.meetTeam": "Meet the team",
     "agent.emptyState.shortcuts": "Shortcuts",
     "agent.emptyState.dismiss": "Don't show this again",
 
     // ── Run timeline (AgentRunView) ─────────────────────────────────────
+    "agent.run.suggestionsAriaLabel": "Suggested next steps",
     "agent.run.stepRunning": "Step running",
     "agent.run.stepSucceeded": "Step succeeded",
     "agent.run.stepFailed": "Step failed",
+    "agent.run.chooseFile": "Choose a file:",
+    "agent.run.useFileMessage": "Use \"{name}\"",
     "agent.run.capped": "Run hit its step/token cap — results may be partial.",
     "agent.run.tokenUsage": "{promptTokens} prompt + {completionTokens} completion tokens",
 
@@ -69,6 +77,274 @@ export const agent = defineNamespace({
     "agent.run.tool.examples": "examples",
     "agent.run.tool.search": "search",
     "agent.run.tool.draft": "draft",
+
+    // ── Run timeline plain-language activity lines (AgentRunView) ────────
+    //    One sentence per tool kind, written for a translator, not an
+    //    engineer. Raw command text (SQL in particular) must never appear in
+    //    the collapsed line — it stays behind the expand.
+    "agent.run.friendly.sql": "Checked the project records",
+    "agent.run.friendly.emit": "Staged drafts for review",
+    "agent.run.friendly.docs": "Consulted the project documents",
+    "agent.run.friendly.aquifer": "Looked up Bible resources",
+    "agent.run.friendly.read": "Read the passage",
+    "agent.run.friendly.examples": "Gathered translation examples",
+    "agent.run.friendly.search": "Searched the project",
+    "agent.run.friendly.draft": "Drafted a translation",
+
+    // ── Agent team personas (personas.ts — social-workspace design) ──────
+    "agent.persona.drafter.name": "Drafter",
+    "agent.persona.drafter.tagline": "Reads each passage in context and writes the first draft.",
+    "agent.persona.reviewer.name": "Reviewer",
+    "agent.persona.reviewer.tagline": "Checks every draft for meaning, restraint, and naturalness.",
+    "agent.persona.coordinator.name": "Coordinator",
+    "agent.persona.coordinator.tagline": "Plans the work and brings finished drafts to you for review.",
+
+    // ── Agent cards (AgentCard — what each teammate can do / reads / writes) ──
+    // The transparency layer: clicking a persona avatar opens this card, so the
+    // machinery behind a teammate is one click away instead of hidden. The
+    // writes lines carry the approval gate — keep "staged"/"proposal" for the
+    // pending state and never let a locale imply the change is already live.
+    "agent.card.triggerAriaLabel": "About {name}",
+    "agent.card.toolsTitle": "What it can do",
+    "agent.card.readsTitle": "What it reads",
+    "agent.card.writesTitle": "What it can change",
+
+    "agent.card.tool.read.label": "Read the passage",
+    "agent.card.tool.read.description":
+      "Pulls the source and the current translation for a range, aligned line by line.",
+    "agent.card.tool.examples.label": "Gather examples",
+    "agent.card.tool.examples.description":
+      "Collects already-validated translations from this project to work from.",
+    "agent.card.tool.search.label": "Search the project",
+    "agent.card.tool.search.description":
+      "Looks across source text, translations, comments, and terms.",
+    "agent.card.tool.draft.label": "Draft a translation",
+    "agent.card.tool.draft.description":
+      "Runs the drafting pipeline and stages what it writes for your review.",
+    "agent.card.tool.docs.label": "Consult the project documents",
+    "agent.card.tool.docs.description":
+      "Reads the project's own reference documents and translation guidance.",
+    "agent.card.tool.aquifer.label": "Look up Bible resources",
+    "agent.card.tool.aquifer.description":
+      "Fetches outside reference material such as notes and dictionaries.",
+    "agent.card.tool.sql.label": "Check the project records",
+    "agent.card.tool.sql.description":
+      "Read-only lookups over project data — this route cannot write anything.",
+    "agent.card.tool.emit.label": "Stage changes for review",
+    "agent.card.tool.emit.description":
+      "Prepares edits as a proposal; staging is not the same as applying.",
+    "agent.card.tool.verifyForce.label": "Force check",
+    "agent.card.tool.verifyForce.description":
+      "Asks whether the draft carries the same weight and intent as the source.",
+    "agent.card.tool.verifyAmbiguity.label": "Ambiguity check",
+    "agent.card.tool.verifyAmbiguity.description":
+      "Asks whether the draft settles a question the source leaves open.",
+    "agent.card.tool.verifyNaturalness.label": "Naturalness check",
+    "agent.card.tool.verifyNaturalness.description":
+      "Asks whether the draft reads like the target language rather than a translation.",
+    "agent.card.tool.lintRules.label": "Project rules check",
+    "agent.card.tool.lintRules.description":
+      "Runs this project's own rules over every draft before it is staged.",
+
+    "agent.card.read.brief.label": "Translation brief",
+    "agent.card.read.brief.description": "The project's purpose, audience, and standards.",
+    "agent.card.read.styleGuide.label": "Style guide",
+    "agent.card.read.styleGuide.description":
+      "The standing instructions for how this project should read.",
+    "agent.card.read.termbase.label": "Terminology",
+    "agent.card.read.termbase.description": "The agreed renderings for this project's key terms.",
+    "agent.card.read.livingMemory.label": "Living memory",
+    "agent.card.read.livingMemory.description":
+      "Notes and decisions the team has built up on this project.",
+    "agent.card.read.rules.label": "Project rules",
+    "agent.card.read.rules.description": "The quality rules every draft is checked against.",
+
+    "agent.card.writes.drafter":
+      "Its drafts are staged as proposals — nothing reaches the translation until you approve it.",
+    "agent.card.writes.reviewer":
+      "It records check results on staged drafts and approves nothing itself — the decision stays yours.",
+    "agent.card.writes.coordinator":
+      "Everything it stages waits as a proposal for you to approve or reject; it applies nothing on its own.",
+
+    // ── Team threads view (TeamThreadsView) ──────────────────────────────
+    "agent.team.tab": "Team",
+    "agent.team.rosterTitle": "Your translation team",
+    "agent.team.needsYou": "Needs your expertise",
+    "agent.team.loading": "Loading the team's activity…",
+    "agent.team.loadFailed": "Couldn't load the team's activity.",
+    "agent.team.retry": "Retry",
+    "agent.team.emptyTitle": "The team posts its work here",
+    "agent.team.emptyBody":
+      "When Autopilot runs, each file becomes a thread where the team narrates its work — what it read, what it drafted, and what is waiting for you.",
+    "agent.team.emptyHint": "Start Autopilot from its pill in the editor to see the team at work.",
+    "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
+    "agent.team.showActivityUpdates": plural({
+      one: "Show {count} activity update",
+      other: "Show {count} activity updates",
+    }),
+    "agent.team.hideActivityUpdates": plural({
+      one: "Hide {count} activity update",
+      other: "Hide {count} activity updates",
+    }),
+    "agent.team.reviewDrafts": "Review drafts",
+    "agent.team.unnamedThread": "Autopilot run",
+    // v2.1 typical-chat layout: conversations list + active conversation.
+    "agent.team.teamChat": "Team chat",
+    "agent.team.teamChatPreviewEmpty": "Message the team to get started.",
+    "agent.team.viewUpdates": "View updates",
+    "agent.team.answerQuestion": "Answer",
+    "agent.team.draftsReady": plural({
+      one: "{count} draft ready for your review",
+      other: "{count} drafts ready for your review",
+    }),
+    "agent.team.questionsWaiting": plural({
+      one: "{count} question needs your expertise",
+      other: "{count} questions need your expertise",
+    }),
+    "agent.team.viewQuestions": "View questions",
+    // v2.2 three-column layout: dock threads list + step inspector + re-open.
+    // (The v2.1 focus toggle went away — collapsing the dock plays that role.)
+    "agent.team.newConversation": "New conversation",
+    "agent.team.composer.reopenPlaceholder":
+      "Message to start new work on this file — your note guides the fresh run.",
+    "agent.team.inspector.title": "Step detail",
+    "agent.team.inspector.close": "Close step detail",
+    "agent.team.inspector.note": "Situation note",
+    "agent.team.inspector.reasons": "Why",
+    "agent.team.inspector.details": "Details",
+    "agent.team.inspector.noDetails": "This step recorded no further detail.",
+    "agent.team.inspector.outputs": "What this step produced",
+    "agent.team.inspector.construal": "Scene reading",
+    "agent.team.inspector.modelCalls": "Model calls",
+    "agent.team.inspector.tracesLoading": "Loading model calls…",
+    "agent.team.inspector.tracesError": "Couldn't load model calls.",
+    "agent.team.inspector.tracesEmpty":
+      "No model calls recorded for this step. Calls are kept for 30 days, and runs from before tracing started have none.",
+    "agent.team.inspector.tracesTruncated": "Showing the first 50 calls.",
+    "agent.team.inspector.traceClipped": "Long text was clipped to 32k characters.",
+    "agent.team.step.viewDetails": "View details",
+    "agent.team.step.hideDetails": "Hide details",
+    "agent.team.step.viewDetailsAriaLabel": "View details: {step}",
+    "agent.team.step.hideDetailsAriaLabel": "Hide details: {step}",
+    "agent.team.spanFallback": "this passage",
+    "agent.team.msg.started": "Starting on {span}.",
+    "agent.team.msg.reading": "Reading the situation around {span}.",
+    "agent.team.msg.drafting": "Drafting {span}.",
+    "agent.team.msg.checking": "Checking the drafts for {span}.",
+    "agent.team.msg.sceneReady": plural({
+      one: "Wrote a situation note for {span} and kept {count} question open.",
+      other: "Wrote a situation note for {span} and kept {count} questions open.",
+    }),
+    "agent.team.msg.sceneReadyUncounted": "Wrote a situation note for {span}.",
+    "agent.team.msg.draftsStaged": plural({
+      one: "Put {count} draft out for your review.",
+      other: "Put {count} drafts out for your review.",
+    }),
+    "agent.team.msg.draftsStagedUncounted": "Put drafts out for your review.",
+    "agent.team.msg.outcomeDone": "Finished {span}.",
+    "agent.team.msg.outcomePartial": "Finished {span} — some cells still have no draft.",
+    "agent.team.msg.outcomeFailed": "Hit a problem in {span} — this needs attention.",
+
+    // ── One project channel (TeamChannel / spine / thread composer) ───────
+    "agent.team.msg.dispatch": "Started work on {file}.",
+    "agent.team.openThreadAriaLabel": "Open the thread for {title}",
+    "agent.team.openQuestionAriaLabel": "Open this question",
+    "agent.team.composer.channelPlaceholder": "Message the team…",
+    "agent.team.composer.threadPlaceholder": "Message {persona}…",
+    "agent.team.composer.finishedPlaceholder":
+      "This work has finished — there is no one left in this thread to direct.",
+    "agent.team.composer.scope": "{persona} · {scope}",
+    "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+    "agent.team.inspector.resize": "Resize step detail",
+
+    // ── Shared chat management (AgentChatOptions) ───────────────────────
+    "agent.chatOptions.label": "Chat options",
+    "agent.chatOptions.newChat": "New chat",
+    "agent.chatOptions.newChatDescription":
+      "Starts a fresh conversation. This one is saved — reopen it under Previous chats. A reopened chat shows the messages, not the proposal cards from the run that produced them.",
+    "agent.chatOptions.previousHeading": "Previous chats",
+    "agent.chatOptions.previousLoading": "Loading your chats…",
+    "agent.chatOptions.previousFailed": "Couldn't load your chats.",
+    "agent.chatOptions.previousEmpty": "No previous chats",
+    "agent.chatOptions.untitledChat": "Untitled chat",
+    "agent.chatOptions.openChat": "{title} — open now",
+
+    // ── Floating AI mini-chat (AgentMiniChat, AQU-1651) ─────────────────
+    // The frame around the SAME conversation the dock and the workbench show.
+    // "Close" dismisses the window only — never say or imply it ends, clears
+    // or deletes the thread, which stays on the server under Previous chats.
+    "agent.miniChat.title": "Ask AI",
+    "agent.miniChat.windowLabel": "AI mini-chat",
+    "agent.miniChat.expand": "Open in full AI chat",
+    "agent.miniChat.minimize": "Minimize chat",
+    "agent.miniChat.restore": "Reopen AI chat",
+    "agent.miniChat.close": "Close chat window",
+
+    // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
+    // The agent's autonomy is a dial, not an on/off: two independent loops
+    // (initiative, react) plus a scope bound. Wording discipline for this
+    // block — never imply the team applies anything by itself. Autonomy here
+    // decides what the team STARTS working on; everything it produces is
+    // still a staged proposal behind the same human approve/reject gate.
+    "agent.mode.title": "Agent mode",
+    "agent.mode.openLabel": "Agent mode: {mode}",
+    "agent.mode.loading": "Loading agent mode…",
+    "agent.mode.unavailable": "Agent mode is unavailable right now.",
+    "agent.mode.saveFailed": "Couldn't save that. Your change was undone.",
+    "agent.mode.forbidden": "Only a project lead can change the agent mode.",
+    "agent.mode.presetsTitle": "Presets",
+    "agent.mode.preset.fullAutopilot": "Autopilot",
+    "agent.mode.preset.fullAutopilotDescription":
+      "Takes on new passages by itself and responds when you edit.",
+    "agent.mode.preset.reactOnly": "Reacting",
+    "agent.mode.preset.reactOnlyDescription":
+      "Waits for your edits, then follows up on what they imply elsewhere.",
+    "agent.mode.preset.qaOnly": "QA only",
+    "agent.mode.preset.qaOnlyDescription":
+      "Responds to your edits by checking the work — it won't redraft.",
+    "agent.mode.preset.draftOnly": "Draft only",
+    "agent.mode.preset.draftOnlyDescription":
+      "Keeps drafting ahead on its own and stays out of your edits.",
+    "agent.mode.preset.off": "Manual",
+    "agent.mode.preset.offDescription":
+      "Nothing starts unless you start it. This is the default.",
+    "agent.mode.preset.custom": "Custom",
+    "agent.mode.preset.customDescription":
+      "A combination of your own — see the switches below for what is on.",
+    "agent.mode.initiative": "Initiative loop",
+    "agent.mode.initiativeDescription": "The team may pick up new passages on its own.",
+    "agent.mode.react": "React loop",
+    "agent.mode.reactDescription":
+      "The team watches the edits you commit and follows up on them.",
+    "agent.mode.scopeTitle": "What it may work on",
+    "agent.mode.scope.full": "Everything",
+    "agent.mode.scope.qa": "Checks only",
+    "agent.mode.scope.draft": "Drafts only",
+    "agent.mode.graphTitle": "What runs",
+    "agent.mode.checkNow": "Check for updates now",
+    "agent.mode.checking": "Checking…",
+    "agent.mode.checkUnavailable":
+      "This project's server can't check for updates yet.",
+    "agent.mode.checkFailed": "Couldn't check for updates. Try again.",
+    "agent.mode.checkStarted": plural({
+      one: "Started {count} follow-up.",
+      other: "Started {count} follow-ups.",
+    }),
+    "agent.mode.checkNothing": "Nothing new to follow up on.",
+    "agent.mode.flagLabel": "Agent modes",
+    "agent.mode.flagDescription":
+      "Show the agent-mode dial in the team view, along with the next-passage button and manual update checks. The mode itself stays off until someone turns it on.",
+    // Reaction conversations: a run the team started off the back of human
+    // edits, rather than one a person asked for.
+    "agent.team.reactionPreview": "Reacted to your changes — {preview}",
+    "agent.team.reactionLabel": "Started in response to your changes",
+    // "Next passage": one span, then a park, so the human reviews before more
+    // work is spent.
+    "agent.team.nextPassage": "Next passage",
+    "agent.team.nextPassageStarting": "Starting…",
+    "agent.team.nextPassageFailed": "Couldn't start the next passage.",
+    // The editor pill's way into this run's conversation.
+    "agent.team.openThread": "Open thread",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -88,6 +364,7 @@ export const agent = defineNamespace({
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
     "agent.budget.weeklyExhausted": "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. Usage resets weekly; see Billing & usage.",
+    "agent.budget.pctUsed": "{pct}% of the run budget used",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the
     //    full-page /approve/:changesetId gate in ApproveChangeset) ──────
@@ -108,7 +385,7 @@ export const agent = defineNamespace({
     "agent.changeset.loading": "Loading changeset…",
     "agent.changeset.backTo": "Back to {projectName}",
     "agent.changeset.notStagedNotice":
-      "This changeset is currently {status} and can no longer be approved.",
+      "This changeset is {status} and can no longer be approved.",
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",
@@ -289,6 +566,8 @@ export const agent = defineNamespace({
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
     "agent.validation.roleCannotValidate": "Your role can't validate in this project",
+    "agent.validation.selfValidationBlocked":
+      "Not applicable — this project doesn't allow validating your own edit",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -310,7 +589,8 @@ export const agent = defineNamespace({
     "agent.brief.prefillFromText": "Pre-fill from text",
     "agent.brief.summaryOutOfDate": "Summary out of date",
     "agent.brief.capturePurpose":
-      "Capture this project's purpose, audience, and standards so the AI drafts to your brief.",
+      "Capture this project's purpose, audience, and standards so the AI drafts to " +
+      "your brief — or skip it and start translating without one.",
     "agent.brief.createBrief": "Create brief",
     "agent.brief.noSummaryYet": "No summary generated yet.",
     "agent.brief.editBrief": "Edit brief",
@@ -353,6 +633,46 @@ export const agent = defineNamespace({
     "agent.brief.field.qualityBar.label": "Quality bar",
     "agent.brief.field.qualityBar.helperText":
       "What 'good' and 'done' mean for this project — the standard a draft must meet before it is acceptable.",
+    "agent.pr.tabs.filesChanged": "Files changed",
+    "agent.pr.tabs.checks": "Checks",
+    "agent.pr.stats.drafts": plural({
+      one: "{count} draft",
+      other: "{count} drafts",
+    }),
+    "agent.pr.stats.flagged": plural({
+      one: "{count} with findings",
+      other: "{count} with findings",
+    }),
+    "agent.pr.stats.needsYou": plural({
+      one: "{count} needs you",
+      other: "{count} need you",
+    }),
+    "agent.pr.passageSummary": plural({
+      one: "{span} · {count} draft · no issues",
+      other: "{span} · {count} drafts · no issues",
+    }),
+    "agent.pr.review": plural({
+      one: "Reviewed {span}: {count} finding",
+      other: "Reviewed {span}: {count} findings",
+    }),
+    "agent.pr.reviewNeedsYou": plural({
+      one: "{count} needs you",
+      other: "{count} need you",
+    }),
+    "agent.pr.viewChecks": "View checks",
+    "agent.pr.checks.needsYou": "Needs you",
+    "agent.pr.checks.advisory": "Advisory",
+    "agent.pr.checks.empty": "No findings. Every pending draft passed its checks cleanly.",
+    "agent.pr.checks.loading": "Loading checks…",
+    "agent.pr.checks.open": "Open {ref} in Files changed",
+    "agent.finding.dissent.force": "Meaning check disagreed",
+    "agent.finding.dissent.naturalness": "Naturalness check disagreed",
+    "agent.finding.dissent.other": "A check disagreed",
+    "agent.finding.lint": "Project rule: {rule}",
+    "agent.finding.unsupported": "Wording not found in the sources",
+    "agent.finding.redrafted": "Redrafted after review",
+    "agent.finding.needsYou": "Needs you",
+    "agent.finding.advisory": "Advisory",
   },
   context: {
     _context: {
@@ -397,6 +717,17 @@ export const agent = defineNamespace({
           "being removed.",
         placeholders: { fileName: "Display name of the attached file being removed." },
       },
+      "agent.dock.copyChat": {
+        description:
+          "Tooltip and accessible name for the small icon button at the top-right of the " +
+          "agent conversation that copies the whole conversation (the user's messages and " +
+          "the agent's replies) to the clipboard as plain text.",
+      },
+      "agent.dock.copiedChat": {
+        description:
+          "Brief confirmation shown in the same tooltip/accessible name for about a second " +
+          "after agent.dock.copyChat succeeds: the conversation is now on the clipboard.",
+      },
       "agent.rename.bannerSuffix": {
         description:
           "Trailing clause appended after a locally-built, already-pluralized count " +
@@ -433,6 +764,12 @@ export const agent = defineNamespace({
           "Button that permanently hides the first-run guide for this browser " +
           "(localStorage). Also the accessible name of that button.",
       },
+      "agent.run.suggestionsAriaLabel": {
+        description:
+          "Accessible name for the row of one-tap suggestion buttons under the " +
+          "agent's final reply — each button sends that suggested next step as " +
+          "the user's next message.",
+      },
       "agent.run.stepRunning": {
         description:
           "Accessible name for the spinner shown beside an in-progress tool-call chip " +
@@ -446,6 +783,21 @@ export const agent = defineNamespace({
       "agent.run.stepFailed": {
         description:
           "Accessible name for the X icon beside a tool-call chip that errored.",
+      },
+      "agent.run.chooseFile": {
+        description:
+          "Short label above a row of buttons, one per project file, shown when the " +
+          "agent asks which file to work in. Ends with a colon because the buttons " +
+          "follow it.",
+      },
+      "agent.run.useFileMessage": {
+        description:
+          "The message sent to the agent when the user clicks one of the file buttons. " +
+          "It appears as the user's chat bubble and is what the agent reads. Keep the " +
+          "straight double quotes around the file name.",
+        placeholders: {
+          name: "The exact file name the user clicked; never translate or alter it.",
+        },
       },
       "agent.run.tokenUsage": {
         description:
@@ -497,6 +849,15 @@ export const agent = defineNamespace({
         placeholders: {
           capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
+        },
+      },
+      "agent.budget.pctUsed": {
+        description:
+          "Compact meter line under an agent run stating how much of the run's " +
+          "credit budget has been spent, as a percentage only (no raw credit " +
+          "amounts — review decision 2026-08-31).",
+        placeholders: {
+          pct: "Whole-number percent spent, pre-formatted; may be the literal '<1' when spend is under one percent.",
         },
       },
       "agent.changeset.moreChanges": {
@@ -799,10 +1160,341 @@ export const agent = defineNamespace({
           ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
         },
       },
+      "agent.team.draftsReady": {
+        description:
+          "Pending-review count in a task conversation header and its sidebar " +
+          "preview. Counts only proposals still awaiting review, not historical staging events.",
+        placeholders: { count: "How many staged drafts await review." },
+      },
+      "agent.team.questionsWaiting": {
+        description: "Project-wide attention prompt in Team chat and the questions conversation.",
+        placeholders: { count: "Full number of open questions, including any beyond the visible page cap." },
+      },
+      "agent.team.viewQuestions": {
+        description: "Open the existing questions conversation; answers remain in the individual question cards.",
+      },
+      "agent.team.showActivityUpdates": {
+        description: "Expand adjacent routine reading, drafting, or checking updates in a task conversation.",
+        placeholders: { count: "Number of activity messages in this group, not passages or pending drafts." },
+      },
+      "agent.team.hideActivityUpdates": {
+        description: "Collapse routine activity updates again; notes, review links, and outcomes remain visible.",
+        placeholders: { count: "Number of activity messages in this group." },
+      },
+      "agent.team.msg.started": {
+        description:
+          "Team-thread message from the Coordinator persona when Autopilot picks " +
+          "up a new piece of text.",
+        placeholders: {
+          span: "Human passage label (e.g. 'MRK 4:1–4:8'), or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.reading": {
+        description: "Team-thread message from the Drafter persona during the reading phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.drafting": {
+        description: "Team-thread message from the Drafter persona during the drafting phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.checking": {
+        description: "Team-thread message from the Reviewer persona during the checking phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.sceneReady": {
+        description:
+          "Team-thread message when a situation note (scene brief) is saved, with " +
+          "how many open questions it deliberately kept open.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+          count: "Number of open questions recorded in the note's ambiguity register.",
+        },
+      },
+      "agent.team.msg.sceneReadyUncounted": {
+        description:
+          "sceneReady variant when the event carried no open-question count.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.draftsStaged": {
+        description:
+          "Team-thread message from the Coordinator when drafts land for human review.",
+        placeholders: { count: "How many drafts were staged." },
+      },
+      "agent.team.msg.outcomeDone": {
+        description: "Team-thread message when a passage finishes cleanly.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.outcomePartial": {
+        description:
+          "Team-thread message when a passage finishes but some cells were skipped.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.outcomeFailed": {
+        description: "Team-thread message when a passage fails and needs a human.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.card.triggerAriaLabel": {
+        description:
+          "Accessible name for the button wrapping a teammate's avatar in the " +
+          "agent team roster. Clicking it opens that teammate's card — the tools " +
+          "it may use, the project state it reads, and the note that its writes " +
+          "are staged for human approval. Phrase it as 'about this person', the " +
+          "way a profile link reads.",
+        placeholders: {
+          name: "The persona's display name — the already-translated Drafter / Reviewer / Coordinator string.",
+        },
+      },
+      "agent.team.msg.dispatch": {
+        description:
+          "Top-level channel message from the Coordinator announcing that a file " +
+          "has been handed to the team; clicking it opens that run's thread.",
+        placeholders: {
+          file: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — a document name, not translated.",
+        },
+      },
+      "agent.team.openThreadAriaLabel": {
+        description:
+          "Accessible name for a channel message that opens an autopilot run's " +
+          "thread, naming which piece of work it opens.",
+        placeholders: {
+          title: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — not translated.",
+        },
+      },
+      "agent.team.step.viewDetails": {
+        description: "Tooltip for the explicit per-message control that opens the step inspector.",
+      },
+      "agent.team.step.hideDetails": {
+        description: "Tooltip for the selected message's control that closes its step inspector.",
+      },
+      "agent.team.step.viewDetailsAriaLabel": {
+        description: "Accessible name identifying which message the details control opens.",
+        placeholders: { step: "The already-localized plain-language step sentence, not raw event data." },
+      },
+      "agent.team.step.hideDetailsAriaLabel": {
+        description: "Accessible name for closing details from the selected message's control.",
+        placeholders: { step: "The already-localized plain-language step sentence." },
+      },
+      "agent.chatOptions.label": {
+        description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
+      },
+      "agent.chatOptions.newChat": {
+        description: "Menu action that starts a fresh conversation. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
+      },
+      "agent.chatOptions.newChatDescription": {
+        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Do not soften the second half — it is the one thing that does not come back.",
+      },
+      "agent.chatOptions.previousHeading": {
+        description: "Inert heading above the list of the signed-in user's own past chats on this project.",
+      },
+      "agent.chatOptions.previousLoading": {
+        description: "Placeholder row while the user's chat list is being fetched.",
+      },
+      "agent.chatOptions.previousFailed": {
+        description: "Placeholder row when the chat list could not be fetched. States the failure rather than implying the user has no chats.",
+      },
+      "agent.chatOptions.previousEmpty": {
+        description: "Placeholder row when this user has no earlier chats on the project.",
+      },
+      "agent.chatOptions.untitledChat": {
+        description: "Name for a saved chat with no first user message to take a title from.",
+      },
+      "agent.chatOptions.openChat": {
+        description: "Label for the chat already on screen, listed so the user can see where they are but not re-openable onto itself.",
+        placeholders: { title: "The chat's own title, or the localized Untitled chat placeholder." },
+      },
+      "agent.miniChat.title": {
+        description:
+          "Fallback heading in the floating mini-chat's title bar, used until " +
+          "the thread has a title of its own. Matches the editor's 'Ask AI' " +
+          "selection action, which is what opens the window.",
+        maxLength: 20,
+      },
+      "agent.miniChat.windowLabel": {
+        description:
+          "Accessible name of the floating chat window itself (a non-modal " +
+          "dialog over the translation view).",
+      },
+      "agent.miniChat.expand": {
+        description:
+          "Tooltip/accessible name for the button that moves the CURRENT " +
+          "thread into the full AI chat surface for longer work. Nothing is " +
+          "lost or started over.",
+      },
+      "agent.miniChat.minimize": {
+        description:
+          "Tooltip/accessible name for the button that collapses the floating " +
+          "chat window to a small bar.",
+      },
+      "agent.miniChat.restore": {
+        description:
+          "Accessible name for the collapsed bar, which reopens the chat " +
+          "window when clicked.",
+      },
+      "agent.miniChat.close": {
+        description:
+          "Tooltip/accessible name for the button that dismisses the floating " +
+          "chat window. It closes the WINDOW only — the conversation is kept " +
+          "and can be reopened under Previous chats. Do not translate it as " +
+          "ending, clearing or deleting the chat.",
+      },
+      "agent.team.openQuestionAriaLabel": {
+        description:
+          "Accessible name for a channel message that opens the thread where the " +
+          "team's open question is answered.",
+      },
+      "agent.team.composer.threadPlaceholder": {
+        description:
+          "Message-box placeholder while a run thread is open — the message goes " +
+          "to that teammate as a direction, not to the general chat.",
+        placeholders: {
+          persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
+        },
+      },
+      "agent.team.composer.scope": {
+        description:
+          "Chip above the message box naming exactly who and what the message will " +
+          "reach, so a thread message is never mistaken for a channel message.",
+        placeholders: {
+          persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
+          scope: "The passage label or file name the run is working — not translated.",
+        },
+      },
       "agent.validation.roleCannotValidate": {
         description:
           "Tooltip on a disabled per-row Validate button in the validation queue " +
           "when the signed-in user's project role is below the validation floor.",
+      },
+      "agent.validation.selfValidationBlocked": {
+        description:
+          "Shown in place of the per-row Validate button when the project has " +
+          "\"Allow self-validation\" off and the signed-in user is the line's last " +
+          "editor, so the server would refuse the validation. States that the " +
+          "prepared validation does not apply to this reader and why, rather than " +
+          "offering a button that fails.",
+      },
+      "agent.team.inspector.resize": {
+        description:
+          "Accessible name of the drag handle on the inner edge of the step-detail " +
+          "column, which widens or narrows that column. Focusable: the arrow keys " +
+          "move it too. A verb phrase naming what is resized.",
+      },
+      // ── NEW: v3 agent modes ────────────────────────────────────────────
+      "agent.mode.openLabel": {
+        description:
+          "Accessible name for the compact button in the agent team's header " +
+          "that opens the autonomy dial. It repeats the mode name shown on the " +
+          "button so the spoken name contains the visible one — keep the mode " +
+          "placeholder in the string for that reason.",
+        placeholders: {
+          mode: "The current mode's already-translated preset name (Autopilot / Reacting / QA only / Draft only / Manual / Custom).",
+        },
+      },
+      "agent.mode.checkStarted": {
+        description:
+          "Result line under the 'Check for updates now' button in the agent-mode " +
+          "popover, reporting how many follow-up runs the manual check just " +
+          "started off the back of recent human edits. Zero is never phrased with " +
+          "this key — 'agent.mode.checkNothing' covers that case.",
+        placeholders: { count: "How many follow-up runs the check started." },
+      },
+      "agent.team.reactionPreview": {
+        description:
+          "One-line preview of a conversation the team STARTED ITSELF after seeing " +
+          "human edits land, rather than one a person asked for. The marker before " +
+          "the dash is the part that must stay recognisable at a glance — it is how " +
+          "a translator tells an uninvited follow-up from work they requested.",
+        placeholders: {
+          preview:
+            "The conversation's ordinary preview line (a status and passage, or a drafts-ready count) — already translated, inserted verbatim.",
+        },
+      },
+      "agent.pr.tabs.filesChanged": {
+        description: "Tab on an agent run (shown like a pull request) listing the run's pending drafts as changes to review.",
+      },
+      "agent.pr.tabs.checks": {
+        description: "Tab on an agent run (shown like a pull request) listing the verifier findings on its pending drafts.",
+      },
+      "agent.pr.stats.drafts": {
+        description: "Header stat on an agent run: pending drafts awaiting review.",
+        placeholders: {count: "Pending drafts in this run." },
+      },
+      "agent.pr.stats.flagged": {
+        description: "Header stat on an agent run: pending drafts that carry at least one verifier finding.",
+        placeholders: {count: "Drafts with findings." },
+      },
+      "agent.pr.stats.needsYou": {
+        description: "Header stat on an agent run: drafts whose findings were triaged as needing a human reviewer.",
+        placeholders: {count: "Drafts that need a person to look before approving." },
+      },
+      "agent.pr.passageSummary": {
+        description: "One-line summary of a finished passage with nothing to review, shown collapsed in an agent run's timeline. Expands to the passage's activity.",
+        placeholders: {span: "Passage label such as 'MRK 1:1–1:8' — not translated.", count: "Drafts staged in the passage." },
+      },
+      "agent.pr.review": {
+        description: "Reviewer persona's per-passage review entry in an agent run's timeline, like a pull-request review.",
+        placeholders: {span: "Passage label — not translated.", count: "Pending drafts in the passage with verifier findings." },
+      },
+      "agent.pr.reviewNeedsYou": {
+        description: "Suffix on the Reviewer's per-passage review entry: how many of those drafts need a person.",
+        placeholders: {count: "Drafts triaged as needing a human." },
+      },
+      "agent.pr.viewChecks": {
+        description: "Link from a Reviewer review entry to the run's Checks tab.",
+      },
+      "agent.pr.checks.needsYou": {
+        description: "Section heading in the Checks tab: findings a person should look at before approving.",
+      },
+      "agent.pr.checks.advisory": {
+        description: "Section heading in the Checks tab: minor findings that do not require a close look.",
+      },
+      "agent.pr.checks.empty": {
+        description: "Empty state of the Checks tab.",
+      },
+      "agent.pr.checks.loading": {
+        description: "Loading state of the Checks tab.",
+      },
+      "agent.pr.checks.open": {
+        description: "Accessible name of a Checks row link that opens that cell's draft in the Files changed tab.",
+        placeholders: {ref: "Cell reference such as 'MRK 1:3' — not translated." },
+      },
+      "agent.finding.dissent.force": {
+        description: "Verifier finding on a draft: the meaning/force verifier voted against this cell, but the other checks accepted it.",
+      },
+      "agent.finding.dissent.naturalness": {
+        description: "Verifier finding on a draft: the naturalness verifier voted against this cell, but the other checks accepted it.",
+      },
+      "agent.finding.dissent.other": {
+        description: "Verifier finding on a draft from a verifier with no dedicated label.",
+      },
+      "agent.finding.lint": {
+        description: "Verifier finding on a draft: it may break a project rule.",
+        placeholders: {rule: "The rule's id — not translated." },
+      },
+      "agent.finding.unsupported": {
+        description: "Verifier finding on a draft: some wording is not supported by the source or the validated examples.",
+      },
+      "agent.finding.redrafted": {
+        description: "Verifier finding on a draft: the first attempt was rejected and this is the redraft.",
+      },
+      "agent.finding.needsYou": {
+        description: "Badge on a draft whose findings were triaged as needing a person before approval.",
+      },
+      "agent.finding.advisory": {
+        description: "Badge on a draft whose findings are minor.",
       },
     },
   },

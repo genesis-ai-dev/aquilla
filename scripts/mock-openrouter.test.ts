@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { scriptMockResponse } from "./mock-openrouter"
+import { mockTranscription, scriptMockResponse } from "./mock-openrouter"
 import { expandSlashCommand } from "../src/lib/agent/slash-commands"
 
 type MockResponse = ReturnType<typeof scriptMockResponse>
@@ -9,6 +9,14 @@ function message(response: MockResponse) {
 }
 
 describe("scripted local agent", () => {
+  it("returns provider-shaped transcription with word timestamps", () => {
+    expect(mockTranscription()).toEqual({
+      text: "Mock transcription", usage: { cost: 0.0001, seconds: 1 }, words: [
+        { word: "Mock", start: 0, end: 0.25 },
+        { word: "transcription", start: 0.25, end: 0.5 },
+      ],
+    })
+  })
   it("returns a declarative JSON recipe for the owned importer contract", () => {
     const reply = message(scriptMockResponse([
       {
@@ -109,5 +117,27 @@ describe("scripted local agent", () => {
       { i: 2, t: "[bozza] Second source" },
     ])
     expect(generation.tool_calls).toBeUndefined()
+  })
+
+  // Regression (2026-08-28 live review): a run's seeded activity showed five
+  // identical ids. The completion id was `mock-${Date.now()}-${callSeq}`, and
+  // only tool calls advanced callSeq — so the contextual nodes, which emit no
+  // tool calls, minted one id for every response inside the same millisecond.
+  it("mints a distinct id per completion, even for back-to-back tool-call-free replies", () => {
+    const contextualNode = (marker: string) => [
+      { role: "system", content: `[[ctx:${marker}]] contextual node` },
+      { role: "user", content: "Summarize this span for the reader." },
+    ]
+
+    const ids = [
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+    ]
+
+    // The bodies are deliberately identical — only the ids must differ.
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

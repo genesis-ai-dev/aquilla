@@ -16,6 +16,8 @@
 // so a new event type or a new capture site inherits the protection without
 // having to remember it.
 
+import { shouldDropCaptureEvent } from "@/lib/analytics-noise"
+
 /** What a redacted value is replaced with — recognizable in PostHog. */
 export const REDACTED = "[redacted]"
 
@@ -177,10 +179,15 @@ export interface RedactableCaptureEvent {
  * `$pageview`, `$exception`, `$snapshot` (session replay) and the `$set_once`
  * person properties PostHog uses to persist `$initial_current_url`.
  *
- * Never drops events — it only rewrites values — so analytics keep working.
+ * Redaction itself only ever rewrites values, so analytics keep working. The
+ * one case that returns `null` is AQU-1572's `$exception` noise filter, which
+ * runs first: PostHog allows a single `before_send`, and the OPS-29 drift
+ * guard asserts that it is this function at every init site, so the filter
+ * composes here rather than wrapping the hook.
  */
 export function redactCaptureEvent<T extends RedactableCaptureEvent>(event: T | null): T | null {
   if (!event) return event
+  if (shouldDropCaptureEvent(event)) return null
   const next: T = { ...event }
   if (next.properties) next.properties = redactAnalyticsProperties(next.properties)
   if (next.$set) next.$set = redactAnalyticsProperties(next.$set)

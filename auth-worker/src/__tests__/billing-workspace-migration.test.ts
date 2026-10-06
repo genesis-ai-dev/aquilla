@@ -98,3 +98,27 @@ it('preserves immutable plan-change review facts across migration replay', async
     await expect(db.exec("UPDATE workspace_plan_change_reviews SET direction = 'immediate_downgrade'")).rejects.toThrow()
   } finally { await db.close() }
 })
+
+it('preserves sandbox history while allowing explicit live attempts and replayable weekly grants', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec(`CREATE TABLE workspace_checkout_attempts
+      (id text PRIMARY KEY, sandbox boolean NOT NULL DEFAULT true CHECK (sandbox = true));
+      INSERT INTO workspace_checkout_attempts (id) VALUES ('sandbox');
+      CREATE TABLE org_billing (org_id bigint PRIMARY KEY, plan text, consumed bigint);
+      INSERT INTO org_billing VALUES (1, 'enterprise', 123);`)
+    const weekly = readFileSync(new URL('../../../db/postgres/migrations/0148_weekly_allowance_overrides.sql', import.meta.url), 'utf8')
+    const live = readFileSync(new URL('../../../db/postgres/migrations/0149_live_workspace_checkout.sql', import.meta.url), 'utf8')
+    await db.exec(weekly)
+    await db.exec(live)
+    await db.exec("INSERT INTO workspace_checkout_attempts VALUES ('live', false)")
+    await db.exec('UPDATE org_billing SET weekly_allowance = 1000')
+    await db.exec(weekly)
+    await db.exec(live)
+    expect((await db.query('SELECT * FROM workspace_checkout_attempts ORDER BY id')).rows)
+      .toEqual([{ id: 'live', sandbox: false }, { id: 'sandbox', sandbox: true }])
+    expect((await db.query('SELECT * FROM org_billing')).rows)
+      .toEqual([{ org_id: 1, plan: 'enterprise', consumed: 123, weekly_allowance: 1000 }])
+    await expect(db.exec('UPDATE org_billing SET weekly_allowance = -1')).rejects.toThrow()
+  } finally { await db.close() }
+})

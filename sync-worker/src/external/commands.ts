@@ -9,6 +9,7 @@
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import type { AiDraftProvenance } from '../events/types'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -36,10 +37,6 @@ import {
   isCellFieldKind,
   validateCellFieldCommand,
   type CellFieldCommand,
-  type SetSourceCommand,
-  type SetTimingCommand,
-  type SetTrackOverrideCommand,
-  type SetTranscriptionCommand,
 } from './commands-cell-fields'
 import {
   MEMBERSHIP_FLOOR,
@@ -90,6 +87,12 @@ import {
   validateStructureCommand,
   type StructureCommand,
 } from './commands-structure'
+import {
+  isVisibilityCommandKind,
+  validateVisibilityCommand,
+  visibilityCommandFloor,
+  type VisibilityCommand,
+} from './commands-hide-cell'
 
 /** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
  *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
@@ -148,6 +151,12 @@ export type {
   StructureCommand,
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
+export type {
+  HideCellCommand,
+  ShowCellCommand,
+  VisibilityCommand,
+} from './commands-hide-cell'
+export { isVisibilityCommand, isVisibilityCommandKind } from './commands-hide-cell'
 export { cellKey, laneCellKey } from './cell-keys'
 export { isCellFieldCommand } from './commands-cell-fields'
 
@@ -181,6 +190,13 @@ export interface PlanImportCommand {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file text direction, stamped onto the created file row. OMIT
+   *  IT unless this one file really runs against the project — absent means the
+   *  project's `sourceTextDirection`/`targetTextDirection` setting decides (and
+   *  below that, the language), so a whole RTL project is one PatchSettings
+   *  rather than one override per import. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
   /** Optional uploaded artifact to preserve + link to the created file. */
   artifactId?: string
   /** Optional normalized profile/recipe selected by the unified importer. */
@@ -291,6 +307,7 @@ export type Command =
   | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
+  | VisibilityCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -457,6 +474,14 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'PlanImport.artifactId must be a non-empty string when present' })
         return
       }
+      let directionInvalid = false
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (c[key] !== undefined && normalizeTextDirection(c[key]) === null) {
+          issues.push({ index, message: `PlanImport.${key} must be "ltr" or "rtl" when present` })
+          directionInvalid = true
+        }
+      }
+      if (directionInvalid) return
       if (!Array.isArray(c.cells)) {
         issues.push({ index, message: 'PlanImport.cells must be an array' })
         return
@@ -625,6 +650,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         fileType: c.fileType,
         ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage as string } : {}),
         ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage as string } : {}),
+        ...(c.sourceTextDirection !== undefined ? { sourceTextDirection: c.sourceTextDirection as TextDirection } : {}),
+        ...(c.targetTextDirection !== undefined ? { targetTextDirection: c.targetTextDirection as TextDirection } : {}),
         ...(c.artifactId !== undefined ? { artifactId: c.artifactId as string } : {}),
         ...(manifest ? { manifest } : {}),
         cells,
@@ -831,6 +858,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-1426 HideCell / ShowCell — one validator for the pair.
+    if (isVisibilityCommandKind(c.kind)) {
+      const cmd = validateVisibilityCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -982,6 +1015,13 @@ export function requiredRoleForCommand(
   // a re-import-shaped act. See commands-structure.ts.
   if (c.kind === 'InsertCell' || c.kind === 'DeleteCell' || c.kind === 'SplitCell') {
     return structureCommandFloor()
+  }
+  // AQU-1426 HideCell / ShowCell: whatever floor `source.cell.visibility.set`
+  // carries at the /events perimeter (PROJECT_LEAD). Asked of role-policy, not
+  // restated, so this surface cannot drift below the perimeter that would refuse
+  // the compiled event anyway — see commands-hide-cell.ts.
+  if (isVisibilityCommandKind(c.kind)) {
+    return visibilityCommandFloor()
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

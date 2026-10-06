@@ -43,6 +43,9 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
+import { laneLanguage } from "./lane-language"
+import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
 import {
@@ -132,8 +135,8 @@ function effectiveSource(row: {
   medium: string | null
   transcription: string | null
 }): string {
-  if ((row.medium ?? "text") !== "media") return row.value
-  return row.transcription?.trim() ? row.transcription : ""
+  if ((row.medium ?? "text") !== "media") return stripTrailingBareMarkers(row.value)
+  return row.transcription?.trim() ? stripTrailingBareMarkers(row.transcription) : ""
 }
 
 /** Read a top-level settings key as a plain object, tolerating junk. */
@@ -272,9 +275,15 @@ export async function buildPromptPreview(
   const draftContext = objectSetting(settings, "draftContext")
 
   const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // Default lane inherits the project target language; a named lane IS its own
-  // target language (resolveActiveTargetLanguage, project-workspace-lane-target.ts).
-  const targetLanguage = targetLang || stringSetting(settings, "targetLanguage")
+  // The default lane inherits the project target language; any other lane has
+  // its own, and that language lives on the LANE ROW (AQU-1586) — mirroring
+  // resolveActiveTargetLanguage in project-workspace-lane-target.ts. `targetLang`
+  // is the lane's `legacy_tag`, an event key that `planNewTargetLane` sets to
+  // the opaque lane id whenever a sibling already holds the language string, so
+  // using it directly told the model to translate "into a3f09c1e".
+  const targetLanguage =
+    (targetLang ? await laneLanguage(db, projectId, targetLang) : null) ||
+    stringSetting(settings, "targetLanguage")
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
@@ -545,13 +554,21 @@ async function loadPrecedingContext(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "LEFT JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.sequence_index IS NOT NULL AND s.sequence_index < ? " +
         "  AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index DESC LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.sequenceIndex, args.count)
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.sequenceIndex,
+      args.count,
+    )
     .all<ContextRow>()
 
   return rows.results
@@ -586,7 +603,9 @@ async function loadValidatedFallback(
         "t.value AS target_value, t.validated AS target_validated " +
         "FROM cells s " +
         "JOIN cells t ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+        "  AND t.cell_id = s.cell_id AND t.side = 'target' AND " +
+        targetLaneDualReadSql("t") +
+        " " +
         "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
         "  AND s.cell_id != ? AND t.validated = 1 AND t.value != '' " +
         "ORDER BY s.sequence_index NULLS LAST, s.cell_id " +
@@ -595,7 +614,13 @@ async function loadValidatedFallback(
         // enough net for token overlap while staying a cheap query.
         "LIMIT ?",
     )
-    .bind(args.targetLang, args.projectId, args.fileId, args.cellId, Math.min(2000, args.limit * 20))
+    .bind(
+      ...targetLaneDualReadBinds(args.projectId, args.targetLang),
+      args.projectId,
+      args.fileId,
+      args.cellId,
+      Math.min(2000, args.limit * 20),
+    )
     .all<ContextRow>()
 
   const pairs = rows.results

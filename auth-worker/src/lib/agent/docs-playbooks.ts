@@ -29,7 +29,10 @@ and applies before the next step reads the state it produced.
    first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
    again); one op per key (a duplicate key is validation_failed); floor
    MAINTAINER (600) for these keys. Register lanes BEFORE any lane-scoped
-   SetTranslation — prepare rejects an unregistered laneId.
+   SetTranslation — prepare rejects an unregistered laneId. The primary
+   targetLanguage IS the default lane: omitting laneId and passing the primary
+   both write it. A regional lane beside it (fr-CA in a French project) is its
+   own lane and must be registered.
 
 3. Termbase seed. Same command, key 'terminology':
    propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
@@ -122,7 +125,7 @@ be applied and then has to be found and undone verse by verse. The whole point
 of the first cycle is to make that visible on ONE passage instead of a book.
 
 1. Pick ONE small passage the person names (a chapter, or ~10 cells).
-   read({ref:'MRK 4', filter:'untranslated'})
+   read({ref:'<BOOK> 4', filter:'untranslated'})   (<BOOK>: a code this project has)
 
 2. Measure readiness before drafting, and say the numbers out loud:
    - examples({text}) — how many validated pairs come back? Zero means the
@@ -131,7 +134,7 @@ of the first cycle is to make that visible on ONE passage instead of a book.
    - docs('terminology') — does the termbase have concepts?
    - is there a paired source file at all (docs('files-and-refs'))?
 
-3. Draft that passage only: draft({ref:'MRK 4', limit:10}). The draft tool
+3. Draft that passage only: draft({ref:'<BOOK> 4', limit:10}). The draft tool
    stages a proposal; it caps at 10 cells per call by design.
 
 4. Show the person the draft AND the gaps together. Name which gap shaped which

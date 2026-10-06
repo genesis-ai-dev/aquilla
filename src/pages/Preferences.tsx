@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Cpu, Gauge, KeyRound, PanelLeft, ServerCog, UserRound } from "lucide-react"
+import { Bell, Cpu, Gauge, KeyRound, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -34,6 +34,7 @@ import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSect
 import { LocalLlmSection } from "@/components/settings/LocalLlmSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
+import { CommentNotificationsSection } from "@/components/settings/CommentNotificationsSection"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
@@ -424,6 +425,14 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     icon: ServerCog,
     tauriOnly: true,
     render: () => <LocalLlmSection />,
+  },
+  {
+    slug: "notifications",
+    titleKey: "settings.notifications.section.title",
+    descriptionKey: "settings.notifications.section.description",
+    group: "Account",
+    icon: Bell,
+    render: () => <CommentNotificationsSection />,
   },
   {
     slug: "usage",

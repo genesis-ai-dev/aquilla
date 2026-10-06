@@ -139,7 +139,6 @@ export function initialInworldDesignMode(prompt: string): InworldDesignMode {
 export const INWORLD_DESIGN_PRESET_IDS = [
   "agent",
   "narrator",
-  "companion",
   "instructor",
   "pirate",
 ] as const
@@ -188,25 +187,6 @@ export const INWORLD_DESIGN_PRESETS: Record<InworldDesignPresetId, InworldDesign
       personality: "authoritative and composed",
       texture: "warm and resonant",
       environment: "clean studio recording with very low noise",
-    },
-  },
-  companion: {
-    freeform:
-      "A bright, enthusiastic young female voice in her early 20s. High energy with upward inflections and animated delivery. Fast-paced, bubbly tone with expressive variations.",
-    structured: {
-      dialect: "general american english",
-      gender: "female",
-      age: "young",
-      emotion: "cheerful and enthusiastic",
-      tone: "upbeat and animated",
-      pitch: "medium-high female pitch with rising inflections",
-      volume: "moderate to loud",
-      speed: "fast-paced and energetic",
-      clarity: "clear with expressive emphasis",
-      fluency: "fluent and lively",
-      personality: "bubbly, outgoing, and expressive",
-      texture: "bright and youthful",
-      environment: "quiet indoor studio",
     },
   },
   instructor: {

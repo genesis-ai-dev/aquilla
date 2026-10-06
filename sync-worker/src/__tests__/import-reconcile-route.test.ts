@@ -68,6 +68,74 @@ describe('planImportReconciliation', () => {
     expect(plan.retainedMissing).toEqual(['retained-cell'])
   })
 
+  // AQU-1394 — a docx whose every unit key shifted because a paragraph was
+  // inserted at the top. Identity matching finds nothing; content matching has
+  // to land each surviving paragraph back on its own cell, or the translations
+  // already sitting on those cells are stranded.
+  describe('content matching (AQU-1394)', () => {
+    const paragraph = (index: number, value: string): ExistingImportCell => ({
+      cellId: `cell-${index}`, eventId: `event-${index}`, value, valueHtml: null,
+      type: 'paragraph', canonicalRef: null,
+      anchorCellId: index === 0 ? null : `cell-${index - 1}`,
+      startMs: null, endMs: null, sequenceIndex: index, medium: null,
+      metadata: importMetadata(`docx:p${index}`, index),
+    })
+    const incoming = (index: number, value: string) => ({
+      id: `incoming-event-${index}`, cellId: `incoming-cell-${index}`, value,
+      anchorCellId: index === 0 ? null : `incoming-cell-${index - 1}`,
+      type: 'paragraph', sequenceIndex: index,
+      metadata: importMetadata(`docx:p${index}`, index),
+    })
+
+    it('adopts the old cell when the unit keys all shift', () => {
+      const existing = [paragraph(0, 'Alpha.'), paragraph(1, 'Beta.'), paragraph(2, 'Gamma.')]
+      const plan = planImportReconciliation(
+        [incoming(0, 'Preface.'), incoming(1, 'Alpha.'), incoming(2, 'Beta.'), incoming(3, 'Gamma.')],
+        existing,
+      )
+
+      // Every unit key still resolves, but each now names the paragraph above
+      // it. None of those pairs is locked, so content matching hands each old
+      // cell back to the paragraph that still reads the same, and only the
+      // preface is left as new.
+      expect(plan.cells.map((cell) => cell.finalCellId))
+        .toEqual(['incoming-cell-0', 'cell-0', 'cell-1', 'cell-2'])
+      expect(plan.cells.map((cell) => cell.matchKind))
+        .toEqual(['new', 'content-exact', 'content-ice', 'content-ice'])
+      expect(plan.cells.map((cell) => cell.matchBand))
+        .toEqual(['new', 'exact', 'ice', 'ice'])
+      expect(plan.cells.map((cell) => cell.parentId))
+        .toEqual([null, 'event-0', 'event-1', 'event-2'])
+      expect(plan.retainedMissing).toEqual([])
+    })
+
+    it('does not resurrect a cell whose paragraph was deleted', () => {
+      const existing = [paragraph(0, 'Alpha.'), paragraph(1, 'Dropped.'), paragraph(2, 'Gamma.')]
+      const plan = planImportReconciliation([incoming(0, 'Alpha.'), incoming(1, 'Gamma.')], existing)
+
+      // "Alpha." is unchanged, so its unit-key pair is locked; "Gamma." follows
+      // its text to cell-2 and the deleted paragraph's cell is retained.
+      expect(plan.cells.map((cell) => cell.finalCellId)).toEqual(['cell-0', 'cell-2'])
+      expect(plan.cells.map((cell) => cell.matchKind)).toEqual(['unit-key', 'content-exact'])
+      expect(plan.cells.map((cell) => cell.matchBand)).toEqual(['exact', 'exact'])
+      expect(plan.retainedMissing).toEqual(['cell-1'])
+    })
+
+    it('reads the previous order from the anchor chain, not the row order', () => {
+      const shuffled = [paragraph(2, 'Gamma.'), paragraph(0, 'Alpha.'), paragraph(1, 'Beta.')]
+      const plan = planImportReconciliation(
+        [incoming(0, 'Alpha.'), incoming(1, 'Beta.'), incoming(2, 'Gamma.')],
+        shuffled,
+      )
+      expect(plan.cells.map((cell) => cell.matchBand)).toEqual(['ice', 'ice', 'ice'])
+    })
+
+    it('leaves a genuinely new file entirely new', () => {
+      const plan = planImportReconciliation([incoming(0, 'Alpha.')], [])
+      expect(plan.cells[0]).toMatchObject({ matchKind: 'new', matchBand: 'new', parentId: null })
+    })
+  })
+
   it('rejects ambiguous identities instead of guessing', () => {
     const duplicate = (cellId: string): ExistingImportCell => ({
       cellId, eventId: `${cellId}-event`, value: cellId, valueHtml: null,
@@ -318,4 +386,90 @@ describe('POST /import/reconcile', () => {
       .toMatchObject({ value: 'Original', event_id: 'source-initial' })
     expect((await rows<any>('events')).map((event) => event.id)).not.toContain('file-reimport-conflict')
   })
+
+  it('populates cells.lane_id from seeded lanes on reconcile insert', async () => {
+    const auth = await token()
+    const { db } = await makeTestDb()
+    const sourceLaneId = 'src00001'
+    const targetLaneId = 'tgt00001'
+
+    // lane_id is NOT NULL, so the lanes have to exist before the first cell
+    // write. Reconcile still has to stamp the same ids on the rows it inserts.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'source', ?, ?, NULL, 0)`,
+    ).bind(sourceLaneId, PROJECT_ID, 'Source', 'en').run()
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'target', ?, ?, ?, 1)`,
+    ).bind(targetLaneId, PROJECT_ID, 'French', 'fr', 'fr').run()
+
+    const initial = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'file-genesis-event',
+          name: 'Genesis',
+          fileType: 'usfm',
+          role: 'source',
+          kind: 'usfm',
+          bookCode: 'GEN',
+          importFormat: 'usfm',
+          parserVersion: 'builtin:usfm-lossless@1',
+          importManifest: { version: 1, profileId: 'builtin:usfm-lossless', profileVersion: '1' },
+        },
+        cells: [{
+          id: 'source-old-1', cellId: 'durable-1', value: 'Old verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }],
+      }),
+    })
+    expect((await handleBulkImportRequest(initial, env(db)))?.status).toBe(200)
+
+    const request = new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'file-reimport-event', name: 'Genesis',
+          fileType: 'usfm', role: 'source', kind: 'usfm', bookCode: 'GEN',
+          importFormat: 'usfm', parserVersion: 'builtin:usfm-lossless@1',
+          importManifest: { version: 1, profileId: 'builtin:usfm-lossless', profileVersion: '1', unitCount: 2 },
+        },
+        cells: [{
+          id: 'source-new-1', cellId: 'parser-1', value: 'Updated verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }, {
+          id: 'source-new-3', cellId: 'parser-3', anchorCellId: 'parser-1',
+          value: 'New verse three', type: 'verse', canonicalRef: 'GEN 1:3', sequenceIndex: 1,
+          metadata: importMetadata('scripture:GEN 1:3', 1),
+        }],
+        targets: [{
+          id: 'target-imported-3', cellId: 'parser-3', parentId: 'source-new-3',
+          value: 'Nouvelle traduction', targetLang: 'fr',
+        }],
+      }),
+    })
+    const response = await handleImportReconcileRequest(request, env(db))
+    const responseBody = await response?.json() as Record<string, unknown>
+    if (response?.status !== 200) throw new Error(JSON.stringify(responseBody))
+    expect(responseBody).toMatchObject({ added: 1, importedTargets: 1 })
+
+    const { results } = await db.prepare(
+      `SELECT side, target_lang, lane_id FROM cells WHERE project_id = ? AND file_id = ?`,
+    ).bind(PROJECT_ID, FILE_ID).all<{ side: string; target_lang: string; lane_id: string | null }>()
+    const source = results.filter((row) => row.side === 'source')
+    const target = results.filter((row) => row.side === 'target' && row.target_lang === 'fr')
+    expect(source).toHaveLength(2)
+    expect(target).toHaveLength(1)
+    for (const row of source) expect(row.lane_id).toBe(sourceLaneId)
+    for (const row of target) expect(row.lane_id).toBe(targetLaneId)
+  }, 120_000)
 })

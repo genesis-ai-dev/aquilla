@@ -20,7 +20,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -54,6 +54,9 @@ import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/ex
 import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
+  dropHiddenCells,
+  hasHiddenCells,
+  hiddenRoundTripRemovals,
   scopeCellsForExport,
   scopeRoundTripCells,
   validatedOnly as isValidatedOnlyMode,
@@ -74,6 +77,7 @@ import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { toast } from "@/components/ui/toast"
 
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
+import { previewAudioByChapter } from "@/lib/export/audio-chapter"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -85,6 +89,12 @@ import {
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
 import type { CellData } from "@/hooks/useCells"
+import { partnerIdmlExportOptionsFor } from "@/lib/partners/registry"
+import type {
+  PartnerIdmlExportOption,
+  PartnerIdmlExportPanelProps,
+  PartnerIdmlExportTransform,
+} from "@/lib/partners/types"
 import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
@@ -98,8 +108,9 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
+type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
 interface FormatOption {
   id: ExportFormat
@@ -238,6 +249,14 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.audioByLine.label",
     ext: ".zip",
     descriptionKey: "importExport.format.audioByLine.description",
+    lossy: false,
+  },
+  {
+    // AQU-1201: verse recordings concatenated into one file per chapter.
+    id: "audio-chapter",
+    labelKey: "importExport.format.audioChapter.label",
+    ext: ".wav",
+    descriptionKey: "importExport.format.audioChapter.description",
     lossy: false,
   },
   // Advanced-only option — not shown in the main format list.
@@ -381,6 +400,41 @@ interface ExportDialogProps {
   outstandingInfractionCount?: number
 }
 
+function profileIdFromCells(cells: readonly CellData[]): string | null {
+  for (const cell of cells) {
+    const metadata = cell.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue
+    const profileId = (metadata as { aquillaImport?: { profileId?: unknown } }).aquillaImport?.profileId
+    if (typeof profileId === "string" && profileId.length > 0) return profileId
+  }
+  return null
+}
+
+function idmlBlob(bytes: Uint8Array, type: string): Blob {
+  return new Blob(
+    [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
+    { type },
+  )
+}
+
+function LazyPartnerIdmlExportPanel({
+  option,
+  ...props
+}: { option: PartnerIdmlExportOption } & PartnerIdmlExportPanelProps) {
+  const [Panel, setPanel] = useState<ComponentType<PartnerIdmlExportPanelProps> | null>(null)
+  useEffect(() => {
+    let live = true
+    void option.panel().then((mod) => {
+      if (live) setPanel(() => mod.default)
+    })
+    return () => {
+      live = false
+    }
+  }, [option])
+  if (!Panel) return null
+  return <Panel {...props} />
+}
+
 export function ExportDialog({
   open,
   onOpenChange,
@@ -464,6 +518,41 @@ export function ExportDialog({
     return null
   }, [nativeFormatId, cells])
 
+  /**
+   * AQU-1423: what this native export does with cells PARKED here ("Hide cell",
+   * AQU-1422), in plain words, and only on a file that actually has some.
+   *
+   * A second line rather than a rewrite of the four `structuralNote` strings
+   * above, for two reasons. Added and removed content is a property of the
+   * FILE's history and those notes show whenever the format is native; hiding is
+   * reversible and current, so a file with nothing parked should say nothing
+   * about it. And the two answers diverge: every format that can drop content
+   * drops a hidden cell, but IDML cannot, and that difference is exactly what a
+   * person about to hand the file to a typesetter needs told.
+   *
+   * Null on a rendered format (md, txt, csv, …) — those build the file from the
+   * cell list, which no longer contains the hidden cell at all, so there is
+   * nothing surprising to explain.
+   */
+  const hiddenNote = useMemo(() => {
+    if (!nativeFormatId) return null
+    if (!hasHiddenCells(cells)) return null
+    // No locators means no paragraph can be placed OR dropped, so a hidden cell
+    // keeps the client's words here as well — the same answer IDML gives, for a
+    // different reason, and the legacy note above already explains why.
+    if ((nativeFormatId === "docx" || nativeFormatId === "pptx") && !hasPackageLocators(cells)) {
+      return "importExport.dialog.hiddenNoteKeepsOriginal" as const
+    }
+    if (nativeFormatId === "docx" || nativeFormatId === "pptx" || nativeFormatId === "usfm") {
+      return "importExport.dialog.hiddenNoteDropped" as const
+    }
+    // IDML, and sdbh-xml: their engines refuse structural change by design.
+    if (nativeFormatId === "idml" || nativeFormatId === "sdbh-xml") {
+      return "importExport.dialog.hiddenNoteKeepsOriginal" as const
+    }
+    return null
+  }, [nativeFormatId, cells])
+
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -497,10 +586,12 @@ export function ExportDialog({
   /** Source above target in every cue — a review artifact, played against the
    *  picture to check the translation line by line. */
   const [vttIncludeSource, setVttIncludeSource] = useState(false)
-  /** Which of the two audio deliverables the Audio card will produce. They are
-   *  two forms of one thing — a mix track and a review folder — so they share a
-   *  card and a button rather than competing as two entries in a list. */
-  const [audioMode, setAudioMode] = useState<"audio-by-character" | "audio-by-line">("audio-by-character")
+  /** Chapter stitch only. Off keeps each chapter file to its verses. */
+  const [includeChapterHeadings, setIncludeChapterHeadings] = useState(false)
+  /** Which audio deliverable the Audio card will produce. Mix tracks, a review
+   *  folder, and a chapter stitch share a card and a button rather than
+   *  competing as separate entries in the format list. */
+  const [audioMode, setAudioMode] = useState<AudioMode>("audio-by-character")
 
   // Re-derive defaults when the dialog opens on a (possibly different) file.
   //
@@ -544,6 +635,7 @@ export function ExportDialog({
       setVttCueSplitting(remembered.cueSplitting)
       setVttExcludeLabels(remembered.excludeLabels)
       setVttIncludeSource(remembered.includeSource)
+      setIncludeChapterHeadings(remembered.includeChapterHeadings)
       // The remembered format is checked against what is actually on offer —
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
@@ -584,6 +676,23 @@ export function ExportDialog({
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
 
+  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const idmlExportOptions = useMemo(
+    () => partnerIdmlExportOptionsFor(activeProfileId),
+    [activeProfileId],
+  )
+  const [idmlTransform, setIdmlTransform] = useState<PartnerIdmlExportTransform | null>(null)
+  const onIdmlTransformChange = useCallback((next: PartnerIdmlExportTransform | null) => {
+    setIdmlTransform(next)
+  }, [])
+  const loadSourcePackage = useCallback(async () => {
+    if (!activeFileId) throw new Error("Choose a file before checking Bible Swap compatibility.")
+    const bytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+    return new Uint8Array(bytes)
+  }, [activeFileId, projectId, getToken, targetLang])
+  const showIdmlExportOptions = idmlExportOptions.length > 0
+    && (nativeFormatId === "idml" || format === "idml")
+
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
   /**
    * Which array to export audio from.
@@ -611,9 +720,14 @@ export function ExportDialog({
             !isDefaultTrackSlot(slot) && Boolean(c.attachments?.[audioId]?.url),
         )
       }) === true
-    if (hasTake(audioCells)) return audioCells!
-    if (hasTake(cells)) return cells
-    return audioCells ?? cells
+    // AQU-1423: parked cells leave the audio deliverables too. Applied to the
+    // RESULT rather than to each candidate, so the "which list has the takes"
+    // decision above is unchanged — a file whose only recording hangs off a
+    // hidden cell still picks the list that holds it, and then drops that one
+    // segment, instead of silently falling through to a take-less list.
+    if (hasTake(audioCells)) return dropHiddenCells(audioCells!)
+    if (hasTake(cells)) return dropHiddenCells(cells)
+    return dropHiddenCells(audioCells ?? cells)
   }, [audioCells, cells])
 
   /**
@@ -647,6 +761,10 @@ export function ExportDialog({
   const recordedLines = useMemo(
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
+  )
+  const chapterPreview = useMemo(
+    () => previewAudioByChapter(audioSourceCells, { includeChapterHeadings }),
+    [audioSourceCells, includeChapterHeadings],
   )
   /**
    * AQU-646 stage 4: takes living on ADDED tracks, which the preview above
@@ -741,6 +859,7 @@ export function ExportDialog({
       cueSplitting: vttCueSplitting,
       excludeLabels: vttExcludeLabels,
       includeSource: vttIncludeSource,
+      includeChapterHeadings,
     })
   }, [
     open,
@@ -753,6 +872,7 @@ export function ExportDialog({
     vttCueSplitting,
     vttExcludeLabels,
     vttIncludeSource,
+    includeChapterHeadings,
   ])
 
   /**
@@ -793,7 +913,7 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -842,7 +962,7 @@ export function ExportDialog({
       return true
     })
     if (!isDubbingFile) return visible
-    const featured = new Set<string>(["audio-by-character", "audio-by-line", nativeFormatId ?? ""])
+    const featured = new Set<string>(["audio-by-character", "audio-by-line", "audio-chapter", nativeFormatId ?? ""])
     const rest = visible.filter((f) => !featured.has(f.id))
     // The sibling subtitle format leads: a file imported as VTT features VTT
     // and offers SRT here, and the other way round.
@@ -1008,7 +1128,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1125,7 +1245,14 @@ export function ExportDialog({
         // indistinguishable from an untranslated one, and the exporter keeps
         // the client's original words for a line somebody deliberately took
         // out. Fails soft to an empty list — never blocks the download.
-        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        // AQU-1423: and what it has PARKED. A hidden cell's paragraph leaves
+        // the document by the same mechanism, because clearing its translation
+        // alone would ship the client's original words for a cell somebody
+        // deliberately hid.
+        const removedCells = [
+          ...await fetchRemovedCells({ projectId, fileId: activeFileId, getToken }),
+          ...hiddenRoundTripRemovals(cells),
+        ]
         // AQU-1148: a non-validated cell keeps its place (the package is located
         // through it) but carries no translation, so the exporter leaves that
         // paragraph's original words alone — as it already does when untranslated.
@@ -1156,7 +1283,10 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         // See the docx branch above.
-        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const removedCells = [
+          ...await fetchRemovedCells({ projectId, fileId: activeFileId, getToken }),
+          ...hiddenRoundTripRemovals(cells),
+        ]
         // AQU-1148: see the docx branch above.
         const result = await exportPptx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
         const baseName = buildExportStem(false)
@@ -1194,14 +1324,23 @@ export function ExportDialog({
           diagnostics: result.diagnostics,
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
-        downloadBlob(result.blob, `${baseName}.idml`)
         const fileName = `${baseName}.idml`
-        setStatus({
-          kind: "ok",
-          msg: result.report.translated === 0
-            ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
-            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
-        })
+        let blob = result.blob
+        let msg = result.report.translated === 0
+          ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
+          : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated })
+        if (idmlTransform) {
+          setStatus({ kind: "busy", msg: idmlTransform.busyMessage })
+          try {
+            const swapped = await idmlTransform.apply(new Uint8Array(await result.blob.arrayBuffer()))
+            blob = idmlBlob(swapped.bytes, result.blob.type)
+            msg = swapped.statusMessage
+          } catch (err) {
+            msg = idmlTransform.failureMessage(err instanceof Error ? err.message : String(err))
+          }
+        }
+        downloadBlob(blob, fileName)
+        setStatus({ kind: "ok", msg })
       } else if (fmt === "audio-by-character") {
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
         // the one export that takes real time — every take is fetched, decoded
@@ -1358,6 +1497,44 @@ export function ExportDialog({
             ? `Exported ${result.files} recordings — ${lineNotes.join("; ")}.`
             : `Exported ${result.files} recordings`,
         })
+      } else if (fmt === "audio-chapter") {
+        // AQU-1201: concatenate verse takes in order into one file per chapter.
+        // The other two audio exports stay exactly as they are.
+        setStatus({ kind: "busy", msg: t("importExport.status.stitchingChapterAudio") })
+        const { exportAudioByChapter } = await import("@/lib/export/audio-chapter")
+        const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
+        const { fetchCellAudio } = await import("@/lib/audio/upload")
+        const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
+        const result = await exportAudioByChapter({
+          cells: audioSourceCells,
+          projectId,
+          fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
+            fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
+          decode: decodeToMono48k,
+          includeChapterHeadings,
+          onProgress: (d, tot) =>
+            setStatus({ kind: "busy", msg: t("importExport.status.decodingCount", { done: d, total: tot }) }),
+        })
+        if (result.chapters === 0) {
+          const msg =
+            result.clips === 0
+              ? "No recordings found in this file, so there is nothing to export."
+              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+          setStatus({ kind: "error", msg })
+          return
+        }
+        const safeChapter = buildExportStem(false)
+        downloadBlob(result.blob, `${safeChapter}${result.downloadSuffix}`)
+        const notes: string[] = []
+        if (result.skipped > 0) {
+          notes.push(`${result.skipped} recording${result.skipped === 1 ? "" : "s"} could not be read`)
+        }
+        setStatus({
+          kind: "ok",
+          msg: notes.length
+            ? `${t("importExport.status.exportedAudioChapters", { count: result.chapters })} — ${notes.join("; ")}.`
+            : t("importExport.status.exportedAudioChapters", { count: result.chapters }),
+        })
       } else if (fmt === "character-sheets") {
         // HER OWN FILES, BACK, CORRECTED. She resolves the disagreements here
         // and her team keeps working from the spreadsheets that still contain
@@ -1442,7 +1619,12 @@ export function ExportDialog({
         }
         const byCellId = new Map<string, string>()
         for (const f of projectFileCells) {
-          for (const c of f.cells) {
+          // AQU-1423: a parked cell contributes no translation, so the skeleton
+          // keeps its own words for that sense — the answer the dialog's hidden
+          // note gives for this format, whose injector cannot drop content.
+          // (This branch does not apply the validated-only content mode either;
+          // that predates this change and is not narrowed here.)
+          for (const c of dropHiddenCells(f.cells)) {
             if (c.translated) byCellId.set(c.id, c.translated)
           }
         }
@@ -1525,8 +1707,12 @@ export function ExportDialog({
         // source-language filler in a validated-only file. Not applied to the
         // audio cues: cue text is the recording's own script, and audio
         // validation is a separate flag (AQU-508 / AQU-965).
+        // AQU-1423: the cues get the hidden filter but NOT the content mode —
+        // hiding is a property of the cell, validation is the person's choice
+        // about this download, and the comment above says why the mode skips
+        // them.
         const filteredCells = opts?.audioCues
-          ? (audioCells ?? [])
+          ? dropHiddenCells(audioCells ?? [])
           : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
@@ -1783,6 +1969,37 @@ export function ExportDialog({
           )
   }
 
+  /** How many verses will be stitched, and into how many chapter files. */
+  const renderChapterPreview = () => {
+    const preview = chapterPreview
+    return (
+      <div className="flex flex-col gap-1 text-xs" data-testid="export-chapter-preview">
+        <label className="flex items-start gap-2 text-muted-foreground">
+          <Checkbox
+            data-testid="export-include-chapter-headings"
+            checked={includeChapterHeadings}
+            onCheckedChange={(c) => setIncludeChapterHeadings(c === true)}
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-foreground">{t("importExport.dialog.includeChapterHeadings")}</span>
+            <span>{t("importExport.dialog.includeChapterHeadingsHint")}</span>
+          </span>
+        </label>
+        <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
+        {preview.clipCount === 0 ? (
+          <p className="text-muted-foreground">{t("importExport.dialog.nothingRecordedYet")}</p>
+        ) : (
+          <p className="text-muted-foreground">
+            {t("importExport.dialog.chapterStitchPreview", {
+              clips: preview.clipCount,
+              chapters: preview.chapterCount,
+            })}
+          </p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -1902,6 +2119,11 @@ export function ExportDialog({
                     label: "By line",
                     hint: "One file per recording, numbered in playing order, each carrying a timestamp a DAW can place it from — plus a manifest listing them all. For reviewing and re-recording individual lines.",
                   },
+                  {
+                    id: "audio-chapter" as const,
+                    label: t("importExport.dialog.audioChapterModeLabel"),
+                    hint: t("importExport.dialog.audioChapterModeHint"),
+                  },
                 ]).map((mode) => (
                   <label
                     key={mode.id}
@@ -1935,7 +2157,7 @@ export function ExportDialog({
                 ))}
               </RadioGroup>
               {/* The preview belongs WITH the button that acts on it. */}
-              {renderCharacterPreview()}
+              {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
               <Button
                 size="lg"
                 className="w-full justify-center"
@@ -2073,7 +2295,23 @@ export function ExportDialog({
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
               {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
               {structuralNote && ` ${t(structuralNote)}`}
+              {hiddenNote && ` ${t(hiddenNote)}`}
             </p>
+          </div>
+        )}
+
+        {showIdmlExportOptions && (
+          <div className="flex flex-col gap-3">
+            {idmlExportOptions.map((option) => (
+              <LazyPartnerIdmlExportPanel
+                key={`${option.id}:${activeFileId ?? ""}`}
+                option={option}
+                disabled={isBusy}
+                fileName={activeFileName}
+                loadSourcePackage={loadSourcePackage}
+                onTransformChange={onIdmlTransformChange}
+              />
+            ))}
           </div>
         )}
 
@@ -2385,6 +2623,8 @@ export function ExportDialog({
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderCharacterPreview()}
+        {!isDubbingFile && format === "audio-chapter"
+          && effectiveScope === "file" && renderChapterPreview()}
 
         {/* Lossy warning banner */}
         {isLossy && (

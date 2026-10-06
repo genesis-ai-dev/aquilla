@@ -36,6 +36,7 @@
     "identity": {
       "directory": "auth-worker",
       "requiredSecrets": [
+        "DISCORD_FEEDBACK_WEBHOOK_URL",
         "OPENROUTER_API_KEY",
         "RESEND_API_KEY",
         "SECRET_KEY",
@@ -51,7 +52,8 @@
           "apiHost": "api.aquilla.app",
           "routes": [
             "api.aquilla.app/identity/*",
-            "api.aquilla.app/chat/*"
+            "api.aquilla.app/chat/*",
+            "api.aquilla.app/.well-known/oauth-authorization-server/*"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
@@ -78,7 +80,8 @@
           "apiHost": "api.dev.aquilla.app",
           "routes": [
             "api.dev.aquilla.app/identity/*",
-            "api.dev.aquilla.app/chat/*"
+            "api.dev.aquilla.app/chat/*",
+            "api.dev.aquilla.app/.well-known/oauth-authorization-server/*"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",

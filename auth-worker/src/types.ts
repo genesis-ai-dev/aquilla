@@ -104,8 +104,19 @@ export interface Env {
    *  email includes a "join the community" CTA; when absent the email simply
    *  omits it (no dead link). Plain config var, not a secret. */
   DISCORD_INVITE_URL?: string
+  /** Webhook URL of the private channel that receives in-app feedback
+   *  (services/discord-feedback.ts). Worker SECRET: anyone holding it can post
+   *  to the channel. When absent the route still accepts the report and answers
+   *  `delivered: false` (local/e2e). */
+  DISCORD_FEEDBACK_WEBHOOK_URL?: string
 
   ENVIRONMENT?: string
+  /**
+   * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
+   * members below Maintainer. Set on deployed dev and prod after the lane
+   * backfill's grant phase. Local and e2e leave it unset.
+   */
+  LANE_READ_WALL?: string
 
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
@@ -132,6 +143,10 @@ export interface Env {
    * trimmed + lowercased for matching.
    */
   ADMIN_EMAILS?: string
+  /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+   *  today's per-table queries), "shadow" (today's answer + access_grants
+   *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+  ACCESS_GRANTS_RESOLVER?: string
 
   /**
    * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the
@@ -160,6 +175,15 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
+   *  react loop use its fixed rules without calling Jev. Unset = on. */
+  JEV_REACT?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -188,6 +212,14 @@ export interface Env {
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
+  /** OAuth issuer for MCP hosts (ChatGPT plugin, Claude, Codex): this
+   *  worker's public base, e.g. https://api.aquilla.app/identity. Must equal
+   *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
+   *  names as the authorization server. Falls back to the request origin. */
+  MCP_OAUTH_ISSUER?: string
+  /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
+   *  client metadata documents served instead of fetching their client_id. */
+  MCP_OAUTH_PINNED_CLIENTS?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
@@ -211,6 +243,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them
@@ -276,6 +314,10 @@ export interface Env {
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Live new-plan sales switch; turning it off preserves paid webhooks/portal. */
+  BILLING_WORKSPACE_CHECKOUT_ENABLED?: string
+  /** Production API and app host allowlist. Live keys never run locally. */
+  BILLING_LIVE_HOSTS?: string
   /** Comma-separated API and app hosts allowed to run sandbox billing when
    *  ENVIRONMENT=development (e.g. api.dev.aquilla.app,dev.aquilla.app). */
   BILLING_SANDBOX_HOSTS?: string
@@ -396,6 +438,9 @@ export interface SyncTokenClaims {
    * gates target-side writes + validate/unvalidate against these scopes.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. Each entry grants that lane at `level`. */
+  laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number
   exp: number

@@ -4,6 +4,7 @@ import {
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
+  scopedLanesFor,
   canSubmitAssignment,
   foreignRoleFor,
   effectiveCommentRoleFor,
@@ -125,6 +126,17 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("file.corpus.set")).toBe(ROLE.CONTRIBUTOR)
     expect(canPerform("file.corpus.set", ROLE.CONTRIBUTOR)).toBe(true)
     expect(canPerform("file.corpus.set", ROLE.REVIEWER)).toBe(false)
+  })
+
+  // AQU-1569: deliberately a rung ABOVE its file.corpus.set neighbour. Moving
+  // one file into a folder is that file's business; reordering a group rewrites
+  // the sidebar every member of the project reads. The client mirror has to
+  // agree with sync-worker/src/events/role-policy.ts or the drag handle shows
+  // for people whose drop the server will refuse.
+  it("keeps a hand-placed file order at the project-setup floor", () => {
+    expect(requiredRoleFor("file.reorder")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("file.reorder", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("file.reorder", ROLE.CONTRIBUTOR)).toBe(false)
   })
 
   // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
@@ -341,5 +353,50 @@ describe("role-policy (client mirror)", () => {
         commentFloorsFrom({ commentCreateMinRole: 9999, commentResolveMinRole: -1 }),
       ).toEqual(DEFAULT_COMMENT_FLOORS)
     })
+  })
+})
+
+describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
+  const lanes = ["", "es", "de"]
+  const lane = (value: string) => ({ kind: "lane", value })
+
+  it("leaves MAINTAINER+ to the full switcher (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.MAINTAINER, [lane("es")], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
+  })
+
+  it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [{ kind: "file", value: "f1" }], lanes)).toBeNull()
+  })
+
+  it("gives a lane-limited contributor or reviewer their lanes, in the project's order", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de"), lane("es")], lanes)).toEqual(["es", "de"])
+    expect(scopedLanesFor(ROLE.REVIEWER, [lane("es")], lanes)).toEqual(["es"])
+  })
+
+  it("counts the default lane ('') as a lane like any other", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("")], lanes)).toEqual([""])
+  })
+
+  it("yields [] for a scope naming no lane the project has — nothing to move to", () => {
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("Spansih")], lanes)).toEqual([])
+  })
+
+  // AQU-1607: a lane scope is a lane id, which the lane rows turn back into
+  // the tag the switcher is written in.
+  it("resolves a lane id scope through the project's lane rows", () => {
+    const laneRows = [
+      { id: "ln-main", name: "German", legacyTag: "" },
+      { id: "ln-es", name: "Spanish", legacyTag: "es" },
+      { id: "ln-de", name: "Low German", legacyTag: "de" },
+    ]
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-es")], lanes, laneRows)).toEqual(["es"])
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-main")], lanes, laneRows)).toEqual([""])
+    // A tag-valued scope the backfill has not converted still resolves.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de")], lanes, laneRows)).toEqual(["de"])
+    // A lane that is gone offers nothing to switch to.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-gone")], lanes, laneRows)).toEqual([])
   })
 })

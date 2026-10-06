@@ -201,6 +201,19 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(unfocused).toContain("Do not pick one")
   })
 
+  // AQU-1455 / AQU-1468 — the one-document auto-pick and the candidate-file
+  // buttons both hang off a read call. A prompt that says "ask before reading"
+  // makes the model ask from memory, so neither ever runs.
+  it("sends the unfocused agent through read before it asks which file", () => {
+    const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(unfocused).toContain("your FIRST step is read with no fileId and no ref")
+    expect(unfocused).toContain("call read with no fileId and no ref")
+    expect(unfocused).not.toContain("before reading")
+    // Project-wide questions must not be pushed through read: its failure
+    // would hang file buttons under an answer that asked nothing.
+    expect(unfocused).toContain("Questions about the project as a whole")
+  })
+
   it("makes 'which file' an explicit exception to prefer-acting-over-asking", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400, fileId: "f1" })
     expect(prompt).toContain("WHICH FILE is the one exception")
@@ -258,6 +271,18 @@ describe("buildSystemPrompt — changeset command index", () => {
   })
 })
 
+describe("buildSystemPrompt — suggested next steps", () => {
+  // The SPA's suggestions parser (src/lib/agent/suggestions.ts) keys on the
+  // literal `NEXT: ` line form — the prompt must keep teaching exactly that.
+  it("instructs the model to close with NEXT: lines, for every role", () => {
+    for (const roleLevel of [AGENT_ROLE.VIEWER, AGENT_ROLE.CONTRIBUTOR]) {
+      const prompt = buildSystemPrompt({ ...baseCtx, roleLevel })
+      expect(prompt).toContain("## Suggested next steps")
+      expect(prompt).toContain("NEXT: <short imperative action>")
+    }
+  })
+})
+
 describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
   it("pins the floors the agent's safety depends on", () => {
     expect(AGENT_REQUIRED_ROLE["target.cell.commit"]).toBe(400)
@@ -266,9 +291,13 @@ describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
     expect(AGENT_REQUIRED_ROLE["source.cell.commit"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["assignment.create"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["file.delete"]).toBe(500)
+    // AQU-1569: a reorder relayouts the sidebar for every member of the
+    // project, so it carries the project-lead floor rather than the
+    // contributor one its file.rename neighbour sits at.
+    expect(AGENT_REQUIRED_ROLE["file.reorder"]).toBe(500)
   })
 
-  it("covers all 28 event kinds from sync-worker/src/events/types.ts", () => {
-    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(28)
+  it("covers all 29 event kinds from sync-worker/src/events/types.ts", () => {
+    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(29)
   })
 })

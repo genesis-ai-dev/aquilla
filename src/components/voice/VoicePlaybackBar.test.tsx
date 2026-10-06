@@ -44,6 +44,19 @@ vi.mock("@/hooks/useTransportForFile", async (importActual) => {
   }
 })
 
+// Lets a test hold the file's attachment read open (a signed-in cold load).
+const audioRead = vi.hoisted(() => ({ hasLoaded: true }))
+vi.mock("@/hooks/useFileAudioAttachments", async (importActual) => {
+  const actual = await importActual<typeof import("@/hooks/useFileAudioAttachments")>()
+  return {
+    ...actual,
+    useFileAudioAttachments: (...args: Parameters<typeof actual.useFileAudioAttachments>) => ({
+      ...actual.useFileAudioAttachments(...args),
+      hasLoaded: audioRead.hasLoaded,
+    }),
+  }
+})
+
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
 import { startQueue, setQueueRate } from "@/lib/audio/play-queue"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -87,6 +100,28 @@ describe("VoicePlaybackBar", () => {
     const play = screen.getByLabelText("Play all") as HTMLButtonElement
     expect(play.disabled).toBe(false)
     expect(screen.getByText("Press play to listen")).toBeTruthy()
+  })
+
+  // AQU-1643: a source clip arriving with the read hands the file from the
+  // picture to the queue, so a press before it lands went to the wrong engine.
+  it("holds play-all until the file's audio has been read", () => {
+    transportSource.value = "video"
+    audioRead.hasLoaded = false
+    try {
+      const { rerender } = render(
+        <VoicePlaybackBar cells={[cell()]} projectId="p" session={null} settings={undefined} />,
+      )
+      const play = screen.getByLabelText("Play all") as HTMLButtonElement
+      expect(play.disabled).toBe(true)
+      expect(screen.queryByText("Press play to listen")).toBeNull()
+      expect(screen.queryByText("No voiced lines yet")).toBeNull()
+      audioRead.hasLoaded = true
+      rerender(<VoicePlaybackBar cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+      expect((screen.getByLabelText("Play all") as HTMLButtonElement).disabled).toBe(false)
+    } finally {
+      transportSource.value = "queue"
+      audioRead.hasLoaded = true
+    }
   })
 
   it("renders nested below content under now-playing", () => {

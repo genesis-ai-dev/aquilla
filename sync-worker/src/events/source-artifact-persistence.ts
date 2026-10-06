@@ -1,3 +1,5 @@
+import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+
 export interface SourceArtifactPersistenceInput {
   projectId: string
   fileId: string
@@ -28,10 +30,10 @@ export interface SourceArtifactPersistenceInput {
  * copies. Keeping all three rows in one returned batch makes binding + sidecar
  * visibility atomic from the database's perspective.
  */
-export function buildSourceArtifactPersistenceStatements(
+export async function buildSourceArtifactPersistenceStatements(
   db: AquillaDb,
   input: SourceArtifactPersistenceInput,
-): AquillaStatement[] {
+): Promise<AquillaStatement[]> {
   const statements: AquillaStatement[] = []
   if (input.updateSourceSidecar) {
     statements.push(db.prepare(
@@ -53,6 +55,7 @@ export function buildSourceArtifactPersistenceStatements(
       input.createdAt,
     ))
   }
+  const conflictColumn = await artifactBindingConflictColumn(db)
   statements.push(
     db.prepare(
       `INSERT INTO artifacts (
@@ -75,9 +78,9 @@ export function buildSourceArtifactPersistenceStatements(
     db.prepare(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
-         member_path, profile_id, profile_version, fidelity, manifest, recipe
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
-       ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
+       ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,
@@ -98,6 +101,8 @@ export function buildSourceArtifactPersistenceStatements(
       input.fidelity,
       JSON.stringify(input.manifest),
       input.recipe ? JSON.stringify(input.recipe) : null,
+      // AQU-1240 slice 8: source role -> source lane; else target lane by tag.
+      ...laneIdResolveBindingBinds(input.projectId, input.bindingRole, input.targetLang),
     ),
   )
   return statements

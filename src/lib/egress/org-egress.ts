@@ -11,7 +11,6 @@
  * See src/lib/egress/types.ts for the contract shared with the UI.
  */
 
-import JSZip from "jszip"
 import { fetchSyncToken, SyncTokenError } from "@/lib/sync/sync-token"
 import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
@@ -32,7 +31,17 @@ import {
 } from "./freshness"
 import { computeOptionsHash } from "./options-hash"
 import { readEgressCache, writeEgressCache } from "./export-cache"
-import { buildProjectExport, egressSlug } from "./build-project-export"
+import {
+  audioListingKey,
+  buildProjectExport,
+  egressSlug,
+  type EgressZipEntry,
+} from "./build-project-export"
+import {
+  createEgressZipPacker,
+  type EgressZipPacker,
+  type ZipWorkerFactory,
+} from "./zip-worker-client"
 
 export interface RunOrgEgressDeps {
   fetchToken?: typeof fetchSyncToken
@@ -43,6 +52,9 @@ export interface RunOrgEgressDeps {
   readCache?: typeof readEgressCache
   writeCache?: typeof writeEgressCache
   now?: () => Date
+  /** Injection seam for the zip packaging worker (AQU-1269). Omitted in
+   *  production; a run with no worker available packs inline. */
+  createZipWorker?: ZipWorkerFactory
 }
 
 /** Mirror makeSyncTokenMinter's refresh window (sync-token.ts). */
@@ -71,6 +83,22 @@ export async function runOrgEgress(
   args: RunOrgEgressArgs,
   deps: RunOrgEgressDeps = {},
 ): Promise<RunOrgEgressResult> {
+  // One worker for the whole run — packaging happens once per cached project
+  // plus once for the org zip, and spinning a worker up per call would cost
+  // more than it saves. Disposed even on abort so no worker outlives the run.
+  const packer = createEgressZipPacker(deps.createZipWorker)
+  try {
+    return await runWithPacker(args, deps, packer)
+  } finally {
+    packer.dispose()
+  }
+}
+
+async function runWithPacker(
+  args: RunOrgEgressArgs,
+  deps: RunOrgEgressDeps,
+  packer: EgressZipPacker,
+): Promise<RunOrgEgressResult> {
   const fetchToken = deps.fetchToken ?? fetchSyncToken
   const fetchFiles = deps.fetchFiles ?? fetchProjectFiles
   const fetchSettings = deps.fetchSettings ?? fetchProjectSettings
@@ -96,7 +124,9 @@ export async function runOrgEgress(
   const progress = (p: Omit<EgressProgressUpdate, "projectCount">): void =>
     args.onProgress?.({ ...p, projectCount })
 
-  const orgZip = new JSZip()
+  // Entries accumulate uncompressed and are DEFLATEd once at the end, in the
+  // worker — JSZip's .file() never compressed, so this costs no extra memory.
+  const orgEntries: EgressZipEntry[] = []
   const reports: EgressProjectReport[] = []
   // Project folder names dedupe with _2/_3 like every other egress slug.
   const usedSlugs = new Map<string, number>()
@@ -161,13 +191,29 @@ export async function runOrgEgress(
       // this project (no read, no write) and say so in the manifest.
       const audioListings =
         args.options.audioMode !== "none" ? new Map<string, FileAudioAttachmentsResponse>() : null
+      // AQU-1591: the lanes this run writes audio for. Empty would mean no
+      // listing and therefore no audio freshness at all, so the default lane
+      // stands in — the same lane buildProjectExport falls back to.
+      const exportLanes = args.options.lanes.length > 0 ? args.options.lanes : [""]
       const projectErrors: string[] = []
       let cacheBypassed = false
       if (audioListings) {
         for (const f of exportable) {
           throwIfAborted()
           try {
-            audioListings.set(f.id, await fetchAudioAttachments(selection.projectId, f.id, await mintToken(f.id)))
+            // AQU-1591: one listing per (file, LANE) being exported, under the
+            // key buildProjectExport memoizes on, so the pre-fetch is still a
+            // hit rather than a second request. This is also what keeps the
+            // freshness digest honest: it now covers exactly the takes this
+            // run will write, so a recording in a lane nobody asked for stops
+            // busting a cache entry whose bytes it cannot change.
+            const token = await mintToken(f.id)
+            for (const lane of exportLanes) {
+              audioListings.set(
+                audioListingKey(f.id, lane),
+                await fetchAudioAttachments(selection.projectId, f.id, token, lane),
+              )
+            }
           } catch (err) {
             rethrowIfAborted(err)
             cacheBypassed = true
@@ -201,18 +247,17 @@ export async function runOrgEgress(
           cached.username === args.username
         ) {
           // Replay the cached per-project zip into the org zip verbatim.
-          const projZip = await JSZip.loadAsync(await cached.zipBlob.arrayBuffer())
-          const names = Object.keys(projZip.files).filter((n) => !projZip.files[n].dir)
-          for (const name of names) {
-            orgZip.file(`${projectSlug}/${name}`, await projZip.files[name].async("uint8array"))
+          const cachedEntries = await packer.unpack(await cached.zipBlob.arrayBuffer())
+          for (const entry of cachedEntries) {
+            orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
           }
           reports.push({ ...cached.report, fromCache: true, folder: projectSlug })
           progress({
             phase: "zipping",
             projectName: selection.projectName,
             projectIndex: i,
-            done: names.length,
-            total: names.length,
+            done: cachedEntries.length,
+            total: cachedEntries.length,
             fromCache: true,
           })
           continue
@@ -253,18 +298,14 @@ export async function runOrgEgress(
         total: 1,
       })
       for (const entry of entries) {
-        orgZip.file(`${projectSlug}/${entry.path}`, entry.data)
+        orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
       }
       // Cache only complete builds: transient holes (network/5xx/decode) could
       // fill on retry, so caching them would replay the gaps until the project
       // happens to change. Persistent skips (404 no sidecar, policy 403,
       // no-audio files) are stable states and cache fine.
       if (!cacheBypassed && !hadTransientFailures) {
-        const projZip = new JSZip()
-        for (const entry of entries) {
-          projZip.file(entry.path, entry.data)
-        }
-        const zipBlob = await projZip.generateAsync({ type: "blob", compression: "DEFLATE" })
+        const zipBlob = await packer.pack(entries)
         await writeCache({
           projectId: selection.projectId,
           username: args.username,
@@ -303,10 +344,10 @@ export async function runOrgEgress(
     options: args.options,
     projects: reports,
   }
-  orgZip.file("manifest.json", JSON.stringify(manifest, null, 2))
+  orgEntries.push({ path: "manifest.json", data: JSON.stringify(manifest, null, 2) })
 
   progress({ phase: "zipping", projectName: "", projectIndex: projectCount, done: 0, total: 0 })
-  const blob = await orgZip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  const blob = await packer.pack(orgEntries)
   // Final packaging can take seconds on big orgs — cancel must win over it.
   throwIfAborted()
 

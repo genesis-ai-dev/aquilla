@@ -39,7 +39,6 @@ export const audio = defineNamespace({
     "audio.newVoice.designPresetGroupLabel": "Voice design presets",
     "audio.newVoice.designPresetAgent": "Agent",
     "audio.newVoice.designPresetNarrator": "Narrator",
-    "audio.newVoice.designPresetCompanion": "Companion",
     "audio.newVoice.designPresetInstructor": "Instructor",
     "audio.newVoice.designPresetPirate": "Pirate",
     "audio.newVoice.designStructuredLabel": "Voice profile",
@@ -221,7 +220,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.nextCellTooltip": "Next cell (→)",
     "audio.recordingModal.retakeTooltip": "Retake (Esc)",
     "audio.recordingModal.retakeButton": "Retake",
-    "audio.recordingModal.saveTooltip": "Save (Space or Enter)",
+    "audio.recordingModal.saveTooltip": "Save (Enter)",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
     "audio.recordingModal.startButton": "Start",
     "audio.recordingModal.startTooltip": "Start recording (Space)",
@@ -290,6 +289,15 @@ export const audio = defineNamespace({
       "Recording is {warnMinutes} minutes — it stops automatically at {hardStopMinutes}.",
     "audio.recordingModal.capturedNotice": "Captured — review, then keep or retake.",
     "audio.recordingModal.noTimedWindow": "This line has no timed window.",
+    "audio.recordingModal.readyTakeCaption": "{label} · {seconds}s",
+    "audio.recordingModal.trimReadout": "{start} – {end} · {length}",
+    "audio.recordingModal.trimReset": "Reset trim",
+    "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
+    "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
+    "audio.recordingModal.takesDrawerOnDescription": "The takes that fit show under the recorder; the arrow beside Takes brings up the rest.",
+    "audio.recordingModal.takesDrawerOffDescription": "Only the Takes bar shows; the arrow beside it brings up the list.",
+    "audio.recordingModal.takesExpand": "Show all takes",
+    "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
     "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
@@ -300,7 +308,7 @@ export const audio = defineNamespace({
       "Recording at full WAV quality — about three times the file size. Click to record " +
       "compressed instead.",
     "audio.recordingModal.formatCompressedTooltip":
-      "Recording compressed — much smaller files, slightly less detail. Click to record at " +
+      "Recording compressed — much smaller files, a little less detail. Click to record at " +
       "full WAV quality.",
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":
@@ -312,7 +320,13 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceOffDescription":
       "Saved recordings stay on this line, and so do uploaded files.",
     "audio.recordingModal.countdownTitle": "Countdown",
-    "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
+    "audio.recordingModal.countdownFastDescription": "3-2-1, half a second each",
+    "audio.recordingModal.countdownNormalDescription": "3-2-1, one second each",
+    "audio.recordingModal.countdownSlowDescription": "3-2-1, a second and a half each",
+    "audio.recordingModal.countdownSpeedOff": "Off",
+    "audio.recordingModal.countdownSpeedFast": "Fast",
+    "audio.recordingModal.countdownSpeedNormal": "Normal",
+    "audio.recordingModal.countdownSpeedSlow": "Slow",
     "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
     "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
@@ -344,6 +358,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.syncFailedTooltip":
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
+    "audio.takesStrip.recordedByBadge": "{date} · {author}",
+    "audio.takesStrip.recordedByTooltip": "Recorded {datetime} by {author}",
+    "audio.takesStrip.generatedByTooltip": "Generated {datetime} by {author}",
     "audio.takesStrip.textDriftBadge": "Text changed",
     "audio.takesStrip.textDriftTooltip":
       "Recorded {date}, when this line read: “{text}”. The text has changed since — " +
@@ -439,6 +456,7 @@ export const audio = defineNamespace({
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
+    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -461,6 +479,17 @@ export const audio = defineNamespace({
     // in the first-run download-consent dialog (AiModelConsentDialog).
     "audio.consent.whisperLabel": "Whisper (transcription)",
     "audio.consent.mmsLabel": "MMS (multilingual TTS)",
+    // Shared compact + Learn more copy (consent prompt, onboarding checklist,
+    // Preferences → Local models). AQU-1211: tell the operator what they get
+    // and when, without unexplained "word-level timing" / "scrub" / "karaoke".
+    "audio.consent.whisper.short":
+      "After you save a recording, this device transcribes it automatically. The spoken words then light up in the cell as the recording plays. Recordings never leave this device.",
+    "audio.consent.whisper.learnMore":
+      "A transcript preview under the cell shows whether the recording matches your text, sounds a little different (you can adopt what was heard), or that you edited after recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove this model later in Preferences → Local models.",
+    "audio.consent.mms.short":
+      "Reads the cell's text aloud on this device in many languages. Your text isn't sent to any server.",
+    "audio.consent.mms.learnMore":
+      "Each language is downloaded the first time you use it. Manage or remove this model later in Preferences → Local models.",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
     // failure category, shown as the popover title (InlineAiError et al.).
@@ -656,9 +685,9 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.designPresetGroupLabel": {
         description:
-          "Accessible group label (not visible text) for the five starting-point " +
-          "chips under the Voice Design prompt (Agent, Narrator, Companion, " +
-          "Instructor, Pirate), read by screen readers.",
+          "Accessible group label (not visible text) for the four starting-point " +
+          "chips under the Voice Design prompt (Agent, Narrator, Instructor, " +
+          "Pirate), read by screen readers.",
       },
       "audio.newVoice.designPresetAgent": {
         description:
@@ -672,13 +701,6 @@ export const audio = defineNamespace({
           "Chip under the Voice Design prompt that fills a calm narration voice. " +
           "Short noun for that starting style, not the project's default-narrator " +
           "badge (audio.narrator). The English prompt it inserts is not this string.",
-        maxLength: 14,
-      },
-      "audio.newVoice.designPresetCompanion": {
-        description:
-          "Chip under the Voice Design prompt that fills a bright, energetic " +
-          "companion voice. Short noun. The English prompt it inserts is not this " +
-          "string — only the chip label is translated.",
         maxLength: 14,
       },
       "audio.newVoice.designPresetInstructor": {
@@ -1285,6 +1307,73 @@ export const audio = defineNamespace({
             "User content — do not translate the substituted value.",
         },
       },
+      "audio.recordingModal.trimReadout": {
+        description:
+          "Small readout under the waveform of a just-recorded take, while the " +
+          "operator trims silence off its start and end before saving (AQU-1210): " +
+          "where the kept part starts, where it ends, and how long it is.",
+        placeholders: {
+          start: "Where the kept part starts, as minutes:seconds.tenths, e.g. 0:00.3.",
+          end: "Where the kept part ends, same format, e.g. 0:02.7.",
+          length: "Length of the kept part, same format, e.g. 0:02.4.",
+        },
+      },
+      "audio.recordingModal.trimReset": {
+        description:
+          "Tooltip and screen-reader name of the small button that puts a just-" +
+          "recorded take's trim lines back where they started (the line's own " +
+          "start and just after Stop). Nothing is deleted either way.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.takesDrawerTitle": {
+        description:
+          "Name of an on/off setting in the recording window's settings menu: whether " +
+          "the list of recorded takes rests open under the recorder, or closed to " +
+          "just its header bar.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.takesDrawerOnDescription": {
+        description:
+          "Hover text for that setting while it is on: some takes show under the " +
+          "recorder, and the small arrow beside 'Takes' shows the rest.",
+      },
+      "audio.recordingModal.takesDrawerOffDescription": {
+        description:
+          "Hover text for that setting while it is off: only the 'Takes' bar shows, " +
+          "and the small arrow beside it shows the list.",
+      },
+      "audio.recordingModal.takesExpand": {
+        description:
+          "Accessible name of the small arrow beside 'Takes' at the bottom of the " +
+          "recording window: pulls the list of takes up over the line and the " +
+          "record button so every take shows at once.",
+        maxLength: 32,
+      },
+      "audio.recordingModal.takesCollapse": {
+        description:
+          "Accessible name of the same arrow once the takes list is pulled up: puts " +
+          "the list back at the bottom of the window.",
+        maxLength: 32,
+      },
+      "audio.recordingModal.trimHint": {
+        description:
+          "Tiny hint beside the trim readout, in two parts: the Space bar plays the " +
+          "just-recorded take, and the two vertical lines on the waveform can be " +
+          "dragged to cut silence off the start and end of the take before saving. " +
+          "'Space' is the keyboard key. Very short.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.readyTakeCaption": {
+        description:
+          "Caption above the waveform of the line's selected take in the recorder, " +
+          "shown before recording (AQU-1217): the take's name and how long the " +
+          "part of it that plays is, so the operator can judge it against the " +
+          "line's target length at a glance.",
+        placeholders: {
+          label: "The take's name, e.g. \"Take 3\" or a name the user gave it. User data, not translated.",
+          seconds: "Length of the part that plays, in seconds with one decimal, e.g. 3.3.",
+        },
+      },
       "audio.boundaryEditor.dividerLabel": {
         description:
           "Accessible name for one draggable divider handle between two lines' " +
@@ -1808,9 +1897,10 @@ export const audio = defineNamespace({
       "audio.recordingModal.settingsAriaLabel": {
         description:
           "Screen-reader name of the gear button at the end of the recorder's " +
-          "bottom strip. It opens a small menu holding three preferences: whether " +
-          "to move on to the next line after each save, whether a 3-2-1 countdown " +
-          "runs before each take, and whether that countdown beeps.",
+          "bottom strip. It opens a small menu of recorder preferences: whether " +
+          "to move on to the next line after each save, whether the film plays " +
+          "along when a take is played back, how fast the 3-2-1 countdown runs " +
+          "before each take (or whether it runs at all), and whether it beeps.",
       },
       "audio.recordingModal.countdownTitle": {
         description:
@@ -1819,11 +1909,51 @@ export const audio = defineNamespace({
           "count-in itself, not an instruction.",
         maxLength: 24,
       },
-      "audio.recordingModal.countdownOnDescription": {
+      "audio.recordingModal.countdownFastDescription": {
         description:
-          "One-line description under that preference while the countdown is ON: " +
-          "pressing Record counts three, two, one and then starts capturing.",
+          "One-line description under that preference while the FAST count is " +
+          "chosen: pressing Record counts three, two, one at half a second per " +
+          "number, then starts capturing.",
         maxLength: 40,
+      },
+      "audio.recordingModal.countdownNormalDescription": {
+        description:
+          "One-line description under that preference while the NORMAL count is " +
+          "chosen (the default): pressing Record counts three, two, one at one " +
+          "second per number, then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownSlowDescription": {
+        description:
+          "One-line description under that preference while the SLOW count is " +
+          "chosen: pressing Record counts three, two, one at a second and a half " +
+          "per number, then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownSpeedOff": {
+        description:
+          "First of four side-by-side choices under 'Countdown' in the recorder's " +
+          "gear menu: no count at all — pressing Record starts capturing at once. " +
+          "Four choices share a narrow row, so keep it to one short word.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedFast": {
+        description:
+          "Second of the four countdown choices: count three, two, one at half a " +
+          "second per number. One short word; the row is narrow.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedNormal": {
+        description:
+          "Third of the four countdown choices, and the default: count three, two, " +
+          "one at one second per number. One short word; the row is narrow.",
+        maxLength: 8,
+      },
+      "audio.recordingModal.countdownSpeedSlow": {
+        description:
+          "Fourth of the four countdown choices: count three, two, one at a second " +
+          "and a half per number. One short word; the row is narrow.",
+        maxLength: 8,
       },
       "audio.recordingModal.countdownOffDescription": {
         description:
@@ -1912,6 +2042,42 @@ export const audio = defineNamespace({
           "Label on the small red button shown on a take that failed to save to the " +
           "server; pressing it queues the save again. Very short — it sits inline on " +
           "a compact take row.",
+      },
+      "audio.takesStrip.recordedByBadge": {
+        description:
+          "Inline provenance stamp on a compact take row: the day the take was " +
+          "made and the person who made it, separated by a middle dot. Answers " +
+          "'when was this recorded, and by whom' at a glance while auditing a " +
+          "line's takes. The separator may be replaced with whatever punctuation " +
+          "reads naturally in the target language; keep it very short, as it " +
+          "shares one row with the take's name, length and action buttons and is " +
+          "truncated when the column is narrow.",
+        maxLength: 32,
+        placeholders: {
+          date: "Day the take was made, already formatted for the user's locale.",
+          author: "Name of the person who made the take, as recorded on the event log.",
+        },
+      },
+      "audio.takesStrip.recordedByTooltip": {
+        description:
+          "Hover title on that stamp, for a take a person RECORDED with a " +
+          "microphone. Gives the full date and time rather than just the day, " +
+          "since the badge beside it is abbreviated. Purely informational.",
+        placeholders: {
+          datetime: "Date AND time the take was recorded, already formatted for the user's locale.",
+          author: "Name of the person who recorded the take.",
+        },
+      },
+      "audio.takesStrip.generatedByTooltip": {
+        description:
+          "Hover title on that same stamp, for a take that was SYNTHESISED by a " +
+          "text-to-speech voice rather than spoken into a microphone. Same shape " +
+          "as audio.takesStrip.recordedByTooltip; the verb differs because the " +
+          "named person chose to generate the take, they did not perform it.",
+        placeholders: {
+          datetime: "Date AND time the take was generated, already formatted for the user's locale.",
+          author: "Name of the person who generated the take.",
+        },
       },
       "audio.takesStrip.textDriftBadge": {
         description:
@@ -2218,6 +2384,16 @@ export const audio = defineNamespace({
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
       },
+      "audio.castGutter.defaultVoiceLabel": {
+        description:
+          "The voice field under a line's waveform in the Audio view, when nobody " +
+          "chose a character for the line and it falls back to the default voice — " +
+          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
+        placeholders: {
+          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
+        },
+        maxLength: 32,
+      },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:
           "Accessible name of the cast-gutter avatar's popover-trigger button, which " +
@@ -2294,6 +2470,43 @@ export const audio = defineNamespace({
         description:
           "Display name for the MMS multilingual text-to-speech model in the same " +
           "consent dialog as audio.consent.whisperLabel, same naming pattern.",
+      },
+      "audio.consent.whisper.short": {
+        description:
+          "Compact explanation of what Whisper transcription does, reused in the " +
+          "first-run download prompt, the onboarding 'Configure voice & transcription' " +
+          "step, and Preferences → Local models so the story cannot drift. Plain " +
+          "words: after each save the recording is transcribed on this device and " +
+          "spoken words light up in the cell during playback. Do not introduce " +
+          "unexplained 'karaoke', 'scrub', or 'word-level timing'.",
+      },
+      "audio.consent.whisper.learnMore": {
+        description:
+          "Fuller explanation revealed in place by the consent prompt's Learn more " +
+          "control (not a second dialog). Covers the transcript preview under the " +
+          "cell and its matches / sounds different / edited-after-recording states, " +
+          "jumping playback by modifier-clicking a word in the cell editor (not in " +
+          "that preview), and Preferences → Local models as the place to manage or " +
+          "remove the model. {modifier} is rendered as the Option key glyph on Apple " +
+          "and the word Alt elsewhere — keep it next to '+click'. Paragraphs are " +
+          "separated by blank lines (keep them).",
+        placeholders: {
+          modifier:
+            "The seek-click modifier, rendered as a keycap: ⌥ (Option) on Mac, Alt otherwise.",
+        },
+      },
+      "audio.consent.mms.short": {
+        description:
+          "Compact explanation of what the MMS local-voice model does, reused in " +
+          "the first-run download prompt and Preferences → Local models. Plain " +
+          "words: it reads cell text aloud on this device; text does not leave the " +
+          "browser.",
+      },
+      "audio.consent.mms.learnMore": {
+        description:
+          "Fuller explanation revealed in place by the MMS consent prompt's Learn " +
+          "more control. Notes that each language downloads on first use, and that " +
+          "Preferences → Local models is where to manage or remove the model.",
       },
       "audio.aiError.dailyLimitTitle": {
         description:

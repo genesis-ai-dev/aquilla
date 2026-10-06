@@ -31,6 +31,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { projectElevationDenial } from "../services/elevation-gate"
+import { auditMembershipChange } from "../services/admin-audit"
 import { JWTService } from "../auth/jwt"
 import {
   INVITE_MIN_ROLE,
@@ -103,6 +105,8 @@ accessLinks.post("/", authMiddleware, zValidator("json", createSchema), async (c
   if (resolved.level < INVITE_MIN_ROLE) {
     return c.json({ error: "role >= project_lead required to mint an access link" }, 403)
   }
+  const unelevated = await projectElevationDenial(c, resolved)
+  if (unelevated) return unelevated
 
   // Target account must exist — this flow never creates users.
   const targetUser = await c.env.AQUILLA_PG.prepare(
@@ -196,6 +200,13 @@ accessLinks.post("/", authMiddleware, zValidator("json", createSchema), async (c
     console.error("[access-links] mint failed:", err)
     return c.json({ error: "Failed to create access link" }, 500)
   }
+  await auditMembershipChange(c.env, caller, {
+    action: "project.access_link.create",
+    where: { scope: "project", projectId },
+    target: { id: targetUser.id, username: targetUser.username },
+    roleBefore: null,
+    roleAfter: grantedRole,
+  })
 
   return c.json({
     token,
@@ -355,10 +366,10 @@ accessLinks.post("/:token/revoke", authMiddleware, async (c) => {
   const token = c.req.param("token")
 
   const link = await c.env.AQUILLA_PG.prepare(
-    "SELECT project_id, revoked_at FROM project_access_links WHERE token = ?",
+    "SELECT project_id, user_id, role_level, revoked_at FROM project_access_links WHERE token = ?",
   )
     .bind(token)
-    .first<{ project_id: string; revoked_at: string | null }>()
+    .first<{ project_id: string; user_id: number; role_level: number; revoked_at: string | null }>()
   if (!link) {
     return c.json({ error: "Access link not found" }, 404)
   }
@@ -367,6 +378,8 @@ accessLinks.post("/:token/revoke", authMiddleware, async (c) => {
   if (!resolved || resolved.level < INVITE_MIN_ROLE) {
     return c.json({ error: "role >= project_lead required to revoke an access link" }, 403)
   }
+  const unelevated = await projectElevationDenial(c, resolved)
+  if (unelevated) return unelevated
 
   if (!link.revoked_at) {
     await c.env.AQUILLA_PG.prepare(
@@ -374,6 +387,13 @@ accessLinks.post("/:token/revoke", authMiddleware, async (c) => {
     )
       .bind(token)
       .run()
+    await auditMembershipChange(c.env, caller, {
+      action: "project.access_link.revoke",
+      where: { scope: "project", projectId: link.project_id },
+      target: { id: Number(link.user_id) },
+      roleBefore: Number(link.role_level),
+      roleAfter: null,
+    })
   }
 
   return c.json({ token, revoked: true })

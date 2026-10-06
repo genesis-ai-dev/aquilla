@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, BookOpen, Search, Cloud, CloudDownload,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -29,8 +28,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { t as tStandalone } from "@/lib/i18n/standalone"
@@ -38,12 +37,12 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  probeMediaDurationMs,
   importEBible,
   importObs,
   importHelloao,
   importMacula,
   importTranslationNotes,
-  importBiblicaStudyNotes,
   prepareParatextProject,
   commitParatextProject,
   importParatextAsTarget,
@@ -56,14 +55,16 @@ import {
   type EBibleMatchResult,
   type MaculaProgress,
   type TnProgress,
-  type BiblicaProgress,
-  type BiblicaEdition,
   type ParatextImportProgress,
   type SourceCellRef,
   type ImportResult,
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
+import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
+import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
+import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
@@ -93,6 +94,13 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import {
+  EMPTY_UPLOAD_HEADER,
+  hasLanguageHeader,
+  uploadHeaderText,
+  type TranslationCheckUpload,
+} from "@/lib/import/translation-signals"
 
 interface CollisionResolution {
   skipKeys: ReadonlySet<string>
@@ -108,15 +116,166 @@ import {
   IMPORT_COLLISION_DETECTED,
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
+  IMPORT_TRANSLATION_CHECK,
 } from "@/lib/event-names"
+import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
+import { partnerIntegrations } from "@/lib/partners/registry"
+import type { PartnerImportPanelProps } from "@/lib/partners/types"
+import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
+import { ROLE } from "@/lib/frontier/roles"
+import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
+import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
+import type { FileTargetCellRef } from "@/lib/import-file-target"
+import {
+  CLOSED_IMPORT_FILE_GATE,
+  nextImportFileGate,
+  type ImportFileGate,
+  type ImportFileGateState,
+} from "@/lib/import/import-file-gate"
+import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
+import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
+import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
+import { ImportOptionCard } from "@/components/import/ImportOptionCard"
+import {
+  translationCheckLayout,
+  translationCheckSignal,
+  translationSignals,
+  type TranslationCheckChoice,
+  type TranslationCheckLayout,
+  type TranslationSignal,
+} from "@/lib/import/translation-signals"
+import { LANGUAGES, type LanguageEntry } from "@/lib/languages/catalog"
+import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
+  // AQU-1365: a translation's destination file is opening in the editor, then
+  // its review (FileTargetImportPanel) runs, or one of the other ways into it
+  // (eBible in target mode, a paired spreadsheet).
+  | "translationOpening" | "translationReview" | "translationEbible" | "translationPaired"
+  // AQU-1365: a source upload looks like a translation; asked before any cell
+  // is created.
+  | "translationCheck"
+
+/**
+ * AQU-1365: what the host gives the "A translation" path. The cell store only
+ * ever holds the OPEN file, so a translation for another file has to open that
+ * file in the editor first; `activeFile*` describe whatever file is open now.
+ */
+export interface TranslationImportHost {
+  /** Project files the translation can go into, in sidebar order. */
+  files: TranslationDestination[]
+  activeFileId: string | null
+  /** The open file's lines, in display order. */
+  activeFileCells: FileTargetCellRef[]
+  activeFileLoading: boolean
+  /** True while the open file's rows came from the device cache and are
+   *  still being brought up to date (`useActiveCellStore.isRefreshing`). */
+  activeFileRefreshing?: boolean
+  activeFileFailed: boolean
+  /** Opens a file in the editor behind the dialog. */
+  openFile: (fileId: string) => void
+  /** Loads the open file's lines again after a failure. */
+  retryActiveFile: () => void
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
+  /** Why this caller can't import a translation (role), or null. */
+  disabledReason: string | null
+  /** Name of the language the import fills (the active lane's), when known. */
+  languageLabel: string | null
+  /** Every target language of the project (one per lane), for telling a
+   *  translation from a source upload. */
+  targetLanguages: TranslationTargetLanguage[]
+  /** AQU-1631: the lanes a translation import may fill (the ones the editor's
+   *  switcher offers this caller), labelled as the switcher labels them. Fewer
+   *  than two, or absent, and there is no language to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** AQU-1631: moves the editor to another lane. The dialog's `targetLang`
+   *  follows it, and that lane is the one the import commits into: its review
+   *  reads current translations and commit parents from the open lane's lines. */
+  onLaneChange?: (lane: string) => void
+}
+
+/** AQU-1365: one of the project's target lanes, as the translation check sees it. */
+export interface TranslationTargetLanguage {
+  /** The lane's language as stored (a name like "Siberian Tatar", or a tag). */
+  language: string
+  /** The lane's name as the person knows it, when it has one. */
+  label: string | null
+  /** True for the lane open in the editor, the one a translation import fills. */
+  active: boolean
+}
+
+/** One translation import in flight: how it arrives, its file, and a key that
+ *  remounts the review for every start. */
+interface TranslationRun {
+  /** A dropped file goes through the review; the other ways have their own
+   *  panels. All of them read the destination's lines, so all wait for it to
+   *  open. */
+  way: "file" | TranslationOtherWay
+  /** The upload, for `way: "file"`; null for the other ways. */
+  file: File | null
+  fileId: string
+  key: string
+  /** True when the person took the held upload's suggested file. */
+  suggested: boolean
+  /** Where it started, for telemetry: the translation screen, the source
+   *  path's check, or the review's "Import into X instead". */
+  entry: TranslationEntry
+}
+
+type TranslationEntry = "translation" | "translation-check" | "review-switch"
+
+/** AQU-1365: the screen a translation run shows once its file is open. */
+const TRANSLATION_READY_SCREEN = {
+  file: "translationReview",
+  ebible: "translationEbible",
+  paired: "translationPaired",
+} as const satisfies Record<TranslationRun["way"], Screen>
+
+/** AQU-1365: telemetry `import_type` per way. A dropped file keeps the name the
+ *  three-dot entry reported; the other two keep their landing tile names. */
+const TRANSLATION_IMPORT_TYPE = {
+  file: "file-target",
+  ebible: "ebible",
+  paired: "paired",
+} as const satisfies Record<TranslationRun["way"], string>
+
+/** AQU-1365: a source upload waiting on "Is this a translation?". */
+interface PendingTranslationCheck {
+  layout: TranslationCheckLayout
+  signals: TranslationSignal[]
+  uploads: UploadForTranslationCheck[]
+  fileCount: number
+  resume: (choice: TranslationCheckResume) => Promise<void>
+  returnScreen: "upload" | "gdrive"
+  /** The language catalog the check ran with, for naming a bare tag. */
+  catalog: readonly LanguageEntry[]
+}
+
+const NO_TRANSLATION_FILES: TranslationDestination[] = []
+
+/** AQU-1365: the dialog title over "Is this a translation?". */
+function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCheckLayout): string {
+  switch (layout.kind) {
+    case "sameBook":
+      return t("importExport.translationCheck.sameBookTitle", { book: layout.book.file.name })
+    case "sameBookAmbiguous":
+      return t("importExport.translationCheck.sameBookTitle", { book: layout.bookName })
+    case "multiBook":
+      return t("importExport.translationCheck.multiBookTitle")
+    case "language":
+      return t("importExport.translationCheck.languageTitle")
+    case "many":
+      return t("importExport.translationCheck.manyTitle")
+  }
+}
 
 interface ImportDialogProps {
   open: boolean
@@ -143,6 +302,8 @@ interface ImportDialogProps {
    * Optional: existing source cells to support the "into target" eBible import
    * mode (AQU-191). When provided, the eBible panel shows a mode toggle so the
    * user can import a translation into the target column of an existing file.
+   * AQU-1365: only without `translation`. With it, eBible into a target lives
+   * under "A translation" and reads the chosen file's lines from there.
    * Each cell needs at minimum: cellId, fileId, translated, canonicalRef, and
    * the AD-2 parentId fields (targetEventId / sourceEventId).
    */
@@ -169,6 +330,35 @@ interface ImportDialogProps {
    * setting. Absent/false imports front matter (the default).
    */
   excludeFrontMatter?: boolean
+  /**
+   * AQU-1527: the "From another project" source — link this established project
+   * to another project's source (AQU-1525's action) from the place people
+   * actually go to bring material in, instead of only from Project Settings →
+   * Source & sync. Absent means the host cannot offer it (nothing to refresh
+   * afterwards), and the tile is not shown at all.
+   *
+   * `roleLevel` is the caller's level on THIS project — the server's floor is
+   * project_lead(500). `alreadyLinked` is true once the project has an upstream:
+   * a project has one at a time, so the tile is shown disabled rather than
+   * leading to a flow that would be refused. `onLinked` lets the host refresh
+   * the project record; the dialog closes itself — except when the link was
+   * saved but its files did not arrive (AQU-1544), where the host is refreshed
+   * and the dialog stays open on the retry.
+   */
+  linkSource?: {
+    roleLevel: number | null
+    alreadyLinked: boolean
+    onLinked: () => void
+  }
+  /**
+   * AQU-1365: why a NEW SOURCE import is refused for this caller (role), or
+   * null. A Contributor can import a translation but not new source text, so
+   * the dialog opens for them with the source choice greyed out.
+   */
+  sourceDisabledReason?: string | null
+  /** AQU-1365: the "A translation" path. Absent, the dialog offers source
+   *  import only, as before. */
+  translation?: TranslationImportHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -193,9 +383,68 @@ export function ImportDialog({
   existingFiles,
   patchDcsCursor,
   excludeFrontMatter,
+  linkSource,
+  sourceDisabledReason = null,
+  translation,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
+  // AQU-1365: "What are you importing?" and the translation path's choices.
+  // They live here, not in the chooser, so Back from the review finds the
+  // same file chosen and the same upload held.
+  const [intent, setIntent] = useState<ImportIntent>("source")
+  const [translationFileId, setTranslationFileId] = useState<string | null>(null)
+  const [heldTranslationFile, setHeldTranslationFile] = useState<File | null>(null)
+  const [translationRun, setTranslationRun] = useState<TranslationRun | null>(null)
+  const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
+    { gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" },
+  )
+  // Where the title's back arrow leads inside the review, as the panel reports it.
+  const [translationBack, setTranslationBack] = useState<FileTargetPanelBack | null>(null)
+  const [translationNotice, setTranslationNotice] = useState<string | null>(null)
+  const [translationCheck, setTranslationCheck] = useState<PendingTranslationCheck | null>(null)
+  const translationRunCount = useRef(0)
+  const translationFiles = translation?.files ?? NO_TRANSLATION_FILES
+  const translationDisabledReason = translation
+    ? translation.disabledReason
+      ?? (translationFiles.length === 0
+        // Only a project lead can add that source text (AQU-1365 review).
+        ? t(sourceDisabledReason ? "importExport.intent.translation.noFilesLead" : "importExport.intent.translation.noFiles")
+        : null)
+    : null
+  const translationDestination = translationRun
+    ? translationFiles.find((file) => file.id === translationRun.fileId) ?? null
+    : null
+  // AQU-1669: a translation's import OUTCOME names the lane it filled. A
+  // partner's failing import into a second lane was invisible in PostHog
+  // because the outcome said nothing about WHICH lane, and only non-default
+  // lanes were broken. The lane can move while the dialog is open ("Fill which
+  // language"), so it is read at the outcome, when it is the lane actually
+  // written to; "import started" keeps its properties as they were.
+  const translationLaneProperty = targetLang || "default"
+
+  // AQU-1365: each opening starts from the caller's situation: New source text
+  // unless only a translation is allowed, and the open file as the translation's
+  // destination. Adjusted while rendering (not in the reset effect below) because
+  // it reads the host's props, and an effect keyed on them would re-run on every
+  // file the dialog itself opens.
+  const [initialisedForOpen, setInitialisedForOpen] = useState(false)
+  if (open !== initialisedForOpen) {
+    setInitialisedForOpen(open)
+    if (open) {
+      const openFileId = translation?.activeFileId ?? null
+      setIntent(sourceDisabledReason !== null && translation ? "translation" : "source")
+      setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
+      setHeldTranslationFile(null)
+      setTranslationRun(null)
+      setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
+      setTranslationBack(null)
+      setTranslationNotice(null)
+      setTranslationCheck(null)
+    }
+  }
+  // Which partner integration the "partner" screen is showing. Null everywhere else.
+  const [partnerId, setPartnerId] = useState<string | null>(null)
   // Holds refs + inferred languages while waiting for the user to set direction.
   const [pendingImport, setPendingImport] = useState<{
     refs: FileReference[]
@@ -245,10 +494,21 @@ export function ImportDialog({
   // the re-render). Consumed synchronously so the second call is a no-op.
   const flushingRef = useRef(false)
 
+  // The partner whose panel the "partner" screen shows, and that panel. Both are
+  // undefined when no partner is selected or its integration is not present —
+  // which is the stripped-build case, where the tile was never offered either.
+  const activePartner = partnerId
+    ? partnerIntegrations().find((integration) => integration.id === partnerId)
+    : undefined
+  const renderActivePartnerPanel = activePartner
+    ? PARTNER_PANEL_RENDERERS.get(activePartner.id)
+    : undefined
+
   // Reset to landing each time the dialog opens.
   useEffect(() => {
     if (open) {
       setScreen("landing")
+      setPartnerId(null)
       setPendingImport(null)
       setImportResult(null)
       setImportResultError(null)
@@ -435,6 +695,257 @@ export function ImportDialog({
     void finishPendingImport(pendingImport, true)
   }
 
+  // AQU-1365: the open file as the opening gate sees it.
+  function gateInput(wantedFileId: string) {
+    return {
+      wantedFileId,
+      activeFileId: translation?.activeFileId ?? null,
+      cellsLoading: translation?.activeFileLoading ?? false,
+      cellsRefreshing: translation?.activeFileRefreshing ?? false,
+      cellsError: translation?.activeFileFailed ?? false,
+      cellCount: translation?.activeFileCells.length ?? 0,
+      firstCellFileId: translation?.activeFileCells[0]?.fileId,
+    }
+  }
+
+  // AQU-1365: review `file` as the translation of `fileId`. When that is not
+  // the open file, the editor opens it behind the dialog, and the review waits
+  // until every one of its lines has loaded: it matches against the lines it
+  // is handed when it mounts.
+  function startTranslation(
+    file: File,
+    fileId: string,
+    { suggested }: TranslationStartOptions,
+    entry: TranslationEntry = "translation",
+  ) {
+    if (!translation) return
+    setHeldTranslationFile(null)
+    beginTranslationRun({ way: "file", file, fileId, suggested, entry })
+  }
+
+  // AQU-1365: eBible or a paired spreadsheet into the chosen file. A held
+  // upload stays held: Back from either lands on the chooser as it was left.
+  function startOtherWay(way: TranslationOtherWay) {
+    if (!translation || translationFileId === null) return
+    beginTranslationRun({ way, file: null, fileId: translationFileId, suggested: false, entry: "translation" })
+  }
+
+  function beginTranslationRun(run: Omit<TranslationRun, "key">) {
+    if (!translation) return
+    const { fileId } = run
+    translationRunCount.current += 1
+    setTranslationFileId(fileId)
+    setTranslationNotice(null)
+    setTranslationBack(null)
+    setTranslationRun({ ...run, key: `${fileId}:${translationRunCount.current}` })
+    posthog.capture(IMPORT_STARTED, {
+      import_type: TRANSLATION_IMPORT_TYPE[run.way],
+      entry: run.entry,
+      suggested: run.suggested,
+      project_id: projectId,
+    })
+    if (translation.activeFileId !== fileId) {
+      translation.openFile(fileId)
+      setOpening({ gate: { file: fileId, sawLoad: false }, state: "waiting" })
+      setScreen("translationOpening")
+      return
+    }
+    // Already open, and opened before this dialog was, so its load has had
+    // its chance: a settled file with no lines counts as loaded instead of
+    // waiting for a load that is not coming.
+    const first = nextImportFileGate(
+      { file: fileId, sawLoad: !translation.activeFileLoading },
+      gateInput(fileId),
+    )
+    setOpening(first)
+    setScreen(first.state === "ready" ? TRANSLATION_READY_SCREEN[run.way] : "translationOpening")
+  }
+
+  // AQU-1365: the source path's "Is this a translation?" check. Runs after
+  // the uploads are parsed and before the preview, so nothing exists yet.
+  // Resolves false (carry on as before) when nothing looks like one.
+  function translationCheckFor(returnScreen: "upload" | "gdrive") {
+    if (!translation) return undefined
+    const host = translation
+    return async (
+      uploads: UploadForTranslationCheck[],
+      resume: (choice: TranslationCheckResume) => Promise<void>,
+      fileCount: number,
+    ): Promise<boolean> => {
+      const open = uploads.filter((upload) => !upload.resolved)
+      if (open.length === 0 || translationFiles.length === 0) return false
+      // The full language catalog knows a project's "Siberian Tatar" is `sty`.
+      // It is loaded only when a header could name a language, and a failed
+      // load falls back to the bundled list rather than skipping the check.
+      const namesLanguage = host.targetLanguages.length > 0
+        && open.some((upload) => upload.header.fields.length > 0 || upload.header.notes.length > 0)
+      let catalog: readonly LanguageEntry[] = []
+      if (namesLanguage) {
+        catalog = peekFullLanguageCatalog() ?? await loadFullLanguageCatalog().catch(() => LANGUAGES)
+      }
+      const signals = translationSignals({
+        uploads: open,
+        existingFiles: translationFiles,
+        sourceLanguage,
+        targetLanguages: host.targetLanguages.map((lane) => lane.language),
+        catalog,
+      })
+      if (signals.length === 0) return false
+      setTranslationCheck({
+        layout: translationCheckLayout(signals, fileCount),
+        signals,
+        uploads,
+        fileCount,
+        resume,
+        returnScreen,
+        catalog,
+      })
+      setScreen("translationCheck")
+      return true
+    }
+  }
+
+  function answerTranslationCheck(choice: TranslationCheckChoice) {
+    const check = translationCheck
+    if (!check) return
+    posthog.capture(IMPORT_TRANSLATION_CHECK, {
+      signal: translationCheckSignal(check.signals),
+      file_count: check.fileCount,
+      flagged_count: check.signals.length,
+      choice,
+      project_id: projectId,
+    })
+    const { layout } = check
+    const flaggedFile = layout.kind === "many"
+      ? undefined
+      : check.uploads.find((upload) => upload.fileKey === layout.signal.fileKey)?.file
+    switch (choice) {
+      case "back":
+        setTranslationCheck(null)
+        setScreen(check.returnScreen)
+        return
+      case "translation":
+        // "A translation of Jonah": the same File goes to the
+        // review, so nothing is dropped twice. Choosing Jonah here is the
+        // person's own choice, as if they had picked it.
+        if (layout.kind !== "sameBook" || !flaggedFile) return
+        setTranslationCheck(null)
+        setIntent("translation")
+        startTranslation(flaggedFile, layout.book.file.id, { suggested: false }, "translation-check")
+        return
+      case "choose-file":
+        if (!flaggedFile) return
+        setTranslationCheck(null)
+        setIntent("translation")
+        setTranslationRun(null)
+        setTranslationNotice(null)
+        // Nothing chosen yet. The picker would otherwise start on the open
+        // file with Continue live, and a quick Continue sent the upload into
+        // whatever file happened to be open: the one thing this screen exists
+        // to stop. The person names the file, or takes the one the held box
+        // offers for the upload's book.
+        setTranslationFileId(null)
+        setHeldTranslationFile(flaggedFile)
+        setScreen("landing")
+        return
+      case "update": {
+        // The collision screen's "Update existing": re-import in place, which
+        // keeps the file's translations. Keyed by the same keys
+        // `emitParsedFile` looks up: a USFM upload's result has no book code,
+        // so its name is what finds Jonah (AQU-1365 review).
+        if (layout.kind !== "sameBook" || !layout.book.file.bookCertain) return
+        const flagged = check.uploads.find((upload) => upload.fileKey === layout.signal.fileKey)
+        const keys = new Set([
+          layout.book.bookCode,
+          ...(flagged?.results ?? [])
+            .filter((result) => result.books.includes(layout.book.bookCode))
+            .flatMap((result) => result.reimportKeys),
+        ])
+        void check.resume({ reimportFileIds: new Map([...keys].map((key) => [key, layout.book.file.id])) })
+        return
+      }
+      case "leave-out": {
+        const flagged = new Set(check.signals.map((signal) => signal.fileKey))
+        void check.resume({
+          leaveOut: new Set(check.uploads.filter((upload) => flagged.has(upload.fileKey)).map((upload) => upload.file)),
+        })
+        return
+      }
+      case "separate":
+      case "import-all":
+        void check.resume({})
+        return
+    }
+  }
+
+  // AQU-1365 review: a language the check found, by the lane's own name (a
+  // lane stored as "ru" reads "Russian"), and whether it is the lane open in
+  // the editor, which is the only one a translation import fills.
+  function describeCheckedLanguage(language: string): { name: string; active: boolean } {
+    const lane = translation?.targetLanguages.find((entry) => entry.language === language)
+      ?? translation?.targetLanguages.find((entry) => languagesEqual(entry.language, language))
+    const lower = language.trim().toLowerCase()
+    const named = translationCheck?.catalog.find((entry) => entry.code === lower || entry.altCode === lower)?.name
+    return { name: lane?.label?.trim() || named || language, active: lane?.active ?? false }
+  }
+
+  // AQU-1365: the review's "Import into Ruth instead" offers a file only when
+  // exactly one holds the book.
+  function translationFileForBook(bookCode: string) {
+    const matches = filesForBook(translationFiles, bookCode)
+    return matches.length === 1 ? { id: matches[0].id, name: matches[0].name } : undefined
+  }
+
+  // Stable on purpose: the review reports its back arrow from an effect keyed
+  // on this callback, and that report re-renders the dialog. A fresh function
+  // every render would loop.
+  const backToTranslationChooser = useCallback(() => {
+    if (translationRun) {
+      if (translationRun.file) setHeldTranslationFile(translationRun.file)
+      setTranslationFileId(translationRun.fileId)
+    }
+    setTranslationRun(null)
+    setTranslationBack(null)
+    setScreen("landing")
+  }, [translationRun])
+
+  // AQU-1365: re-check the opening gate whenever the open file's state moves.
+  const openingFileId = screen === "translationOpening" ? translationRun?.fileId ?? null : null
+  const openingFileGone = openingFileId !== null && !translationFiles.some((file) => file.id === openingFileId)
+  const hostActiveFileId = translation?.activeFileId ?? null
+  const hostLoading = translation?.activeFileLoading ?? false
+  const hostRefreshing = translation?.activeFileRefreshing ?? false
+  const hostFailed = translation?.activeFileFailed ?? false
+  const hostCellCount = translation?.activeFileCells.length ?? 0
+  const hostFirstCellFileId = translation?.activeFileCells[0]?.fileId
+  // Adjusted while rendering rather than in an effect: the gate is derived
+  // from props, and the reducer hands back the same object once it settles,
+  // so this converges in one extra pass instead of a commit per step.
+  if (openingFileId !== null) {
+    if (openingFileGone) {
+      // Deleted while it opened: its lines are never coming, so hand the
+      // upload back to the chooser with nothing chosen. (The other ways have
+      // no upload of their own; a held one stays held.)
+      if (translationRun?.file) setHeldTranslationFile(translationRun.file)
+      setTranslationFileId(null)
+      setTranslationRun(null)
+      setTranslationNotice(t("importExport.translation.fileGone"))
+      setScreen("landing")
+    } else {
+      const next = nextImportFileGate(opening.gate, {
+        wantedFileId: openingFileId,
+        activeFileId: hostActiveFileId,
+        cellsLoading: hostLoading,
+        cellsRefreshing: hostRefreshing,
+        cellsError: hostFailed,
+        cellCount: hostCellCount,
+        firstCellFileId: hostFirstCellFileId,
+      })
+      if (next.gate !== opening.gate || next.state !== opening.state) setOpening(next)
+      if (next.state === "ready" && translationRun) setScreen(TRANSLATION_READY_SCREEN[translationRun.way])
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[90dvh] sm:max-w-2xl flex-col">
@@ -448,6 +959,33 @@ export function ImportDialog({
               t("importExport.dialog.titleResult")
             ) : screen === "collision" ? (
               t("importExport.dialog.titleCollision")
+            ) : screen === "translationCheck" && translationCheck ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => answerTranslationCheck("back")}
+                  label={t("importExport.dialog.backToFileSelection")}
+                />
+                <span className="min-w-0">{translationCheckTitle(t, translationCheck.layout)}</span>
+              </div>
+            ) : screen === "translationOpening" || screen === "translationReview"
+              || screen === "translationEbible" || screen === "translationPaired" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                {screen === "translationReview" && translationBack ? (
+                  <ImportDialogBackButton
+                    onClick={translationBack.onBack}
+                    label={translationBack.label}
+                    disabled={translationBack.disabled}
+                  />
+                ) : (
+                  <ImportDialogBackButton
+                    onClick={backToTranslationChooser}
+                    label={t("importExport.translation.backToChooser")}
+                  />
+                )}
+                <span className="min-w-0 truncate">
+                  {t("importExport.translation.titleInto", { fileName: translationDestination?.name ?? "" })}
+                </span>
+              </div>
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
@@ -468,35 +1006,152 @@ export function ImportDialog({
                   label={t("importExport.dialog.backToImportTypes")}
                 />
                 {screen === "upload" ? t("importExport.landing.upload.title")
+                  : screen === "youtube" ? t("importExport.landing.youtube.title")
                   : screen === "gdrive" ? t("importExport.landing.gdrive.title")
                   : screen === "helloao" ? t("importExport.dialog.titleHelloao")
                   : screen === "obs" ? t("importExport.landing.obs.title")
                   : screen === "dcs" ? t("importExport.landing.dcs.title")
                   : screen === "macula" ? t("importExport.landing.macula.title")
                   : screen === "tn" ? t("importExport.dialog.titleTn")
-                  : screen === "biblica" ? t("importExport.landing.biblica.title")
+                  : screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
+                  : screen === "linkProject" ? t("importExport.landing.linkProject.title")
                   : t("importExport.landing.ebible.title")}
               </div>
             )}
           </DialogTitle>
         </DialogHeader>
 
+        {/* AQU-1365: the translation review owns its scroll and pins its footer,
+            so it sits outside the scrolling body (below), not inside it. */}
+        {screen !== "translationReview" && (
         <DialogBody>
 
-        {screen === "landing" && (
+        {screen === "landing" && translation && (
+          <div className="pt-1 pb-4">
+            <ImportIntentChoice
+              value={intent}
+              onChange={(next) => {
+                setIntent(next)
+                setTranslationNotice(null)
+              }}
+              sourceDisabledReason={sourceDisabledReason}
+              translationDisabledReason={translationDisabledReason}
+            />
+          </div>
+        )}
+
+        {screen === "landing" && intent === "translation" && translation && (
+          <div className="pb-2">
+            <TranslationChooser
+              files={translationFiles}
+              value={translationFileId}
+              onValueChange={(fileId) => {
+                setTranslationFileId(fileId)
+                setTranslationNotice(null)
+              }}
+              languageLabel={translation.languageLabel}
+              heldFile={heldTranslationFile}
+              onHeldFileChange={setHeldTranslationFile}
+              onStart={startTranslation}
+              notice={translationNotice}
+              onOtherWay={startOtherWay}
+              laneOptions={translation.laneOptions}
+              lane={targetLang ?? ""}
+              onLaneChange={translation.onLaneChange}
+            />
+          </div>
+        )}
+
+        {screen === "translationOpening" && translationRun && (
+          opening.state === "failed" ? (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-destructive" role="alert">
+                {t("importExport.translation.openFailed", { fileName: translationDestination?.name ?? "" })}
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+                <Button onClick={() => translation?.retryActiveFile()}>{t("importExport.translation.tryAgain")}</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2" aria-busy="true">
+              <p className="text-sm font-medium" role="status">
+                {t("importExport.translation.opening", { fileName: translationDestination?.name ?? "" })}
+              </p>
+              <div className="space-y-2.5 rounded-md border p-3">
+                {[0, 1, 2, 3, 4].map((row) => <Skeleton key={row} className="h-4 w-full" />)}
+              </div>
+              <div className="flex justify-end">
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+              </div>
+            </div>
+          )
+        )}
+
+        {screen === "landing" && intent === "source" && (
           <ImportLanding
             allowDcs={patchDcsCursor !== undefined}
-            onSelect={(s) => {
-              posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
+            translationOnlyElsewhere={translation !== undefined}
+            linkProject={
+              linkSource
+                ? {
+                    alreadyLinked: linkSource.alreadyLinked,
+                    canLink: (linkSource.roleLevel ?? 0) >= ROLE.PROJECT_LEAD,
+                  }
+                : null
+            }
+            onSelect={(s, selectedPartnerId) => {
+              posthog.capture(IMPORT_STARTED, {
+                import_type: selectedPartnerId ?? s,
+                project_id: projectId,
+              })
+              setPartnerId(selectedPartnerId ?? null)
               if (s === "spreadsheet") {
                 setSpreadsheetSeedFile(null)
                 setSpreadsheetReturnScreen("landing")
               }
               setScreen(s)
             }}
+          />
+        )}
+
+        {/* AQU-1527: the same flow the settings card mounts — one component, so
+            the picker, the pre-link preview and the cycle refusal cannot
+            diverge between the two entry points. */}
+        {screen === "linkProject" && linkSource && (
+          <div className="space-y-3 py-1">
+            <LinkSourceFlow
+              projectId={projectId}
+              roleLevel={linkSource.roleLevel}
+              intro={
+                <p className="text-sm text-muted-foreground">
+                  {t("projectSettings.linkSource.description")}
+                </p>
+              }
+              onLinked={() => {
+                // Refresh first, close second: the file list the user is sent
+                // back to is the thing that must already know about the link.
+                linkSource.onLinked()
+                onOpenChange(false)
+              }}
+              // AQU-1544: the link is saved but its files did not arrive. The
+              // host still has to learn the project is linked (or this tile
+              // would offer to link it again), but the dialog stays open on
+              // the flow's "try again" — closing here is the silent success
+              // this slice removes.
+              onLinkSavedWithoutFiles={() => linkSource.onLinked()}
+            />
+          </div>
+        )}
+
+        {screen === "youtube" && (
+          <YouTubeImportPanel
+            ctx={{ projectId, author: username, sourceLanguage,
+              targetLanguage, targetLang, getToken }}
+            onImported={handleChildImported}
           />
         )}
 
@@ -537,6 +1192,7 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            onTranslationCheck={translationCheckFor("upload")}
           />
         )}
 
@@ -578,11 +1234,15 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
 
         {screen === "ebible" && (
           <EBiblePanel
+            // AQU-1365: with a translation path, New source text means source:
+            // eBible into an existing file's target lives under A translation.
+            mode={translation ? "source" : undefined}
             projectId={projectId}
             username={username}
             sourceLanguage={sourceLanguage}
@@ -590,8 +1250,8 @@ export function ImportDialog({
             targetLang={targetLang}
             getToken={getToken}
             sourceCells={sourceCells}
-            onImported={async (ref, inferredLanguages) => {
-              await handleChildImported([ref], inferredLanguages)
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
             onTargetImported={() => {
               onOpenChange(false)
@@ -606,8 +1266,8 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             getToken={getToken}
-            onImported={async (ref, inferredLanguages) => {
-              await handleChildImported([ref], inferredLanguages)
+            onImported={async (refs, inferredLanguages) => {
+              await handleChildImported(refs, inferredLanguages)
             }}
           />
         )}
@@ -663,18 +1323,17 @@ export function ImportDialog({
           />
         )}
 
-        {screen === "biblica" && (
-          <BiblicaPanel
-            projectId={projectId}
-            username={username}
-            sourceLanguage={sourceLanguage}
-            targetLanguage={targetLanguage}
-            getToken={getToken}
-            onImported={async (ref) => {
-              await handleChildImported([ref])
-            }}
-          />
-        )}
+        {screen === "partner" && renderActivePartnerPanel?.({
+          loadingLabel: t("common.loading"),
+          projectId,
+          username,
+          ...(sourceLanguage ? { sourceLanguage } : {}),
+          ...(targetLanguage ? { targetLanguage } : {}),
+          getToken,
+          onImported: async (ref) => {
+            await handleChildImported([ref])
+          },
+        })}
 
         {screen === "sdbh" && (
           <SdbhPanel
@@ -738,6 +1397,64 @@ export function ImportDialog({
           </div>
         )}
 
+        {/* AQU-1365: the other ways into a chosen file, mounted once every
+            line of it is loaded (the same opening gate as a dropped file):
+            both match against the lines they are handed. The open file IS the
+            destination by then, so its lines are the host's open-file lines. */}
+        {(screen === "translationEbible" || screen === "translationPaired") && translationRun && translation
+          && translation.activeFileCells.length === 0 && (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              {t("importExport.translation.fileHasNoLines", { fileName: translationDestination?.name ?? "" })}
+            </p>
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={backToTranslationChooser}>{t("common.back")}</Button>
+            </div>
+          </div>
+        )}
+        {screen === "translationEbible" && translationRun && translation && translation.activeFileCells.length > 0 && (
+          <EBiblePanel
+            key={translationRun.key}
+            mode="target"
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            getToken={getToken}
+            sourceCells={translation.activeFileCells}
+            onImported={handleChildImported}
+            onTargetImported={() => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: TRANSLATION_IMPORT_TYPE.ebible,
+                entry: translationRun.entry,
+                project_id: projectId,
+              })
+              onOpenChange(false)
+            }}
+          />
+        )}
+        {screen === "translationPaired" && translationRun && translation && translation.activeFileCells.length > 0 && (
+          <PairedImportPanel
+            key={translationRun.key}
+            projectId={projectId}
+            username={username}
+            targetLang={targetLang}
+            sourceCells={translation.activeFileCells}
+            getToken={getToken}
+            onImported={(committedCount) => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: TRANSLATION_IMPORT_TYPE.paired,
+                entry: translationRun.entry,
+                file_count: committedCount,
+                project_id: projectId,
+              })
+              onOpenChange(false)
+            }}
+            onCancel={backToTranslationChooser}
+          />
+        )}
+
         {screen === "direction" && (
           <DirectionPanel
             sourceLanguage={directionSource}
@@ -782,6 +1499,16 @@ export function ImportDialog({
           />
         )}
 
+        {screen === "translationCheck" && translationCheck && (
+          <TranslationCheckPanel
+            layout={translationCheck.layout}
+            fileCount={translationCheck.fileCount}
+            canImportTranslation={translation?.disabledReason === null}
+            describeLanguage={describeCheckedLanguage}
+            onChoose={answerTranslationCheck}
+          />
+        )}
+
         {/* AQU-287: collision guard — shown when re-importing into an existing project */}
         {screen === "collision" && collisionState && (
           <CollisionPanel
@@ -816,6 +1543,60 @@ export function ImportDialog({
           />
         )}
         </DialogBody>
+        )}
+
+        {/* AQU-1365: the existing target-import review, handed the dropped
+            file so it starts matching straight away. Mounted only once every
+            line of the destination is loaded (the opening gate above). */}
+        {screen === "translationReview" && translationRun?.file && translation && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <FileTargetImportPanel
+              key={translationRun.key}
+              projectId={projectId}
+              username={username}
+              targetLang={targetLang}
+              fileName={translationDestination?.name ?? ""}
+              cells={translation.activeFileCells}
+              getToken={getToken}
+              applyOptimisticTargetEdits={translation.applyOptimisticTargetEdits}
+              excludeFrontMatter={excludeFrontMatter}
+              initialFile={translationRun.file}
+              onBackToFileChoice={backToTranslationChooser}
+              fileForBook={translationFileForBook}
+              onUseFile={(fileId) => {
+                if (!translationRun.file) return
+                startTranslation(translationRun.file, fileId, { suggested: false }, "review-switch")
+              }}
+              onBackChange={setTranslationBack}
+              onImported={(committedCount) => {
+                posthog.capture(IMPORT_SUCCEEDED, {
+                  import_type: "file-target",
+                  entry: translationRun.entry,
+                  suggested: translationRun.suggested,
+                  // `file_count` has always carried the CELL count here; existing
+                  // dashboards read it, so it stays and `cell_count` names the
+                  // same number honestly for anything new (AQU-1669).
+                  file_count: committedCount,
+                  cell_count: committedCount,
+                  project_id: projectId,
+                  target_lane: translationLaneProperty,
+                })
+                onOpenChange(false)
+              }}
+              onError={(message, phase) => {
+                posthog.capture(IMPORT_FAILED, {
+                  import_type: "file-target",
+                  entry: translationRun.entry,
+                  phase,
+                  project_id: projectId,
+                  target_lane: translationLaneProperty,
+                  error: message,
+                })
+              }}
+              onCancel={() => onOpenChange(false)}
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -849,6 +1630,14 @@ type ImportOption = {
   icon: LucideIcon
   badge?: "beta" | "soon"
   disabled?: boolean
+  /**
+   * Why this option is disabled, when it is disabled for a reason other than
+   * "not built yet" (AQU-1527). Replaces the coming-soon tooltip so a tile that
+   * exists but cannot be used here says what would make it usable.
+   */
+  disabledReasonKey?: MessageKey
+  /** Set on a tile contributed by a partner integration; routes to screen "partner". */
+  partnerId?: string
 }
 
 const POPULAR_OPTIONS: ImportOption[] = [
@@ -862,6 +1651,8 @@ const POPULAR_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.helloao.description" },
   { id: "spreadsheet", titleKey: "importExport.landing.spreadsheet.title", hintKey: "importExport.landing.spreadsheet.hint", icon: Table2, badge: "beta",
     descriptionKey: "importExport.landing.spreadsheet.description" },
+  { id: "youtube", titleKey: "importExport.landing.youtube.title", icon: Video,
+    descriptionKey: "importExport.landing.youtube.description" },
 ]
 
 const SPECIALIZED_OPTIONS: ImportOption[] = [
@@ -871,8 +1662,6 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.paired.description" },
   { id: "tn", titleKey: "importExport.landing.tn.title", hintKey: "importExport.landing.tn.hint", icon: StickyNote, badge: "beta",
     descriptionKey: "importExport.landing.tn.description" },
-  { id: "biblica", titleKey: "importExport.landing.biblica.title", hintKey: "importExport.landing.biblica.hint", icon: BookOpen, badge: "beta",
-    descriptionKey: "importExport.landing.biblica.description" },
   { id: "obs", titleKey: "importExport.landing.obs.title", hintKey: "importExport.landing.obs.hint", icon: BookImage, badge: "beta",
     descriptionKey: "importExport.landing.obs.description" },
   { id: "dcs", titleKey: "importExport.landing.dcs.title", hintKey: "importExport.landing.dcs.hint", icon: Cloud, badge: "beta",
@@ -882,6 +1671,53 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
   { id: "upload", titleKey: "importExport.landing.tm.title", hintKey: "importExport.landing.tm.hint", icon: Database,
     descriptionKey: "importExport.landing.tm.description" },
 ]
+
+/**
+ * Tiles contributed by the partner integrations that are present (AQU-1286).
+ * Empty when the `partner-integrations` folders have been stripped, which is how
+ * those importers "simply do not appear" rather than erroring.
+ */
+const PARTNER_OPTIONS: ImportOption[] = partnerIntegrations().flatMap((integration) => {
+  const screen = integration.importScreen
+  if (!screen) return []
+  return [{
+    id: "partner" as const,
+    partnerId: integration.id,
+    titleKey: screen.titleKey,
+    ...(screen.hintKey ? { hintKey: screen.hintKey } : {}),
+    descriptionKey: screen.descriptionKey,
+    icon: screen.icon,
+    ...(screen.badge ? { badge: screen.badge } : {}),
+  }]
+})
+
+/**
+ * One renderer per present partner, built once at module load.
+ *
+ * `lazy()` must be called once per partner rather than once per render — a fresh
+ * lazy component each render would remount the panel and refetch its chunk. The
+ * map holds element factories rather than components so the render site never
+ * puts a locally-bound component into JSX; the component (`Panel`) is a stable
+ * module-level binding, which is what keeps its identity — and the panel's state
+ * — intact across renders.
+ */
+const PARTNER_PANEL_RENDERERS: ReadonlyMap<string, (props: PartnerPanelHostProps) => ReactNode> =
+  new Map(partnerIntegrations().flatMap((integration) => {
+    const screen = integration.importScreen
+    if (!screen) return []
+    const Panel = lazy(screen.panel)
+    const render = ({ loadingLabel, ...props }: PartnerPanelHostProps) => (
+      <Suspense fallback={<p className="py-4 text-sm text-muted-foreground">{loadingLabel}</p>}>
+        <Panel {...props} />
+      </Suspense>
+    )
+    return [[integration.id, render] as const]
+  }))
+
+interface PartnerPanelHostProps extends PartnerImportPanelProps {
+  /** Resolved by the caller, which has the I18nProvider context this does not. */
+  loadingLabel: string
+}
 
 function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
   const t = useT()
@@ -898,52 +1734,29 @@ function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
   )
 }
 
-function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen) => void }) {
+function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen, partnerId?: string) => void }) {
   const t = useT()
-  const { icon: Icon, disabled } = option
   const title = t(option.titleKey)
-  const select = () => { if (!disabled && option.id) onSelect(option.id) }
-  const disabledTooltip = disabled
-    ? t("importExport.landing.comingSoonTooltip", { title })
-    : undefined
-  const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
-  const card = (
-    <Card
-      size="sm"
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled || undefined}
-      data-tooltip={testTooltipAttr}
-      onClick={select}
-      onKeyDown={(e) => {
-        if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); select() }
+  return (
+    <ImportOptionCard
+      icon={option.icon}
+      title={title}
+      hint={option.hintKey ? t(option.hintKey) : undefined}
+      badge={option.badge ? <OptionBadge kind={option.badge} /> : undefined}
+      description={t(option.descriptionKey)}
+      disabled={option.disabled}
+      disabledTooltip={
+        !option.disabled
+          ? undefined
+          : option.disabledReasonKey
+            ? t(option.disabledReasonKey)
+            : t("importExport.landing.comingSoonTooltip", { title })
+      }
+      onSelect={() => {
+        if (option.id) onSelect(option.id, option.partnerId)
       }}
-      className={cn(
-        "gap-0 px-3",
-        disabled
-          ? "cursor-not-allowed opacity-55"
-          : "transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium leading-none">{title}</span>
-            {option.hintKey && <span className="text-xs text-muted-foreground">{t(option.hintKey)}</span>}
-            {option.badge && <span className="ml-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
-          </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{t(option.descriptionKey)}</p>
-        </div>
-      </div>
-    </Card>
+    />
   )
-
-  if (!disabled) return card
-
-  return <AppTooltip content={disabledTooltip}>{card}</AppTooltip>
 }
 
 function ImportSection({ label, children }: { label: string; children: ReactNode }) {
@@ -955,24 +1768,74 @@ function ImportSection({ label, children }: { label: string; children: ReactNode
   )
 }
 
+/**
+ * AQU-1527: the "From another project" tile, built per render because its state
+ * depends on this project — unlike every other option, which is the same for
+ * everyone.
+ *
+ * It is offered rather than hidden in both unusable cases, because hiding it is
+ * what sent people to the forums in the first place: the capability existed and
+ * nothing on screen said so. Disabled-with-a-reason tells a Contributor who to
+ * ask, and tells a lead on an already-linked project that the thing they are
+ * looking for is in settings (a project has one upstream at a time, so the flow
+ * would only be refused).
+ */
+function linkProjectOption({ alreadyLinked, canLink }: LinkProjectAvailability): ImportOption {
+  const reasonKey: MessageKey | undefined = alreadyLinked
+    ? "importExport.landing.linkProject.alreadyLinkedTooltip"
+    : !canLink
+      ? "importExport.landing.linkProject.roleTooltip"
+      : undefined
+  return {
+    id: "linkProject",
+    titleKey: "importExport.landing.linkProject.title",
+    hintKey: "importExport.landing.linkProject.hint",
+    descriptionKey: "importExport.landing.linkProject.description",
+    icon: Link2,
+    ...(reasonKey ? { disabled: true, disabledReasonKey: reasonKey } : {}),
+  }
+}
+
+interface LinkProjectAvailability {
+  /** The project already has an upstream; it may only have one at a time. */
+  alreadyLinked: boolean
+  /** The caller is project_lead or above on this project. */
+  canLink: boolean
+}
+
 interface ImportLandingProps {
-  onSelect: (screen: Screen) => void
+  onSelect: (screen: Screen, partnerId?: string) => void
   /** When false, the Door43 (DCS) option is hidden — its import needs a way to
    *  write the project settings cursor (patchDcsCursor), unavailable e.g. for
    *  unsynced local-only projects. */
   allowDcs: boolean
+  /** AQU-1527: null when the host cannot offer linking at all. */
+  linkProject: LinkProjectAvailability | null
+  /**
+   * AQU-1365: true when the dialog has an "A translation" path. Paired
+   * translation only ever fills an existing file's translation, so it is
+   * offered there instead of among the source importers.
+   */
+  translationOnlyElsewhere?: boolean
 }
 
-function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false }: ImportLandingProps) {
   const t = useT()
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
   const q = filter.trim().toLowerCase()
+  // AQU-1527: "From another project" sits in the popular tier — it is a first
+  // answer to "bring that material in here", not a specialized format.
+  const popular = linkProject
+    ? [...POPULAR_OPTIONS, linkProjectOption(linkProject)]
+    : POPULAR_OPTIONS
   // Hide DCS when the host can't persist the release cursor.
+  const specializedOptions = [...SPECIALIZED_OPTIONS, ...PARTNER_OPTIONS]
+    .filter((o) => !(translationOnlyElsewhere && o.id === "paired"))
   const available = allowDcs
-    ? SPECIALIZED_OPTIONS
-    : SPECIALIZED_OPTIONS.filter((o) => o.id !== "dcs")
+    ? specializedOptions
+    : specializedOptions.filter((o) => o.id !== "dcs")
   const specialized = q
     ? available.filter((o) =>
         [t(o.titleKey), o.hintKey ? t(o.hintKey) : "", t(o.descriptionKey)].some((s) => s.toLowerCase().includes(q)),
@@ -982,7 +1845,7 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
     <div className="space-y-5 py-1">
       <p className="text-sm text-muted-foreground">{t("importExport.landing.intro")}</p>
       <ImportSection label={t("importExport.landing.popularSection")}>
-        {POPULAR_OPTIONS.map((o) => (
+        {popular.map((o) => (
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
@@ -1062,6 +1925,81 @@ interface UploadPanelProps {
   /** AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
    *  reusing this panel's preview/collision/commit machinery unchanged. */
   variant?: "upload" | "gdrive"
+  /**
+   * AQU-1365: after parsing and before the preview, the parent checks the
+   * text uploads for a translation of a file already here. Resolves true when
+   * it took over (it shows its question and later calls `resume`), false to
+   * carry on to the preview as before.
+   */
+  onTranslationCheck?: (
+    uploads: UploadForTranslationCheck[],
+    resume: (choice: TranslationCheckResume) => Promise<void>,
+    /** Every file in the batch, flagged or not, media included. */
+    fileCount: number,
+  ) => Promise<boolean>
+}
+
+/** AQU-1365: one parsed text upload, as the translation check sees it. */
+export interface UploadForTranslationCheck extends TranslationCheckUpload {
+  file: File
+  /** True when the person already answered about it on the collision screen. */
+  resolved: boolean
+  /** Each parsed result's books and the keys `emitParsedFile` looks it up by
+   *  in `reimportFileIds`, so "A new version of Jonah's source text"
+   *  re-imports in place. */
+  results: { books: string[]; reimportKeys: string[] }[]
+}
+
+/** AQU-1365: how the import continues after the translation check. */
+export interface TranslationCheckResume {
+  /** Uploads to leave out of this import. */
+  leaveOut?: ReadonlySet<File>
+  /** Extra in-place re-imports ("A new version of Jonah's source text"):
+   *  book code → file id. */
+  reimportFileIds?: ReadonlyMap<string, string>
+}
+
+/** AQU-1365: the bytes a header can name its language in (USFM `\id`/`\rem`,
+ *  the WebVTT header). Read separately from the parse, which keeps no text. */
+const TRANSLATION_HEADER_BYTES = 8192
+
+async function uploadsForTranslationCheck(
+  files: readonly File[],
+  preparedByFile: ReadonlyMap<File, PreparedImportFile>,
+  answered: { names: ReadonlySet<string>; reimportFileIds?: ReadonlyMap<string, string> },
+): Promise<UploadForTranslationCheck[]> {
+  const uploads: UploadForTranslationCheck[] = []
+  for (const file of files) {
+    const prepared = preparedByFile.get(file)
+    if (!prepared) continue
+    // The real USFM parse carries no `bookCode`, so the books come off the
+    // parsed lines (AQU-1365 review).
+    const results = prepared.results.map((result) => ({
+      books: parsedResultBooks(prepared.fileType, result),
+      reimportKeys: reimportKeysFor(result),
+    }))
+    const bookIds = [...new Set(results.flatMap((result) => result.books))]
+    let header = EMPTY_UPLOAD_HEADER
+    if (hasLanguageHeader(file.name)) {
+      try {
+        const head = await file.slice(0, TRANSLATION_HEADER_BYTES).arrayBuffer()
+        header = uploadHeaderText(file.name, decodeImportText(head, file.name))
+      } catch {
+        // Unreadable here means it parsed some other way: no header to check.
+      }
+    }
+    // The keys the collision screen's choices and the re-import are keyed by
+    // (see `emitParsedFile`): lowercased names, uppercased book codes.
+    const importKeys = [...new Set([
+      file.name.trim().toLowerCase(),
+      ...results.flatMap((result) => result.reimportKeys),
+      ...bookIds,
+    ])]
+    const resolved = answered.names.has(file.name.trim().toLowerCase())
+      || importKeys.some((key) => answered.reimportFileIds?.has(key))
+    uploads.push({ fileKey: file.name, fileName: file.name, bookIds, header, importKeys, file, resolved, results })
+  }
+  return uploads
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -1094,7 +2032,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload" }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload", onTranslationCheck }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -1102,6 +2040,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  const [mediaReview, setMediaReview] = useState<{
+    id: string
+    mediaName: string
+    durationMs?: number
+    sources: MediaTextSourceOption[]
+  } | null>(null)
+  const mediaReviewResolver = useRef<((source: MediaTextSource | undefined | null) => void) | null>(null)
   // AQU-823: per-file Drive provenance (normalized name → origin), set by the
   // gdrive variant just before handleFiles and stamped into importManifest.
   const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
@@ -1110,7 +2055,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     refs: FileReference[]
     skipped?: { book: string; reason: string }[]
   } | null>(null)
-  useEffect(() => () => parseAbortRef.current?.abort(), [])
+  useEffect(() => () => {
+    parseAbortRef.current?.abort()
+    mediaReviewResolver.current?.(null)
+    mediaReviewResolver.current = null
+  }, [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1139,7 +2088,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             // Filter out skipped files and proceed with the rest.
             const filtered = list.filter((f) => !resolution.skipKeys.has(f.name.trim().toLowerCase()))
             if (filtered.length === 0) return
-            await doImportFiles(filtered, resolution.reimportFileIds)
+            // AQU-1365: whatever was chosen for a colliding file (update or
+            // duplicate) was the person's answer; the translation check
+            // doesn't ask about it again.
+            await doImportFiles(
+              filtered,
+              resolution.reimportFileIds,
+              new Set(collisions.map((collision) => collision.name.trim().toLowerCase())),
+            )
           })
           return
         }
@@ -1156,10 +2112,10 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * AQU-310: when `onPreview` is provided, this splits into two phases:
    *   1. Parse phase — reads all files locally, shows a preview
    *   2. Commit phase — uploads after user confirms
-   * Media files bypass preview (they have no text cells to show).
+   * Media with companion or embedded captions shows an editable cue preview.
    */
   const doImportFiles = useCallback(
-    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
+    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>, answeredNames?: ReadonlySet<string>) => {
       const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
       if (spreadsheets.length > 0) {
         if (list.length !== 1) {
@@ -1188,9 +2144,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       }
 
       // Parse text files client-side for the preview.
-      const allParsedResults: ImportResult[] = []
       const preparedByFile = new Map<File, PreparedImportFile>()
-      if (textFiles.length > 0 && onPreview) {
+      if (onPreview && (textFiles.length > 0 || mediaFiles.some(file => /\.(mp4|m4a)$/i.test(file.name)))) {
         parseAbortRef.current?.abort()
         const parseController = new AbortController()
         parseAbortRef.current = parseController
@@ -1214,7 +2169,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               excludeFrontMatter,
             })
             preparedByFile.set(file, prepared)
-            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
           if (parseController.signal.aborted) return
@@ -1229,30 +2183,98 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setImporting(false)
           setPhase("")
           return
-        } finally {
-          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
 
-        // Hand off to parent to show the preview screen.
-        // The commit closure does the actual upload.
-        onPreview(allParsedResults, async (options) => {
-          if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
-            for (const [file, prepared] of preparedByFile) {
-              preparedByFile.set(file, {
-                ...prepared,
-                results: prepared.results.map((result) => ({
-                  ...result,
-                  strings: result.epubMembers
-                    ? filterEpubStrings(result.strings, options.skipMemberPaths!)
-                    : result.strings,
-                })),
-              })
-            }
+        let reviewed: Awaited<ReturnType<typeof reviewMediaCompanions>>
+        try {
+        reviewed = await reviewMediaCompanions(list, async file => {
+          const prepared = preparedByFile.get(file)
+          const format = detectFileType(file.name)
+          if (!prepared || (format !== "vtt" && format !== "srt" && format !== "sbv")) {
+            throw new Error(t("importExport.upload.parseFailed"))
           }
-          await doCommit(list, preparedByFile, reimportFileIds)
+          return {
+            cues: prepared.results.flatMap(result => result.strings),
+            artifact: { name: file.name, format,
+              bytes: prepared.results[0]?.rawBytes ?? await file.arrayBuffer() },
+          }
+        }, async (media, sources) => {
+          const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+          if (parseController.signal.aborted) return null
+          return new Promise(resolve => {
+            mediaReviewResolver.current = resolve
+            setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
+          })
+        }, async media => {
+          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          parseController.signal.throwIfAborted()
+          assertSourceUploadByteLength(media.size)
+          const bytes = await media.arrayBuffer()
+          parseController.signal.throwIfAborted()
+          return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({
+            ...source, label: t(source.language
+              ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
+              number: index + 1, language: source.language ?? "",
+            }),
+          }))
         })
+        } catch (failure) {
+          if (!parseController.signal.aborted) {
+            setError(failure instanceof Error ? failure.message : t("importExport.upload.parseFailed"))
+            setImporting(false)
+          }
+          return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
+        }
+        if (reviewed === null) return
+        const toPreview = async (files: File[], fileIds: ReadonlyMap<string, string> | undefined) => {
+          const remainingResults = files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+          if (remainingResults.length === 0 && mediaFiles.length > 0) {
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
+            return
+          }
+
+          // Hand off to parent to show the preview screen.
+          // The commit closure does the actual upload.
+          onPreview(remainingResults, async (options) => {
+            if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
+              for (const [file, prepared] of preparedByFile) {
+                preparedByFile.set(file, {
+                  ...prepared,
+                  results: prepared.results.map((result) => ({
+                    ...result,
+                    strings: result.epubMembers
+                      ? filterEpubStrings(result.strings, options.skipMemberPaths!)
+                      : result.strings,
+                  })),
+                })
+              }
+            }
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
+          })
+        }
+
+        // AQU-1365: before any cell exists, ask about an upload that looks
+        // like a translation of a file already here (its book is here, or it
+        // says it's in the target language). The parent shows the question
+        // and resumes with the person's answer.
+        if (onTranslationCheck) {
+          const textUploads = reviewed.files.filter(file => !mediaFiles.includes(file))
+          const uploads = await uploadsForTranslationCheck(textUploads, preparedByFile, {
+            names: answeredNames ?? new Set(),
+            reimportFileIds,
+          })
+          const tookOver = uploads.length > 0 && await onTranslationCheck(uploads, async ({ leaveOut, reimportFileIds: extra }) => {
+            const files = leaveOut?.size ? reviewed.files.filter(file => !leaveOut.has(file)) : reviewed.files
+            const fileIds = extra?.size ? new Map([...(reimportFileIds ?? []), ...extra]) : reimportFileIds
+            await toPreview(files, fileIds)
+          }, reviewed.files.length)
+          if (tookOver) return
+        }
+        await toPreview(reviewed.files, reimportFileIds)
         return
       }
 
@@ -1260,7 +2282,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, onTranslationCheck, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -1269,6 +2291,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       list: File[],
       preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
       reimportFileIds?: ReadonlyMap<string, string>,
+      mediaSources?: ReadonlyMap<File, MediaTextSource>,
     ) => {
       setImporting(true)
       setProgress(null)
@@ -1341,6 +2364,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
@@ -1472,6 +2496,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
   // AQU-823: Google Drive variant — same panel state machine (importing,
   // progress, error, Paratext choice above), different file source.
+  if (mediaReview) {
+    const finishReview = (source: MediaTextSource | undefined | null) => {
+      const resolve = mediaReviewResolver.current
+      mediaReviewResolver.current = null
+      setMediaReview(null)
+      resolve?.(source)
+    }
+    return <MediaImportPreviewDialog key={mediaReview.id}
+      mediaName={mediaReview.mediaName} sources={mediaReview.sources}
+      durationMs={mediaReview.durationMs}
+      onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
+  }
   if (variant === "gdrive" && !importing) {
     return (
       <div>
@@ -1614,7 +2650,7 @@ function ParatextChoice({
   const [error, setError] = useState<string | null>(null)
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [query, setQuery] = useState("")
-  // Books the user unchecked in the preview (uppercase bookIds → skipKeys).
+  // Books left unchecked in the preview (uppercase bookIds → skipKeys).
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [expandedBook, setExpandedBook] = useState<string | null>(null)
 
@@ -1625,7 +2661,12 @@ function ParatextChoice({
   useEffect(() => {
     let cancelled = false
     prepareParatextProject(entries, { excludeFrontMatter })
-      .then((p) => { if (!cancelled) setPlan(p) })
+      .then((p) => {
+        if (cancelled) return
+        setPlan(p)
+        // Opt-in: every book starts unchecked; the user picks what to bring in.
+        setExcluded(new Set(p.books.map((b) => b.book.bookId.toUpperCase())))
+      })
       .catch((err) => {
         if (cancelled) return
         posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
@@ -1870,6 +2911,19 @@ function ParatextChoice({
         </p>
       </div>
       {plan && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline hover:text-foreground"
+            onClick={() =>
+              setExcluded(excluded.size === 0 ? new Set(plan.books.map((b) => b.book.bookId.toUpperCase())) : new Set())
+            }
+          >
+            {excluded.size === 0 ? t("importExport.review.deselectAll") : t("common.selectAll")}
+          </button>
+        </div>
+      )}
+      {plan && (
         // Native overflow scroll: ScrollArea's size-full viewport can't resolve
         // against a max-h-only root, so long book lists paint past the border.
         <div className="max-h-56 overflow-y-auto rounded border">
@@ -1955,19 +3009,28 @@ interface EBiblePanelProps {
   targetLanguage: string
   targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: a whole-Bible eBible import lands as one file per book, so this
+   *  takes the full list rather than a single reference. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   /** When provided, enables the "into target" mode toggle (AQU-191). */
   sourceCells?: SourceCellRef[]
   /** Called after a successful target-column import (no new FileReference). */
   onTargetImported?: () => void
+  /**
+   * AQU-1365: fixes the mode and hides the "New source file / Into target
+   * column" tabs, because the Import dialog's "What are you importing?" has
+   * already said which. Absent, the tabs show whenever `sourceCells` has lines.
+   */
+  mode?: EBiblePanelMode
 }
 
 type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported, mode: fixedMode }: EBiblePanelProps) {
   const t = useT()
-  const [mode, setMode] = useState<EBiblePanelMode>("source")
+  const [chosenMode, setMode] = useState<EBiblePanelMode>("source")
+  const mode = fixedMode ?? chosenMode
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
   const [targetProgress, setTargetProgress] = useState<EBibleTargetProgress | null>(null)
@@ -2020,7 +3083,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
     abortRef.current = new AbortController()
 
     try {
-      const ref = await importEBible(
+      const refs = await importEBible(
         selected,
         {
           projectId,
@@ -2034,7 +3097,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       )
       // Propagate the eBible translation's language code as the inferred
       // sourceLanguage so the project can seed it when unset (AQU-249).
-      await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
+      await onImported(refs, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
@@ -2150,8 +3213,9 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
   // ── Shared translation picker ────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3">
-      {/* Mode toggle — only shown when target-import is possible */}
-      {sourceCells && sourceCells.length > 0 && (
+      {/* Mode toggle — only shown when target-import is possible and the
+          dialog hasn't already fixed the mode (AQU-1365) */}
+      {!fixedMode && sourceCells && sourceCells.length > 0 && (
         <Tabs
           value={mode}
           onValueChange={(value) => setMode(value as EBiblePanelMode)}
@@ -2321,7 +3385,8 @@ interface HelloaoPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** AQU-1187: a Hello AO import lands as one file per selected book. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
 }
 
 function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
@@ -2335,7 +3400,8 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
   const [books, setBooks] = useState<HelloaoBook[] | null>(null)
   const [booksErr, setBooksErr] = useState<string | null>(null)
   const [checkedBooks, setCheckedBooks] = useState<Set<string>>(new Set())
-  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT">("all")
+  // "custom" = no preset highlighted (the opt-in default, or after Deselect all).
+  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT" | "custom">("custom")
 
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
@@ -2382,23 +3448,23 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     setBooks(null)
     setBooksErr(null)
     setCheckedBooks(new Set())
-    setBookPreset("all")
+    setBookPreset("custom")
     fetchHelloaoBooks(tr.id)
       .then((list) => {
+        // Opt-in: nothing is checked until the user picks books or a preset.
         setBooks(list)
-        // Default: everything selected (whole bible).
-        setCheckedBooks(new Set(list.map((b) => b.id)))
-        setBookPreset("all")
       })
       .catch((err) => {
         setBooksErr(err instanceof Error ? err.message : String(err))
       })
   }
 
-  function applyPreset(preset: "all" | "OT" | "NT") {
+  function applyPreset(preset: "all" | "OT" | "NT" | "custom") {
     if (!books) return
     setBookPreset(preset)
-    if (preset === "all") {
+    if (preset === "custom") {
+      setCheckedBooks(new Set())
+    } else if (preset === "all") {
       setCheckedBooks(new Set(books.map((b) => b.id)))
     } else {
       setCheckedBooks(new Set(books.filter((b) => getTestament(b.id) === preset).map((b) => b.id)))
@@ -2424,7 +3490,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     try {
       // Whole-bible selection passes null so the parser skips no books.
       const selection = checkedBooks.size === books.length ? null : checkedBooks
-      const ref = await importHelloao(
+      const refs = await importHelloao(
         selected,
         selection,
         {
@@ -2437,7 +3503,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         setProgress,
         abortRef.current.signal
       )
-      await onImported(ref, { sourceLanguage: selected.language || undefined })
+      await onImported(refs, { sourceLanguage: selected.language || undefined })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
@@ -2494,6 +3560,14 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
               <span className="ml-auto text-xs text-muted-foreground">
                 {t("importExport.helloao.booksSelected", { checked: checkedBooks.size, total: books.length })}
               </span>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+                disabled={importing || checkedBooks.size === 0}
+                onClick={() => applyPreset("custom")}
+              >
+                {t("importExport.review.deselectAll")}
+              </button>
             </div>
 
             <ScrollArea className="h-64 rounded-md border">
@@ -3530,231 +4604,6 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
   )
 }
 
-// ---------------------------------------------------------------------------
-// Biblica Study Bible Notes (IDML) panel
-// ---------------------------------------------------------------------------
-
-/**
- * One tick-box option on the Biblica panel: the label doubles as the control's
- * accessible name, and the hint under it says what ticking the box changes.
- */
-function BiblicaOption({
-  label,
-  hint,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  hint: string
-  checked: boolean
-  disabled: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-      <Checkbox
-        className="mt-0.5"
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(next) => onChange(next === true)}
-        aria-label={label}
-      />
-      <span className="flex flex-col gap-0.5">
-        <span>{label}</span>
-        <span className="text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </label>
-  )
-}
-
-interface BiblicaPanelProps {
-  projectId: string
-  username: string
-  sourceLanguage?: string
-  targetLanguage?: string
-  getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference) => void | Promise<void>
-}
-
-function BiblicaPanel({
-  projectId,
-  username,
-  sourceLanguage,
-  targetLanguage,
-  getToken,
-  onImported,
-}: BiblicaPanelProps) {
-  const t = useT()
-  const [importing, setImporting] = useState(false)
-  const [progress, setProgress] = useState<BiblicaProgress | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [file, setFile] = useState<File | null>(null)
-  // Off by default: each InDesign line stays one cell unless the translator opts in.
-  const [splitSentences, setSplitSentences] = useState(false)
-  // The four Biblica templates disagree about what a paragraph style means — a
-  // study Bible marks its notes, the next two mark scripture instead, and an EBL
-  // guide has no scripture to mark — and nothing in the package says which title
-  // it is, so the person importing it does. One edition at a time, hence a single
-  // value rather than a flag per title.
-  const [edition, setEdition] = useState<BiblicaEdition>("study-notes")
-
-  async function handleImport() {
-    if (!file || importing) return
-    setImporting(true)
-    setError(null)
-    setProgress({ phase: "parse" })
-    try {
-      const ref = await importBiblicaStudyNotes(
-        file,
-        {
-          projectId,
-          author: username,
-          ...(sourceLanguage ? { sourceLanguage } : {}),
-          ...(targetLanguage ? { targetLanguage } : {}),
-          getToken,
-        },
-        setProgress,
-        { splitSentences, edition },
-      )
-      await onImported(ref)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
-    } finally {
-      setImporting(false)
-      setProgress(null)
-    }
-  }
-
-  function chooseEdition(next: BiblicaEdition, checked: boolean) {
-    setEdition(checked ? next : "study-notes")
-    setError(null)
-  }
-
-  return (
-    <div className="flex flex-col gap-4 py-2">
-      <p className="text-xs text-muted-foreground">
-        {edition === "treasure-hunt"
-          ? t("importExport.biblica.descriptionTreasureHunt")
-          : edition === "reach4life"
-          ? t("importExport.biblica.descriptionReach4Life")
-          : edition === "ebl"
-          ? t("importExport.biblica.descriptionEbl")
-          : t("importExport.biblica.description")}
-      </p>
-      <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
-          {file
-            ? file.name
-            : edition === "treasure-hunt" ? t("importExport.biblica.chooseFileTreasureHunt")
-            : edition === "reach4life" ? t("importExport.biblica.chooseFileReach4Life")
-            : edition === "ebl" ? t("importExport.biblica.chooseFileEbl")
-            : t("importExport.biblica.chooseFile")}
-          <input
-            type="file"
-            className="hidden"
-            accept=".idml"
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null
-              setFile(f)
-              setError(null)
-            }}
-            disabled={importing}
-          />
-        </Button>
-        {file && !importing && (
-          <p className="text-xs text-muted-foreground">
-            {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
-          </p>
-        )}
-        {/* How finely to cut the text, which every edition answers the same way. */}
-        <BiblicaOption
-          label={t("importExport.biblica.splitSentencesLabel")}
-          hint={t("importExport.biblica.splitSentencesHint")}
-          checked={splitSentences}
-          disabled={importing}
-          onChange={setSplitSentences}
-        />
-      </div>
-      {/* Which template to read the package with — a different question, and the
-          three answers are alternatives, so they are grouped away from the cut
-          setting above rather than sitting in one undifferentiated list. */}
-      <fieldset className="flex flex-col gap-2 border-t border-border/60 pt-4">
-        <legend className="sr-only">{t("importExport.biblica.editionQuestion")}</legend>
-        <div className="flex flex-col gap-0.5">
-          <span aria-hidden className="text-sm font-medium">
-            {t("importExport.biblica.editionQuestion")}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {t("importExport.biblica.editionQuestionHint")}
-          </span>
-        </div>
-        <BiblicaOption
-          label={t("importExport.biblica.treasureHuntLabel")}
-          hint={t("importExport.biblica.treasureHuntHint")}
-          checked={edition === "treasure-hunt"}
-          disabled={importing}
-          onChange={(checked) => chooseEdition("treasure-hunt", checked)}
-        />
-        <BiblicaOption
-          label={t("importExport.biblica.reach4lifeLabel")}
-          hint={t("importExport.biblica.reach4lifeHint")}
-          checked={edition === "reach4life"}
-          disabled={importing}
-          onChange={(checked) => chooseEdition("reach4life", checked)}
-        />
-        <BiblicaOption
-          label={t("importExport.biblica.eblLabel")}
-          hint={t("importExport.biblica.eblHint")}
-          checked={edition === "ebl"}
-          disabled={importing}
-          onChange={(checked) => chooseEdition("ebl", checked)}
-        />
-      </fieldset>
-      {progress && (
-        <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" && (
-            <p>
-              {progress.idml?.total
-                ? t("importExport.biblica.readingPackageWithProgress", {
-                    completed: progress.idml.completed,
-                    total: progress.idml.total,
-                  })
-                : t("importExport.biblica.readingPackage")}
-            </p>
-          )}
-          {progress.phase === "save" && progress.cellsTotal && (
-            <>
-              <p>
-                {t("importExport.tn.uploadingNotes", {
-                  enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
-                  total: progress.cellsTotal.toLocaleString(),
-                })}
-              </p>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
-                />
-              </div>
-              {progress.verseUnitCount ? (
-                <p className="mt-1.5">
-                  {t("importExport.biblica.paragraphsSkipped", { count: progress.verseUnitCount })}
-                </p>
-              ) : null}
-            </>
-          )}
-        </div>
-      )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <div className="flex justify-end">
-        <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
-        </Button>
-      </div>
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Translation Notes (TSV) panel (AQU-179)

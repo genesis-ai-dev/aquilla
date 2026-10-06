@@ -7,7 +7,10 @@
 // store — every request re-authenticates the `aqk_` bearer credential via
 // validateApiCredential, exactly like the REST external surface. A missing or
 // invalid credential is an HTTP 401 with the errors.ts envelope (not a JSON-RPC
-// error), so transports fail fast before any method runs.
+// error), so transports fail fast before any method runs. The 401 carries a
+// `WWW-Authenticate` challenge naming the RFC 9728 metadata, which is how
+// OAuth-capable hosts (ChatGPT plugins, Claude, Codex) discover sign-in; the
+// token they come back with is an ordinary `aqk_` credential.
 //
 // Methods: initialize, notifications/initialized (202), ping, tools/list,
 // tools/call. Unknown method -> JSON-RPC -32601. The tool layer (mcp-handlers.ts)
@@ -15,11 +18,15 @@
 
 import { externalError } from './errors'
 import { AUTH_HINT } from './discovery-route'
+import { CHATGPT_TOOLS, CHATGPT_INSTRUCTIONS } from './mcp-chatgpt-tools'
+import { callChatGptTool } from './mcp-chatgpt'
 import { MCP_TOOLS } from './mcp-tools'
 import { callTool, UNKNOWN_TOOL } from './mcp-handlers'
 import { matchUiOnly, uiOnlyHint } from './ui-only'
+import { MCP_SERVER_INSTRUCTIONS } from './mcp-instructions'
+import { mcpWwwAuthenticate, publicBaseFrom, mcpResourceUrl } from './mcp-oauth-metadata'
 import type { ExternalEnv } from './types'
-import { validateApiCredential } from '../../../db/shared/api-credentials'
+import { validateApiCredential, McpDelegatedRequest } from '../../../db/shared/api-credentials'
 
 const MCP_PATH = '/api/v1/external/mcp'
 /** Discovery root, quoted in uiOnly hints so an agent can read the full list. */
@@ -52,10 +59,21 @@ function rpcError(id: JsonRpcId, code: number, message: string): Response {
   return Response.json({ jsonrpc: '2.0', id, error: { code, message } })
 }
 
+/** A 401 that tells an MCP client where to get a token (RFC 9728 §5.1). Without
+ *  the header, ChatGPT and other OAuth-capable hosts cannot start sign-in. */
+function unauthorized(response: Response, challenge: string): Response {
+  response.headers.set('WWW-Authenticate', challenge)
+  response.headers.set('Access-Control-Expose-Headers', 'WWW-Authenticate')
+  return response
+}
+
 export async function handleExternalMcpRequest(
   request: Request,
   env: ExternalEnv,
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
+  /** Path prefix the deployed worker is mounted under (`/sync`), stripped from
+   *  `request` before routing. Needed to advertise the public metadata URL. */
+  mountPrefix = '',
 ): Promise<Response | null> {
   const url = new URL(request.url)
   if (url.pathname !== MCP_PATH) return null
@@ -82,18 +100,31 @@ export async function handleExternalMcpRequest(
   if (!env.AQUILLA_PG) return externalError('job_failed', 'AQUILLA_PG not configured', 500)
 
   // Stateless auth: re-validate the credential on every request.
+  const publicBase = publicBaseFrom(request.url, mountPrefix)
   const token = bearer(request)
   if (!token) {
-    return externalError('permission_denied', `missing Authorization header — ${AUTH_HINT}`, 401)
-  }
-  const cred = await validateApiCredential(env.AQUILLA_PG, token, request.headers.get('CF-Connecting-IP'))
-  if (!cred) {
-    return externalError(
-      'permission_denied',
-      `invalid, revoked, or expired API credential — ${AUTH_HINT}`,
-      401,
+    return unauthorized(
+      externalError('permission_denied', `missing Authorization header — ${AUTH_HINT}`, 401),
+      mcpWwwAuthenticate(publicBase),
     )
   }
+  const cred = await validateApiCredential(env.AQUILLA_PG, token, request.headers.get('CF-Connecting-IP'), mcpResourceUrl(publicBase))
+  if (!cred) {
+    return unauthorized(
+      externalError(
+        'permission_denied',
+        `invalid, revoked, or expired API credential — ${AUTH_HINT}`,
+        401,
+      ),
+      mcpWwwAuthenticate(publicBase, {
+        code: 'invalid_token',
+        description: 'invalid, revoked, or expired API credential',
+      }),
+    )
+  }
+
+  const chatGpt = cred.oauthResource !== undefined
+  env = { ...env, mcpRequest: (input, init) => new McpDelegatedRequest(mcpResourceUrl(publicBase), input, init) }
 
   let message: JsonRpcRequest
   try {
@@ -124,7 +155,10 @@ export async function handleExternalMcpRequest(
       return rpcResult(id, {
         protocolVersion: clientVersion,
         capabilities: { tools: {} },
-        serverInfo: { name: 'aquilla', version: '0.1.0' },
+        serverInfo: { name: 'aquilla', title: 'Aquilla', version: '0.2.0' },
+        // Cross-tool workflow guidance. ChatGPT, Claude and Codex read this
+        // alongside the tool descriptions (see mcp-instructions.ts).
+        instructions: chatGpt ? CHATGPT_INSTRUCTIONS : MCP_SERVER_INSTRUCTIONS,
       })
     }
 
@@ -132,7 +166,7 @@ export async function handleExternalMcpRequest(
       return rpcResult(id, {})
 
     case 'tools/list':
-      return rpcResult(id, { tools: MCP_TOOLS })
+      return rpcResult(id, { tools: chatGpt ? CHATGPT_TOOLS : MCP_TOOLS })
 
     case 'tools/call': {
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown }
@@ -143,7 +177,7 @@ export async function handleExternalMcpRequest(
         typeof params.arguments === 'object' && params.arguments !== null
           ? (params.arguments as Record<string, unknown>)
           : {}
-      const result = await callTool(params.name, args, env, cred, token, ctx)
+      const result = await (chatGpt ? callChatGptTool : callTool)(params.name, args, env, cred, token, ctx)
       if (result === UNKNOWN_TOOL) {
         // AQU-1178: an invented tool name is often a probe at a deliberately
         // browser-only surface (mint_credential, delete_project, approve_...).

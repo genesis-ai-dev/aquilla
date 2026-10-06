@@ -21,10 +21,37 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /**
+   * AQU-777: open the attachments drawer scrolled to one attachment. Fired by
+   * an attachment link under a cell. Here rather than on the row bag for this
+   * module's whole reason: the workspace owns the drawer state and renders it
+   * outside the table, so a row only needs a stable way to fire it.
+   */
+  onOpenAttachment?: (cellId: string, attachmentId: string) => void
+  /**
+   * AQU-777: this file's attachments, by cell id. Rows read their own group
+   * out of it to render the links under the cell and count the rail's badge.
+   *
+   * ONE MAP FOR THE FILE, not a per-row array, and that is the point: a fresh
+   * array per row would fail MemoizedRow's shallow compare for every rendered
+   * row on every attach. The map identity changes only when the file's
+   * attachments actually change.
+   */
+  attachmentsByCell?: ReadonlyMap<string, readonly import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord[]>
+  /**
+   * AQU-777: an attachment just landed on this cell, with a record shaped like
+   * the server's. The workspace merges it optimistically so the link shows
+   * before the outbox flush lands.
+   */
+  onAttachmentAdded?: (
+    record: import("@/lib/sync/cell-attachments-read-types").CellAttachmentRecord,
+  ) => void
   /** Opens the matching concept in the Terminology page. */
   onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
-  onOpenRecording?: (cellId: string) => void
+  /** Open the recorder on a line, recording onto `slot` (the main track when
+   *  absent) — the Recording tab's New take names its take's track. */
+  onOpenRecording?: (cellId: string, slot?: string) => void
   /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,
@@ -56,6 +83,12 @@ export interface EditorActionsContextValue {
     opts?: { applyToSpeaker?: boolean },
   ) => void
   /**
+   * How many lines in the file share this cast name — what the gutter
+   * picker's "Apply to all «name» lines" would change (Sam, 2026-09-28).
+   * Asked only when the picker opens, never per row per render.
+   */
+  countCastLines?: (castName: string) => number
+  /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
    * member isn't offered a guaranteed-403 validate on an out-of-scope cell.
@@ -71,6 +104,12 @@ export interface EditorActionsContextValue {
    * identity-stable in the workspace.
    */
   onTakeSaved?: (cellId: string) => void
+  /**
+   * The cell's last recording was deleted from the Recording tab (2026-09-29)
+   * — the same reset of the target row the recorder's delete triggers.
+   * Identity-stable in the workspace, like `onTakeSaved`.
+   */
+  onLastTakeRemoved?: (cellId: string) => void
   /**
    * AQU-646 stage 3f: where this row's audio actually belongs.
    *
@@ -131,6 +170,17 @@ export interface EditorActionsContextValue {
   onInsertCellBeside?: (cellId: string, position: "above" | "below") => void
   /** Take this cell out, after the confirmation its inventory earns. */
   onRemoveCell?: (cellId: string) => void
+  /**
+   * AQU-1422: park this cell, or bring it back. The reversible sibling of
+   * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no
+   * Maintainer: the source text, every lane's translation, recordings, comments
+   * and validations are all still there and come back untouched.
+   *
+   * Absent ⇒ this person may not park cells here at all (the same gate as
+   * "Edit text": Project Lead and up on a cloud project whose source is neither
+   * live-linked nor DCS-pinned).
+   */
+  onSetCellHidden?: (cellId: string, hidden: boolean) => void
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

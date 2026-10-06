@@ -47,7 +47,7 @@ import { checkProjectMembershipDetailed, type MembershipDetail } from './members
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { createCommentFloorsCache } from './comment-floors'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
-import { laneRelevantHeadSeq } from './link-sync'
+import { collectLaneTouches, notifyLiveDownstreamsOfUpstreamChanges } from './link-notify'
 import {
   fileProgressRecomputeStmt,
   fullProgressRecomputeStmts,
@@ -67,177 +67,6 @@ const BATCH_LIMIT = 100
 // transactions degrade every other project sharing it, not just this one.
 const MAX_EVENTS_PER_REQUEST = 500
 
-// ── FRO-479 push accelerator: notify live downstreams of upstream commits ──
-//
-// Hard constraint (spec §8): push is a LOSSY ACCELERATOR, never load-bearing.
-// The FRO-476 mirror sync (lazy-pull on file open, `POST /link/sync`) is the
-// deterministic self-healing floor — this hook only shaves the "next open"
-// wait down to "seconds" for downstreams that are already connected. It must
-// never perform an eager fan-out WRITE on the upstream commit path (no events
-// minted here, no DB writes) and must never be awaited before the response.
-//
-// Lane-relevant kinds mirror `LANE_KINDS_SOURCE` in link-sync.ts (not
-// exported there — re-declared per the FRO-479 dispatch note rather than
-// touching a forbidden file). Comments/audio/BT/validation events on a
-// consumes=source link never mirror, so they must never produce a frame —
-// a probe/notify that counted them would make every downstream "blink" on
-// unrelated upstream noise.
-const LINK_NOTIFY_LANE_KINDS: ReadonlySet<string> = new Set([
-  'source.cell.create',
-  'source.cell.commit',
-  'source.cell.delete',
-  'source.cell.mirror',
-  'cell.retime',
-  'cast.assign',
-  'file.create',
-])
-
-/** Per-commit cap on distinct cell ids carried in the frame (spec §8: "capped
- *  at 64"). The rest converge lazily via the mirror sync's own delta fold —
- *  this is a hint for a targeted client refetch, not the source of truth. */
-const LINK_NOTIFY_CELL_ID_CAP = 64
-
-/** Per-commit cap on the number of downstream projects notified. At scale
- *  (spec: up to 600 downstreams) the rest converge lazily on next file open;
- *  notifying is strictly best-effort so under-notifying is safe. */
-const LINK_NOTIFY_DOWNSTREAM_CAP = 50
-
-/** How long a project's downstream list is cached in-isolate before being
- *  re-queried (spec §8: "cached in-memory per isolate with short TTL"). Link
- *  creation/detach is a rare admin action, so a short window trades a little
- *  staleness on the notify path (never load-bearing) for avoiding a query on
- *  every single commit. */
-const LINK_NOTIFY_DOWNSTREAM_CACHE_TTL_MS = 30_000
-
-interface DownstreamCacheEntry {
-  downstreamIds: string[]
-  expiresAt: number
-}
-
-// Isolate-lifetime cache — module scope is intentional (mirrors the pattern
-// already used for per-isolate memoization elsewhere in this worker). Keyed
-// by upstream project id.
-const downstreamCache = new Map<string, DownstreamCacheEntry>()
-
-/** Test-only escape hatch: the cache is module-scoped (isolate lifetime) by
- *  design, which otherwise leaks state between test cases running in the
- *  same vitest module instance. Not used by production code paths. */
-export function __resetLinkNotifyDownstreamCacheForTests(): void {
-  downstreamCache.clear()
-}
-
-/**
- * Live (non-clone) downstreams of `upstreamProjectId`. Clone-mode downstreams
- * never receive push frames (spec: "Clone-mode downstreams receive no
- * frames") — they have no mirror sync to trigger and no staleness to refetch.
- */
-async function loadLiveDownstreams(
-  db: AquillaDb,
-  upstreamProjectId: string,
-  now: number,
-): Promise<string[]> {
-  const cached = downstreamCache.get(upstreamProjectId)
-  if (cached && cached.expiresAt > now) return cached.downstreamIds
-
-  const { results } = await db
-    .prepare(
-      `SELECT id FROM projects
-       WHERE source_project_id = ?
-         AND source_link_mode IS NOT NULL
-         AND source_link_mode != 'clone'`,
-    )
-    .bind(upstreamProjectId)
-    .all<{ id: string }>()
-
-  const downstreamIds = results.map((r) => r.id)
-  downstreamCache.set(upstreamProjectId, {
-    downstreamIds,
-    expiresAt: now + LINK_NOTIFY_DOWNSTREAM_CACHE_TTL_MS,
-  })
-  return downstreamIds
-}
-
-/**
- * Send `link.upstream-changed` frames to every live downstream of every
- * project that just committed lane-relevant events in this request. Called
- * via `ctx.waitUntil` AFTER the response is built (see call site) — never
- * awaited in the request path, so downstream count can never regress
- * upstream commit latency (spec acceptance criterion).
- *
- * `committed` is grouped by upstream (project that committed), each with
- * the lane-relevant file/cell ids touched.
- */
-async function notifyLiveDownstreamsOfUpstreamChanges(
-  db: AquillaDb,
-  projectSync: DurableObjectNamespace,
-  secretKey: string,
-  committed: ReadonlyMap<string, { fileIds: Set<string>; cellIds: Set<string> }>,
-): Promise<void> {
-  const now = Date.now()
-  const sends: Promise<void>[] = []
-
-  for (const [upstreamProjectId, delta] of committed) {
-    let downstreamIds: string[]
-    try {
-      downstreamIds = await loadLiveDownstreams(db, upstreamProjectId, now)
-    } catch (err) {
-      console.warn('[events/route] link-notify: downstream lookup failed:', err)
-      continue
-    }
-    if (downstreamIds.length === 0) continue
-
-    // Advisory only — the client never gates on this value, it's an
-    // audit-trail hint (spec §8). Reading it here (post-response, inside
-    // waitUntil) costs nothing on the commit path.
-    let untilSeq = 0
-    try {
-      untilSeq = await laneRelevantHeadSeq(db, upstreamProjectId)
-    } catch (err) {
-      console.warn('[events/route] link-notify: head-seq probe failed:', err)
-    }
-
-    const cellIds = [...delta.cellIds].slice(0, LINK_NOTIFY_CELL_ID_CAP)
-    const fileIds = [...delta.fileIds]
-    const notified = downstreamIds.slice(0, LINK_NOTIFY_DOWNSTREAM_CAP)
-
-    for (const downstreamId of notified) {
-      const frame = {
-        t: 'link.upstream-changed',
-        project: downstreamId,
-        upstream: upstreamProjectId,
-        untilSeq,
-        fileIds,
-        cellIds,
-      }
-      const id = projectSync.idFromName(downstreamId)
-      const stub = projectSync.get(id)
-      sends.push(
-        stub
-          .fetch('http://do.internal/__broadcast', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${secretKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(frame),
-          })
-          .then(async (res) => {
-            if (!res.ok) {
-              console.warn(
-                `[events/route] link-notify broadcast failed for ${downstreamId}: HTTP ${res.status}`,
-              )
-            }
-          })
-          .catch((err) => {
-            console.warn('[events/route] link-notify broadcast error:', err)
-          }),
-      )
-    }
-  }
-
-  await Promise.all(sends)
-}
-
 /**
  * Cell-content kinds whose `event.applied` frame carries `serverSeq` + the
  * cell's current projected `rows`: the chain-mutating kinds (create / commit /
@@ -245,7 +74,17 @@ async function notifyLiveDownstreamsOfUpstreamChanges(
  * `cells.validated` without advancing the chain head.
  */
 function isEventAppliedRowsKind(kind: string): boolean {
-  return isChainMutatingKind(kind) || kind === 'cell.validate' || kind === 'cell.unvalidate'
+  return (
+    isChainMutatingKind(kind) ||
+    kind === 'cell.validate' ||
+    kind === 'cell.unvalidate' ||
+    // AQU-1422: a hide/show changes the cell's projected rows without being
+    // chain-mutating, so it has to be named here. Left out, the frame carries no
+    // `rows` and every collaborator's client falls back to a by-ids refetch to
+    // learn a row left the file — correct, but a round trip for a one-column
+    // change we already have in hand.
+    kind === 'source.cell.visibility.set'
+  )
 }
 
 /** Above this many distinct cells in one request, `rows` is omitted from every
@@ -369,6 +208,8 @@ export interface EventsRouteEnv {
   EMAIL_FROM?: string
   /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
   BASE_URL?: string
+  /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
+  LANE_READ_WALL?: string
 }
 
 interface AcceptedEntry {
@@ -669,6 +510,11 @@ async function prefetchCommentAuthors(
   return authors
 }
 
+/** A target cell in one lane — `cellKeyOf` plus the lane's tag ('' = default). */
+function laneCellKeyOf(projectId: string, fileId: string, cellId: string, lane: string): string {
+  return `${cellKeyOf(projectId, fileId, cellId)}\0${lane}`
+}
+
 /**
  * `last_editor` of each target cell in `cells`, in ONE SELECT. Backs the
  * FRO-189 self-validation check (cell.validate with allowSelfValidation
@@ -676,13 +522,21 @@ async function prefetchCommentAuthors(
  * cell.validate candidate regardless of the project's allowSelfValidation
  * setting — a superset read is cheap and the setting isn't known until the
  * per-event loop reads readProjectSettings (memoized separately).
+ *
+ * AQU-1571: keyed per LANE. Every lane is its own target row, and keying by
+ * cell alone kept whichever row the database returned last — so on a cell
+ * translated in two lanes, validating one lane was judged against the other
+ * lane's editor: a reviewer refused for somebody else's work, or let through
+ * on their own, depending on row order. `heads` is every target head of these
+ * cells, which the check treats as an edit the server knows.
  */
 async function prefetchLastEditors(
   db: AquillaDb,
   cells: readonly CellKey[],
-): Promise<Map<string, string | null>> {
+): Promise<{ editors: Map<string, string | null>; heads: Set<string> }> {
   const editors = new Map<string, string | null>()
-  if (cells.length === 0) return editors
+  const heads = new Set<string>()
+  if (cells.length === 0) return { editors, heads }
 
   const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
   const binds: unknown[] = []
@@ -690,16 +544,86 @@ async function prefetchLastEditors(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, last_editor FROM cells
+      `SELECT project_id, file_id, cell_id, target_lang, event_id, last_editor FROM cells
        WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
-    .all<{ project_id: string; file_id: string; cell_id: string; last_editor: string | null }>()
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      target_lang: string | null; event_id: string | null; last_editor: string | null
+    }>()
 
   for (const r of results) {
-    editors.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.last_editor)
+    editors.set(laneCellKeyOf(r.project_id, r.file_id, r.cell_id, r.target_lang ?? ''), r.last_editor)
+    if (r.event_id) heads.add(r.event_id)
   }
-  return editors
+  return { editors, heads }
+}
+
+interface TakeKey extends CellKey {
+  audioId: string
+}
+
+// The separator is the `\0` ESCAPE, never a literal NUL character. A literal one
+// here made grep treat this whole file as binary, which is how an AQU-1571
+// audit concluded the validation gates below did not exist (they do).
+const takeKeyOf = (projectId: string, fileId: string, cellId: string, audioId: string) =>
+  `${projectId}\0${fileId}\0${cellId}\0${audioId}`
+
+/**
+ * AQU-490: who RECORDED each take a batch is about to validate, for the audio
+ * self-validation check.
+ *
+ * The text twin above asks `cells.last_editor`, which a take has no equivalent
+ * of. `cell_audio.event_id` cannot stand in either: the transcription re-attach
+ * lands about 800ms after every recording and overwrites it, so a take would
+ * name whoever last touched it — meaning a reviewer who trimmed somebody's
+ * recording would become its recorder, and on a project with self-validation
+ * off would then be refused permission to validate it. Hence the dedicated
+ * `created_by` column, written fill-only and backfilled from the EARLIEST
+ * attach event.
+ *
+ * A NULL recorder — a take whose attach event is gone, or one on a project the
+ * rollout has not reached — is "unknown", never a match. It must not silently
+ * equal the caller.
+ *
+ * AQU-1571: the take's stored `url` comes along, so a re-attach in the same
+ * request that SWAPS the audio can be told from one that only refreshes it.
+ */
+interface StoredTake {
+  createdBy: string | null
+  url: string | null
+}
+
+async function prefetchTakeRecorders(
+  db: AquillaDb,
+  takes: readonly TakeKey[],
+): Promise<Map<string, StoredTake>> {
+  const recorders = new Map<string, StoredTake>()
+  if (takes.length === 0) return recorders
+
+  const placeholders = takes.map(() => '(?, ?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const t of takes) binds.push(t.projectId, t.fileId, t.cellId, t.audioId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, audio_id, created_by, url FROM cell_audio
+       WHERE (project_id, file_id, cell_id, audio_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{
+      project_id: string; file_id: string; cell_id: string
+      audio_id: string; created_by: string | null; url: string | null
+    }>()
+
+  for (const r of results) {
+    recorders.set(takeKeyOf(r.project_id, r.file_id, r.cell_id, r.audio_id), {
+      createdBy: r.created_by,
+      url: r.url,
+    })
+  }
+  return recorders
 }
 
 /**
@@ -875,6 +799,12 @@ export async function handleEventsWriteRequest(
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
   const validateCells = new Map<string, CellKey>()
+  /** The edits this request's cell.validate events name (AQU-1571). */
+  const validateEditIds = new Set<string>()
+  const validateTakes = new Map<string, TakeKey>()
+  /** Takes this request attaches, with the urls it attaches them under (see
+   *  the cell.audio.attach note below). */
+  const batchAttachedTakes = new Map<string, Set<string>>()
   // AQU-1296: keyed by (project, comment) — the same comment id in two
   // projects names two different rows, and the ownership check must read the
   // one belonging to the event's own project.
@@ -914,16 +844,58 @@ export async function handleEventsWriteRequest(
     // setting, which isn't known until the per-event loop below.
     if (e.kind === 'cell.validate') {
       validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+      const editEventId = (e.payload as { editEventId?: unknown } | undefined)?.editEventId
+      if (typeof editEventId === 'string' && editEventId) validateEditIds.add(editEventId)
+    }
+    // AQU-490: the audio twin (see prefetchTakeRecorders), gathered on the
+    // same terms — before the project's allowSelfValidationAudio setting is
+    // known, because it is not known until the per-event loop below.
+    if (e.kind === 'cell.audio.validate') {
+      const audioId = (e.payload as { audioId?: unknown } | undefined)?.audioId
+      if (typeof audioId === 'string' && audioId) {
+        validateTakes.set(`${key}\u0000${audioId}`, {
+          projectId: e.projectId, fileId: e.fileId, cellId: e.cellId, audioId,
+        })
+      }
+    }
+    // AQU-490: which takes this request ATTACHES. The prefetch below reads
+    // cell_audio, which cannot know about a row this same request is about to
+    // create — and that is exactly the recorder's own save: the modal enqueues
+    // the attach and its auto-validation back to back with no server ack
+    // between them, and the flusher posts them together. So the self-
+    // validation gate was a no-op on the one path it exists to guard.
+    // (Adversarial review, 2026-09-22.)
+    //
+    // AQU-1571: only WHICH takes, never `e.author`. That field is the client's
+    // claim; the stored author (and so cell_audio.created_by) is the token's
+    // username. Trusting it let a request attach its own take as "someone
+    // else" and validate it in the same breath. Every event in one request is
+    // authorized against the same bearer token, so a take attached here was
+    // recorded by the caller — the self-validation check below reads it that
+    // way. Collected before authorization and regardless of order, so a vote
+    // placed AHEAD of its attach in the batch is caught too.
+    if (e.kind === 'cell.audio.attach') {
+      const p = e.payload as { audioId?: unknown; url?: unknown } | undefined
+      if (typeof p?.audioId === 'string' && p.audioId) {
+        const takeKey = `${key}\u0000${p.audioId}`
+        const urls = batchAttachedTakes.get(takeKey) ?? new Set<string>()
+        if (typeof p.url === 'string') urls.add(p.url)
+        batchAttachedTakes.set(takeKey, urls)
+      }
     }
   }
-  const [existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors] =
-    await Promise.all([
+  const [
+    existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, validateTargets,
+    takeRecorders, knownEditIds,
+  ] = await Promise.all([
       readExistingEventIds(db, candidateIds),
       prefetchChainWinners(db, [...chainCells.values()]),
       prefetchCellHeads(db, [...chainCells.values()]),
       prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
       prefetchCommentAuthors(db, foreignComments),
       prefetchLastEditors(db, [...validateCells.values()]),
+      prefetchTakeRecorders(db, [...validateTakes.values()]),
+      readExistingEventIds(db, validateEditIds),
     ])
 
   // PERF-2: project_settings is read at most once per (request, project) —
@@ -973,7 +945,7 @@ export async function handleEventsWriteRequest(
 
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache, env.LANE_READ_WALL)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
@@ -1093,7 +1065,14 @@ export async function handleEventsWriteRequest(
       parentId: rawEvent.parentId ?? null,
       kind: rawEvent.kind,
       author: authResult.event.claims.username,
-      payload: rawEvent.payload,
+      // AQU-1612: the AUTHORIZED payload, not the one off the wire. authorize()
+      // resolves an event that named its lane by `laneId` into the lane's frozen
+      // `targetLang` tag, and the chain slot + head key below are built from that
+      // tag. Reading the raw payload here would key an id-only commit on the
+      // default lane while the claim insert (handlers/cell-events.ts, which uses
+      // the authorized payload) keyed it on the real one — two slots for one
+      // lane, and two commits on a cell both winning.
+      payload: authResult.event.event.payload,
       clientTs: rawEvent.clientTs,
       serverTs,
     }
@@ -1326,6 +1305,8 @@ export async function handleEventsWriteRequest(
     //   1. validationRoleFloor — reject if caller's role < configured floor
     //   2. validationNamedUsers — reject if caller is not in the allowlist
     //   3. allowSelfValidation=false — reject if caller is the cell's last editor
+    //      in the validated lane, or made the edit in this same request; and
+    //      reject a vote on an edit the server has never seen (AQU-1571)
     //   4. (FRO-279) validationCount — read for the projection's threshold recompute
     // For cell.unvalidate events:
     //   The FRO-189 role/named/self checks do NOT apply (unvalidation is always
@@ -1391,16 +1372,188 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const lastEditor = lastEditors.get(
-            cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+          // The AUTHORIZED payload: an event may name its lane by `laneId`
+          // alone (AQU-1612), and authorize() fills in the tag. Off the wire
+          // such a vote read as a default-lane vote and was judged by that
+          // lane's editor instead of its own.
+          const p = authResult.event.event.payload as
+            | { editEventId?: unknown; targetLang?: unknown }
+            | undefined
+          const lane = typeof p?.targetLang === 'string' ? p.targetLang : ''
+          const editEventId = typeof p?.editEventId === 'string' ? p.editEventId : undefined
+          // AQU-1571: the last editor was read BEFORE this request, so an edit
+          // made in the same request as its own vote went unseen — commit and
+          // validate in one post and the gate compared against the previous
+          // editor. Every event in one request is authorized against the same
+          // bearer token, so an edit this request introduces is the caller's.
+          // (An id already stored is a retry, and its row says who made it.)
+          const editedHere =
+            editEventId !== undefined && candidateIds.has(editEventId) && !existingIds.has(editEventId)
+          // AQU-1571: and a vote is stored pinned to its edit id whether or
+          // not that edit exists, while event ids are the client's to choose.
+          // Voting on an id first and committing under it afterwards made the
+          // vote count for its own author. The edit must be one the server has
+          // seen — any stored event, or a target head the projection holds
+          // (data older than the event log has heads without rows) — or one
+          // this request makes. A malformed payload is left to the handler.
+          if (
+            editEventId !== undefined &&
+            !editedHere &&
+            !knownEditIds.has(editEventId) &&
+            !validateTargets.heads.has(editEventId)
+          ) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `validating an edit before it is saved is not allowed on this project`,
+            })
+            continue
+          }
+          const lastEditor = validateTargets.editors.get(
+            laneCellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, lane),
           )
-          if (lastEditor === callerUsername) {
+          if (editedHere || lastEditor === callerUsername) {
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,
               reason: `self-validation is not allowed on this project`,
             })
             continue
+          }
+        }
+      }
+    }
+
+    // ── Audio validation config enforcement (AQU-490) ──────────────────────
+    // The same three gates as FRO-189 above, read from the project's SEPARATE
+    // audio keys: a project can want two ears on a recording and one on a
+    // translation, or trust a different set of people with each. The audio
+    // keys are never read as fallbacks for the text ones and vice versa —
+    // absent means unrestricted on both sides.
+    //
+    // Settings failure stays non-fatal here exactly as it is above: skip
+    // enforcement rather than block every validate in the project.
+    if (rawEvent.kind === 'cell.audio.validate' || rawEvent.kind === 'cell.audio.unvalidate') {
+      const parsed = await readProjectSettings(rawEvent.projectId)
+
+      // Stripping SOMEBODY ELSE'S vote is a maintainer act, and the only place
+      // it can be gated: by the time the event reaches the projection the
+      // question is settled, and the projection honours the field as written.
+      // A payload with no targetUsername means "remove my own", which anyone
+      // who could cast it may do.
+      if (rawEvent.kind === 'cell.audio.unvalidate') {
+        const target = (rawEvent.payload as { targetUsername?: unknown } | undefined)?.targetUsername
+        if (typeof target === 'string' && target.trim() && target.trim() !== callerUsername) {
+          if (callerRole < ROLE.MAINTAINER) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `only a maintainer can remove another user's audio validation`,
+            })
+            continue
+          }
+        }
+      }
+
+      if (rawEvent.kind === 'cell.audio.validate') {
+        let roleFloor: string | undefined
+        let namedUsers: string[] | undefined
+        let allowSelf: boolean | undefined
+        if (parsed) {
+          if (typeof parsed.validationRoleFloorAudio === 'string') {
+            roleFloor = parsed.validationRoleFloorAudio as string
+          }
+          if (Array.isArray(parsed.validationNamedUsersAudio)) {
+            namedUsers = parsed.validationNamedUsersAudio as string[]
+          }
+          if (typeof parsed.allowSelfValidationAudio === 'boolean') {
+            allowSelf = parsed.allowSelfValidationAudio
+          }
+        }
+
+        // 1. Role floor.
+        if (roleFloor != null) {
+          const FLOOR_MAP: Record<string, number> = {
+            reviewer: ROLE.REVIEWER,
+            project_lead: ROLE.PROJECT_LEAD,
+            maintainer: ROLE.MAINTAINER,
+          }
+          const floorLevel = FLOOR_MAP[roleFloor]
+          if (floorLevel != null && callerRole < floorLevel) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `role too low to validate audio (project requires ${roleFloor} or above)`,
+            })
+            continue
+          }
+        }
+
+        // 2. Named-user allowlist.
+        if (namedUsers != null && namedUsers.length > 0 && !namedUsers.includes(callerUsername)) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `user '${callerUsername}' is not in the project's audio validator allowlist`,
+          })
+          continue
+        }
+
+        // 3. Self-validation, against the take's RECORDER. A NULL recorder is
+        // unknown, not a match: a take whose attach event has been pruned must
+        // not become unvalidatable-by-everyone or validatable-by-anyone by
+        // accident. The strict === on two strings gives that for free, and it
+        // is the reason this reads the column rather than the event author.
+        if (allowSelf === false && rawEvent.fileId && rawEvent.cellId) {
+          const audioId = (rawEvent.payload as { audioId?: unknown } | undefined)?.audioId
+          if (typeof audioId === 'string' && audioId) {
+            const takeKey = takeKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId, audioId)
+            const attachedHere = batchAttachedTakes.has(takeKey)
+            // AQU-1571: a take the server has never seen is NOT an unknown
+            // recorder. The vote is stored keyed by audio id whether or not the
+            // take exists, and audio ids are the client's to choose, so a vote
+            // cast first and the take recorded afterwards made the recorder's
+            // own vote count — the first time anyone else's vote recounted the
+            // take. Nothing the app draws can be voted on before it is saved,
+            // so refusing costs no real flow. (Only while self-validation is
+            // off: elsewhere there is no recorder to protect against.)
+            if (!takeRecorders.has(takeKey) && !attachedHere) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating a recording before it is saved is not allowed on this project`,
+              })
+              continue
+            }
+            // The stored recorder, or — for a take this very request is
+            // attaching — the caller (see batchAttachedTakes). Without the
+            // fallback the check silently passes for every fresh recording,
+            // which is the only case that reliably reaches it. A stored
+            // recorder wins over the fallback: re-attaching somebody else's
+            // take (the transcription re-attach) leaves created_by alone.
+            //
+            // AQU-1571: unless this request swaps the take's AUDIO. Putting
+            // your own recording under somebody else's take id is a new
+            // recording, and the projection now credits it to whoever attached
+            // it (cell.audio.attach); this is the same rule for a vote cast in
+            // the same request, before that projection has run.
+            const stored = takeRecorders.get(takeKey)
+            const attachedUrls = batchAttachedTakes.get(takeKey)
+            const swappedHere =
+              stored !== undefined &&
+              attachedUrls !== undefined &&
+              [...attachedUrls].some((url) => url !== stored.url)
+            const recorder = swappedHere
+              ? callerUsername
+              : (stored?.createdBy ?? (attachedHere ? callerUsername : null))
+            if (recorder != null && recorder === callerUsername) {
+              rejected.push({
+                id: rawEvent.id ?? '(unknown)',
+                status: 403,
+                reason: `validating your own recording is not allowed on this project`,
+              })
+              continue
+            }
           }
         }
       }
@@ -1524,38 +1677,48 @@ export async function handleEventsWriteRequest(
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
-      /** QW-10 recompute statements — run in a SECOND batch after `stmts` commit. */
-      recompute: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
-    let currentChunk: PendingChunk = { entries: [], stmts: [], recompute: [] }
+    let currentChunk: PendingChunk = { entries: [], stmts: [] }
 
-    // QW-10: the deferred file-counter recompute runs once per (file, chunk),
-    // built when the chunk is sealed — 1/N the aggregate scans of the old
-    // per-event recompute.
+    // QW-10 / AQU-1261: the deferred file-counter recompute runs once per FILE
+    // per request — built from the entries that actually committed, after the
+    // last chunk commits — rather than once per (file, chunk).
+    //
+    // The recompute is a full-file aggregate scan, so its cost is a function of
+    // the file, not of how many events touched it. Rebuilding it per chunk made
+    // a 400-event bulk write over a 10k-cell file scan that file four times for
+    // one identical answer; only the last pass survived. Coalescing to one pass
+    // keeps the same end state and drops the redundant scans — which is what
+    // concurrent writers on the same file were queueing behind.
     //
     // perf/events-write-path: it runs in its OWN transaction, immediately
-    // after the chunk's write transaction commits (same request, awaited
-    // before the broadcast — never waitUntil), rather than inside it. The
-    // recompute is a full-file aggregate scan over `cells`; carrying it inside
-    // the write transaction meant the events/cells row locks stayed held for
-    // the whole scan, which on prod showed up as 200ms+ lock waits and
-    // deadlocks on single-row commits. The contract is therefore: counters
-    // are consistent by the time this request RESPONDS (and broadcasts), not
-    // by the time the events commit. The window between the two is only
-    // observable to a concurrent reader, who would see counters at most one
-    // chunk behind — and that reader's own next commit recomputes them again.
+    // after the write transactions commit (same request, awaited before the
+    // broadcast — never waitUntil), rather than inside them. The recompute is a
+    // full-file aggregate scan over `cells`; carrying it inside the write
+    // transaction meant the events/cells row locks stayed held for the whole
+    // scan, which on prod showed up as 200ms+ lock waits and deadlocks on
+    // single-row commits. The contract is therefore: counters are consistent by
+    // the time this request RESPONDS (and broadcasts), not by the time the
+    // events commit. The window between the two is only observable to a
+    // concurrent reader, who would see counters behind by at most this
+    // request — and that reader's own next commit recomputes them again.
     // A recompute failure is logged loudly and does not un-accept the events
     // (they are durably committed); the next commit on the file self-heals.
-    const sealChunk = (chunk: PendingChunk): void => {
+    //
+    // AQU-1261: this is built from COMMITTED entries only, so a request whose
+    // later chunk fails still recomputes over its durable prefix — the totals
+    // match the events that actually landed rather than the ones we hoped to
+    // write.
+    const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
       const counterFiles = new Map<string, {
         projectId: string
         fileId: string
         fullSections: boolean
         cellIds: Set<string>
       }>()
-      for (const entry of chunk.entries) {
+      for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
           let impact = counterFiles.get(key)
@@ -1571,20 +1734,23 @@ export async function handleEventsWriteRequest(
         }
       }
       const recomputeTs = Date.now()
+      const stmts: AquillaStatement[] = []
       for (const f of counterFiles.values()) {
-        chunk.recompute.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
-          chunk.recompute.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+          // A full rebuild supersedes any per-cell section recompute for the
+          // same file, so the touched cell ids are deliberately dropped here.
+          stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
         } else {
-          chunk.recompute.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
           if (f.cellIds.size > 0) {
-            chunk.recompute.push(
+            stmts.push(
               sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
             )
           }
         }
       }
-      chunks.push(chunk)
+      return stmts
     }
 
     for (const entry of pendingEntries) {
@@ -1606,8 +1772,8 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length > 0 &&
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
-        sealChunk(currentChunk)
-        currentChunk = { entries: [], stmts: [], recompute: [] }
+        chunks.push(currentChunk)
+        currentChunk = { entries: [], stmts: [] }
       }
 
       currentChunk.entries.push(entry)
@@ -1615,7 +1781,7 @@ export async function handleEventsWriteRequest(
     }
 
     if (currentChunk.stmts.length > 0) {
-      sealChunk(currentChunk)
+      chunks.push(currentChunk)
     }
 
     const committedEntries: PendingEntry[] = []
@@ -1628,8 +1794,9 @@ export async function handleEventsWriteRequest(
     // client would treat "accepted" as "saved" (the old silent-loss bug).
     // Reading the row count back from the same transaction is race-free:
     // no later request can change what THIS write did. (The recompute
-    // statements are NOT in this batch — see sealChunk — so `results` indexes
-    // line up with `chunk.stmts` exactly as the per-entry offsets assume.)
+    // statements are NOT in this batch — see buildRecomputeStmts — so
+    // `results` indexes line up with `chunk.stmts` exactly as the per-entry
+    // offsets assume.)
     const flagChainLosers = (
       chunk: PendingChunk,
       results: ReadonlyArray<{ meta: { changes: number } }>,
@@ -1667,27 +1834,39 @@ export async function handleEventsWriteRequest(
     const runBatch = (stmts: AquillaStatement[]) =>
       db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
 
+    /**
+     * One recompute pass over everything that committed, in its own
+     * transaction. Called exactly once per request — on the success path after
+     * the last chunk, and on the failure path over the durable prefix.
+     */
+    const recomputeCommitted = async (): Promise<void> => {
+      try {
+        const stmts = buildRecomputeStmts(committedEntries)
+        if (stmts.length === 0) return
+        await runBatch(stmts)
+      } catch (recomputeErr) {
+        // The events are committed; only the derived counters are behind.
+        // Loud, because a silent miss here is a counter drift nobody can
+        // trace back — but not fatal, and NOT reported as a rejection.
+        console.error(
+          `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
+          recomputeErr,
+        )
+      }
+    }
+
     try {
       for (const chunk of chunks) {
         const results = await runBatch(chunk.stmts)
         flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
-        if (chunk.recompute.length > 0) {
-          try {
-            await runBatch(chunk.recompute)
-          } catch (recomputeErr) {
-            // The events are committed; only the derived counters are behind.
-            // Loud, because a silent miss here is a counter drift nobody can
-            // trace back — but not fatal, and NOT reported as a rejection.
-            console.error(
-              `[events] file counter recompute failed after commit (${chunk.entries.length} events accepted; counters self-heal on the next commit):`,
-              recomputeErr,
-            )
-          }
-        }
       }
+      await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      // The chunks that did commit are durable, so their counters must still
+      // be brought up to date (AQU-1261) before we report the partial result.
+      await recomputeCommitted()
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {
@@ -1749,6 +1928,7 @@ export async function handleEventsWriteRequest(
                 author: entry.author,
                 body,
                 parentCommentId,
+                commentId: p.commentId,
               }),
             )
           }
@@ -1848,35 +2028,21 @@ export async function handleEventsWriteRequest(
       await Promise.all(doFanOut)
     }
 
-    // FRO-479 push accelerator — see notifyLiveDownstreamsOfUpstreamChanges
-    // above for the full contract. Build the lane-relevant per-upstream-
-    // project delta from what just committed, and fire the notify
-    // fire-and-forget via ctx.waitUntil so it can NEVER delay this response
-    // (the acceptance criterion is "upstream commit latency is not
-    // measurably regressed by having many downstreams"). Skipped entirely
-    // when ProjectSync/ctx aren't bound (dev/test envs without the DO) —
-    // the lazy-pull mirror sync remains the deterministic floor either way.
+    // FRO-479 push accelerator — see link-notify.ts for the full contract.
+    // Group the lane-relevant events that just committed by upstream project,
+    // and fire the notify fire-and-forget via ctx.waitUntil so it can NEVER
+    // delay this response (the acceptance criterion is "upstream commit
+    // latency is not measurably regressed by having many downstreams").
+    // Skipped entirely when ProjectSync/ctx aren't bound (dev/test envs
+    // without the DO) — the lazy-pull mirror sync remains the deterministic
+    // floor either way.
     if (ctx && env.ProjectSync && env.SYNC_SECRET_KEY) {
-      const laneDeltaByProject = new Map<
-        string,
-        { fileIds: Set<string>; cellIds: Set<string> }
-      >()
-      for (const entry of newEntries) {
-        const frame = entry.eventFrame
-        if (!LINK_NOTIFY_LANE_KINDS.has(frame.kind)) continue
-        let delta = laneDeltaByProject.get(frame.project)
-        if (!delta) {
-          delta = { fileIds: new Set(), cellIds: new Set() }
-          laneDeltaByProject.set(frame.project, delta)
-        }
-        if (frame.file) delta.fileIds.add(frame.file)
-        if (frame.cell) delta.cellIds.add(frame.cell)
-      }
-      if (laneDeltaByProject.size > 0) {
+      const touchesByProject = collectLaneTouches(newEntries.map((entry) => entry.eventFrame))
+      if (touchesByProject.size > 0) {
         const projectSync = env.ProjectSync
         const secretKey = env.SYNC_SECRET_KEY
         ctx.waitUntil(
-          notifyLiveDownstreamsOfUpstreamChanges(db, projectSync, secretKey, laneDeltaByProject).catch(
+          notifyLiveDownstreamsOfUpstreamChanges(db, projectSync, secretKey, touchesByProject).catch(
             (err) => {
               console.warn('[events/route] link-notify hook failed:', err)
             },

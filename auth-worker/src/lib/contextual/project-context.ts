@@ -19,9 +19,22 @@
 // violations inbox point at the same concept rather than at two definitions
 // that drift.
 
-import { termToRegexSource, type LintHit, type LintRule } from "../agent/lint"
+import {
+  compileRulePattern,
+  countMatches,
+  ruleViolation,
+  type LintHit,
+  type LintRule,
+  type RuleViolation,
+} from "../agent/lint"
+import {
+  compileConceptsToRulesCore,
+  type CompileLabels,
+  type CompiledTermRule,
+} from "../../../../src/lib/terminology/compile-core"
+import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
-import type { TermMatchOptions } from "../../../../src/lib/terminology/model"
+import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -38,8 +51,8 @@ export interface Concept {
   renderings: TermRendering[]
   notes?: string
   status: "active" | "draft" | "deprecated"
-  /** Carried as the editor reads them (AQU-1710). The matching here does not
-   *  use them yet; aligning it with the editor is AQU-1711. */
+  /** Read as the editor reads them (AQU-1710) and matched as the editor
+   *  matches them (AQU-1711). */
   caseSensitive?: boolean
   match?: TermMatchOptions
 }
@@ -94,6 +107,9 @@ export interface ProjectContext {
   briefParameters: TranslationBriefParameters
   /** Active concepts, the project's own plus any it subscribes to. */
   concepts: Concept[]
+  /** The project's affix inventory for source-term matching
+   *  (ProjectWideSettings.termMatching), as the editor applies it. */
+  termMatching?: TermMatchingSettings
   /** Hand-authored project rules. */
   authoredRules: LintRule[]
 }
@@ -155,38 +171,79 @@ function parseBriefParameters(raw: unknown): TranslationBriefParameters {
   return out
 }
 
-// ── Terminology checking ────────────────────────────────────────────────────
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-function buildTermRegex(term: string): RegExp | null {
-  const src = termToRegexSource(term)
-  if (src === null) return null
-  try {
-    return new RegExp(src, "iu")
-  } catch {
-    return null // malformed user pattern — never break drafting over it
+/** `ProjectWideSettings.termMatching`, which the editor passes to the matcher
+ *  as stored. Only the types are checked here, so a malformed value cannot
+ *  throw inside the matcher in the middle of a run. */
+function parseTermMatching(raw: unknown): TermMatchingSettings | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []
+  return {
+    prefixes: strings(r.prefixes),
+    suffixes: strings(r.suffixes),
+    ...(typeof r.maxAffixes === "number" ? { maxAffixes: r.maxAffixes } : {}),
+    ...(typeof r.foldMarksDefault === "boolean" ? { foldMarksDefault: r.foldMarksDefault } : {}),
   }
 }
 
-function termMatches(haystack: string, term: string): boolean {
-  if (!haystack) return false
-  const re = buildTermRegex(term)
-  return re !== null && re.test(haystack)
+// ── Terminology checking ────────────────────────────────────────────────────
+
+/** Names for the compiled term rules. Hits carry them to the model, so they
+ *  name the term and its renderings, never the regex. */
+const TERM_LABELS: CompileLabels = {
+  approvedName: (term) => `Term: ${term}`,
+  approvedDescription: (term, renderings) => `"${term}" must use an approved rendering (${renderings})`,
+  forbiddenName: (term) => `Term: ${term} — forbidden rendering`,
+  forbiddenDescription: (rendering, term) => `"${rendering}" is a forbidden rendering for "${term}"`,
+}
+
+function termMessage(rule: CompiledTermRule, violation: RuleViolation): string {
+  // Renderings are present but too few or too many: say which, so the model
+  // knows whether to add one or remove one.
+  if (violation.type === "source-requires-target" && violation.targetCount > 0) {
+    return `${rule.description}, once each time the term appears: ×${violation.sourceCount} in the source, ×${violation.targetCount} in the target`
+  }
+  return rule.description
+}
+
+interface ConceptCheck {
+  concept: Concept
+  /** The rules the editor compiles from the concept (compile-core.ts). */
+  rules: CompiledTermRule[]
+  /** The concept's source pattern, with its rules' flags. Null when it
+   *  compiles to no rules or the pattern is invalid. */
+  source: RegExp | null
+}
+
+// Compiled once per termbase per run: `ctx.concepts` is one array for a whole
+// tick, so every cell, span and redraft reuses it. Compiling per cell cost
+// ~9 ms per cell on a 961-term termbase, and ~30 ms with an affix inventory.
+const conceptChecks = new WeakMap<Concept[], { termMatching?: TermMatchingSettings; checks: ConceptCheck[] }>()
+
+function checksFor(concepts: Concept[], termMatching?: TermMatchingSettings): ConceptCheck[] {
+  const cached = conceptChecks.get(concepts)
+  if (cached && cached.termMatching === termMatching) return cached.checks
+  const checks = concepts.map((concept): ConceptCheck => {
+    const rules = compileConceptsToRulesCore([concept], TERM_LABELS, termMatching)
+    const pattern = rules.length > 0 ? conceptToRegexSource(concept, termMatching) : null
+    return { concept, rules, source: pattern === null ? null : compileRulePattern(rules[0], pattern) }
+  })
+  conceptChecks.set(concepts, { termMatching, checks })
+  return checks
 }
 
 /**
- * Check one drafted cell against the project's key terms.
+ * Check one drafted cell against the project's key terms with the rules the
+ * editor compiles from them (src/lib/terminology/compile-core.ts), judged as
+ * the editor judges them (`ruleViolation`, AQU-1711). Both sides run the
+ * shared table in src/lib/terminology/__fixtures__/terminology-lint-parity.ts.
  *
- * Deliberately NOT expressed as `LintRule`s run through `lintDraft`. Concepts
- * hold raw termbase terms, which need term semantics (termToRegexSource: `*`
- * wildcards, whole-word boundaries), while `lintDraft` compiles rule patterns
- * as raw regexes, as the editor does (AQU-1705). The any-of test — "the target
- * must contain AT LEAST ONE of these approved renderings" — lives here instead.
+ * One deliberate difference: a forbidden rendering counts only when the
+ * cell's SOURCE bears the concept. That is the intended rule; the editor's
+ * `target-forbids` has no source condition yet (AQU-1712).
  *
- * Hit ids match the client's compiled rule ids (`term:<conceptId>:approved`,
+ * Hit ids are the client's compiled rule ids (`term:<conceptId>:approved`,
  * `term:<conceptId>:forbidden:<rendering>`) so findings stay attributable to
  * the same concept in the violations inbox.
  */
@@ -194,31 +251,18 @@ export function lintTerminology(
   concepts: Concept[],
   sourceText: string,
   targetText: string,
+  termMatching?: TermMatchingSettings,
 ): LintHit[] {
-  if (!targetText) return []
+  // Like the editor, terminology does not judge an empty translation.
+  if (!targetText.trim()) return []
   const hits: LintHit[] = []
-  for (const concept of concepts) {
-    // The concept only constrains a cell whose SOURCE bears the term.
-    if (!termMatches(sourceText, concept.sourceTerm)) continue
-
-    const approved = concept.renderings.filter(
-      (r) => r.status === "preferred" || r.status === "admitted",
-    )
-    if (approved.length > 0 && !approved.some((r) => termMatches(targetText, r.rendering))) {
-      hits.push({
-        ruleId: `term:${concept.id}:approved`,
-        ruleName: `Term: ${concept.sourceTerm}`,
-        message: `"${concept.sourceTerm}" must use an approved rendering (${approved.map((r) => r.rendering).join(", ")})`,
-      })
-    }
-    for (const f of concept.renderings.filter((r) => r.status === "forbidden")) {
-      if (termMatches(targetText, f.rendering)) {
-        hits.push({
-          ruleId: `term:${concept.id}:forbidden:${escapeRegex(f.rendering)}`,
-          ruleName: `Term: ${concept.sourceTerm} — forbidden rendering`,
-          message: `"${f.rendering}" is a forbidden rendering for "${concept.sourceTerm}"`,
-        })
-      }
+  for (const { rules, source } of checksFor(concepts, termMatching)) {
+    // The concept constrains only a cell whose source bears it: the same
+    // pattern and flags as its approved rule's source side.
+    if (!source || countMatches(sourceText, source) === 0) continue
+    for (const rule of rules) {
+      const violation = ruleViolation(rule, sourceText, targetText)
+      if (violation) hits.push({ ruleId: rule.id, ruleName: rule.name, message: termMessage(rule, violation) })
     }
   }
   return hits
@@ -241,24 +285,25 @@ export const MAX_TERMS_PER_SPAN = 24
 export function termGuidanceForSpan(
   concepts: Concept[],
   sourceTexts: string[],
+  termMatching?: TermMatchingSettings,
 ): TermGuidance[] {
   if (concepts.length === 0) return []
   const haystack = sourceTexts.join("\n")
   if (!haystack.trim()) return []
 
   const hits: { at: number; guidance: TermGuidance }[] = []
-  for (const concept of concepts) {
-    const re = buildTermRegex(concept.sourceTerm)
-    if (!re) continue
-    const match = re.exec(haystack)
-    if (!match) continue
+  for (const { concept, source } of checksFor(concepts, termMatching)) {
+    // Found with the lint's own pattern, so the model is told about exactly
+    // the terms the lint checks (AQU-1711). `search` leaves `source` reusable.
+    const at = source ? haystack.search(source) : -1
+    if (at < 0) continue
     const preferred = concept.renderings.filter((r) => r.status === "preferred").map((r) => r.rendering)
     const admitted = concept.renderings.filter((r) => r.status === "admitted").map((r) => r.rendering)
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden").map((r) => r.rendering)
     // A concept with no decisions recorded yet constrains nothing.
     if (preferred.length === 0 && admitted.length === 0 && forbidden.length === 0) continue
     hits.push({
-      at: match.index,
+      at,
       guidance: {
         conceptId: concept.id,
         sourceTerm: concept.sourceTerm,
@@ -348,6 +393,7 @@ export async function loadProjectContext(
     ...(await loadLocalConcepts(db, projectId, settings.terminology)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
+  const termMatching = parseTermMatching(settings.termMatching)
 
   return {
     ...(asString(row.source_language) ? { sourceLanguage: asString(row.source_language) } : {}),
@@ -355,6 +401,7 @@ export async function loadProjectContext(
     ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
     briefParameters: parseBriefParameters(briefObj.parameters),
     concepts,
+    ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
   }
 }

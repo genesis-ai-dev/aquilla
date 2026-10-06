@@ -47,40 +47,18 @@ export interface LintHit {
   message: string
 }
 
-// ── Term regex (mirror of src/lib/terminology/match.ts) ─────────────────────
-// For raw termbase terms (lintTerminology in contextual/project-context.ts).
-// Rule patterns are not terms: they compile through compileRulePattern below.
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-const LEAD_BOUNDARY = "(?<!\\p{L})"
-const TRAIL_BOUNDARY = "(?!\\p{L})"
-const WILDCARD = "\\p{L}*"
-
-export function termToRegexSource(term: string): string | null {
-  const trimmed = term.trim()
-  if (!trimmed) return null
-  const hasLeadingStar = trimmed.startsWith("*")
-  const hasTrailingStar = trimmed.endsWith("*")
-  const body = trimmed.split("*").map(escapeRegex).join(WILDCARD)
-  const lead = hasLeadingStar ? "" : LEAD_BOUNDARY
-  const trail = hasTrailingStar ? "" : TRAIL_BOUNDARY
-  return `${lead}${body}${trail}`
-}
-
 // ── Rule patterns (mirror of checkRule in src/lib/rules/rule-engine.ts) ─────
 
 /**
  * Compile a rule pattern the way the editor does. Patterns are raw regexes:
  * the rule editor stores regex by default and escapes literal-mode text
- * itself, and `term:` rules already carry termToRegexSource output. Flags
- * match the editor: `i` unless the rule is caseSensitive, and `u` only for
- * `term:` rules, whose \p{L} wildcards need it — adding `u` to a user regex
- * can make a valid pattern invalid.
+ * itself, and `term:` rules carry the term matcher's output
+ * (src/lib/terminology/compile-core.ts). Flags match the editor: `i` unless
+ * the rule is caseSensitive, and `u` only for `term:` rules, whose \p{L}
+ * classes need it — adding `u` to a user regex can make a valid pattern
+ * invalid.
  */
-function compileRulePattern(rule: LintRule, pattern: string): RegExp | null {
+export function compileRulePattern(rule: LintRule, pattern: string): RegExp | null {
   const caseFlag = rule.check.caseSensitive === true ? "" : "i"
   const unicodeFlag = rule.id.startsWith("term:") ? "u" : ""
   try {
@@ -90,11 +68,46 @@ function compileRulePattern(rule: LintRule, pattern: string): RegExp | null {
   }
 }
 
-/** Instances, counted as the editor counts them: non-empty matches. */
-function countMatches(text: string, re: RegExp): number {
+/** Instances, counted as the editor counts them: non-empty matches. `re` must
+ *  carry the `g` flag; matchAll works on a copy, so `re` can be reused. */
+export function countMatches(text: string, re: RegExp): number {
   let n = 0
   for (const m of text.matchAll(re)) if (m[0].length > 0) n++
   return n
+}
+
+/** Why a rule fails a draft. Counts are the editor's: non-empty matches. */
+export type RuleViolation =
+  | { type: "target-forbids" }
+  | { type: "source-requires-target"; sourceCount: number; targetCount: number }
+
+/**
+ * Judge one draft against one rule, as the editor's checkRule does. Both
+ * lints decide with this: lintDraft for project rules, and lintTerminology
+ * (contextual/project-context.ts) for the `term:` rules it compiles
+ * (AQU-1711). Null when the rule passes or does not apply.
+ */
+export function ruleViolation(rule: LintRule, sourceText: string, afterText: string): RuleViolation | null {
+  const c = rule.check
+  if (c.type === "target-forbids" && typeof c.targetPattern === "string") {
+    return compileRulePattern(rule, c.targetPattern)?.test(afterText) ? { type: "target-forbids" } : null
+  }
+  if (
+    c.type === "source-requires-target" &&
+    typeof c.sourcePattern === "string" &&
+    typeof c.targetPattern === "string"
+  ) {
+    const sourceRe = compileRulePattern(rule, c.sourcePattern)
+    const targetRe = compileRulePattern(rule, c.targetPattern)
+    const sourceCount = sourceRe ? countMatches(sourceText, sourceRe) : 0
+    if (!targetRe || sourceCount === 0) return null
+    // Like the editor: one rendering per source instance, so too few and
+    // too many are both violations.
+    const targetCount = countMatches(afterText, targetRe)
+    return targetCount === sourceCount ? null : { type: "source-requires-target", sourceCount, targetCount }
+  }
+  // Other rule types (source-target-match, builtin) stay client-side.
+  return null
 }
 
 // ── Rules loading ────────────────────────────────────────────────────────────
@@ -131,40 +144,20 @@ export function lintDraft(rules: LintRule[], sourceText: string, afterText: stri
   if (!afterText.trim()) return []
   const hits: LintHit[] = []
   for (const rule of rules) {
-    const c = rule.check
-    if (c.type === "target-forbids" && typeof c.targetPattern === "string") {
-      if (compileRulePattern(rule, c.targetPattern)?.test(afterText)) {
-        hits.push({
-          ruleId: rule.id,
-          ruleName: rule.name,
-          message: `forbidden in target: "${c.targetPattern}"`,
-        })
-      }
-    } else if (
-      c.type === "source-requires-target" &&
-      typeof c.sourcePattern === "string" &&
-      typeof c.targetPattern === "string"
-    ) {
-      const sourceRe = compileRulePattern(rule, c.sourcePattern)
-      const targetRe = compileRulePattern(rule, c.targetPattern)
-      const sourceCount = sourceRe ? countMatches(sourceText, sourceRe) : 0
-      // Like the editor: one rendering per source instance, so too few and
-      // too many are both violations.
-      if (targetRe && sourceCount > 0) {
-        const targetCount = countMatches(afterText, targetRe)
-        if (targetCount !== sourceCount) {
-          hits.push({
-            ruleId: rule.id,
-            ruleName: rule.name,
-            message:
-              targetCount === 0
-                ? `source contains "${c.sourcePattern}" but target is missing "${c.targetPattern}"`
-                : `counts don't add up: "${c.sourcePattern}" ×${sourceCount} in the source, "${c.targetPattern}" ×${targetCount} in the target`,
-          })
-        }
-      }
-    }
-    // Other rule types (source-target-match, builtin) stay client-side.
+    const violation = ruleViolation(rule, sourceText, afterText)
+    if (!violation) continue
+    // ruleViolation judged these patterns, so both are strings here.
+    const { sourcePattern, targetPattern } = rule.check as { sourcePattern?: string; targetPattern?: string }
+    hits.push({
+      ruleId: rule.id,
+      ruleName: rule.name,
+      message:
+        violation.type === "target-forbids"
+          ? `forbidden in target: "${targetPattern}"`
+          : violation.targetCount === 0
+            ? `source contains "${sourcePattern}" but target is missing "${targetPattern}"`
+            : `counts don't add up: "${sourcePattern}" ×${violation.sourceCount} in the source, "${targetPattern}" ×${violation.targetCount} in the target`,
+    })
   }
   return hits
 }

@@ -166,7 +166,7 @@ function sweepMissingClips(cells: readonly CellData[]): void {
   let changed = false
   for (const [cellId, audioId] of missingClips) {
     const cell = byId.get(cellId)
-    const target = cell ? activeTargetForCell(cell) : null
+    const target = cell ? resolveTargetAudio(cell) : null
     if (!cell || target?.audioId !== audioId || cell.attachments?.[audioId]?.pendingSync) {
       missingClips.delete(cellId)
       changed = true
@@ -715,10 +715,19 @@ function progRebuild(): void {
   }
   // Must match the timeline's own ordering exactly, or the transport and the
   // drawing would disagree about where a verse is: same filter, same sort.
-  const dialogue = sortByLens(
+  const mediaCells = sortByLens(
     ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
     "time",
   )
+  // AQU-1704: a video-less subtitle import has no media cells, so its cues are
+  // the verses. TimelineEditor's layout falls back to the subtitle lane the same way.
+  const dialogue =
+    mediaCells.length > 0
+      ? mediaCells
+      : sortByLens(
+          ctx.cells.filter((c) => hasTiming(c)),
+          "time",
+        )
   programme = buildProgramme(dialogue)
   setProgress({ duration: programme.totalSec })
 }
@@ -885,7 +894,7 @@ function classifyTargetFailure(
   if (cause !== undefined) return isMissingAudioError(cause) ? "missing" : "other"
   const ctx = activeContext
   const cell = ctx?.cells.find((c) => c.id === cellId)
-  const target = cell ? activeTargetForCell(cell) : null
+  const target = cell ? resolveTargetAudio(cell) : null
   if (!ctx || !cell || !target) return "other"
   const frontier = parseFrontierAudioUrl(target.url)
   if (!frontier) return "other"
@@ -1336,7 +1345,7 @@ async function progPlaySlot(
   pendingDubs = []
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
-  const target = slot.targetWindow ? activeTargetForCell(cell) : null
+  const target = slot.targetWindow ? resolveTargetAudio(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
@@ -2162,7 +2171,7 @@ function progPrefetchNext(): void {
   const next = progNextPlayable(progIndex + 1)
   const slot = next >= 0 ? prog.slots[next] : null
   const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
-  const target = cell && slot?.targetWindow ? activeTargetForCell(cell) : null
+  const target = cell && slot?.targetWindow ? resolveTargetAudio(cell) : null
   if (!slot || !cell || !target) {
     disposeProgPrefetch()
     return
@@ -2878,7 +2887,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && activeTargetForCell(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && resolveTargetAudio(cell) && into < slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -3020,7 +3029,7 @@ export function updateQueueCells(cells: CellData[]): void {
       const entry = overlayPool.find((e) => e.cellId === onCellId)
       if (entry) {
         const cell = activeContext?.cells.find((c) => c.id === onCellId)
-        const target = cell ? activeTargetForCell(cell) : null
+        const target = cell ? resolveTargetAudio(cell) : null
         const slot = slots[i]
         if (!target || !slot.targetWindow || target.audioId !== entry.audioId) {
           removeOverlayEntry(entry)

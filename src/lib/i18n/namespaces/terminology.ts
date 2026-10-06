@@ -690,7 +690,7 @@ export const terminology = defineNamespace({
     "terminology.bibleLink.unlink": "Unlink",
     "terminology.bibleLink.book": "Book",
     "terminology.bibleLink.search": "Search names",
-    "terminology.bibleLink.suggested": "Suggested",
+    "terminology.bibleLink.suggested": "Best matches",
     "terminology.bibleLink.empty": "No person, place or group in this book matches.",
     "terminology.bibleLink.loadFailed": "Bible data did not load. Try again when you are online.",
     "terminology.bibleLink.hint": "Voices and Who's Who use this entry's preferred rendering as the name.",

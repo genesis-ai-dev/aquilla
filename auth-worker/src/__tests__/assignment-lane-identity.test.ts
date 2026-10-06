@@ -235,3 +235,49 @@ describe("AQU-1609: GET /assignments/unit identifies the lane by id", () => {
     expect(body.assignments.find((a) => a.assignmentId === "as-one")?.validated).toBe(2)
   })
 })
+
+// AQU-1493 x AQU-1609: CELLS_DONE_SUBQUERY has two copies — one for a project
+// that counts headings and one for a project that leaves them out — and the
+// rebase onto AQU-1609 had to move the second one onto lane ids by hand. The
+// test above only ever takes the first copy (no setting means "count them"),
+// so nothing else notices if the headings-off copy drifts back onto the tag.
+//
+// Two same-language lanes on their own cannot tell the copies apart: ln-es2's
+// tag is its own id, so its tag and its id pick out the same rows. What does is
+// an assignment whose tag no longer names its lane — as-drift, pinned to ln-es1
+// but still tagged 'es-MX'. A tag-matched count finds none of its lines.
+describe("AQU-1493: an assignee's progress without headings matches lines by lane id", () => {
+  it("counts only the assignment's own lane's validated lines when headings are left out", async () => {
+    await seedTwoSameLanguageLanes()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pb', '{"countStructuralCells":false}')`,
+    ).run()
+    // A heading in the book, assigned with it and validated in BOTH lanes. With
+    // headings left out it counts on neither side — which is how the test knows
+    // the read took the headings-excluded copy.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, type, event_id, last_edit_at, canonical_ref) VALUES
+        ('pb','f1','h1','source','','ln-src','Acts','heading','e-pb',1,'ACT 1:0')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, endorsement_count, validated) VALUES
+        ('pb','f1','h1','target','Spanish','ln-es1','Hechos','e-pb',1,1,1),
+        ('pb','f1','h1','target','ln-es2','ln-es2','Hechos','e-pb',1,1,1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-one','f1','h1'), ('as-two','f1','h1'), ('as-drift','f1','h1')`,
+    ).run()
+
+    const rows = await getOrgAssignmentWorkload(testEnv, 1)
+    const byId = Object.fromEntries(rows.map((r) => [r.assignmentId, r]))
+
+    // ln-es1 has c1 validated, ln-es2 has c1 and c2; the heading counts nowhere.
+    expect(byId["as-one"]).toMatchObject({ cellsTotal: 2, cellsDone: 1 })
+    expect(byId["as-two"]).toMatchObject({ cellsTotal: 2, cellsDone: 2 })
+    // The case that tells the copies apart: by its lane, as-drift has c1 done;
+    // by its stale tag it has nothing, and a finished line drops off the
+    // manager's screen only while the team leaves headings out.
+    expect(byId["as-drift"]).toMatchObject({ laneId: "ln-es1", cellsTotal: 2, cellsDone: 1 })
+  })
+})

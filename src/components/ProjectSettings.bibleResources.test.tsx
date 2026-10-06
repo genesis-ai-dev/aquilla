@@ -18,6 +18,11 @@
 // the page: stored choices show on load without a dirty flag, a change joins
 // the deferred Save bar and saves only `bibleEnrichments`, and the rows follow
 // the master switch, including an unsaved change to it.
+//
+// AQU-1685: all of that is an experiment, on only for a device that switched
+// on "Bible data enrichments" in Settings → Experimental. Without it the card
+// is exactly the old "Bible resources" card, which is what the first block
+// (AQU-460) tests.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -174,7 +179,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     expect(toggle).toHaveAttribute("aria-checked", "true")
     // Nothing was toggled by the user — the page must not report unsaved changes
     // just from rendering the derived state.
@@ -187,7 +192,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: false,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -197,7 +202,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -207,7 +212,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     fireEvent.click(toggle)
     expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
   })
@@ -254,7 +259,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     currentHasFetched = true
     rerenderSettings()
 
-    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
@@ -263,11 +268,26 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
 
 describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
+  /** The device-local experiment, switched on (useProject overlays it onto the record). */
+  const EXPERIMENT_ON = { bibleData: true }
   const enrichmentSwitch = (name: string) => screen.getByRole("switch", { name })
   const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
 
-  it("renames the card to Bible data", () => {
+  // A project's stored enrichment choices must not leak the experiment onto a
+  // device that never opted in: the card stays the old one, with no rows and
+  // no Data sources link, even when choices are stored.
+  it("keeps the old Bible resources card, with no enrichment rows, while this device has the experiment off", () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentSettings = { bibleEnrichments: { voices: false } }
+    renderSettings()
+    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible resources/)
+    expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: "Voices" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Data sources" })).toBeNull()
+  })
+
+  it("renames the card to Bible data", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible data/)
     expect(screen.queryByText("Bible resources")).toBeNull()
@@ -276,7 +296,7 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   // A stored choice must read back as stored after a reload, and settling to
   // it must not count as an edit (the AQU-460 trust bug, one level down).
   it("shows stored choices and defaults on load without a dirty flag", () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     currentSettings = { bibleEnrichments: { voices: false, autopilot: true }, autopilotEnabled: true }
     renderSettings()
     expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-checked", "false")
@@ -287,7 +307,7 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   })
 
   it("joins the Save bar and saves only the bibleEnrichments key", async () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     fireEvent.click(enrichmentSwitch("Places and maps"))
     expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "false")
@@ -297,7 +317,7 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   })
 
   it("disables every enrichment, with the reason, while Bible data is off — even an unsaved off", () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     expect(enrichmentSwitch("Voices")).not.toHaveAttribute("aria-disabled", "true")
 
@@ -308,16 +328,37 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   })
 
   it("disables the autopilot row with its reason while Autopilot is off for the project", () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByText(/Autopilot is off for this project/)).toBeInTheDocument()
   })
 
   it("opens Rules → Built-in checks from the checks row", async () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     fireEvent.click(screen.getByRole("button", { name: "Open built-in checks" }))
     expect(await screen.findByText("Living Memory pane")).toBeInTheDocument()
+  })
+})
+
+describe("ProjectSettings — Language profile for checks (AQU-1688)", () => {
+  const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
+
+  // The card configures Bible data checks only. A device that never opted in
+  // to the Bible data experiment has no such checks, so it must not see the
+  // card, even for a scripture project with a stored profile.
+  it("is absent while this device has the Bible data experiment off", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentSettings = { languageProfile: { quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "none" } } }
+    renderSettings()
+    expect(screen.getByText("Languages")).toBeInTheDocument()
+    expect(screen.queryByText("Language profile for checks")).toBeNull()
+  })
+
+  it("is shown with the experiment on", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: { bibleData: true } })
+    renderSettings()
+    expect(screen.getByText("Language profile for checks")).toBeInTheDocument()
   })
 })

@@ -9,7 +9,12 @@
  *     --text <ebible>/corpus/eng-engwebp.txt --vref <ebible>/metadata/vref.txt \
  *     [--max-calls 2000] [--samples 150] [--tq-chapters 40] [--questions speaker,tq] \
  *     [--seed 1701] [--concurrency 4] [--out docs/JEV-SHADOW-EVAL-2026-10-06.md] \
- *     [--dev-vars auth-worker/.dev.vars] [--fake]
+ *     [--dump answers.jsonl] [--no-facts] [--no-source] [--dev-vars auth-worker/.dev.vars] [--fake]
+ *
+ * --dump writes every answer with its case, for adjudicating flags by hand.
+ * --no-facts and --no-source are ablations: the cells go without their facts
+ * line, or their source, to see whether Jev answers about the source instead
+ * of reading the translation.
  *
  * It asks what production asks: the per-cell questions in production's words
  * and request shape (judge-expectations.ts bibleQaRequest), the Translation
@@ -99,10 +104,7 @@ function arg(name: string): string | undefined {
 
 function required(name: string): string {
   const value = arg(name)
-  if (!value) {
-    console.error(`missing --${name}; see the header of scripts/jev-shadow-eval.ts`)
-    process.exit(2)
-  }
+  if (!value) throw new Error(`missing --${name}; see the header of scripts/jev-shadow-eval.ts`)
   return value
 }
 
@@ -176,13 +178,21 @@ interface TqCase extends EvalCase {
 
 type AnyCase = CellCase | TqCase
 
-/** A batch of cell questions, asked as one span's questions are. */
-function askCells(jev: Ask, unit: EvalUnit<CellCase>): ReturnType<AskUnit<CellCase>> {
+/**
+ * A batch of cell questions, asked as one span's questions are. `include`
+ * false for facts (--no-facts) or source (--no-source) leaves that out of
+ * the state: an ablation, to see whether Jev answers about the source
+ * instead of reading the translation.
+ */
+function askCells(jev: Ask, unit: EvalUnit<CellCase>, include: { facts: boolean; source: boolean }): ReturnType<AskUnit<CellCase>> {
   const asks = unit.cases.map((c, index) => ({ key: `c${index}_${c.question}`, index, question: c.prompt }))
-  const { state, questions } = bibleQaRequest(
-    unit.cases.map((c) => ({ ref: c.ref, source: c.source, text: c.text, factsLine: c.factsLine })),
-    asks,
-  )
+  const cells = unit.cases.map((c) => ({
+    ref: c.ref,
+    source: include.source ? c.source : "",
+    text: c.text,
+    ...(include.facts ? { factsLine: c.factsLine } : {}),
+  }))
+  const { state, questions } = bibleQaRequest(cells, asks)
   const fallback = () => Object.fromEntries(asks.map((a) => [a.key, { kind: "noul", p: 0.5 } as JevAnswer]))
   return jev({ state, questions, fallback }).then(({ result, usage }) => ({
     // As production reads them: a fallback, or an exact 0.5, is no answer.
@@ -261,7 +271,11 @@ async function main(): Promise<void> {
     (ALL_QUESTIONS as readonly string[]).includes(q),
   )
   const fake = process.argv.includes("--fake")
+  const withFacts = !process.argv.includes("--no-facts")
+  const withSource = !process.argv.includes("--no-source")
   const out = arg("out")
+  /** --dump <file.jsonl>: every answer with its case, for adjudicating flags by hand (design doc §10). */
+  const dump = arg("dump")
 
   checkAgreesWithProduction()
   const auth = loadKey(resolve(arg("dev-vars") ?? join(REPO, "auth-worker/.dev.vars")))
@@ -348,10 +362,22 @@ async function main(): Promise<void> {
   const ask: AskUnit<AnyCase> = (unit) =>
     unit.question === "tq"
       ? askChapter(jev, unit as EvalUnit<TqCase>, chapterCells, manifest.version)
-      : askCells(jev, unit as EvalUnit<CellCase>)
+      : askCells(jev, unit as EvalUnit<CellCase>, { facts: withFacts, source: withSource })
   const started = Date.now()
   const run = await runUnits(units, ask, budget, concurrency)
   const scores: QuestionScore[] = questions.map((q) => scoreQuestion(q, run))
+  if (dump) {
+    const line = ({ case: c, p }: (typeof run.answered)[number]) =>
+      JSON.stringify({
+        question: c.question,
+        kind: c.kind,
+        ref: c.ref,
+        passWhenYes: c.passWhenYes,
+        p,
+        ...(c.question === "tq" ? { tq: c.tq.id, q: c.tq.q, a: c.tq.a } : { prompt: c.prompt, text: c.text }),
+      })
+    writeFileSync(resolve(dump), `${run.answered.map(line).join("\n")}\n`)
+  }
 
   const totalCost = scores.reduce((sum, s) => sum + costOf(s).usd, 0)
   const estimated = scores.some((s) => costOf(s).estimated && s.calls > 0)
@@ -362,6 +388,7 @@ async function main(): Promise<void> {
     `- Calls: ${budget.used} of a cap of ${maxCalls}${run.capped ? " (cap reached: the cases left are listed as not asked)" : ""}; ${run.errors} failed outright; ${((Date.now() - started) / 1000).toFixed(0)} s.`,
     `- Cost: ${estimated ? "≈ " : ""}$${totalCost.toFixed(4)}${estimated ? " (estimated at $0.00003 a call: the responses reported no cost)" : " (as the responses reported it)"}.`,
     `- Cases: up to ${samples} published verses per question and their planted twins (seed ${seed}); C1: ${tqChapters} chapters, half of each one's questions with an answer from another book. ${CELLS_PER_CALL} cells per call, one call per chapter for C1, never a verse beside its planted twin.`,
+    `- State: ${withFacts && withSource ? "as production sends it: each cell's source, translation and facts line" : `ABLATION: the cells without their ${[withFacts ? "" : "facts line (--no-facts)", withSource ? "" : "source (--no-source)"].filter(Boolean).join(" or ")}`}.`,
     "",
     "A flag is a \"no\" at the band's certainty |p − 0.5|·2. Precision: flags on planted errors over all flags. Recall: flags on planted errors over all planted errors (an abstention is a miss). Abstain: answers below certainty 0.4, as production abstains.",
     "",
@@ -383,7 +410,7 @@ async function main(): Promise<void> {
     "## Reproduce",
     "",
     "```",
-    `npx tsx scripts/jev-shadow-eval.ts --pack <bible-wiki>/content/bkp/v1 --text <ebible>/corpus/eng-engwebp.txt --vref <ebible>/metadata/vref.txt --max-calls ${maxCalls} --samples ${samples} --tq-chapters ${tqChapters} --seed ${seed}`,
+    `npx tsx scripts/jev-shadow-eval.ts --pack <bible-wiki>/content/bkp/v1 --text <ebible>/corpus/eng-engwebp.txt --vref <ebible>/metadata/vref.txt --max-calls ${maxCalls} --samples ${samples} --tq-chapters ${tqChapters} --seed ${seed}${withFacts ? "" : " --no-facts"}${withSource ? "" : " --no-source"}`,
     "```",
     "",
   ].join("\n")

@@ -41,6 +41,7 @@ import {
   emitLinkSourceEvent,
   listDownstreamProjects,
   loadLinkAdoption,
+  loadLinkAdoptionRaw,
   loadLinkBackfillRaw,
   loadProjectWithSource,
   loadLinkFileIds,
@@ -57,7 +58,10 @@ import {
   parseSourceLinkBackfill,
   serializeSourceLinkBackfill,
 } from "../../../db/shared/source-link-backfill"
-import { serializeSourceLinkAdoption } from "../../../db/shared/source-link-adopt"
+import {
+  parseSourceLinkAdoption,
+  serializeSourceLinkAdoption,
+} from "../../../db/shared/source-link-adopt"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
@@ -439,14 +443,23 @@ sourceLinking.post(
 //
 // `complete: false` means the addition is recorded but the files have not all
 // arrived yet (the sync failed, or ran out of rounds). Nothing is half-added in
-// the meantime: the files are not part of the link and not in the file list
-// until they are complete. Calling again with the same files resumes the
+// the meantime: the files are not part of the link and not in the link's file
+// list until they are complete. Calling again with the same files resumes the
 // replay where it stopped, and so does any later sync of the link.
+//
+// AQU-1679: `replaceFiles` names files this project ALREADY has that an added
+// upstream file should follow into, instead of arriving as a second copy —
+// the link request's option, available here too. Same shape and checks as
+// there; every pair's upstream file must be among the files being added. The
+// pairs are recorded on `projects.source_link_adopt` before the addition, so
+// the mirror sync joins the file to its upstream before it replays the file's
+// history (sync-worker events/link-adopt.ts runs first).
 // ──────────────────────────────────────────────────────────────────────────
 
 const addLinkFilesSchema = z.object({
   // Same bounds as the link request's own `fileIds`.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000),
+  replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
 })
 
 sourceLinking.post(
@@ -456,7 +469,16 @@ sourceLinking.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { fileIds } = c.req.valid("json")
+    const { fileIds, replaceFiles } = c.req.valid("json")
+
+    // AQU-1679: refused on shape alone, before any lookup.
+    if (replaceFiles) {
+      const problem = replacePairsProblem(replaceFiles)
+      if (problem) return c.json({ error: problem }, 400)
+      if (replaceFiles.some((p) => !fileIds.includes(p.upstreamFileId))) {
+        return c.json({ error: "a replaced file must be one of the files being added" }, 400)
+      }
+    }
 
     const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
     if (!role) return c.json({ error: "not found or no access" }, 403)
@@ -472,6 +494,14 @@ sourceLinking.post(
     // with — and a legacy link with no recorded mode is not mirrored either.
     if (project.source_link_mode !== "live") {
       return c.json({ error: "only a live link can have files added" }, 409)
+    }
+    // AQU-1679: a chain link's source is the upstream's translations, which a
+    // file imported on its own cannot line up with — same rule as the link.
+    if (replaceFiles && project.source_link_consumes === "target") {
+      return c.json(
+        { error: "only a link to the upstream's source can replace a file's source" },
+        400,
+      )
     }
 
     // The same check the link itself makes ([Pen test] AQU authz review):
@@ -497,6 +527,63 @@ sourceLinking.post(
     const added = [...new Set(fileIds)].filter((id) => upstreamFileIds.has(id) && !followedSet.has(id))
     if (added.length === 0) {
       return c.json({ projectId, added: [], fileIds: followed, complete: true })
+    }
+
+    // AQU-1679: a pair for a file that is not actually being added — already
+    // followed, or gone upstream — is refused rather than dropped: the lead
+    // asked for one file, and silence here would quietly leave them with two.
+    if (replaceFiles && replaceFiles.some((p) => !added.includes(p.upstreamFileId))) {
+      return c.json({ error: "a replaced file must be one of the files being added" }, 400)
+    }
+    // The pairs are checked against the two projects' actual lines before
+    // anything is recorded — the same pairing the mirror then performs.
+    if (replaceFiles) {
+      const matches = await matchFilesForReplace(c.env, {
+        projectId,
+        sourceProjectId: upstreamId,
+        pairs: replaceFiles,
+      })
+      if (matches.some((m) => !m.canReplace)) {
+        return c.json(
+          {
+            error: "some files do not match the upstream files they were to follow",
+            replaceFiles: matches,
+          },
+          422,
+        )
+      }
+      // Recorded BEFORE the addition, folded into whatever is already adopted
+      // (a compare-and-set, as below): the sync that the addition triggers
+      // must find the pairs, or it would replay the file in as a copy.
+      let adopted = false
+      for (let attempt = 0; attempt < 3 && !adopted; attempt++) {
+        const current = await loadLinkAdoptionRaw(c.env, projectId)
+        if (!current.ok) {
+          // A database that predates migration 0140 cannot hold the pairs, and
+          // adding the file as a copy is not what was asked.
+          console.error(`link-source/files: source_link_adopt unreadable for ${projectId}`)
+          return c.json({ error: "replacing a file's source is not available yet" }, 503)
+        }
+        const existing = parseSourceLinkAdoption(current.raw)
+        const files = { ...(existing?.files ?? {}) }
+        for (const pair of replaceFiles) files[pair.upstreamFileId] = pair.fileId
+        const pending = [
+          ...new Set([...(existing?.pending ?? []), ...replaceFiles.map((p) => p.upstreamFileId)]),
+        ]
+        try {
+          const res = await c.env.AQUILLA_PG.prepare(
+            `UPDATE projects SET source_link_adopt = ?
+              WHERE id = ? AND source_link_adopt IS NOT DISTINCT FROM ?`,
+          )
+            .bind(serializeSourceLinkAdoption({ files, pending }), projectId, current.raw)
+            .run()
+          adopted = Number(res.meta?.changes ?? 0) > 0
+        } catch (err) {
+          console.error("link-source/files adopt UPDATE failed:", err)
+          return c.json({ error: "could not add files" }, 500)
+        }
+      }
+      if (!adopted) return c.json({ error: "the link changed while adding files; try again" }, 409)
     }
 
     // Record the addition, folded into anything already pending. A
@@ -538,12 +625,18 @@ sourceLinking.post(
     const after = await loadLinkFileIds(c.env, projectId)
     const pending = await loadLinkBackfillRaw(c.env, projectId)
     const stillPending = pending.ok ? parseSourceLinkBackfill(pending.raw) : null
+    // AQU-1679: a file whose join has not run is not complete either — until it
+    // has, the file is not yet the project's own file following the link.
+    const stillJoining = replaceFiles ? (await loadLinkAdoption(c.env, projectId))?.pending ?? [] : []
     const afterSet = after ? new Set(after) : null
     const complete =
       !stillPending?.fileIds.some((id) => added.includes(id)) &&
+      !stillJoining.some((id) => added.includes(id)) &&
       added.every((id) => afterSet === null || afterSet.has(id))
 
-    return c.json({ projectId, added, fileIds: after, complete })
+    // AQU-1679: echoed only when pairs were sent — an add that replaces nothing
+    // answers exactly what it did before this slice.
+    return c.json({ projectId, added, fileIds: after, ...(replaceFiles ? { replaceFiles } : {}), complete })
   },
 )
 

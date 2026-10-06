@@ -232,6 +232,8 @@ export interface SourceLinkProject {
   source_project_id: string | null
   /** AQU-1560: 'live' | 'clone', or null for a legacy link (see SourceLinkMode). */
   source_link_mode: string | null
+  /** AQU-1679: 'source' | 'target', or null (= source, the server's default). */
+  source_link_consumes: string | null
   archived_at: string | null
 }
 
@@ -470,6 +472,30 @@ export async function loadLinkAdoption(
   }
 }
 
+/**
+ * AQU-1679: the adopted-files column exactly as stored, for a compare-and-set
+ * write — the mirror sync writes it too (a joined file leaves `pending`) and may
+ * be running right now. `{ ok: false }` is a database that predates migration
+ * 0140, where a replace cannot be recorded; the add route has to refuse rather
+ * than add the file as a copy the lead did not ask for.
+ */
+export async function loadLinkAdoptionRaw(
+  env: Env,
+  projectId: string,
+): Promise<{ ok: true; raw: string | null } | { ok: false }> {
+  if (!env.AQUILLA_PG) return { ok: false }
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_adopt FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_adopt: string | null }>()
+    return { ok: true, raw: row?.source_link_adopt ?? null }
+  } catch {
+    return { ok: false }
+  }
+}
+
 /** AQU-1679: forget the adopted files — the link they belonged to has ended or
  *  been replaced. Best-effort for the same reason as `clearLinkBackfill`. */
 export async function clearLinkAdoption(env: Env, projectId: string): Promise<void> {
@@ -580,7 +606,7 @@ export async function loadProjectWithSource(
   projectId: string,
 ): Promise<SourceLinkProject | null> {
   return env.AQUILLA_PG.prepare(
-    `SELECT id, name, source_project_id, source_link_mode, archived_at
+    `SELECT id, name, source_project_id, source_link_mode, source_link_consumes, archived_at
        FROM projects WHERE id = ?`,
   )
     .bind(projectId)

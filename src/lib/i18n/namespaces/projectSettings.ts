@@ -755,6 +755,22 @@ export const projectSettings = defineNamespace({
         "Their source text will be replaced with the source project's current " +
         "text. Their translations, validations and comments stay.",
     }),
+    // AQU-1679: an added upstream file can instead follow INTO a file this
+    // project already has — the link flow's replace option, here too.
+    "projectSettings.sourceLink.chooseFilesReplaceHeading": plural({
+      one: "Replace the source in this file you already have:",
+      other: "Replace the source in these files you already have:",
+    }),
+    "projectSettings.sourceLink.chooseFilesReplaceBody": plural({
+      one:
+        "It stays the same file, with its translations, validations and comments " +
+        "on the same lines. Its source text becomes the source project's, and it " +
+        "receives the source project's changes from then on. No second copy is added.",
+      other:
+        "They stay the same files, with their translations, validations and comments " +
+        "on the same lines. Their source text becomes the source project's, and they " +
+        "receive the source project's changes from then on. No second copies are added.",
+    }),
     "projectSettings.sourceLink.chooseFilesAddHeading": plural({
       one: "Add this file:",
       other: "Add these files:",
@@ -2005,6 +2021,20 @@ export const projectSettings = defineNamespace({
           "Under the resume list: the one thing resuming costs. The file's source text is " +
           "replaced with the source project's current text — the lead may have been editing " +
           "it in the meantime — while the translations on it are kept. Both halves matter.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceHeading": {
+        description:
+          "Heading in the Choose files confirm step over the list of files the project " +
+          "already has whose source the added upstream files will replace (AQU-1679). Ends " +
+          "in a colon; names follow. Kept apart from the add heading: these files are not " +
+          "arriving, they are being joined to the link.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceBody": {
+        description:
+          "Under the replace list: the file keeps its identity and everything on it " +
+          "(translations, validations, comments) line by line; only its source text " +
+          "becomes the source project's, and it follows the source project afterwards. " +
+          "Says explicitly that no second copy is added \u2014 the thing a lead fears here.",
       },
       "projectSettings.sourceLink.chooseFilesAddHeading": {
         description:

@@ -22,18 +22,25 @@
  *   4. The project still has exactly one file, its cells are the SAME cells,
  *      and the translation is still on its line.
  *   5. An upstream source edit reaches that same cell on the next sync.
+ *
+ * The second test is the same promise from "Choose files" on a link that
+ * already exists (AQU-1560) — the case that was first reported: the project is
+ * linked to some of the upstream's files, and the lead now adds the one their
+ * team has been translating on its own.
  */
 
 import { randomUUID } from "node:crypto"
 import { test, expect } from "../../helpers/multi-user"
 import { resetBackend } from "../../helpers/seed"
 import {
+  importMarkdownIntoProject,
   jwtFor,
   mintSyncToken,
   openSeededProject,
   readProjectedCells,
   seedProjectWithFile,
 } from "../../helpers/seed-project"
+import { linkProjectToSource } from "../../helpers/frontier-api"
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 const SYNC_BASE = process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
@@ -148,4 +155,62 @@ test("replacing the source of a file the project already has keeps one file and 
   expect(await projectFileNames(jwt, established.projectId)).toEqual([established.fileName])
   const finalSource = await readProjectedCells(jwt, established, "source")
   expect(finalSource).toHaveLength(sourceBefore.length)
+})
+
+test("adding a file to an existing link can replace the source of the project's own copy", async ({ bob }) => {
+  test.setTimeout(120_000)
+  const jwt = await jwtFor("bob")
+  const stamp = Date.now()
+
+  const upstream = await seedProjectWithFile(jwt, { name: `AddUpstream ${stamp}` })
+  const other = await importMarkdownIntoProject(jwt, upstream.projectId, "# Other\n\nA line of other text.\n", "other.md")
+  const established = await seedProjectWithFile(jwt, { name: `AddEstablished ${stamp}` })
+
+  const ws = await openSeededProject(bob, established)
+  const translation = `Tafsiri ya awali ${stamp}`
+  await ws.editCell(0, translation)
+  await expect
+    .poll(async () => (await readProjectedCells(jwt, established, "target")).map((c) => c.value))
+    .toContain(translation)
+  const sourceBefore = await readProjectedCells(jwt, established, "source")
+
+  // Linked already — to the upstream's OTHER file only.
+  const link = await linkProjectToSource(jwt, established.projectId, {
+    sourceProjectId: upstream.projectId,
+    mode: "live",
+    consumes: "source",
+    fileIds: [other.fileId],
+  })
+  expect(link.seeded).toBe(true)
+  await expect.poll(() => projectFileNames(jwt, established.projectId)).toEqual(["other.md", established.fileName])
+
+  // Settings → Source & sync → Choose files: add the upstream's sample.md,
+  // replacing the source in the project's own.
+  await bob.goto(`/project/${established.projectId}/settings/source-sync`)
+  await bob.getByRole("button", { name: "Choose files" }).click()
+  const dialog = bob.getByRole("dialog")
+  await dialog.getByRole("checkbox", { name: new RegExp(`^${established.fileName.replace(".", "\\.")}\\b`) }).click()
+  const replace = dialog.getByRole("checkbox", { name: /^Replace the source in my existing/ })
+  await expect(replace).toBeVisible({ timeout: 10_000 })
+  await replace.click()
+  const lines = upstream.cellIds.length
+  await expect(dialog.getByText(`${lines} of ${lines} lines are the same in both files.`)).toBeVisible({ timeout: 10_000 })
+  await dialog.getByRole("button", { name: "Review changes" }).click()
+  await expect(dialog.getByText("Replace the source in this file you already have:")).toBeVisible()
+
+  const added = bob.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith(`/projects/${established.projectId}/link-source/files`),
+  )
+  await dialog.getByRole("button", { name: "Confirm" }).click()
+  const addedResponse = await added
+  expect(addedResponse.status(), await addedResponse.text()).toBe(200)
+  await expect(dialog).toBeHidden({ timeout: 10_000 })
+
+  // Still two files — no second sample.md — the same cells, the translation on its line.
+  expect(await projectFileNames(jwt, established.projectId)).toEqual(["other.md", established.fileName])
+  const sourceAfter = await readProjectedCells(jwt, established, "source")
+  expect(sourceAfter.map((c) => [c.cellId, c.value])).toEqual(sourceBefore.map((c) => [c.cellId, c.value]))
+  expect((await readProjectedCells(jwt, established, "target")).map((c) => c.value)).toContain(translation)
 })

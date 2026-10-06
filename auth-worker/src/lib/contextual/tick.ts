@@ -1030,7 +1030,15 @@ async function processSpan(
       // AQU-1691: durable decisions, re-read every wave (never consumed).
       projectFacts: shared.ctx.projectFacts,
       languageProfile: shared.ctx.languageProfile,
-      ...(shared.bible.state === "ready" ? { bible: spanBible(shared.bible.data) } : {}),
+      ...(shared.bible.state === "ready"
+        ? {
+            bible: spanBible(shared.bible.data, {
+              pairs: shared.pairs,
+              spanId: seed.id,
+              ...(deps.bible?.judge ? { judge: deps.bible.judge } : {}),
+            }),
+          }
+        : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),

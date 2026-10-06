@@ -377,7 +377,7 @@ async function selfTickLoop(
   // Prompt/reply per call for the Team step inspector; flushed with the meter.
   const traces = makeTraceRecorder(env, db, { runId, projectId })
   // AQU-1690: Bible data for the run; its caches last across waves.
-  const bible = makeBibleTickDeps(env, db, { projectId })
+  const bible = makeBibleTickDeps(env, db, { projectId, runId }, { traces, meter })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -1280,7 +1280,14 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     )
     return c.json(body, status)
   }
-  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  const result = await listRunTraces(c.env.AQUILLA_PG, {
+    projectId,
+    runId,
+    limit,
+    ...(spanId ? { spanId } : {}),
+    // AQU-1690: shadow-mode Jev answers are for maintainers only.
+    includeJev: gate.level >= ROLE.MAINTAINER,
+  })
   return c.json(result)
 })
 

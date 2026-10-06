@@ -22,6 +22,7 @@ import type { CellFacts } from "../../../../db/shared/bible-facts/types"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { BkpFailureReason, BkpResult, BookPack } from "../bkp/pack-loader"
 import type { Concept } from "./project-context"
+import type { BibleJudgeDeps } from "./bible-span"
 
 export interface BibleFlags {
   /** Bible data on and the `autopilot` enrichment on. */
@@ -56,6 +57,8 @@ export interface BibleTickDeps {
   /** The project's effective Bible data switches, read once per wave. */
   flags: () => Promise<BibleFlags>
   loadPack: LoadBookPack
+  /** Jev for the Bible data questions. Omitted → only code decides; nothing is asked. */
+  judge?: BibleJudgeDeps
 }
 
 /** The book of the first cell with a verse ref, e.g. "JHN"; null for a file with none. */

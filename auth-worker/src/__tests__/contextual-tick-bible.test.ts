@@ -17,6 +17,7 @@ import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { __resetBkpServerMemory } from "../lib/bkp/pack-loader"
 import { JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
+import { listRunTraces, makeTraceRecorder } from "../lib/contextual/traces"
 import { seedUser } from "./helpers/db"
 
 const db = env.AQUILLA_PG
@@ -32,6 +33,9 @@ interface Captured {
 
 let captured: Captured[] = []
 let packFiles: Record<string, () => Response> = {}
+let jevCalls: { questions: Record<string, unknown> }[] = []
+/** What the stubbed Jev answers to every question: p(yes). */
+let jevP = 0.9
 const realFetch = globalThis.fetch
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
@@ -58,6 +62,8 @@ function goodPack(): Record<string, () => Response> {
 
 beforeEach(async () => {
   captured = []
+  jevCalls = []
+  jevP = 0.9
   packFiles = goodPack()
   __resetBkpServerMemory()
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -65,6 +71,12 @@ beforeEach(async () => {
     if (url.startsWith(PACK)) {
       const file = packFiles[url.slice(PACK.length)]
       return file ? file() : new Response("not found", { status: 404 })
+    }
+    if (url.endsWith("/alpha/decisions")) {
+      const request = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }
+      jevCalls.push(request)
+      const answers = Object.fromEntries(Object.keys(request.questions).map((key) => [key, { type: "noul", noul: jevP }]))
+      return json({ model: "jev-1.13.0", answers, usage: { input_tokens: 40, output_tokens: 3 } })
     }
     if (url !== MOCK_URL) throw new Error(`unexpected fetch: ${url}`)
     const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
@@ -100,7 +112,7 @@ async function seedProject(settings: Record<string, unknown>): Promise<void> {
   }
 }
 
-async function tickOnce() {
+async function tickOnce(opts: { withTraces?: boolean } = {}) {
   const created = await createRun(db, {
     projectId: PROJECT,
     fileId: FILE,
@@ -111,9 +123,29 @@ async function tickOnce() {
   })
   if (created.status !== "ok") throw new Error("run not created")
   const llm = makeLlmCall({ url: MOCK_URL, apiKey: "mock", models: { fast: "m/f", mid: "m/m", deep: "m/d" } })
-  const bible = makeBibleTickDeps({ ...env, BKP_BASE: PACK }, db, { projectId: PROJECT })
+  const traces = opts.withTraces ? makeTraceRecorder({}, db, { runId: created.run.id, projectId: PROJECT }) : undefined
+  const bible = makeBibleTickDeps(
+    { ...env, BKP_BASE: PACK, OPENROUTER_API_KEY: "test-key" },
+    db,
+    { projectId: PROJECT, runId: created.run.id },
+    traces ? { traces } : {},
+  )
   await runOneTick({ db, runId: created.run.id, llm, bible })
+  await traces?.flush()
   return created.run.id
+}
+
+/** English quotation and question rules, so the bkp: gates and M1 run. */
+const ENGLISH_PROFILE = {
+  quoteMarks: { levels: [{ open: "\u201c", close: "\u201d" }, { open: "\u2018", close: "\u2019" }], continuation: "reopen-each-paragraph" },
+  questionMarkers: {},
+}
+
+async function setSettings(settings: Record<string, unknown>): Promise<void> {
+  await db
+    .prepare(`UPDATE project_settings SET settings = ? WHERE project_id = ?`)
+    .bind(JSON.stringify({ bibleResourcesEnabled: true, bibleEnrichments: { autopilot: true, checks: true }, ...settings }), PROJECT)
+    .run()
 }
 
 async function spanReasons(runId: string): Promise<string[]> {
@@ -153,5 +185,27 @@ describe("autopilot with Bible data", () => {
       .run()
     await tickOnce()
     expect(captured.some((call) => call.user.includes("Given facts"))).toBe(false)
+  })
+})
+
+describe("Jev questions, traced", () => {
+  it("records the span's one Jev call as a bible-qa trace, with each shadow answer and its certainty", async () => {
+    // No negators in the profile: code cannot see the negation in JHN 4:9, so Jev is asked.
+    await setSettings({ languageProfile: ENGLISH_PROFILE })
+    jevP = 0.1
+    const runId = await tickOnce({ withTraces: true })
+    expect(jevCalls).toHaveLength(1)
+    const all = await listRunTraces(db, { projectId: PROJECT, runId, includeJev: true })
+    const jev = all.traces.filter((trace) => trace.label === "jev:bible-qa")
+    expect(jev).toHaveLength(1)
+    expect(jev[0]).toMatchObject({ tier: "jev", model: "typesafe/jev-1.13", promptTokens: 40, completionTokens: 3 })
+    const output = JSON.parse(jev[0].output ?? "{}") as { judgments: { check: string; outcome: string; mode: string; certainty: number }[] }
+    expect(output.judgments).toContainEqual(expect.objectContaining({ check: "negation", outcome: "fail", mode: "shadow" }))
+    // Shadow answers act on nothing: the draft is staged unredrafted, with no bkp:M3 finding.
+    const drafts = await listDrafts(db, PROJECT, FILE, "proposed", "")
+    expect(drafts.find((d) => d.cellId === "c9")?.verdicts ?? {}).not.toHaveProperty("bkp:M3")
+    // Maintainers only: without includeJev the row is not listed.
+    const viewer = await listRunTraces(db, { projectId: PROJECT, runId })
+    expect(viewer.traces.some((trace) => trace.label === "jev:bible-qa")).toBe(false)
   })
 })

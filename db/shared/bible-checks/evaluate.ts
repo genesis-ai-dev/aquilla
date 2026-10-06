@@ -34,16 +34,16 @@ import {
  * Question marks across scripts: ? ¿ ; (Greek) ՞ (Armenian) ؟ (Arabic)
  * ፧ (Ethiopic) ‽ ⁇ ⁈ ⁉ ⸮ and the full-width and small forms.
  */
-const QUESTION_MARK = /[?¿;՞؟፧‽⁇-⁉⸮︖﹖？]/u
+export const QUESTION_MARK = /[?¿;՞؟፧‽⁇-⁉⸮︖﹖？]/u
 
 /** Scripts written without spaces between words, where a particle sits against its neighbours. */
-const UNSPACED_SCRIPT =
+export const UNSPACED_SCRIPT =
   /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]+$/u
 
 /** A character that belongs to a word, for the whole-word and word-end tests below. */
-const WORD_PART = '[\\p{L}\\p{M}\\p{N}]'
+export const WORD_PART = '[\\p{L}\\p{M}\\p{N}]'
 
-function escapeRegExp(value: string): string {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 

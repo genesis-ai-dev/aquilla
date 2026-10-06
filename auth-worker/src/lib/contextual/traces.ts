@@ -78,8 +78,15 @@ export function makeTraceRecorder(
   })
 }
 
+/**
+ * One row. A model call is an LlmCallTrace; AQU-1690 also records Jev calls
+ * (tier "jev", label "jev:bible-qa") and code-only rows such as the Bible
+ * facts a span used (tier "code"), so the tier is any short label here.
+ */
+export type TraceInput = Omit<LlmCallTrace, "tier"> & { tier: string }
+
 export class TraceRecorder {
-  private rows: LlmCallTrace[] = []
+  private rows: TraceInput[] = []
 
   constructor(
     private readonly db: AquillaDb,
@@ -92,7 +99,7 @@ export class TraceRecorder {
   ) {}
 
   /** Buffer one call. Fire-and-forget: callers must not await the auto-flush. */
-  add(t: LlmCallTrace): void {
+  add(t: TraceInput): void {
     if (!this.opts.store && !this.opts.posthog) return
     this.rows.push(t)
     if (this.rows.length >= (this.opts.flushAt ?? 32)) void this.flush()
@@ -106,7 +113,7 @@ export class TraceRecorder {
     await Promise.all([this.store(batch), this.sendPosthog(batch)])
   }
 
-  private async store(batch: LlmCallTrace[]): Promise<void> {
+  private async store(batch: TraceInput[]): Promise<void> {
     if (!this.opts.store) return
     try {
       const placeholders = batch
@@ -154,9 +161,11 @@ export class TraceRecorder {
     }
   }
 
-  private async sendPosthog(batch: LlmCallTrace[]): Promise<void> {
+  private async sendPosthog(rows: TraceInput[]): Promise<void> {
     const ph = this.opts.posthog
-    if (!ph) return
+    // A code-only row (tier "code") is not a generation.
+    const batch = rows.filter((t) => t.tier !== "code")
+    if (!ph || batch.length === 0) return
     try {
       const events = batch.map((t) => ({
         event: "$ai_generation",
@@ -232,17 +241,22 @@ interface TraceRow {
   created_at: string | Date
 }
 
-/** Traces for one run, oldest first, optionally narrowed to a span. */
+/**
+ * Traces for one run, oldest first, optionally narrowed to a span. Jev rows
+ * (label "jev:…", AQU-1690) carry shadow-mode answers that act on nothing
+ * yet; only callers that pass `includeJev` (maintainers) see them.
+ */
 export async function listRunTraces(
   db: AquillaDb,
-  input: { projectId: string; runId: string; spanId?: string; limit?: number },
+  input: { projectId: string; runId: string; spanId?: string; limit?: number; includeJev?: boolean },
 ): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
   const limit = Math.min(Math.max(1, input.limit ?? TRACE_LIST_LIMIT), TRACE_LIST_LIMIT)
   const spanClause = input.spanId ? "AND span_id = ?" : ""
+  const jevClause = input.includeJev ? "" : "AND label NOT LIKE 'jev:%'"
   const { results } = await db
     .prepare(
       `SELECT * FROM contextual_run_traces
-        WHERE project_id = ? AND run_id = ? ${spanClause}
+        WHERE project_id = ? AND run_id = ? ${spanClause} ${jevClause}
         ORDER BY created_at ASC, id ASC
         LIMIT ?`,
     )

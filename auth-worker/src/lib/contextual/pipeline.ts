@@ -21,7 +21,7 @@ import {
   type TranslationBriefParameters,
 } from "./project-context"
 import { projectDecisionLines } from "./project-decisions"
-import type { SpanBible } from "./bible-span"
+import { checkSpanBible, type SpanBible } from "./bible-span"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
@@ -332,6 +332,9 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
 
     phase("checking")
     const flags = await deps.lint(drafted.draft)
+    // AQU-1690 judgeExpectations: the Bible data questions code cannot settle,
+    // one batched Jev call for the span. Shadow answers are only recorded.
+    const bibleCheck = await checkSpanBible(deps.bible, drafted.draft, flags)
 
     // Support: code first (free), the fast model only on what code flagged.
     // Both tiers are reported — a routing decision nobody can inspect is a
@@ -396,6 +399,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
           flags,
           ...(supportSignal ? { support: supportSignal } : {}),
           redrafted: attempt === 2,
+          bible: bibleCheck.activeCodes.get(cellId) ?? [],
         }),
       })
     }

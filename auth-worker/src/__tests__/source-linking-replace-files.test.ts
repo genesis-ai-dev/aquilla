@@ -16,6 +16,9 @@
 //   4. Detach writes the upstream's text onto the project's own cells in a
 //      followed-into file, and creates no second copy of it.
 //   5. A database that predates migration 0140 still links.
+//   6. "Choose files" on an existing link (POST /link-source/files) takes the
+//      same pairs for the files it adds, records them before the addition, and
+//      refuses the same things.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -243,6 +246,88 @@ describe("POST /:projectId/link-source — replaceFiles (AQU-1679)", () => {
     expect(body.replaceFiles).toMatchObject([{ fileId: OWN_MRK, canReplace: false }])
     expect(await linkedTo()).toBeNull()
     expect(await storedAdoption()).toBeNull()
+  })
+})
+
+describe("POST /:projectId/link-source/files — replaceFiles (AQU-1679)", () => {
+  async function storedBackfill() {
+    const row = await env.AQUILLA_PG.prepare("SELECT source_link_backfill FROM projects WHERE id = ?")
+      .bind(DOWN)
+      .first<{ source_link_backfill: string | null }>()
+    return row?.source_link_backfill ? JSON.parse(row.source_link_backfill) : null
+  }
+  const addFiles = (body: Record<string, unknown>) => post("/link-source/files", body)
+
+  beforeEach(async () => {
+    // A link that follows only MAT; MRK is the file the lead now adds.
+    await liveSourceLink({ fileIds: [UP_MAT] })
+  })
+
+  // WHY: the pairs have to be on the record BEFORE the addition is, because the
+  // sync the addition triggers joins the file first and replays it second — a
+  // pair recorded after would find the file already replayed in as a copy.
+  it("records the pairs as pending adopted files alongside the addition", async () => {
+    const res = await addFiles({
+      fileIds: [UP_MRK],
+      replaceFiles: [{ upstreamFileId: UP_MRK, fileId: OWN_MRK }],
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { added: string[]; replaceFiles: unknown; complete: boolean }
+    expect(body.added).toEqual([UP_MRK])
+    expect(body.replaceFiles).toEqual([{ upstreamFileId: UP_MRK, fileId: OWN_MRK }])
+    // The stubbed sync ran nothing, so the join is still pending — and so is
+    // the add; neither is reported complete.
+    expect(body.complete).toBe(false)
+    expect(await storedAdoption()).toEqual({ files: { [UP_MRK]: OWN_MRK }, pending: [UP_MRK] })
+    expect(await storedBackfill()).toEqual({ fileIds: [UP_MRK], doneSeq: 0 })
+  })
+
+  // WHY: each of these would record something the lead did not ask for.
+  it.each([
+    ["a file not being added", { fileIds: [UP_MRK], replaceFiles: [{ upstreamFileId: UP_MAT, fileId: OWN_MRK }] }],
+    ["a file the link already follows", { fileIds: [UP_MAT, UP_MRK], replaceFiles: [{ upstreamFileId: UP_MAT, fileId: OWN_MRK }] }],
+  ])("refuses a pair for %s and adds nothing", async (_label, body) => {
+    const res = await addFiles(body)
+
+    expect(res.status).toBe(400)
+    expect(await storedAdoption()).toBeNull()
+    expect(await storedBackfill()).toBeNull()
+  })
+
+  it("refuses, with the comparison, when the files are not the same material — and adds nothing", async () => {
+    // Make the project's MRK unrelated to the upstream's.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET value = 'Unrelated ' || cell_id WHERE project_id = ? AND file_id = ?`,
+    )
+      .bind(DOWN, OWN_MRK)
+      .run()
+
+    const res = await addFiles({
+      fileIds: [UP_MRK],
+      replaceFiles: [{ upstreamFileId: UP_MRK, fileId: OWN_MRK }],
+    })
+
+    expect(res.status).toBe(422)
+    expect(((await res.json()) as { replaceFiles: Array<{ canReplace: boolean }> }).replaceFiles).toMatchObject([
+      { canReplace: false },
+    ])
+    expect(await storedAdoption()).toBeNull()
+    expect(await storedBackfill()).toBeNull()
+  })
+
+  it("refuses to replace on a database without source_link_adopt, and adds nothing", async () => {
+    await env.AQUILLA_PG.prepare("ALTER TABLE projects DROP COLUMN IF EXISTS source_link_adopt").run()
+    try {
+      const res = await addFiles({
+        fileIds: [UP_MRK],
+        replaceFiles: [{ upstreamFileId: UP_MRK, fileId: OWN_MRK }],
+      })
+      expect(res.status).toBe(503)
+      expect(await storedBackfill()).toBeNull()
+    } finally {
+      await env.AQUILLA_PG.prepare("ALTER TABLE projects ADD COLUMN IF NOT EXISTS source_link_adopt TEXT").run()
+    }
   })
 })
 

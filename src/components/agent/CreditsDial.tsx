@@ -10,10 +10,10 @@
  *   1. Role gate: viewer's org role must be >= MAINTAINER (600). Translators
  *      must never see credit/cost data.
  *   2. Server gate: getOrgCredits returns null on 403 (not maintainer server-
- *      side, or showToOrg off) → the dial self-hides.
+ *      side, or showToOrg off) → the dial renders `fallback` instead.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
@@ -29,9 +29,12 @@ export interface CreditsDialProps {
   orgRoleLevel: number
   /** Re-fetch when this changes (e.g. after each agent run settles). */
   refreshKey?: unknown
+  /** Shown while credits are loading or hidden (403 / error), so the slot
+   *  never goes blank for a maintainer whose org hides credits. */
+  fallback?: ReactNode
 }
 
-export function CreditsDial({ jwt, orgId, orgRoleLevel, refreshKey }: CreditsDialProps) {
+export function CreditsDial({ jwt, orgId, orgRoleLevel, refreshKey, fallback = null }: CreditsDialProps) {
   const t = useT()
   const [data, setData] = useState<OrgCredits | null>(null)
   const [open, setOpen] = useState(false)
@@ -48,8 +51,8 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel, refreshKey }: CreditsDia
   }, [refresh, refreshKey])
 
   // Role gate (double-check): non-maintainers never see credit data.
-  if (orgRoleLevel < ROLE.MAINTAINER) return null
-  if (!data) return null
+  if (orgRoleLevel < ROLE.MAINTAINER) return fallback
+  if (!data) return fallback
 
   const { day, week, config, remaining } = data
   const pct = capUsagePct(day.agentCredits, config.agentDailyCap)

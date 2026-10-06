@@ -82,6 +82,22 @@ describe("AgentUsageRing", () => {
     expect(screen.queryByTestId("run-budget-ring")).toBeNull()
   })
 
+  it("falls back to the run-budget ring when the org hides credits from a maintainer", async () => {
+    // getOrgCredits resolves null on 403 (showToOrg off). With the per-reply
+    // usage line gone, a blank slot would leave this maintainer no usage at all.
+    mockGetOrgCredits.mockResolvedValue(null)
+    render(
+      <AgentUsageRing
+        credits={credits(ROLE.MAINTAINER)}
+        runs={[run("a", { spentCredits: 2, capCredits: 2500, exhausted: false })]}
+        isStreaming={false}
+      />,
+    )
+    await waitFor(() => expect(mockGetOrgCredits).toHaveBeenCalled())
+    expect(screen.getByTestId("run-budget-ring")).toHaveAccessibleName("<1% of the run budget used")
+    expect(screen.queryByTestId("credits-dial")).toBeNull()
+  })
+
   it("re-fetches org spend when a run settles, so the dial isn't stale", async () => {
     mockGetOrgCredits.mockResolvedValue(ORG_CREDITS)
     const view = render(<AgentUsageRing credits={credits(ROLE.MAINTAINER)} runs={[]} isStreaming={false} />)

@@ -5,7 +5,8 @@
  *
  * Role-aware:
  *   - Maintainer+: the org CreditsDial (today's agent spend vs. the daily cap,
- *     with a breakdown popover). Credit figures stay behind its double gate.
+ *     with a breakdown popover). Credit figures stay behind its double gate;
+ *     when the server hides them (403), the run-budget ring stands in.
  *   - Everyone else: the latest run's budget as a percentage only — the same
  *     figure BudgetMeter showed inline, never credits.
  */
@@ -25,12 +26,13 @@ export interface AgentUsageRingProps {
 }
 
 export function AgentUsageRing({ credits, runs, isStreaming }: AgentUsageRingProps) {
+  const budget = runs.findLast((run) => run.budget)?.budget
+  const runRing = budget ? <RunBudgetRing budget={budget} /> : null
   if (credits && credits.orgRoleLevel >= ROLE.MAINTAINER) {
     // Re-fetch org spend once a run settles, so the ring isn't stale.
-    return <CreditsDial {...credits} refreshKey={isStreaming ? -1 : runs.length} />
+    return <CreditsDial {...credits} refreshKey={isStreaming ? -1 : runs.length} fallback={runRing} />
   }
-  const budget = runs.findLast((run) => run.budget)?.budget
-  return budget ? <RunBudgetRing budget={budget} /> : null
+  return runRing
 }
 
 function RunBudgetRing({ budget }: { budget: AgentBudget }) {

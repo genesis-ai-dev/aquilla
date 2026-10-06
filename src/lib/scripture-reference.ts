@@ -1,4 +1,4 @@
-import { getBookName, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
+import { bookCodeFromName, getBookName, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 
 export interface ScriptureReference {
   bookCode: string
@@ -21,6 +21,47 @@ export function parseScriptureReference(value: string | null | undefined): Scrip
     chapter: match[2],
     verse: match[3] ?? null,
   }
+}
+
+/** A verse, or a run of verses, as `parseVerseReference` reads it. */
+export interface VerseReference {
+  bookCode: string
+  chapter: number
+  /** The verse (`4`, or `4a`), or the first verse of a bridge. */
+  verse: string
+  /** The last verse of a bridge (`\v 1-2`); null for a single verse. */
+  toVerse: string | null
+}
+
+const LOOSE_VERSE_REF_RE = /^(.+?)\s*(\d+)\s*[:.]\s*(\d+[a-z]?)(?:\s*[-–]\s*(\d+[a-z]?))?$/i
+
+/** A verse number with its leading zeros dropped and its letter lower-cased. */
+const verseNumber = (value: string) => value.toLowerCase().replace(/^0+(?=\d)/, "")
+
+/**
+ * A verse reference written the way people and other tools write one —
+ * `GEN 1:4`, `gen 1:4`, `GEN 1.4`, `Genesis 1:4`, `1 Samuel 3:2`, `GEN 1:1-2` —
+ * or null when it names no known book or no verse. Looser than
+ * `parseScriptureReference` on purpose: that one reads the app's own refs and
+ * its callers depend on its strictness; this one reads refs from someone
+ * else's file (a target import's reference column, AQU-1375).
+ */
+export function parseVerseReference(value: string | null | undefined): VerseReference | null {
+  const match = value?.trim().match(LOOSE_VERSE_REF_RE)
+  if (!match) return null
+  const bookCode = bookCodeFromName(match[1])
+  if (!bookCode) return null
+  return {
+    bookCode,
+    chapter: Number(match[2]),
+    verse: verseNumber(match[3]),
+    toVerse: match[4] ? verseNumber(match[4]) : null,
+  }
+}
+
+/** The app's own spelling of a verse reference: `GEN 1:4`, `GEN 1:1-2`. */
+export function formatVerseReference(ref: VerseReference): string {
+  return `${ref.bookCode} ${ref.chapter}:${ref.verse}${ref.toVerse ? `-${ref.toVerse}` : ""}`
 }
 
 /** Canonical verse label for the editor gutter. Non-verse cells return null. */

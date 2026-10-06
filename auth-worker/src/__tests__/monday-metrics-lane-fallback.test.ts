@@ -74,6 +74,28 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     expect(file.status_auto).toBe("Not started")
   })
 
+  // AQU-1626: a cue sheet or a caption track is machinery the importer made,
+  // not a deliverable — pushing it to Monday put a row on a board for a partner
+  // to chase, and its 500 untranslated cues dragged the project percentage down
+  // with it. Tombstoned files were already excluded; the hidden roles were not.
+  it("pushes neither the hidden companion files nor a tombstoned one", async () => {
+    await seedProject("proj-hidden")
+    await seedFallbackFile("proj-hidden", { cellCount: 10, filledCount: 10, approvedCount: 10 })
+    await seedTargetLanes("proj-hidden", [""])
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, role, deleted_at)
+       VALUES ('f-cues', ?, 'RUT · audio cues', 'e1', 500, 0, 0, 'audio-cues', NULL),
+              ('f-track', ?, 'RUT · captions', 'e1', 500, 0, 0, 'timeline-content', NULL),
+              ('f-gone', ?, 'RUT draft', 'e1', 500, 0, 0, NULL, 123)`,
+    ).bind("proj-hidden", "proj-hidden", "proj-hidden").run()
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "proj-hidden")
+
+    expect(summary!.files.map((f) => f.fileId)).toEqual(["f1"])
+    expect(summary!.project.total_count).toBe(10)
+    expect(summary!.project.completion_pct).toBe(100)
+  })
+
   it("keeps the file counters on a single-lane project", async () => {
     await seedProject("proj-2")
     await seedFallbackFile("proj-2", { cellCount: 10, filledCount: 6, approvedCount: 4 })

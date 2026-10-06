@@ -314,6 +314,37 @@ describe("the validator list", () => {
     expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("a", false)
   })
 
+  // The text control's PR 1 area 5 step 6 bug, here too (2026-10-03): the
+  // trash button closed a click-opened list behind Base UI's back, and Base
+  // UI ignores hover while it thinks a click opened the list, so the check
+  // never opened the list on hover again.
+  it("opens on hover again after Remove your validation closed a click-opened list", async () => {
+    const { onValidationChange, rerender } = draw([
+      take({ audioId: "a", validatorCount: 2, validators: ["ana", "bo"] }),
+    ], { validationRequirement: 2 })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+    await userEvent.click(within(list).getByRole("button", { name: /remove your validation/i }))
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("a", false)
+    rerender(
+      <I18nProvider>
+        <AudioValidationControl
+          cellRef="GEN 1:1"
+          takes={[take({ audioId: "a", validatorCount: 1, validators: ["bo"] })]}
+          currentUsername="ana"
+          validationRequirement={2}
+          canValidate
+          onValidationChange={onValidationChange}
+        />
+      </I18nProvider>,
+    )
+    await vi.waitFor(() => expect(screen.queryByText("Audio validated by")).toBeNull())
+    await userEvent.unhover(button()!)
+    await userEvent.hover(button()!)
+    expect(await screen.findByText("Audio validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(screen.getByText("bo")).toBeInTheDocument()
+  })
+
   it("says plainly when nobody has validated one of several takes", async () => {
     draw([
       take({ audioId: "a", validatorCount: 1, validators: ["bo"] }),

@@ -14,6 +14,7 @@ import type { TermFormTally, TermOccurrencePage, TermOccurrenceWire } from "../.
 import { verdictForKnownMatch } from "../../../src/lib/terminology/verdict"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { visibleSourceSql } from "./hidden-cells-scope"
+import { inCountedFileSql } from "../../../db/shared/counted-files"
 
 /** Stop a pathological project from holding the request open. */
 const MAX_SCAN = 50_000
@@ -165,6 +166,10 @@ async function fetchBatch(
     ` AND ${targetLaneDualReadSql("t")}`,
     "WHERE s.project_id = ? AND s.side = 'source'",
     ` AND ${visibleSourceSql("s")}`,
+    // AQU-1626: an occurrence inside a deleted file or a hidden companion is
+    // not an occurrence a translator can act on — the file is not openable from
+    // the sidebar, so the row was a dead end in the term drawer.
+    ` AND ${inCountedFileSql("s")}`,
     " AND s.tombstoned_at IS NULL AND s.value <> ''",
     cursorSql,
     "ORDER BY s.file_id, COALESCE(s.sequence_index, 1e300), s.cell_id",
@@ -328,6 +333,9 @@ export async function loadVisibleSourceTexts(
         "FROM cells s",
         "WHERE s.project_id = ? AND s.side = 'source'",
         ` AND ${visibleSourceSql("s")}`,
+        // AQU-1626: and mining skips them too, or a dubbed project's suggested
+        // terminology comes back full of timecodes.
+        ` AND ${inCountedFileSql("s")}`,
         " AND s.tombstoned_at IS NULL AND s.value <> ''",
         "ORDER BY s.file_id, COALESCE(s.sequence_index, 1e300), s.cell_id",
         "LIMIT ?",

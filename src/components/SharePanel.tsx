@@ -24,6 +24,7 @@ import {
 } from "@/lib/sync/invites"
 import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneRowLabel } from "@/lib/lanes/lane-language"
 import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
@@ -267,7 +268,9 @@ function MembersTab({ projectId }: { projectId: string }) {
           laneRows.length > 0
             ? laneRows.map((lane) => ({
                 value: lane.id,
-                label: lane.name.trim() || (lane.legacyTag ?? "").trim() || defaultLabel,
+                // AQU-1586: the row's name or language before its tag — a
+                // tag can be the opaque lane id.
+                label: laneRowLabel(lane) ?? ((lane.legacyTag ?? "").trim() || defaultLabel),
               }))
             : [
                 { value: "", label: defaultLabel },

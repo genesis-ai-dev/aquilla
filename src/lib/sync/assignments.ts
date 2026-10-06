@@ -202,10 +202,10 @@ export async function getProjectAssignments(
  * part of it that lands in the unit on screen. That is the only grain at which
  * "Anna: 940 of 950" can be read against the unit's own bar directly above it.
  *
- * `translated`/`validated` are measured in the lane the caller asked for;
- * `recorded`/`audioValidated` are lane-independent, because `cell_audio` has
- * no target_lang column — one recording is the recording, whichever text lane
- * you are looking at.
+ * All four are measured in the lane the caller asked for. `recorded` and
+ * `audioValidated` were lane-independent until AQU-1591, when a take came to
+ * belong to the lane it performs: a line voiced in one language no longer
+ * reads as recorded in another.
  *
  * `targetLang` is the lane the ASSIGNMENT is pinned to (AQU-538 §3.5, '' = the
  * default lane), which need not be the lane being viewed — see

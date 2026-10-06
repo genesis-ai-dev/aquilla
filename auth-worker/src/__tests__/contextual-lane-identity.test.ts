@@ -237,17 +237,17 @@ describe("the drafts read takes a lane id", () => {
 })
 
 /**
- * AQU-1610: the Workers deploy separately from migration 0139, in either
+ * AQU-1610: the Workers deploy separately from migration 0151, in either
  * order, so for one window the running code meets the OTHER world's indexes.
  * A QA walk on the preview (shared development database, un-migrated) caught
  * exactly that: every staged draft failed with *"there is no unique or
  * exclusion constraint matching the ON CONFLICT specification"* and the run
  * reported zero proposals.
  *
- * These rebuild the three live-row indexes in their PRE-0139 shape and then
+ * These rebuild the three live-row indexes in their PRE-0151 shape and then
  * run the same writers, so the fallback cannot rot.
  */
-describe("the writers survive a database migration 0139 has not reached", () => {
+describe("the writers survive a database migration 0151 has not reached", () => {
   beforeEach(async () => {
     await db.prepare("DROP INDEX IF EXISTS contextual_drafts_live").run()
     await db
@@ -310,7 +310,7 @@ describe("the writers survive a database migration 0139 has not reached", () => 
     // Both lanes spell their tag '', so on this database the span key cannot
     // tell them apart. Archiving by lane_id would leave the Spanish brief in
     // the slot and the approve would hit the unique index; archiving by the
-    // key actually in force supersedes it, which is the pre-0139 behaviour
+    // key actually in force supersedes it, which is the pre-0151 behaviour
     // this window has to keep — a refusal here is a run that cannot finish.
     expect((await reviewSceneBrief(db, { id: quechua.brief.id, action: "approve" })).status).toBe("ok")
     const approved = await listSceneBriefs(db, PROJECT, { status: "approved" })
@@ -320,10 +320,10 @@ describe("the writers survive a database migration 0139 has not reached", () => 
   it("reports the former default lane's run as active_exists, not a database error", async () => {
     const first = await createRun(db, { projectId: PROJECT, fileId: FILE, laneId: LANE_DEFAULT })
     if (first.status !== "ok") throw new Error("unreachable")
-    // Both lanes spell their tag '', and the pre-0139 index is keyed on it, so
+    // Both lanes spell their tag '', and the pre-0151 index is keyed on it, so
     // the second lane's run is refused by the database. The caller still gets
     // the domain answer rather than a raw constraint error — the honest one
-    // for this database, which cannot hold both runs until 0139 lands.
+    // for this database, which cannot hold both runs until 0151 lands.
     const second = await createRun(db, { projectId: PROJECT, fileId: FILE, laneId: LANE_UNTAGGED })
     expect(second).toEqual({ status: "active_exists", runId: first.run.id })
   })

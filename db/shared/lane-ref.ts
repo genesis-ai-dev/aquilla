@@ -125,7 +125,7 @@ export type RequiredLaneRef =
  * Which column the contextual pipeline's live-row uniqueness rules are keyed
  * on in THIS database, right now.
  *
- * Migration 0139 moves `contextual_runs_active`, `contextual_drafts_live` and
+ * Migration 0151 moves `contextual_runs_active`, `contextual_drafts_live` and
  * `scene_briefs_live` from the legacy tag to `lane_id`. The Workers deploy
  * separately from the migration and in either order, so for one window the
  * running code meets the other world's indexes — and the mismatch is not

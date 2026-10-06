@@ -426,7 +426,7 @@ export async function reviewSceneBrief(
   }
 
   // approve: archive the current holder of this span key (if any), then
-  // approve. The span key is lane_id after migration 0139 and the legacy tag
+  // approve. The span key is lane_id after migration 0151 and the legacy tag
   // before it (AQU-1610); archiving by the column the index does NOT use
   // leaves the current holder in place for the approve to collide with.
   const liveKey = await liveLaneKey(db, "scene_briefs_live")

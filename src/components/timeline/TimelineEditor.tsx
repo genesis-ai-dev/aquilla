@@ -53,6 +53,8 @@ import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
+import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
@@ -433,6 +435,17 @@ export interface TimelineEditorProps {
   /** Pre-merge round: change THIS FILE's mode (file.timing.set). Absent = the
    *  control is read-only (the server requires maintainer to write it). */
   onChangeTimingMode?(mode: AudioTimingMode): void
+  /**
+   * The file's playback sound, offered on the Source audio lane beside its mute
+   * button (Sam, Oct 5): the same choice as the "Sound: …" pill in the video's
+   * corner, read and changed through the same store. Absent unless the file
+   * has both a YouTube video's own sound and an uploaded recording.
+   */
+  soundSource?: {
+    value: PlaybackSource
+    recordingName: string | null
+    onChange(next: PlaybackSource): void
+  }
   /** AQU-646 stage 1: withhold the timing-mode control altogether. A subtitle
    *  import resolves to Original timing whatever it has stored, so there is
    *  only one mode it can be in — a picker with a single choice, or a label
@@ -1150,6 +1163,7 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  soundSource,
   onCollapseSection,
   onCollapseTextSection,
   onToggleTextFullscreen,
@@ -4410,6 +4424,18 @@ export function TimelineEditor({
                     }
                     trailing={
                       <>
+                        {/* Sam, Oct 5: the playback-sound menu belongs on the
+                            Source audio lane too, beside its mute button. Not
+                            in the collapsed strip, which keeps only glyphs. */}
+                        {speaker === "source" && soundSource && !gutterCollapsed && !renaming && (
+                          <VideoSoundSourcePicker
+                            variant="lane"
+                            compact={rowH < MIN_SPEAKER_FULL_H_PX}
+                            value={soundSource.value}
+                            recordingName={soundSource.recordingName}
+                            onChange={soundSource.onChange}
+                          />
+                        )}
                         {speaker
                           ? speakerToggle(
                               speaker,

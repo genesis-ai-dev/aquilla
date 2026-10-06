@@ -49,7 +49,13 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
-import { recordingDrivesPlayback, setPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
+import {
+  onBeforePlaybackSourceSwitch,
+  recordingDrivesPlayback,
+  switchPlaybackSource,
+  usePlaybackSource,
+  type PlaybackSource,
+} from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
@@ -627,16 +633,24 @@ export function MediaVideoPane({
    *   recording under the video's own sound. Stopping it hands the bar to the
    *   source the person just picked.
    */
-  const chooseSoundSource = (next: PlaybackSource) => {
-    if (next === playbackSource) return
-    pauseAllTransports()
-    wantPlayRef.current = false
-    stallRef.current = IDLE_STALL_STATE
-    cancelPendingPlay()
-    videoRef.current?.pause()
-    if (queue.active) stopQueue()
-    setPlaybackSource(fileId, next)
-  }
+  //
+  // The timeline's Source audio lane offers the same choice (Sam, Oct 5), so
+  // the stopping is registered for the file and runs whichever surface the
+  // person used (`switchPlaybackSource`).
+  const queueActive = queue.active
+  useEffect(
+    () =>
+      onBeforePlaybackSourceSwitch(fileId, () => {
+        pauseAllTransports()
+        wantPlayRef.current = false
+        stallRef.current = IDLE_STALL_STATE
+        cancelPendingPlay()
+        videoRef.current?.pause()
+        if (queueActive) stopQueue()
+      }),
+    [fileId, queueActive, cancelPendingPlay],
+  )
+  const chooseSoundSource = (next: PlaybackSource) => switchPlaybackSource(fileId, playbackSource, next)
 
   // Handing the transport to the queue abandons any start we were waiting for.
   //

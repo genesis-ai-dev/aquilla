@@ -76,7 +76,42 @@ export function setPlaybackSource(fileId: string, source: PlaybackSource): void 
 /** Test seam: forget every in-memory choice. */
 export function __resetPlaybackSourceForTests(): void {
   sessionOverrides.clear()
+  beforeSwitch.clear()
   for (const l of listeners) l()
+}
+
+// What has to stop before a file's sound changes hands, per file. The video
+// pane registers its routine (it owns the picture's element and its play
+// intent); see `chooseSoundSource` there for why a plain flip is not enough.
+// Sam, Oct 5: the choice is offered in two places, the video's corner and the
+// timeline's Source audio lane, so both go through `switchPlaybackSource`.
+const beforeSwitch = new Map<string, Set<() => void>>()
+
+/** Run `fn` before this file's sound changes hands. Returns the unsubscribe. */
+export function onBeforePlaybackSourceSwitch(fileId: string, fn: () => void): () => void {
+  let set = beforeSwitch.get(fileId)
+  if (!set) {
+    set = new Set()
+    beforeSwitch.set(fileId, set)
+  }
+  set.add(fn)
+  return () => {
+    set.delete(fn)
+    if (set.size === 0 && beforeSwitch.get(fileId) === set) beforeSwitch.delete(fileId)
+  }
+}
+
+/**
+ * Change which sound plays this file, from any surface: stop what is playing
+ * (whatever registered for the file), then remember the new choice. Nothing
+ * resumes by itself; the person presses play on the new source. With no video
+ * pane on screen nothing is registered, and only the choice changes: the
+ * picture is not playing, and the queue keeps the transport anyway.
+ */
+export function switchPlaybackSource(fileId: string, current: PlaybackSource, next: PlaybackSource): void {
+  if (next === current) return
+  for (const fn of [...(beforeSwitch.get(fileId) ?? [])]) fn()
+  setPlaybackSource(fileId, next)
 }
 
 /**

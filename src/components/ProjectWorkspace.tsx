@@ -177,7 +177,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
-import { recordingDrivesPlayback, usePlaybackSource } from "@/lib/audio/playback-source"
+import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
@@ -10725,6 +10725,24 @@ export function ProjectWorkspace() {
   // sound menu; until then the video plays with its own sound. Read through the
   // same store as the pane and the playback bar, so all three agree.
   const playbackSource = usePlaybackSource(activeFileId, activeFile?.coreMediaUrl)
+  // Sam, Oct 5: the same choice on the timeline's Source audio lane. Offered
+  // exactly when the video pane offers it: a YouTube video with an uploaded
+  // recording. The pane does the stopping (`switchPlaybackSource`).
+  const recordingCellForSound = useMemo(
+    () => audioMergedCells.find((c) => queueClockIsFileTime(c)),
+    [audioMergedCells],
+  )
+  const timelineSoundSource = useMemo(
+    () =>
+      activeFileId && recordingCellForSound && youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
+        ? {
+            value: playbackSource,
+            recordingName: recordingCellForSound.original.trim() || null,
+            onChange: (next: PlaybackSource) => switchPlaybackSource(activeFileId, playbackSource, next),
+          }
+        : undefined,
+    [activeFileId, activeFile?.coreMediaUrl, recordingCellForSound, playbackSource],
+  )
   /**
    * Does the PICTURE own this file's transport?
    *
@@ -13427,6 +13445,7 @@ export function ProjectWorkspace() {
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    soundSource={timelineSoundSource}
                     // AQU-646 stage 6B: the trim handles are withheld when the
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.

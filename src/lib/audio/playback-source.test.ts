@@ -6,8 +6,10 @@ import {
   defaultPlaybackSource,
   playbackSourceKey,
   readPlaybackSource,
+  onBeforePlaybackSourceSwitch,
   recordingDrivesPlayback,
   setPlaybackSource,
+  switchPlaybackSource,
   usePlaybackSource,
 } from "./playback-source"
 
@@ -88,5 +90,43 @@ describe("recordingDrivesPlayback", () => {
     expect(recordingDrivesPlayback(true, "video")).toBe(false)
     expect(recordingDrivesPlayback(false, "recording")).toBe(false)
     expect(recordingDrivesPlayback(false, "video")).toBe(false)
+  })
+})
+
+// Sam, Oct 5: the choice is offered in the video's corner AND on the Source
+// audio lane. Whichever is used, what is playing must stop before the sound
+// changes hands (the video pane registers that), or the picture plays on
+// unmuted under the queue.
+describe("switchPlaybackSource", () => {
+  it("stops what the file registered, then remembers the new choice", () => {
+    const order: string[] = []
+    const off = onBeforePlaybackSourceSwitch("f1", () => order.push(`stop:${readPlaybackSource("f1", YT)}`))
+    switchPlaybackSource("f1", "video", "recording")
+    expect(order).toEqual(["stop:video"])
+    expect(readPlaybackSource("f1", YT)).toBe("recording")
+    off()
+  })
+
+  it("does nothing when the choice is already on", () => {
+    const stop = vi.fn()
+    const off = onBeforePlaybackSourceSwitch("f1", stop)
+    switchPlaybackSource("f1", "video", "video")
+    expect(stop).not.toHaveBeenCalled()
+    expect(localStorage.getItem(playbackSourceKey("f1"))).toBeNull()
+    off()
+  })
+
+  it("runs only the switched file's stoppers, and none after unsubscribing", () => {
+    const f1 = vi.fn()
+    const f2 = vi.fn()
+    const off1 = onBeforePlaybackSourceSwitch("f1", f1)
+    const off2 = onBeforePlaybackSourceSwitch("f2", f2)
+    switchPlaybackSource("f2", "video", "recording")
+    expect(f1).not.toHaveBeenCalled()
+    expect(f2).toHaveBeenCalledTimes(1)
+    off2()
+    switchPlaybackSource("f2", "recording", "video")
+    expect(f2).toHaveBeenCalledTimes(1)
+    off1()
   })
 })

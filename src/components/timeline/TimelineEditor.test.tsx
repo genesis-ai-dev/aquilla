@@ -715,6 +715,46 @@ describe("TimelineEditor", () => {
     expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
+  // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too,
+  // beside its mute button, when the workspace offers it.
+  it("puts the playback-sound pill beside the Source audio mute button when offered", async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    rerender(
+      <TimelineEditor
+        fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        soundSource={{ value: "video", recordingName: "episode.wav", onChange }}
+      />,
+    )
+    const pill = screen.getByTestId("tl-sound-source-picker")
+    expect(pill).toHaveTextContent(/^Sound: Video$/)
+    // Beside the SOURCE row's speaker, not the target's.
+    expect(pill.parentElement).toContainElement(screen.getByTestId("tl-speaker-source"))
+    expect(pill.parentElement).not.toContainElement(screen.getByTestId("tl-speaker-target"))
+    fireEvent.click(pill)
+    fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("recording")
+  })
+
+  it("keeps the playback-sound pill out of the collapsed gutter strip", () => {
+    localStorage.setItem("aquilla:tlGutterCollapsed:sndstrip", "1")
+    try {
+      render(
+        <TimelineEditor
+          fileId="sndstrip" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          soundSource={{ value: "video", recordingName: null, onChange: () => {} }}
+        />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    } finally {
+      localStorage.removeItem("aquilla:tlGutterCollapsed:sndstrip")
+    }
+  })
+
   it("a muted-source preference persists across mounts", () => {
     localStorage.setItem("aquilla:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null

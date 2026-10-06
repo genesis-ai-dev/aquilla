@@ -24,6 +24,15 @@ export function bibleReasonParams(finding: BibleCheckFinding): Record<string, st
     params.speakerConf = String(evidence.speakerConf)
   } else {
     params.refs = evidence.refs.join(',')
+    // AQU-1697: the pack data each kind adds.
+    if (evidence.kind === 'number') {
+      params.startWord = String(evidence.startWord)
+      params.endWord = String(evidence.endWord)
+    } else if (evidence.kind === 'variant') {
+      params.passage = evidence.passage
+    } else if (evidence.kind === 'pericope') {
+      params.title = evidence.title
+    }
   }
   return params
 }

@@ -17,8 +17,19 @@ import {
   type QuoteMarksProfile,
 } from '../language-profile'
 import { isMarkedSpeech } from './compile'
+import {
+  checkAbsentVerse,
+  checkCardinals,
+  checkDisputedPassage,
+  checkNegation,
+  checkOrdinals,
+  checkSentenceRunsOn,
+  type PackACellInput,
+} from './evaluate-pack-a'
 import { scanQuotes, type QuoteToken } from './quote-scan'
 import { wordNumber, wordRef } from './refs'
+import { UNSPACED_SCRIPT, WORD_PART, escapeRegExp } from './text-match'
+import { maskUsfm } from './usfm-mask'
 import {
   BIBLE_CHECK_DEFAULT_SEVERITY,
   BIBLE_CHECK_NEEDS,
@@ -36,16 +47,9 @@ import {
  */
 export const QUESTION_MARK = /[?¿;՞؟፧‽⁇-⁉⸮︖﹖？]/u
 
-/** Scripts written without spaces between words, where a particle sits against its neighbours. */
-export const UNSPACED_SCRIPT =
-  /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]+$/u
-
-/** A character that belongs to a word, for the whole-word and word-end tests below. */
-export const WORD_PART = '[\\p{L}\\p{M}\\p{N}]'
-
-export function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+// AQU-1697: these moved to ./text-match.ts, which the pack-A checks share;
+// re-exported for the callers that import them from here.
+export { UNSPACED_SCRIPT, WORD_PART, escapeRegExp }
 
 /**
  * The cell marks a question: with a question mark, or with one of the
@@ -97,12 +101,22 @@ interface Evaluation {
   /** Closing marks by level, stray closes included: a close with no open still closes. */
   closes: Map<number, QuoteToken[]>
   levels: Map<number, LevelExpectation>
+  /** AQU-1697: what the pack-A checks read; the text with its notes blanked out. */
+  packA: PackACellInput
 }
 
 /** True when a check cannot run because its Language-profile slot is empty. */
 export function isBibleCheckDormant(id: BibleCheckId, profile: LanguageProfile | null | undefined): boolean {
   const filled = filledLanguageProfileSlots(profile)
   return BIBLE_CHECK_NEEDS[id].some((slot) => !filled.has(slot))
+}
+
+/** AQU-1697: checks that read the text layer. N1 and N2 need it; M3 and S3 are sharper with it. */
+const TEXT_LAYER_CHECKS: readonly BibleCheckId[] = ['bkp:N1', 'bkp:N2', 'bkp:M3', 'bkp:S3']
+
+/** Is the text layer worth loading for this profile? Several MB per book, so only when a check reads it. */
+export function bibleChecksReadText(profile: LanguageProfile | null | undefined): boolean {
+  return TEXT_LAYER_CHECKS.some((id) => !isBibleCheckDormant(id, profile))
 }
 
 function expectedByLevel(expectation: CellExpectation): Map<number, LevelExpectation> {
@@ -361,6 +375,12 @@ const CHECKS: readonly (readonly [BibleCheckId, (e: Evaluation) => BibleCheckFin
   ['bkp:V8', checkInterruptions],
   ['bkp:V9', checkSelfProjection],
   ['bkp:M1', checkQuestion],
+  ['bkp:N1', (e) => checkCardinals(e.packA)],
+  ['bkp:N2', (e) => checkOrdinals(e.packA)],
+  ['bkp:M3', (e) => checkNegation(e.packA)],
+  ['bkp:S3', (e) => checkSentenceRunsOn(e.packA)],
+  ['bkp:S6', (e) => checkAbsentVerse(e.packA)],
+  ['bkp:S7', (e) => checkDisputedPassage(e.packA)],
 ]
 
 /**
@@ -369,6 +389,12 @@ const CHECKS: readonly (readonly [BibleCheckId, (e: Evaluation) => BibleCheckFin
  * quotation boundary in it; the rest would guess.
  */
 const VERSE_LEVEL_CHECKS: ReadonlySet<BibleCheckId> = new Set(['bkp:V3', 'bkp:V5', 'bkp:V7', 'bkp:V9'])
+
+/**
+ * AQU-1697: the variant policy holds for each part of a split verse, and is
+ * all there is to check where the pack lacks the verse (MAT 17:21).
+ */
+const VARIANT_CHECKS: ReadonlySet<BibleCheckId> = new Set(['bkp:S6', 'bkp:S7'])
 
 /**
  * Every finding for one cell. Empty when the cell has no expectation, its text
@@ -394,10 +420,15 @@ export function evaluateCell(
     opens: byDepth(tokens, ['open']),
     closes: byDepth(tokens, ['close', 'stray-close']),
     levels: expectedByLevel(expectation),
+    packA: { text: maskUsfm(targetText), rawText: targetText, expectation, profile: languageProfile ?? {} },
   }
-  const runnable = expectation.approximate
-    ? expectation.boundaries ? [] : active.filter(([id]) => VERSE_LEVEL_CHECKS.has(id))
-    : active
+  const runnable = !expectation.inPack
+    ? active.filter(([id]) => VARIANT_CHECKS.has(id))
+    : expectation.approximate
+      ? active.filter(
+          ([id]) => (VERSE_LEVEL_CHECKS.has(id) && !expectation.boundaries) || VARIANT_CHECKS.has(id),
+        )
+      : active
   const findings: BibleCheckFinding[] = []
   for (const [, check] of runnable) {
     const result = check(e)

@@ -8,14 +8,18 @@
 //
 // Relative imports only, no DOM: shared with the workers.
 
-import { expandCellRefs } from './refs'
+import { verseNumbers } from './greek-numbers'
+import { cellNegation } from './negation'
+import { expandCellRefs, siblingWordId, wordNumber, type CellVerses } from './refs'
 import type {
   CellExpectation,
   SpeechExpectation,
   SpeechInput,
   StructureLayerInput,
+  TextLayerInput,
   VoicesLayerInput,
 } from './types'
+import { cellVariant } from './variants'
 
 interface IndexedRun {
   ref: string
@@ -36,6 +40,8 @@ interface VoicesIndex {
   refRange: Map<string, { first: number; last: number }>
   speeches: Map<string, SpeechInput>
   gaps: Map<string, Gap[]>
+  /** AQU-1697: each speech's first word, where a question's μή can stand (M3). */
+  speechStarts: Set<string>
 }
 
 const MAX_NESTING = 32
@@ -80,7 +86,7 @@ function buildIndex(voices: VoicesLayerInput): VoicesIndex {
       lastCovered.set(id, i)
     }
   })
-  return { runs, refRange, speeches, gaps }
+  return { runs, refRange, speeches, gaps, speechStarts: new Set(voices.speeches.map((speech) => speech.from)) }
 }
 
 // Built once per layer object. The pack client hands out one object per file
@@ -114,13 +120,106 @@ function runLevel(run: IndexedRun, speeches: Map<string, SpeechInput>): number {
 export interface CompileOptions {
   /** Verse refs that more than one cell of the file covers (split verses). */
   sharedRefs?: ReadonlySet<string>
+  /** AQU-1697: the text layer (or a compact copy) for the numbers (N1, N2) and negation (M3). */
+  text?: TextLayerInput | null
+}
+
+// ── AQU-1697: moves (S3) ────────────────────────────────────────────────────
+
+interface MovesIndex {
+  /** Moves sorted by first word, with the furthest last word of any move so far. */
+  froms: string[]
+  furthestTo: string[]
+  ends: Set<string>
+}
+
+const movesCache = new WeakMap<object, MovesIndex>()
+
+function movesIndex(moves: readonly { from: string; to: string }[]): MovesIndex {
+  let index = movesCache.get(moves)
+  if (!index) {
+    const sorted = [...moves].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
+    const furthestTo: string[] = []
+    for (const move of sorted) {
+      const previous = furthestTo[furthestTo.length - 1]
+      furthestTo.push(previous !== undefined && previous > move.to ? previous : move.to)
+    }
+    index = { froms: sorted.map((m) => m.from), furthestTo, ends: new Set(moves.map((m) => m.to)) }
+    movesCache.set(moves, index)
+  }
+  return index
+}
+
+/** Some move spans `wordId` and runs on past it, and none ends there: the sentence goes on. */
+function sentenceRunsPast(structure: StructureLayerInput | null | undefined, wordId: string): boolean {
+  if (!structure?.moves) return false
+  const index = movesIndex(structure.moves)
+  if (index.ends.has(wordId)) return false
+  // The last move that starts at or before the word.
+  let lo = 0
+  let hi = index.froms.length - 1
+  let at = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (index.froms[mid] <= wordId) {
+      at = mid
+      lo = mid + 1
+    } else hi = mid - 1
+  }
+  return at >= 0 && index.furthestTo[at] > wordId
+}
+
+/** The Greek ends a sentence or a clause at this word: . · ; (Macula's `after`). */
+const GREEK_STOP = /[.;\u00B7\u0387\u037E]/u
+
+function greekStopsAt(text: TextLayerInput | null | undefined, wordId: string): boolean {
+  if (!text || !Object.hasOwn(text.words, wordId)) return false
+  return GREEK_STOP.test(text.words[wordId].after ?? '')
+}
+
+/** Where a speech starts or a vocative ends: places a question's μή can open the clause. */
+function clauseStarts(index: VoicesIndex, structure: StructureLayerInput | null | undefined, refs: readonly string[]): Set<string> {
+  const starts = new Set(index.speechStarts)
+  for (const ref of refs) {
+    const verse = structure && Object.hasOwn(structure.verses, ref) ? structure.verses[ref] : undefined
+    for (const vocative of verse?.vocatives ?? []) starts.add(siblingWordId(vocative, wordNumber(vocative) + 1))
+  }
+  return starts
+}
+
+/**
+ * The expectation for a cell whose verses the pack lacks: a verse the
+ * critical text omits (MAT 17:21), maybe bridged with one it has. Only the
+ * variant checks have facts here; null when none of its verses is a variant.
+ */
+function outsidePack(verses: CellVerses, sharedRefs: ReadonlySet<string> | undefined): CellExpectation | null {
+  const variant = cellVariant(verses.verses)
+  if (!variant) return null
+  return {
+    book: verses.book,
+    refs: verses.verses,
+    approximate: verses.partial || verses.verses.some((ref) => sharedRefs?.has(ref) === true),
+    speeches: [],
+    startDepth: 0,
+    endDepth: 0,
+    boundaries: false,
+    trailingNarration: null,
+    question: { expected: false, rhetorical: false },
+    numbers: [],
+    negation: null,
+    continuesPast: false,
+    variant,
+    inPack: false,
+  }
 }
 
 /**
  * The expectation for one cell, from its `globalReferences` and the book's
  * voices and structure layers. Null when the pack has nothing to say: no verse
  * refs, a verse the voices layer lacks, or refs that are not consecutive.
- * A missing structure layer only means no question facts.
+ * A missing structure layer only means no question, negation or move facts;
+ * a missing text layer, no numbers. AQU-1697: a cell with a verse the pack
+ * lacks because the critical text omits it gets the variant facts alone.
  */
 export function compileCellExpectation(
   cellRefs: readonly string[],
@@ -134,7 +233,7 @@ export function compileCellExpectation(
   const ranges: { first: number; last: number }[] = []
   for (const ref of verses.verses) {
     const range = index.refRange.get(ref)
-    if (!range) return null
+    if (!range) return outsidePack(verses, options.sharedRefs)
     const previous = ranges[ranges.length - 1]
     if (previous && range.first !== previous.last + 1) return null
     ranges.push(range)
@@ -212,6 +311,12 @@ export function compileCellExpectation(
       expected: verses.verses.some((ref) => structureLayer?.verses[ref]?.question === true),
       rhetorical: false,
     },
+    numbers: verses.verses.flatMap((ref) => verseNumbers(ref, options.text)),
+    negation: cellNegation(verses.verses, structureLayer, options.text, clauseStarts(index, structureLayer, verses.verses)),
+    // A raised dot or full stop there lets a translation end the sentence too.
+    continuesPast: sentenceRunsPast(structureLayer, cellTo) && !greekStopsAt(options.text, cellTo),
+    variant: cellVariant(verses.verses),
+    inPack: true,
   }
 }
 
@@ -230,6 +335,7 @@ export function compileFileExpectations(
   cells: readonly CellRefsInput[],
   voicesLayer: VoicesLayerInput,
   structureLayer: StructureLayerInput | null | undefined,
+  text?: TextLayerInput | null,
 ): Map<string, CellExpectation> {
   const cellsPerVerse = new Map<string, number>()
   for (const cell of cells) {
@@ -240,7 +346,7 @@ export function compileFileExpectations(
   const sharedRefs = new Set([...cellsPerVerse].filter(([, count]) => count > 1).map(([ref]) => ref))
   const out = new Map<string, CellExpectation>()
   for (const cell of cells) {
-    const expectation = compileCellExpectation(cell.globalReferences ?? [], voicesLayer, structureLayer, { sharedRefs })
+    const expectation = compileCellExpectation(cell.globalReferences ?? [], voicesLayer, structureLayer, { sharedRefs, text })
     if (expectation) out.set(cell.id, expectation)
   }
   return out

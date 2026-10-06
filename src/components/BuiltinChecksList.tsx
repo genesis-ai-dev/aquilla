@@ -32,6 +32,10 @@ import {
 const NEEDS_KEY: Readonly<Record<BibleCheckSlot, MessageKey>> = {
   quoteMarks: "bibleData.check.needs.quoteMarks",
   questionMarkers: "bibleData.check.needs.questionMarkers",
+  numberWords: "bibleChecks.needs.numberWords",
+  negators: "bibleChecks.needs.negators",
+  headings: "bibleChecks.needs.headings",
+  textualVariants: "bibleChecks.needs.textualVariants",
 }
 
 interface Props {

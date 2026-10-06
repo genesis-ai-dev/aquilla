@@ -29,6 +29,7 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell, type CellCheckContext } from "@/lib/rules/rule-engine"
+import { bibleScanInfractions, type BibleFileScanInput } from "@/lib/rules/bible-check-rules"
 import { semanticSourceText } from "@/lib/semantic-source-text"
 import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
@@ -207,6 +208,12 @@ export interface CheckRunInput {
    * and the checks that need it report nothing.
    */
   contextFor?: (cell: CellData) => CellCheckContext | undefined
+  /**
+   * AQU-1697: what the file-level Bible data scans read (S1 headings, S8
+   * verse numbering). Their findings join the rule pass under their own
+   * built-in rules. Omit it and they report nothing.
+   */
+  bibleScan?: BibleFileScanInput | null
 }
 
 const CHUNK_SIZE = 100
@@ -235,6 +242,8 @@ export async function runDeterministicCheck(
     }
     if (i + CHUNK_SIZE < input.cells.length) await nextTick()
   }
+  // AQU-1697: the Bible data scans that need the whole file in order.
+  infractions.push(...bibleScanInfractions(input.cells, enabledRules, input.bibleScan))
 
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).

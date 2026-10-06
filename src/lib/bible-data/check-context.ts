@@ -14,7 +14,9 @@ import { isBibleCheckDormant } from "../../../db/shared/bible-checks/evaluate"
 import { expandCellRefs } from "../../../db/shared/bible-checks/refs"
 import {
   BIBLE_CHECK_IDS,
+  isBibleScanCheckId,
   type StructureLayerInput,
+  type TextLayerInput,
   type VoicesLayerInput,
 } from "../../../db/shared/bible-checks/types"
 
@@ -22,8 +24,8 @@ import {
  * Whether a project's Bible data checks can run:
  *   off     — the Bible data experiment is off on this device, or Bible data,
  *             or its Bible data checks enrichment, is off;
- *   dormant — on, but every check waits for an empty Language-profile slot;
- *   on      — at least one check can run with this profile.
+ *   dormant — on, but every check of a cell waits for an empty Language-profile slot;
+ *   on      — at least one check of a cell can run with this profile.
  */
 export type BibleChecksGate =
   | { state: "off" }
@@ -55,7 +57,9 @@ export function bibleChecksEnabled(project: BibleChecksProject | null | undefine
 export function bibleChecksGateFor(enabled: boolean, storedProfile: unknown): BibleChecksGate {
   if (!enabled) return { state: "off" }
   const profile = readLanguageProfile(storedProfile)
-  const runnable = BIBLE_CHECK_IDS.some((id) => !isBibleCheckDormant(id, profile))
+  // AQU-1697: S1 and S8 run in Check file, which loads what it needs, so
+  // they never make a cell's live checks worth loading the pack for.
+  const runnable = BIBLE_CHECK_IDS.some((id) => !isBibleScanCheckId(id) && !isBibleCheckDormant(id, profile))
   return runnable ? { state: "on", profile } : { state: "dormant", profile }
 }
 
@@ -81,9 +85,11 @@ export function buildCellCheckContexts(
   voices: VoicesLayerInput,
   structure: StructureLayerInput | null,
   profile: LanguageProfile,
+  /** AQU-1697: the text layer, for the number, negation and run-on sentence facts. */
+  text: TextLayerInput | null = null,
 ): Map<string, CellCheckContext> {
   const contexts = new Map<string, CellCheckContext>()
-  for (const [cellId, expectation] of compileFileExpectations(cells, voices, structure)) {
+  for (const [cellId, expectation] of compileFileExpectations(cells, voices, structure, text)) {
     contexts.set(cellId, { bible: { expectation, profile } })
   }
   return contexts

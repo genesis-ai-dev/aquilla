@@ -15,6 +15,7 @@
 
 import type { CellPair } from "../agent/tools/select-cells"
 import { compileFileExpectations } from "../../../../db/shared/bible-checks/compile"
+import { bibleChecksReadText } from "../../../../db/shared/bible-checks/evaluate"
 import { expandCellRefs } from "../../../../db/shared/bible-checks/refs"
 import type { CellExpectation } from "../../../../db/shared/bible-checks/types"
 import { computeCellFacts, renderFactsLine } from "../../../../db/shared/bible-facts/facts"
@@ -76,13 +77,14 @@ export function bookOfPairs(pairs: readonly CellPair[]): string | null {
 }
 
 /**
- * The text layer is several MB, and only feeds "you" singular/plural. It is
- * worth loading while the profile has not said whether "you" has number (a
- * fact question may ask) or says it does (the facts state the number).
+ * The text layer is several MB. It feeds "you" singular/plural, worth loading
+ * while the profile has not said whether "you" has number (a fact question
+ * may ask) or says it does (the facts state the number); and (AQU-1697) the
+ * Bible data checks that read it: numbers, negation, run-on sentences.
  */
 export function needsTextLayer(profile: LanguageProfile): boolean {
   const second = profile.pronouns?.secondPerson
-  return second === undefined || second.numberDistinction
+  return second === undefined || second.numberDistinction || bibleChecksReadText(profile)
 }
 
 /**
@@ -129,6 +131,7 @@ export async function prepareBibleRun(input: {
     input.pairs.map((pair) => ({ id: pair.cellId, globalReferences: pair.canonicalRef ? [pair.canonicalRef] : [] })),
     pack.voices,
     pack.structure,
+    pack.text,
   )
   const renderings = agreedRenderings(pack, input.concepts)
   const layers = { voices: pack.voices, structure: pack.structure, people: pack.people, text: pack.text }

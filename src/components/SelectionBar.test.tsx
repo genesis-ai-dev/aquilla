@@ -326,39 +326,17 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
-  it("disables with the AI-draft reason for an untouched machine draft", async () => {
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
-    renderBar(makeProject(ROLE.CONTRIBUTOR), [
-      makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true }),
-    ])
-    const btn = validateButton()
-    expect(btn).toBeDisabled()
-    await expectTooltip(btn, "Nothing eligible — untouched AI drafts require individual review")
-    vi.restoreAllMocks()
-  })
-
-  it("says where an org can allow bulk validation of AI drafts", async () => {
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
-    renderBar(makeProject(ROLE.CONTRIBUTOR), [
-      makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true }),
-    ])
-    await expectTooltip(validateButton(), "An organization maintainer can allow this under Settings → Project defaults.")
-    vi.restoreAllMocks()
-  })
-
-  // Sam, 2026-10-01: an org may let bulk validation take untouched AI drafts.
-  // Off is the test above; on, the same five drafts are offered and validated.
-  it("offers and validates untouched AI drafts when the org allows it", async () => {
+  // AQU-1703 regression guard (bounce of AQU-1503). Machine-drafted text that
+  // nobody has retyped used to disable this button with "untouched AI drafts
+  // require individual review". A reviewer's whole job is signing off work they
+  // did not type, so the button offers all five and validates all five.
+  it("offers and validates machine-drafted cells the caller never edited", async () => {
     vi.mocked(emitCellValidate).mockClear()
     const ids = ["d1", "d2", "d3", "d4", "d5"]
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(ids))
-    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, aiDrafted: true }))
+    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, lastEditor: "other" }))
 
-    const off = renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
-    expect(validateButton()).toBeDisabled()
-    off.unmount()
-
-    renderBar(makeProject(ROLE.CONTRIBUTOR), drafts, [], "", { allowBulkValidateAiDrafts: true })
+    renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
     const btn = validateButton()
     expect(btn).toBeEnabled()
     expect(btn).toHaveTextContent(/Validate text\s*5/)
@@ -368,14 +346,11 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
-  it("keeps the other guards when the org allows AI drafts", async () => {
+  it("keeps the already-mine guard on a machine-drafted cell", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(
       makeProject(ROLE.CONTRIBUTOR),
-      [makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true, activeValidators: ["alice"] })],
-      [],
-      "",
-      { allowBulkValidateAiDrafts: true },
+      [makeCell({ id: "cell-1", translated: "auto draft", activeValidators: ["alice"] })],
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
@@ -474,9 +449,9 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
 /**
  * AQU-1503 — the bulk validate must SAY what it did, including what it left
  * alone. The old loop reported exactly one class of skip ("already
- * validated"); an untouched AI draft, an out-of-scope cell or an unsaved edit
- * dropped out of the count with nothing said, so a user who selected five
- * cells and watched two change had no way to learn why.
+ * validated"); an out-of-scope cell or an unsaved edit dropped out of the
+ * count with nothing said, so a user who selected five cells and watched two
+ * change had no way to learn why.
  */
 describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", () => {
   function renderFor(cells: CellData[], myScopes: MemberScope[] = []) {
@@ -489,12 +464,11 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.mocked(emitCellValidate).mockClear()
     const added = vi.spyOn(toast, "add")
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
-      new Set(["ok-1", "ok-2", "draft", "empty", "mine"]),
+      new Set(["ok-1", "ok-2", "empty", "mine"]),
     )
     renderFor([
       makeCell({ id: "ok-1", translated: "bonjour" }),
       makeCell({ id: "ok-2", translated: "salut" }),
-      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
       makeCell({ id: "empty", translated: "" }),
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
@@ -503,7 +477,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
-    expect(description).toMatch(/untouched AI draft/i)
+    // Both classes, not just the "already validated" one the old loop named.
     expect(description).toMatch(/still needs? a translation/i)
     expect(description).toMatch(/already validated/i)
     added.mockRestore()
@@ -514,26 +488,26 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
   // seven only in the toast after the click.
   it("says on hover which lines a partial run signs off and why it leaves the rest", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
-      new Set(["ok-1", "ok-2", "draft", "empty"]),
+      new Set(["ok-1", "ok-2", "mine", "empty"]),
     )
     renderFor([
       makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
       makeCell({ id: "ok-2", context: "B5", translated: "salut" }),
-      makeCell({ id: "draft", context: "B7", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
       makeCell({ id: "empty", context: "B8", translated: "" }),
     ])
     const btn = screen.getByRole("button", { name: /^Validate text/i })
     await expectTooltip(btn, "Validate 2 of 4 selected cells: B4 and B5")
-    await expectTooltip(btn, /2 will be skipped — .*still needs? a translation.*untouched AI draft/i)
+    await expectTooltip(btn, /2 will be skipped — .*still needs? a translation.*already validated/i)
     vi.restoreAllMocks()
   })
 
   it("shortens a long list of lines", async () => {
     const ids = Array.from({ length: 10 }, (_, i) => `ok-${i + 1}`)
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...ids, "draft"]))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...ids, "mine"]))
     renderFor([
       ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
-      makeCell({ id: "draft", context: "D1", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", context: "D1", translated: "deja", activeValidators: ["alice"] }),
     ])
     await expectTooltip(
       screen.getByRole("button", { name: /^Validate text/i }),
@@ -543,11 +517,11 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
   })
 
   it("names the lines by row number when one has no reference", async () => {
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "mine"]))
     renderFor([
       makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
       makeCell({ id: "ok-2", context: "", group: "", translated: "salut" }),
-      makeCell({ id: "draft", context: "B7", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
     ])
     const btn = screen.getByRole("button", { name: /^Validate text/i })
     // …so they go by the table's # column instead: their place in the file.
@@ -575,10 +549,10 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.mocked(emitCellValidate).mockClear()
     const captured = vi.mocked(posthog.capture)
     captured.mockClear()
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "draft"]))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "mine"]))
     renderFor([
       makeCell({ id: "ok-1", translated: "bonjour" }),
-      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
@@ -590,7 +564,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       source: "selection",
       outcome: "partial",
       validated_count: 1,
-      skipped_ai_draft: 1,
+      skipped_already_mine: 1,
     })
     vi.restoreAllMocks()
   })
@@ -609,11 +583,11 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
   it("validates each eligible line through one emit and reports nothing itself", async () => {
     vi.mocked(posthog.capture).mockClear()
     vi.mocked(emitCellValidate).mockClear()
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "draft"]))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "mine"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
       makeCell({ id: "ok-1", translated: "bonjour" }),
       makeCell({ id: "ok-2", translated: "salut" }),
-      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ], [], "fr", { onValidationCommitted: vi.fn() })
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
@@ -937,11 +911,11 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     vi.restoreAllMocks()
   })
 
-  // The reader's own AI draft is refused one at a time too, so "review it
-  // individually" would be the wrong advice.
-  it("names the own change, not the AI-draft rule, for the reader's own draft", async () => {
+  // A machine-drafted line the reader themselves last committed: the reason is
+  // the self-validation rule, which is the one the reader can act on.
+  it("names the own change for the reader's own machine-drafted line", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft"]))
-    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" })])
+    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", lastEditor: "alice" })])
     expect(validateButton()).toBeDisabled()
     await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
     vi.restoreAllMocks()
@@ -994,16 +968,22 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     vi.restoreAllMocks()
   })
 
-  // A mixed selection: "these cells are yours" would be false for the rest,
-  // and would hide the reason the reader or their org can act on.
-  it("leads with the AI-draft reason when another person's draft sits beside the reader's own", async () => {
+  // AQU-1703: a mixed selection of the reader's own line and a colleague's
+  // machine-drafted one. The colleague's line is ordinary review work, so the
+  // button offers it; only the reader's own is held back. This used to refuse
+  // the whole selection as "untouched AI drafts require individual review".
+  it("offers another person's machine-drafted line beside the reader's own", async () => {
+    vi.mocked(emitCellValidate).mockClear()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft", "their-draft"]))
     renderBar(strict(), [
-      makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" }),
-      makeCell({ id: "their-draft", translated: "auto 2", aiDrafted: true, lastEditor: "bob" }),
+      makeCell({ id: "own-draft", translated: "auto", lastEditor: "alice" }),
+      makeCell({ id: "their-draft", translated: "auto 2", lastEditor: "bob" }),
     ])
-    expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "untouched AI drafts require individual review")
+    const btn = validateButton()
+    expect(btn).toBeEnabled()
+    await expectTooltip(btn, "Validate 1 of 2 selected cells")
+    fireEvent.click(btn)
+    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["their-draft"])
     vi.restoreAllMocks()
   })
 

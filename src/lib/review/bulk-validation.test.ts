@@ -12,7 +12,6 @@ const cell = (over: Record<string, unknown> = {}) => ({
   translated: "hola",
   activeValidators: [] as string[],
   targetEventId: "evt-1",
-  aiDrafted: false,
   ...over,
 }) as Parameters<typeof isBulkValidatableByMe>[0]
 
@@ -43,15 +42,14 @@ describe("isBulkValidatableByMe", () => {
     expect(isBulkValidatableByMe(cell({ activeValidators: ["bo"] }), "ana", unscoped, "")).toBe(true)
   })
 
-  // The org setting lifts ONLY the AI-draft rule; scope and already-mine still
-  // apply, so the run never fires a guaranteed 403 or a repeat vote.
-  it("takes an untouched AI draft only when the org allows it, and keeps the other guards", () => {
-    const draft = cell({ aiDrafted: true })
-    expect(isBulkValidatableByMe(draft, "ana", unscoped, "")).toBe(false)
-    expect(isBulkValidatableByMe(draft, "ana", unscoped, "", { allowAiDrafts: true })).toBe(true)
+  // AQU-1703: a machine-drafted line is ordinary work to review — but the
+  // guards that say WHO may validate still apply, so a run never fires a
+  // guaranteed 403 or a repeat vote.
+  it("takes a machine-drafted line, and keeps the scope and already-mine guards", () => {
+    expect(isBulkValidatableByMe(cell(), "ana", unscoped, "")).toBe(true)
     const scopes = [{ kind: "file", value: "other" }] as unknown as MemberScope[]
-    expect(isBulkValidatableByMe(draft, "ana", scopes, "", { allowAiDrafts: true })).toBe(false)
-    expect(isBulkValidatableByMe(cell({ aiDrafted: true, activeValidators: ["ana"] }), "ana", unscoped, "", { allowAiDrafts: true })).toBe(false)
+    expect(isBulkValidatableByMe(cell(), "ana", scopes, "")).toBe(false)
+    expect(isBulkValidatableByMe(cell({ activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
   })
 })
 
@@ -76,10 +74,9 @@ describe("isBulkValidatableByMe — own latest change", () => {
     expect(isBulkValidatableByMe(cell(), "ana", unscoped, "", off)).toBe(true)
   })
 
-  // The org's AI-draft allowance widens what one gesture covers, not who may
-  // validate: the caller's own draft is still theirs.
-  it("still skips the caller's own AI draft when the org allows drafts in bulk", () => {
-    const draft = cell({ aiDrafted: true, lastEditor: "ana" })
-    expect(isBulkValidatableByMe(draft, "ana", unscoped, "", { ...off, allowAiDrafts: true })).toBe(false)
+  // AQU-1703: dropping the AI-draft exclusion widened what one gesture covers,
+  // not who may validate — the caller's own latest change is still theirs.
+  it("still skips the caller's own latest change on a machine-drafted line", () => {
+    expect(isBulkValidatableByMe(cell({ lastEditor: "ana" }), "ana", unscoped, "", off)).toBe(false)
   })
 })

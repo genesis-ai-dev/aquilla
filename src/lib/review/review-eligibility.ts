@@ -1,36 +1,35 @@
 export interface BulkReviewCandidate {
   translated: string
   targetEventId?: string | null
-  aiDrafted?: boolean
-}
-
-export interface BulkReviewPolicy {
-  /**
-   * The org's `allowBulkValidateAiDrafts` setting. Off unless the org turns it
-   * on, which keeps the rule below.
-   */
-  allowAiDrafts?: boolean
 }
 
 /**
- * Bulk validation is reserved for human-authored or human-edited text.
+ * Bulk validation covers every line that HAS a committed translation.
  *
- * An untouched AI draft must be reviewed explicitly, one cell at a time. A
- * human target commit clears `aiDrafted` in the server projection, after which
- * the cell is eligible for the convenience bulk action again.
+ * AQU-1703: it used to exclude untouched AI drafts (`cells.ai_drafted`), with
+ * an org switch to lift the rule. That exclusion was wrong, and wrong in a way
+ * that read as a refusal: `ai_drafted` is cleared by a human *target commit*,
+ * so eligibility tracked "has somebody retyped this line" rather than "is
+ * there committed text to sign off". A reviewer's selection of five of a
+ * colleague's AI-assisted translations was therefore reported back as "5 are
+ * untouched AI drafts, reviewed one at a time" — and in a mixed selection only
+ * the lines the reviewer had typed themselves were signed off, which is the
+ * exact inverse of what review is for (AQU-1503 bounced on this).
  *
- * An org may lift that rule for its own projects (`allowAiDrafts`, Sam
- * 2026-10-01): some teams review the drafts in place and then sign a whole
- * passage off at once. Off by default. The rest still holds either way — a
- * blank or uncommitted cell is never bulk-validated.
+ * Validating another person's work — machine-drafted or not — is the whole job.
+ * The acting user puts their own name on each line through the same
+ * `cell.validate` the gutter control emits, the server accepts it and clears
+ * `ai_drafted` as part of the projection, and the project's per-run cap
+ * (AQU-586) bounds how much one gesture covers.
+ *
+ * What still holds: a blank or uncommitted cell is never bulk-validated. Who
+ * MAY validate is a separate question, asked by `isBulkValidatableByMe` (scope,
+ * already-mine, self-validation) and enforced by the server.
+ *
+ * The AI-draft guard remains on the external Agent API (AQU-1184,
+ * `sync-worker/src/external/emit-events-engine.ts`): an agent laundering its
+ * own output into validated text is a different act from a person signing it.
  */
-export function isBulkValidationEligible(
-  cell: BulkReviewCandidate,
-  policy: BulkReviewPolicy = {},
-): boolean {
-  return Boolean(
-    cell.translated.trim() &&
-    cell.targetEventId &&
-    (!cell.aiDrafted || policy.allowAiDrafts === true),
-  )
+export function isBulkValidationEligible(cell: BulkReviewCandidate): boolean {
+  return Boolean(cell.translated.trim() && cell.targetEventId)
 }

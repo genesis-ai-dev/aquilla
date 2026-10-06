@@ -24,7 +24,6 @@ interface Cell {
   fileId: string
   translated: string
   targetEventId?: string | null
-  aiDrafted?: boolean
 }
 
 function filterValidatableCells(cells: Cell[], activeFileId: string): Cell[] {
@@ -37,16 +36,16 @@ describe("AQU-288: batch-validate cell filter", () => {
 
   const cells: Cell[] = [
     { id: "c1", fileId: FILE_A, translated: "human", targetEventId: "evt-1" },
-    { id: "c2", fileId: FILE_A, translated: "edited", targetEventId: "evt-2", aiDrafted: false },
+    { id: "c2", fileId: FILE_A, translated: "edited", targetEventId: "evt-2" },
     { id: "c3", fileId: FILE_A, translated: "", targetEventId: null },
     { id: "c4", fileId: FILE_A, translated: "" },
     { id: "c5", fileId: FILE_B, translated: "human", targetEventId: "evt-5" },
-    { id: "c6", fileId: FILE_A, translated: "untouched AI", targetEventId: "evt-6", aiDrafted: true },
+    { id: "c6", fileId: FILE_A, translated: "untouched AI", targetEventId: "evt-6" },
   ]
 
   it("includes only cells in the active file that have a targetEventId", () => {
     const result = filterValidatableCells(cells, FILE_A)
-    expect(result.map((c) => c.id)).toEqual(["c1", "c2"])
+    expect(result.map((c) => c.id)).toEqual(["c1", "c2", "c6"])
   })
 
   it("returns empty when all cells in the active file are uncommitted", () => {
@@ -63,9 +62,11 @@ describe("AQU-288: batch-validate cell filter", () => {
     expect(result.find((c) => c.id === "c5")).toBeUndefined()
   })
 
-  it("excludes untouched AI drafts until a human reviews them", () => {
+  // AQU-1703: machine provenance is not an eligibility input. `c6` is committed
+  // target text nobody has retyped, which is exactly what a reviewer signs off.
+  it("includes committed text no human has retyped", () => {
     const result = filterValidatableCells(cells, FILE_A)
-    expect(result.find((c) => c.id === "c6")).toBeUndefined()
+    expect(result.find((c) => c.id === "c6")).toBeDefined()
   })
 })
 

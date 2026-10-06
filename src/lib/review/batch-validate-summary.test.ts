@@ -37,7 +37,6 @@ function cell(over: Partial<BatchValidateCandidate> = {}): BatchValidateCandidat
     fileId: "file-1",
     translated: "bonjour",
     targetEventId: "evt-1",
-    aiDrafted: false,
     activeValidators: [],
     ...over,
   }
@@ -67,8 +66,11 @@ describe("batchValidateSkipReason — one bucket per cell", () => {
     expect(batchValidateSkipReason(cell({ activeValidators: ["other"] }), ME, [], "")).toBeNull()
   })
 
-  it("names an untouched AI draft — the rule bulk validation deliberately keeps", () => {
-    expect(batchValidateSkipReason(cell({ aiDrafted: true }), ME, [], "")).toBe("aiDraft")
+  // AQU-1703: machine provenance is no longer a skip reason at all. The old
+  // "aiDraft" bucket reported a refusal ("reviewed one at a time") for exactly
+  // the cells a reviewer is there to sign off.
+  it("does NOT skip a cell nobody has retyped", () => {
+    expect(batchValidateSkipReason(cell(), ME, [], "")).toBeNull()
   })
 
   it("names a translation with no committed event as not committed", () => {
@@ -91,7 +93,6 @@ describe("summarizeBatchValidate — the accounting always balances", () => {
     const candidates = [
       cell({ id: "a" }),
       cell({ id: "b", translated: "" }),
-      cell({ id: "c", aiDrafted: true }),
       cell({ id: "d", activeValidators: [ME] }),
       cell({ id: "e", targetEventId: null }),
       cell({ id: "f" }),
@@ -112,12 +113,12 @@ describe("summarizeBatchValidate — the accounting always balances", () => {
 
   it("reports `nothing-eligible` — the dead-click case — when candidates exist but none qualifies", () => {
     const summary = summarizeBatchValidate(
-      [cell({ id: "a", aiDrafted: true }), cell({ id: "b", aiDrafted: true })],
+      [cell({ id: "a", activeValidators: [ME] }), cell({ id: "b", activeValidators: [ME] })],
       base,
     )
     expect(summary.outcome).toBe("nothing-eligible")
     expect(summary.validatable).toEqual([])
-    expect(summary.skips.aiDraft).toBe(2)
+    expect(summary.skips.alreadyMine).toBe(2)
   })
 
   it("distinguishes an empty selection from an ineligible one", () => {
@@ -167,7 +168,7 @@ describe("batchValidateToast — no branch is silent", () => {
       summarizeBatchValidate([], base),
       summarizeBatchValidate([cell()], { ...base, canValidate: false }),
       summarizeBatchValidate([cell()], { ...base, hasTarget: false }),
-      summarizeBatchValidate([cell({ aiDrafted: true })], base),
+      summarizeBatchValidate([cell({ activeValidators: [ME] })], base),
       summarizeBatchValidate([cell()], base),
       summarizeBatchValidate([cell({ id: "a" }), cell({ id: "b", translated: "" })], base),
     ]
@@ -179,13 +180,13 @@ describe("batchValidateToast — no branch is silent", () => {
 
   it("explains a nothing-eligible run instead of just saying zero", () => {
     const summary = summarizeBatchValidate(
-      [cell({ id: "a", aiDrafted: true }), cell({ id: "b", translated: "" })],
+      [cell({ id: "a", activeValidators: [ME] }), cell({ id: "b", translated: "" })],
       base,
     )
     const message = batchValidateToast(summary, t, joinList)
     expect(message.type).toBe("info")
     expect(message.title).toContain("nothingEligibleTitle")
-    expect(message.description).toContain("skip.aiDraft")
+    expect(message.description).toContain("skip.alreadyMine")
     expect(message.description).toContain("skip.needsTranslation")
   })
 
@@ -194,7 +195,7 @@ describe("batchValidateToast — no branch is silent", () => {
       [
         cell({ id: "a" }),
         cell({ id: "b", activeValidators: [ME] }),
-        cell({ id: "c", aiDrafted: true }),
+        cell({ id: "c", targetEventId: null }),
         cell({ id: "d", translated: "" }),
       ],
       base,
@@ -204,7 +205,7 @@ describe("batchValidateToast — no branch is silent", () => {
     // The count in the summary line is the whole difference, so it can never
     // disagree with the number of cells the user watched not change.
     expect(message.description).toContain('"count":3')
-    for (const fragment of ["skip.alreadyMine", "skip.aiDraft", "skip.needsTranslation"]) {
+    for (const fragment of ["skip.alreadyMine", "skip.notCommitted", "skip.needsTranslation"]) {
       expect(message.description).toContain(fragment)
     }
   })
@@ -231,13 +232,13 @@ describe("batchValidateToast — no branch is silent", () => {
 
 describe("batchValidateTelemetry — the surface can no longer be invisible", () => {
   it("carries the cell count and outcome on a run that validated nothing", () => {
-    const summary = summarizeBatchValidate([cell({ aiDrafted: true })], base)
+    const summary = summarizeBatchValidate([cell({ activeValidators: [ME] })], base)
     expect(batchValidateTelemetry(summary, "workspace-action")).toMatchObject({
       source: "workspace-action",
       outcome: "nothing-eligible",
       validated_count: 0,
       skipped_count: 1,
-      skipped_ai_draft: 1,
+      skipped_already_mine: 1,
     })
   })
 
@@ -248,34 +249,46 @@ describe("batchValidateTelemetry — the surface can no longer be invisible", ()
   })
 })
 
-// The org setting (Sam, 2026-10-01): with it on, the drafts that used to land
-// in the "aiDraft" bucket are validated instead, and the bucket stays empty.
-describe("summarizeBatchValidate — when the org allows AI drafts in bulk", () => {
-  it("validates untouched AI drafts instead of skipping them", () => {
-    const cells = [cell({ id: "a", aiDrafted: true }), cell({ id: "b", aiDrafted: true }), cell({ id: "c", translated: "" })]
-    const off = summarizeBatchValidate(cells, base)
-    expect(off.validatable).toHaveLength(0)
-    expect(off.skips.aiDraft).toBe(2)
-    const on = summarizeBatchValidate(cells, { ...base, allowAiDrafts: true })
-    expect(on.validatable.map((c) => c.id)).toEqual(["a", "b"])
-    expect(on.skips.aiDraft).toBe(0)
-    expect(on.skips.needsTranslation).toBe(1)
-    expect(on.outcome).toBe("partial")
+// AQU-1703 — the bounce of AQU-1503. The old rule excluded `cells.ai_drafted`
+// from bulk validation, with an org switch to lift it. `ai_drafted` is cleared
+// by a human target COMMIT, so eligibility tracked "has somebody retyped this"
+// rather than "is there committed text to sign off": a reviewer multi-selecting
+// a colleague's AI-assisted translations was told they were "reviewed one at a
+// time", and in a mixed selection only the lines the reviewer had typed
+// themselves were signed off. These are the guards for the corrected rule.
+describe("summarizeBatchValidate — machine provenance is not an eligibility rule", () => {
+  it("validates a selection in which the caller has edited nothing", () => {
+    const cells = [cell({ id: "a", lastEditor: "other" }), cell({ id: "b", lastEditor: "other" })]
+    const summary = summarizeBatchValidate(cells, base)
+    expect(summary.validatable.map((c) => c.id)).toEqual(["a", "b"])
+    expect(summary.skippedTotal).toBe(0)
+    expect(summary.outcome).toBe("validated")
   })
 
-  it("does not call the drafts it will sign off human-authored", () => {
-    const cells = [cell({ id: "a", aiDrafted: true }), cell({ id: "b" })]
-    const on = batchValidateConfirmDescription(summarizeBatchValidate(cells, { ...base, allowAiDrafts: true }), t, joinList)
-    expect(on).toContain("nav.workspaceActions.batchValidate.willValidateWithDrafts")
-    // Without a draft in the run, the usual wording stands.
-    const humanOnly = batchValidateConfirmDescription(summarizeBatchValidate([cell({ id: "b" })], { ...base, allowAiDrafts: true }), t, joinList)
-    expect(humanOnly).toContain("nav.workspaceActions.batchValidate.willValidate")
-    expect(humanOnly).not.toContain("WithDrafts")
+  // The reported repro: 5 of another user's cells + 2 the caller edited. All 7
+  // used to be reduced to the caller's 2.
+  it("validates another user's cells alongside the caller's own", () => {
+    const cells = [
+      ...[1, 2, 3, 4, 5].map((n) => cell({ id: `other-${n}`, lastEditor: "other" })),
+      ...[1, 2].map((n) => cell({ id: `mine-${n}`, lastEditor: ME })),
+    ]
+    const summary = summarizeBatchValidate(cells, base)
+    expect(summary.validatable).toHaveLength(7)
+    expect(summary.outcome).toBe("validated")
   })
 
-  it("still names a draft this user already signed off as theirs", () => {
-    expect(batchValidateSkipReason(cell({ aiDrafted: true, activeValidators: [ME] }), ME, [], "", { allowAiDrafts: true }))
-      .toBe("alreadyMine")
+  it("no skip bucket reports a refusal to review in bulk", () => {
+    expect(BATCH_VALIDATE_SKIP_REASONS).not.toContain("aiDraft")
+  })
+
+  it("still names a cell this user already signed off as theirs", () => {
+    expect(batchValidateSkipReason(cell({ activeValidators: [ME] }), ME, [], "")).toBe("alreadyMine")
+  })
+
+  it("describes the run without claiming the text is human-authored", () => {
+    const body = batchValidateConfirmDescription(summarizeBatchValidate([cell()], base), t, joinList)
+    expect(body).toContain("nav.workspaceActions.batchValidate.willValidate")
+    expect(body).not.toContain("WithDrafts")
   })
 })
 
@@ -298,36 +311,31 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
     expect(batchValidateSkipReason(cell(), ME, [], "", { allowSelfValidation: false })).toBeNull()
   })
 
-  // needsTranslation → alreadyMine → notCommitted → ownEdit → aiDraft → outOfScope.
-  it("sits after already-mine and not-committed, and before AI draft and scope", () => {
+  // needsTranslation → alreadyMine → notCommitted → ownEdit → outOfScope.
+  it("sits after already-mine and not-committed, and before scope", () => {
     const self = { allowSelfValidation: false }
     expect(batchValidateSkipReason(cell({ lastEditor: ME, activeValidators: [ME] }), ME, [], "", self)).toBe("alreadyMine")
     expect(batchValidateSkipReason(cell({ lastEditor: ME, targetEventId: null }), ME, [], "", self)).toBe("notCommitted")
-    // The caller's own AI draft: refused one at a time too, so "review it
-    // individually" would be the wrong advice — whatever the org allows.
-    expect(batchValidateSkipReason(cell({ lastEditor: ME, aiDrafted: true }), ME, [], "", self)).toBe("ownEdit")
-    expect(batchValidateSkipReason(cell({ lastEditor: ME, aiDrafted: true }), ME, [], "", { ...self, allowAiDrafts: true })).toBe("ownEdit")
     const scopes: MemberScope[] = [{ kind: "file", value: "other-file" }]
     expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, scopes, "", self)).toBe("ownEdit")
   })
 
-  it("keeps the books balanced with all six reasons in play", () => {
+  it("keeps the books balanced with all five reasons in play", () => {
     const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
     const candidates = [
       cell({ id: "ok" }),
       cell({ id: "empty", translated: "" }),
       cell({ id: "mine", activeValidators: [ME] }),
       cell({ id: "own", lastEditor: ME }),
-      cell({ id: "draft", aiDrafted: true }),
       cell({ id: "away", fileId: "file-2" }),
       cell({ id: "unsaved", targetEventId: null }),
     ]
     const summary = summarizeBatchValidate(candidates, { ...off, myScopes: scopes })
     expect(summary.skips).toEqual({
-      needsTranslation: 1, alreadyMine: 1, ownEdit: 1, aiDraft: 1, outOfScope: 1, notCommitted: 1,
+      needsTranslation: 1, alreadyMine: 1, ownEdit: 1, outOfScope: 1, notCommitted: 1,
     })
     const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
-    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(6)
+    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(5)
     expect(bucketed).toBe(summary.skippedTotal)
     expect(summary.validatable.map((c) => c.id)).toEqual(["ok"])
     expect(summary.validatable.length + bucketed).toBe(candidates.length)
@@ -335,7 +343,7 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
 
   it("reads its clause after already-mine and before out-of-scope", () => {
     expect(BATCH_VALIDATE_SKIP_REASONS).toEqual([
-      "needsTranslation", "aiDraft", "alreadyMine", "ownEdit", "outOfScope", "notCommitted",
+      "needsTranslation", "alreadyMine", "ownEdit", "outOfScope", "notCommitted",
     ])
     const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
     const summary = summarizeBatchValidate(
@@ -396,7 +404,6 @@ describe("workspaceBatchValidateOptions — the project's rules reach the run", 
       username: ME,
       myScopes: [],
       activeLane: "",
-      allowBulkValidateAiDrafts: false,
     })
 
   it("passes 'Allow self-validation' through, so the reader's own lines are skipped", () => {

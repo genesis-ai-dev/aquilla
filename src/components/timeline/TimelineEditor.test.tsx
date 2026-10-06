@@ -4544,6 +4544,9 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     // The row is disabled, so the badge has to take the pointer itself for its
     // tooltip to open.
     expect(screen.getByTestId("tl-sources-track-editing-off").className).toMatch(/pointer-events-auto/)
+    // And the menu takes its content's width, so the badge can't squeeze the
+    // label onto two lines at the Sources button's width.
+    expect(screen.getByRole("menu").className).toMatch(/(^|\s)w-max(\s|$)/)
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What

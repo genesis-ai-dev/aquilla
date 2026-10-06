@@ -3,6 +3,7 @@ import type { VariantProps } from "class-variance-authority"
 import { Info, MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -127,8 +128,16 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
   // panel that carries a hint gets a slightly wider floor to keep short labels
   // on one line. Menus without a hint render exactly as before.
   const hasDescription = items.some((item) => item.description)
+  // A panel with status badges ("linked", "not imported", "track editing off")
+  // takes its content's width instead of its anchor's: at the anchor's width a
+  // badge squeezed its row's label onto two lines (Sam, Oct 5, the timeline's
+  // Sources menu). Capped so a long label still wraps inside the window.
+  const hasBadge = items.some((item) => item.badge)
   return (
-    <DropdownMenuContent align="end" className={hasDescription ? "min-w-56" : "min-w-48"}>
+    <DropdownMenuContent align="end" className={cn(
+      hasDescription ? "min-w-56" : "min-w-48",
+      hasBadge && "w-max max-w-[min(24rem,calc(100vw-2rem))]",
+    )}>
       <DropdownMenuGroup>
         {items.map((item) =>
           item.type === "separator" ? (

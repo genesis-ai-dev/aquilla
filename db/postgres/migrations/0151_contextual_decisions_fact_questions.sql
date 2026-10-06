@@ -1,4 +1,4 @@
--- Migration 0142: fact questions on contextual_decisions (AQU-1691).
+-- Migration 0151: fact questions on contextual_decisions (AQU-1691).
 --
 -- A contextual decision used to end as steering text, `Decision: <reason> /
 -- Human answer: <answer>`, which autopilot consumes after ONE wave. So an

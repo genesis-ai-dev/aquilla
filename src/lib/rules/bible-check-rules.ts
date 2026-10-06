@@ -9,7 +9,9 @@
 import type { InfractionSpan, RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import { evaluateCell, isBibleCheckDormant } from "../../../db/shared/bible-checks/evaluate"
 import { bibleReasonParams } from "../../../db/shared/bible-checks/params"
-import { scanHeadings, scanVersification, type ScanCellInput } from "../../../db/shared/bible-checks/scans"
+import type { BibleCheckReadiness } from "../../../db/shared/bible-checks/participant-types"
+import { scanHeadings, scanVersification, type BibleScanFinding, type ScanCellInput } from "../../../db/shared/bible-checks/scans"
+import { scanNameConsistency, scanRepeatedQuotations, type TextScanCell } from "../../../db/shared/bible-checks/scans-pack-b"
 import {
   isBibleCheckId,
   isBibleScanCheckId,
@@ -17,6 +19,8 @@ import {
   type BibleCheckId,
   type CellExpectation,
   type StructureLayerInput,
+  type TextLayerInput,
+  type VoicesLayerInput,
 } from "../../../db/shared/bible-checks/types"
 import type { LanguageProfile } from "../../../db/shared/language-profile"
 
@@ -74,12 +78,41 @@ export function bibleCheckInfraction(
   }
 }
 
-// ── AQU-1697: the file-level scans (S1, S8) ─────────────────────────────────
+// ── AQU-1697: the file-level scans (S1, S8; AQU-1699: P2, X3) ───────────────
 
 /** What Check file's Bible data scans read: the book's structure layer, in the project's versification, and the profile. */
 export interface BibleFileScanInput {
   structure: StructureLayerInput
   profile: LanguageProfile
+  /** AQU-1699: X3 compares the Greek of repeated quotations. */
+  voices?: VoicesLayerInput | null
+  text?: TextLayerInput | null
+  /** AQU-1699: each cell's compiled expectation, with its participants (P2). */
+  expectations?: ReadonlyMap<string, CellExpectation>
+  /** AQU-1699: what the project's decisions and terminology switch on. */
+  readiness?: BibleCheckReadiness
+}
+
+/** One scan's findings, or none when it lacks what it reads. */
+function runScan(
+  checkId: BibleCheckId,
+  cells: readonly (ScanCellInput & { translated?: string })[],
+  scan: BibleFileScanInput,
+): BibleScanFinding[] {
+  const textCells = (): TextScanCell[] =>
+    cells.map((cell) => ({ id: cell.id, globalReferences: cell.globalReferences, text: cell.translated ?? "" }))
+  switch (checkId) {
+    case "bkp:S1":
+      return scanHeadings(cells, scan.structure, scan.profile)
+    case "bkp:S8":
+      return scanVersification(cells, scan.structure)
+    case "bkp:P2":
+      return scan.expectations ? scanNameConsistency(textCells(), scan.expectations) : []
+    case "bkp:X3":
+      return scan.voices && scan.text ? scanRepeatedQuotations(textCells(), scan.voices, scan.text, scan.profile) : []
+    default:
+      return []
+  }
 }
 
 /**
@@ -88,7 +121,7 @@ export interface BibleFileScanInput {
  * the whole file, in order.
  */
 export function bibleScanInfractions(
-  cells: readonly (ScanCellInput & { fileId: string })[],
+  cells: readonly (ScanCellInput & { fileId: string; translated?: string })[],
   rules: readonly TranslationRule[],
   scan: BibleFileScanInput | null | undefined,
 ): RuleInfraction[] {
@@ -98,9 +131,8 @@ export function bibleScanInfractions(
   for (const rule of rules) {
     if (rule.check.type !== "builtin" || !isBibleCheckId(rule.check.checkId)) continue
     const checkId = rule.check.checkId
-    if (!isBibleScanCheckId(checkId) || isBibleCheckDormant(checkId, scan.profile)) continue
-    const findings =
-      checkId === "bkp:S1" ? scanHeadings(cells, scan.structure, scan.profile) : scanVersification(cells, scan.structure)
+    if (!isBibleScanCheckId(checkId) || isBibleCheckDormant(checkId, scan.profile, scan.readiness)) continue
+    const findings = runScan(checkId, cells, scan)
     for (const finding of findings) {
       out.push({
         ruleId: rule.id,

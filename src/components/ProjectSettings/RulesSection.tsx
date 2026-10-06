@@ -21,6 +21,8 @@ import { RulesSurface } from "@/components/RulesSurface"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
+import { readinessFromDecisions } from "../../../db/shared/bible-checks/agreed-names"
+import { readProjectFacts } from "../../../db/shared/project-facts"
 
 interface RulesSettingsSectionProps {
   projectId: string
@@ -126,6 +128,13 @@ export function RulesSettingsSection({
 
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
 
+  // AQU-1699: the Bible data checks that need decisions or terminology say so while they have none.
+  const projectFacts = project?.projectFacts
+  const bibleReadiness = useMemo(
+    () => readinessFromDecisions(readProjectFacts(projectFacts), localConcepts),
+    [projectFacts, localConcepts],
+  )
+
   const enabledRules = useMemo(() => rules.filter((rule) => rule.enabled), [rules])
   const infractions = useMemo(() => {
     const out = new Map<string, RuleInfraction[]>()
@@ -178,6 +187,7 @@ export function RulesSettingsSection({
         setEditingRuleId={setEditingRuleId}
         activeLane={activeLane}
         onActiveLaneChange={onActiveLaneChange}
+        bibleReadiness={bibleReadiness}
       />
     </>
   )

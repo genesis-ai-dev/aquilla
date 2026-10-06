@@ -752,6 +752,11 @@ export interface ProjectRecord {
    *  ProjectWideSettings. Read it through `readLanguageProfile`
    *  (db/shared/language-profile.ts), which drops a damaged slot. */
   languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /** AQU-1699: the decision log, synced via ProjectWideSettings. Bible data
+   *  check pack B reads its `render.*` and `clusivity.*` decisions. Read it
+   *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
+   *  from here (ProjectDecisionsSection writes the stored list). */
+  projectFacts?: unknown[]
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

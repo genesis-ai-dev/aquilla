@@ -10,6 +10,7 @@ import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { LocaleFormatters } from "@/lib/i18n/format"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import type { BibleCheckReason } from "../../../db/shared/bible-checks/types"
+import { packBEvidenceLines, packBReasonKey } from "./check-messages-pack-b"
 
 const REASON_KEY: Readonly<Record<BibleCheckReason, MessageKey>> = {
   "open-missing": "bibleData.check.reason.openMissing",
@@ -34,6 +35,23 @@ const REASON_KEY: Readonly<Record<BibleCheckReason, MessageKey>> = {
   "heading-inside-pericope": "bibleChecks.reason.headingInsidePericope",
   "verse-not-in-pack": "bibleChecks.reason.verseNotInPack",
   "pack-verse-without-cell": "bibleChecks.reason.packVerseWithoutCell",
+  // AQU-1699: check pack B. Several pick their sentence by params (./check-messages-pack-b.ts).
+  "name-missing": "bibleParticipants.reason.nameMissing",
+  "name-variant-different": "bibleParticipants.reason.nameVariantDifferent",
+  "name-variant-none": "bibleParticipants.reason.nameVariantNone",
+  "homonym-name": "bibleParticipants.reason.homonymName",
+  "name-form-missing": "bibleParticipants.reason.nameFormMissing",
+  "name-not-in-source": "bibleParticipants.reason.nameNotInSource",
+  "subject-name-wrong": "bibleParticipants.reason.subjectNameWrong",
+  "you-number-missing": "bibleParticipants.reason.youSingularMissing",
+  "you-number-wrong": "bibleParticipants.reason.youSingularWrong",
+  "clusivity-missing": "bibleParticipants.reason.exclusiveMissing",
+  "clusivity-wrong": "bibleParticipants.reason.exclusiveWrong",
+  "group-number-missing": "bibleParticipants.reason.paucalMissing",
+  "divine-name-missing": "bibleParticipants.reason.kyriosJesusMissing",
+  "divine-name-swapped": "bibleParticipants.reason.kyriosJesusSwapped",
+  "deity-pronoun-lowercase": "bibleParticipants.reason.deityPronounLowercase",
+  "quotation-differs": "bibleParticipants.reason.quotationDiffers",
 }
 
 /** N1 says what it could read (`accepts`): digits only with standard number words, or a number the profile has no word for. */
@@ -67,7 +85,7 @@ export function formatBibleCheckReason(infraction: RuleInfraction, t: TFunction)
     params.kind === "number-missing" && Object.hasOwn(NUMBER_MISSING_KEY, params.accepts ?? "")
       ? NUMBER_MISSING_KEY[params.accepts ?? ""]
       : undefined
-  return t(numberKey ?? REASON_KEY[params.kind], {
+  return t(numberKey ?? packBReasonKey(params) ?? REASON_KEY[params.kind], {
     level: params.level ?? "1",
     open: params.open ?? "",
     close: params.close ?? "",
@@ -77,6 +95,14 @@ export function formatBibleCheckReason(infraction: RuleInfraction, t: TFunction)
     passage: params.passage ?? "",
     title: params.title ?? "",
     refs: refList(params.refs),
+    // AQU-1699: check pack B.
+    name: params.name ?? "",
+    renderings: params.renderings ?? "",
+    rendering: params.rendering ?? "",
+    usual: params.usual ?? "",
+    other: params.other ?? "",
+    form: params.form ?? "",
+    similarity: params.similarity ?? "",
   })
 }
 
@@ -133,7 +159,7 @@ export function formatBibleCheckEvidence(infraction: RuleInfraction, t: TFunctio
   } else if (params.evidence === "question") {
     lines.push(t("bibleData.check.evidence.question", { dataset: t("bibleData.source.macula.short"), refs }))
   } else {
-    lines.push(...packAEvidence(infraction, t, refs))
+    lines.push(...packAEvidence(infraction, t, refs), ...packBEvidenceLines(params, t, refs))
   }
   if (params.approximate === "true") lines.push(t("bibleData.check.evidence.approximate"))
   return lines

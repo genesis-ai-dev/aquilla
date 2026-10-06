@@ -98,6 +98,12 @@ export interface ProjectContext {
   projectFacts: ProjectFact[]
   /** AQU-1691: the Language profile, read slot by slot (a damaged slot is left out). */
   languageProfile: LanguageProfile
+  /**
+   * AQU-1699: more than one target lane is active. The termbase does not say
+   * which lane a rendering is for, so a terminology entry then gives a name
+   * only when it has one rendering (db/shared/bible-checks/agreed-names.ts).
+   */
+  multiLane?: boolean
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────────
@@ -360,7 +366,21 @@ export async function loadProjectContext(
     authoredRules: parseAuthoredRules(settings.rules),
     projectFacts: readProjectFacts(settings.projectFacts),
     languageProfile: readLanguageProfile(settings.languageProfile),
+    ...(hasExtraTargetLane(settings, asString(row.target_language)) ? { multiLane: true } : {}),
   }
+}
+
+/**
+ * A registered target lane beside the default one, not archived. The registry
+ * may list the primary language itself (AQU-1473), which is the default lane.
+ */
+function hasExtraTargetLane(settings: Record<string, unknown>, targetLanguage: string | undefined): boolean {
+  const archived = new Set(stringList(settings.archivedLanes).map((lane) => lane.trim().toLowerCase()))
+  const primary = (targetLanguage ?? "").trim().toLowerCase()
+  return stringList(settings.targetLanes).some((lane) => {
+    const tag = lane.trim().toLowerCase()
+    return tag !== primary && !archived.has(tag)
+  })
 }
 
 function stringList(raw: unknown): string[] {

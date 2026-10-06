@@ -13,6 +13,7 @@ import type { BibleChecksProject } from "@/lib/bible-data/check-context"
 import type { BkpManifest } from "@/lib/bible-data/pack-types"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../db/shared/bible-checks/__fixtures__/pack"
 import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../db/shared/bible-checks/__fixtures__/pack-a"
+import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from "../../db/shared/bible-checks/__fixtures__/pack-b"
 
 vi.mock("@/lib/bible-data/pack-client", () => ({
   loadManifest: vi.fn(),
@@ -118,8 +119,57 @@ describe("useBibleChecks", () => {
     const scan = await result.current.fileScan()
     expect(scan?.profile).toEqual({ headings: "pericope" })
     expect(scan?.structure).toBe(JHN4_STRUCTURE)
-    expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
+    // AQU-1699: X3 compares the Greek of repeated quotations, so Check file reads voices and text too.
+    expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure", "voices", "text"])
+    expect(scan?.voices).toBe(JHN4_VOICES)
     const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS))
     expect(await off.result.current.fileScan()).toBeNull()
   })
+
+  // AQU-1699: check pack B reads who each word refers to. WHY: the people
+  // layer must load only while a participant check can run, which takes the
+  // project's decisions or terminology, and each cell must get the agreed
+  // names those give.
+  it("loads the people layer only once a decision or terminology entry names someone", async () => {
+    vi.mocked(loadLayer).mockImplementation(async (layer) => {
+      if (layer === "voices") return { ok: true, value: JHN_B_VOICES } as never
+      if (layer === "structure") return { ok: true, value: JHN_B_STRUCTURE } as never
+      if (layer === "people") return { ok: true, value: JHN_B_PEOPLE } as never
+      return { ok: true, value: JHN_B_TEXT } as never
+    })
+    const cells = [{ id: "c42", globalReferences: ["JHN 1:42"] }]
+    const plain = renderHook(() => useBibleChecks(ON, cells))
+    await waitFor(() => expect(plain.result.current.status).toBe("ready"))
+    expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "people")).toBe(false)
+    expect(plain.result.current.contextFor("c42")?.bible?.expectation.participants).toBeNull()
+
+    const decided = { ...ON, sourceLanguage: "en", projectFacts: [renderPeter] }
+    const named = renderHook(() => useBibleChecks(decided, cells))
+    await waitFor(() => expect(named.result.current.contextFor("c42")?.bible?.expectation.participants).toBeTruthy())
+    expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "people")).toBe(true)
+    const participants = named.result.current.contextFor("c42")?.bible?.expectation.participants
+    expect(participants?.named.map((m) => m.entity)).toContain("person:Peter")
+    expect(participants?.names.names.get("person:Peter")?.[0]).toMatchObject({ renderings: ["Peter", "Cephas"], source: "fact" })
+
+    // A terminology entry for the label in the source language names someone too.
+    const termed = renderHook(() =>
+      useBibleChecks({ ...ON, sourceLanguage: "en" }, cells, [
+        { id: "k1", sourceTerm: "Andrew", status: "active", renderings: [{ rendering: "Andrés", status: "preferred" }] },
+      ]),
+    )
+    await waitFor(() => expect(termed.result.current.contextFor("c42")?.bible?.expectation.participants).toBeTruthy())
+    expect(termed.result.current.contextFor("c42")?.bible?.expectation.participants?.names.names.get("person:Andrew")?.[0]).toMatchObject({
+      renderings: ["Andrés"],
+      source: "terminology",
+    })
+  })
 })
+
+const renderPeter = {
+  id: "f1",
+  key: "render.person.Peter",
+  value: "Peter|Cephas",
+  scope: {},
+  author: "dev",
+  at: "2026-10-06T00:00:00.000Z",
+}

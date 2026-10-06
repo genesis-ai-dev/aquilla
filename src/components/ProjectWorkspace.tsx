@@ -6309,7 +6309,8 @@ export function ProjectWorkspace() {
   // AQU-1688: Bible data checks read each cell's compiled pack facts. They are
   // compiled once per file (by pack version, refs and Language profile) and
   // looked up by cell id, so typing still re-checks only the edited cell.
-  const bibleChecks = useBibleChecks(project, cellSummaries)
+  // AQU-1699: the terminology gives names their agreed renderings (check pack B).
+  const bibleChecks = useBibleChecks(project, cellSummaries, localConcepts)
   const bibleCheckContextFor = bibleChecks.contextFor
   const bibleFileScan = bibleChecks.fileScan
   const healthCellCheckContext = useCallback(

@@ -132,6 +132,22 @@ describe("Rules → Built-in checks configures them like any built-in", () => {
       ["builtin:bkp:S6", "minor", true],
       ["builtin:bkp:S7", "minor", true],
       ["builtin:bkp:S8", "minor", true],
+      // AQU-1699: pack B starts minor, except a name the verse does not have
+      // (P5) and a wrong name for the implied subject (P6): both make the
+      // verse say that someone else did it.
+      ["builtin:bkp:P1", "minor", true],
+      ["builtin:bkp:P2", "minor", true],
+      ["builtin:bkp:P3", "minor", true],
+      ["builtin:bkp:P4", "minor", true],
+      ["builtin:bkp:P5", "major", true],
+      ["builtin:bkp:P6", "major", true],
+      ["builtin:bkp:P8", "minor", true],
+      ["builtin:bkp:P9", "minor", true],
+      ["builtin:bkp:P10", "minor", true],
+      ["builtin:bkp:P14", "minor", true],
+      ["builtin:bkp:P15", "minor", true],
+      ["builtin:bkp:X3", "minor", true],
+      ["builtin:bkp:X4", "minor", true],
     ])
   })
 

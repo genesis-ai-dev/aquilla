@@ -18,6 +18,7 @@ import { __resetBkpServerMemory } from "../lib/bkp/pack-loader"
 import { JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
 import { listRunTraces, makeTraceRecorder } from "../lib/contextual/traces"
+import { decodeBibleParams } from "../../../db/shared/bible-checks/params"
 import { seedUser } from "./helpers/db"
 
 const db = env.AQUILLA_PG
@@ -207,5 +208,30 @@ describe("Jev questions, traced", () => {
     // Maintainers only: without includeJev the row is not listed.
     const viewer = await listRunTraces(db, { projectId: PROJECT, runId })
     expect(viewer.traces.some((trace) => trace.label === "jev:bible-qa")).toBe(false)
+  })
+})
+
+describe("bounded repair, end to end", () => {
+  it("stages a cell whose quotation is still wrong after its repair for a person, with its bkp: code and evidence", async () => {
+    await setSettings({ languageProfile: ENGLISH_PROFILE })
+    // The mock drafter echoes the source, so a source that closes the woman's
+    // quotation AFTER the narrator's aside yields a draft that does too — on
+    // the first attempt and on the repair.
+    await db
+      .prepare(`UPDATE cells SET value = ? WHERE project_id = ? AND cell_id = 'c9' AND side = 'source'`)
+      .bind(
+        "The Samaritan woman said to him, \u201cHow is it that you ask me for a drink? (For Jews have no dealings with Samaritans.)\u201d",
+        PROJECT,
+      )
+      .run()
+    await tickOnce()
+    const drafts = captured.filter((call) => call.system.includes("[[ctx:draft]]"))
+    // First draft, then ONE repair with the templated constraint — never a third.
+    expect(drafts).toHaveLength(2)
+    expect(drafts[1].user).toContain("Constraints from review (satisfy each): Close Samaritan woman's quotation")
+    const c9 = (await listDrafts(db, PROJECT, FILE, "proposed", "")).find((d) => d.cellId === "c9")
+    expect(c9?.verdicts?._triage).toBe("human")
+    expect(decodeBibleParams(c9?.verdicts?.["bkp:V2"])).toMatchObject({ kind: "close-after-aside", startRef: "JHN 4:9" })
+    expect(c9?.verdicts).toHaveProperty("redrafted")
   })
 })

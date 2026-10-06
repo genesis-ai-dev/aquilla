@@ -18,7 +18,7 @@ import {
   type BibleQaTrace,
   type JudgeResult,
 } from "./judge-expectations"
-import type { LintFlag, SpanDraft } from "./types"
+import type { LintFlag, SpanBibleMetrics, SpanDraft } from "./types"
 
 export interface SpanBible {
   /** Short facts per cell id, for scene construal (who speaks to whom, who is named). */
@@ -95,6 +95,29 @@ export interface SpanBibleCheck {
   activeCodes: Map<string, `bkp:${string}`[]>
   /** Per cell: templated constraints to repair — warning findings and active Jev failures. Shadow answers never add one. */
   constraints: Map<string, string[]>
+}
+
+export function newBibleMetrics(): SpanBibleMetrics {
+  return { findings: {}, jevCalls: 0, judgments: [], repaired: 0 }
+}
+
+/** Count one draft's bkp: flags and its judgments into the span's metrics. */
+export function recordBible(metrics: SpanBibleMetrics, flags: readonly LintFlag[], judged: JudgeResult | undefined): void {
+  for (const flag of flags) {
+    if (flag.bible) metrics.findings[flag.ruleId] = (metrics.findings[flag.ruleId] ?? 0) + 1
+  }
+  if (!judged) return
+  metrics.jevCalls += judged.jevCalls
+  for (const j of judged.judgments) {
+    metrics.judgments.push({
+      cellId: j.cellId,
+      check: j.check,
+      outcome: j.outcome,
+      mode: j.mode,
+      decidedBy: j.decidedBy,
+      ...(j.certainty !== undefined ? { certainty: Math.round(j.certainty * 100) / 100 } : {}),
+    })
+  }
 }
 
 function push<T>(map: Map<string, T[]>, key: string, value: T): void {

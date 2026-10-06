@@ -233,4 +233,18 @@ export interface SpanReport {
   notes: string[]
   unitsUsed: number
   callsUsed: number
+  /** AQU-1690 metrics: how scene construal ended (absent when the span had no work). */
+  closure?: { rounds: number; exit: ClosureExit }
+  /** AQU-1690 metrics: what Bible data did in this span, when it had any. */
+  bible?: SpanBibleMetrics
+}
+
+export interface SpanBibleMetrics {
+  /** bkp: findings per code, over every draft of the span (first drafts and redrafts). */
+  findings: Record<string, number>
+  jevCalls: number
+  /** Every judgment, shadow ones included, with its certainty. */
+  judgments: { cellId: string; check: string; outcome: string; mode: string; decidedBy: string; certainty?: number }[]
+  /** Cells that took the cheap expectation repair. */
+  repaired: number
 }

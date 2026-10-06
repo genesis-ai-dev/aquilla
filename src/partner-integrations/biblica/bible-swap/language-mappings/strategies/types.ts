@@ -1,10 +1,10 @@
 /**
  * Per-language Bible Swap strategy.
  *
- * Precomputed versification mappings capture the verse alignment for each
- * preset Bible IDML. Strategies layer language-specific swap behaviour on top:
- * preferred mode, volume availability, chapter-block indexing flags, and
- * optional plan refinements.
+ * The verse alignment is built from the selected Bible file at export time.
+ * Strategies layer language-specific swap behaviour on top: preferred mode,
+ * volumes that must use Structure, chapter-block indexing flags, and optional
+ * plan refinements.
  */
 
 import type { BuildChapterBlockOptions } from "../../chapterBlocks";
@@ -37,16 +37,13 @@ export interface BibleSwapLanguageStrategy {
     id: BibleSwapLanguageId;
     label: string;
     /**
-     * When true, export loads a shipped `{volume}.mapping.json` instead of
-     * deriving the versification plan at export time.
+     * No language ships a stored plan. Kept so older callers can still ask;
+     * export always derives the plan from the selected Bible file.
      */
     hasMappings: boolean;
-    /** Volumes that have a usable precomputed mapping file. */
+    /** Volumes this strategy is written for. */
     availableVolumes: readonly StudyVolumeId[];
-    /**
-     * Volumes that exist on disk but must not be applied (broken / empty
-     * indexes). Loader falls back to analyze-at-export for these.
-     */
+    /** Volumes whose stored plans were rejected. Unused now that plans are built live. */
     unusableVolumes?: readonly StudyVolumeId[];
     /**
      * Default mode suggestion for the UI. "auto" leaves Surgical/Structure
@@ -56,8 +53,8 @@ export interface BibleSwapLanguageStrategy {
     /** Volumes that always run structure swap (heavy versification deltas). */
     forceStructureVolumes?: readonly StudyVolumeId[];
     /**
-     * Minimum projected match % for a loaded plan to be considered usable.
-     * Below this, the loader rejects the plan and falls back to analyze-at-export.
+     * Floor kept for the usability check on a caller-supplied plan. Export does
+     * not load a stored plan, so this no longer gates a swap.
      */
     minUsableProjectedMatchPercent: number;
     /** Chapter-block build overrides when indexing the Bible for structure swap. */

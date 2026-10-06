@@ -9,7 +9,7 @@ import { ALL_STUDY_VOLUMES } from "./types";
 export const frenchStrategy: BibleSwapLanguageStrategy = {
     id: "french",
     label: "French",
-    hasMappings: true,
+    hasMappings: false,
     availableVolumes: ALL_STUDY_VOLUMES,
     preferredMode: "structure",
     forceStructureVolumes: ["JOB-SNG"],
@@ -20,5 +20,5 @@ export const frenchStrategy: BibleSwapLanguageStrategy = {
         retainAcrosticHeadings: true,
     },
     description:
-        "Preset French Bible (MAT–JHN / ACT–REV). Structure recommended; JOB-SNG always uses Structure (Psalms).",
+        "French Bible (MAT–JHN / ACT–REV). Structure recommended; JOB-SNG always uses Structure (Psalms). The plan is built from the selected file.",
 };

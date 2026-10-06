@@ -1,45 +1,87 @@
 /**
- * Language mappings: deserialization of shipped versification mapping files
- * back into the runtime VersificationPlan, plus per-language strategies.
+ * Language strategies and deserialization of a versification plan. Plans are
+ * built from the selected Bible file at export time; nothing here reads a
+ * stored mapping file.
  */
 
 import { describe, expect, it } from "vitest";
-import * as fs from "fs";
-import { fileURLToPath } from "node:url";
 import {
     ANY_BIBLE_SWAP_LANGUAGE,
     BIBLE_SWAP_LANGUAGES,
+    applyLanguagePlanRefinements,
     deserializeVersificationPlan,
     getBibleSwapLanguageStrategy,
     isMappedBibleSwapLanguage,
-    isUsableMappingPlan,
     resolveSwapModeForLanguage,
     studyVolumeFromFileName,
-    type BibleSwapMappingDocument,
+    type SerializedVersificationPlan,
 } from "../language-mappings";
 import { chapterBlockKey, verseKey } from "../types";
+import type { VersificationPlan } from "../versificationPlan";
 
-// The codex original resolved this with `__dirname`, which is undefined under
-// Vitest's ESM transform. `process.cwd()` and `path` are no help either: this
-// repo's vite-plugin-node-polyfills replaces both with browser shims, so
-// `path.dirname()` returns "." for a Windows path and `process.cwd()` is "/".
-// URL strings are always forward-slashed, so resolve there and convert once.
-function mappingFilePath(language: string, volume: string): string {
-    return fileURLToPath(
-        import.meta.url.replace(
-            /\/scripts\/[^/]*$/,
-            `/language-mappings/${language}/${volume}.mapping.json`
-        )
-    );
+const EMPTY_STATS: SerializedVersificationPlan["stats"] = {
+    versesMapped: 1,
+    versesRemoved: 1,
+    versesInserted: 0,
+    psalmChapterSlots: 0,
+    psalmChapterShifts: 0,
+};
+
+function samplePlan(): SerializedVersificationPlan {
+    return {
+        verseMappings: [
+            {
+                study: { book: "JOS", chapter: "1", verse: "1", key: verseKey("JOS", "1", "1") },
+                action: "replace",
+                bible: { book: "JOS", chapter: "1", verse: "1" },
+            },
+            {
+                study: { book: "JOS", chapter: "1", verse: "2", key: verseKey("JOS", "1", "2") },
+                action: "remove",
+            },
+        ],
+        chapterRemaps: [{ book: "JOS", studyChapter: "1", bibleChapter: "1" }],
+        chapterInserts: [
+            {
+                book: "RUT",
+                studyChapter: "4",
+                verses: [{ bibleChapter: "4", bibleVerse: "22" }],
+            },
+        ],
+        structureChapters: [
+            {
+                book: "JOS",
+                studyChapter: "1",
+                studyVerseStart: 1,
+                studyVerseEnd: 18,
+                insertOnly: false,
+                bibleSlices: [{ chapter: "1", firstVerse: 1, lastVerse: 18 }],
+            },
+        ],
+        trailingInserts: [],
+        stats: EMPTY_STATS,
+    };
 }
 
-function loadMapping(language: string, volume: string): BibleSwapMappingDocument {
-    const file = mappingFilePath(language, volume);
-    return JSON.parse(fs.readFileSync(file, "utf-8")) as BibleSwapMappingDocument;
+function emptyRuntimePlan(): VersificationPlan {
+    return {
+        verseMap: new Map(),
+        structureChapters: new Map(),
+        chapterInserts: new Map(),
+        trailingInserts: [],
+        chapterRemaps: new Map(),
+        stats: {
+            versesMapped: 0,
+            versesRemoved: 0,
+            versesInserted: 0,
+            psalmChapterSlots: 0,
+            psalmChapterShifts: 0,
+        },
+    };
 }
 
 describe("language registry", () => {
-    it("offers Any plus all mapped languages", () => {
+    it("offers Any plus every language, and none of them ship a stored plan", () => {
         const ids = BIBLE_SWAP_LANGUAGES.map((l) => l.id);
         expect(ids).toEqual([
             ANY_BIBLE_SWAP_LANGUAGE,
@@ -51,29 +93,25 @@ describe("language registry", () => {
             "arabic",
             "ukrainian",
         ]);
-        expect(isMappedBibleSwapLanguage("french")).toBe(true);
-        expect(isMappedBibleSwapLanguage("hindi")).toBe(true);
-        expect(isMappedBibleSwapLanguage("marathi")).toBe(true);
-        expect(isMappedBibleSwapLanguage("arabic")).toBe(true);
-        expect(isMappedBibleSwapLanguage("ukrainian")).toBe(true);
-        expect(isMappedBibleSwapLanguage(ANY_BIBLE_SWAP_LANGUAGE)).toBe(false);
+        for (const language of ids) {
+            expect(isMappedBibleSwapLanguage(language), language).toBe(false);
+            expect(getBibleSwapLanguageStrategy(language).hasMappings).toBe(false);
+        }
     });
 
     it("derives study volume from file names", () => {
         expect(studyVolumeFromFileName("JOS-EST.idml")).toBe("JOS-EST");
         expect(studyVolumeFromFileName("jos-est.codex")).toBe("JOS-EST");
         expect(studyVolumeFromFileName("C:\\files\\MAT-JOHN.idml")).toBe("MAT-JOHN");
+        expect(studyVolumeFromFileName("GEN-DEU.idml")).toBe("GEN-DEU");
     });
 
     it("strips importer tags, notebook uuids, and dedup counters", () => {
-        // Stored originals from the Biblica importer.
         expect(studyVolumeFromFileName("JOS-EST-biblica.idml")).toBe("JOS-EST");
         expect(studyVolumeFromFileName("GEN-DEU-biblica.idml")).toBe("GEN-DEU");
         expect(studyVolumeFromFileName("mat-john-biblica.idml")).toBe("MAT-JOHN");
-        // Dedup counter added on a file-name clash.
         expect(studyVolumeFromFileName("JOB-SNG (1).idml")).toBe("JOB-SNG");
         expect(studyVolumeFromFileName("MAT-JOHN (1).idml")).toBe("MAT-JOHN");
-        // Notebook names.
         expect(studyVolumeFromFileName("JOS-EST-notes.codex")).toBe("JOS-EST");
         expect(
             studyVolumeFromFileName("ISA-MAL-313c6d48-60a1-43c3-bf02-5ac01575c5d1.codex")
@@ -85,7 +123,6 @@ describe("language registry", () => {
 
     it("passes unrecognised names through instead of guessing a volume", () => {
         expect(studyVolumeFromFileName("SOMETHING-ELSE.idml")).toBe("SOMETHING-ELSE");
-        // A different volume must not be matched by a shared prefix word.
         expect(studyVolumeFromFileName("JOS-ESTHER-EXTRA.idml")).toBe("JOS-ESTHER-EXTRA");
     });
 });
@@ -101,8 +138,6 @@ describe("per-language strategies", () => {
                 )
             ).toBe("structure");
         }
-        // French/Marathi/Hindi ACT–REV Bibles now start at Acts, so Structure is
-        // no longer forced there and the user's choice stands.
         for (const language of ["french", "marathi", "hindi"]) {
             expect(
                 resolveSwapModeForLanguage(
@@ -121,80 +156,54 @@ describe("per-language strategies", () => {
         ).toBe("surgical");
     });
 
-    it("rejects Ukrainian NT mappings as unusable (0% projected match)", () => {
-        const strategy = getBibleSwapLanguageStrategy("ukrainian");
-        const doc = loadMapping("ukrainian", "ACT-REV");
-        expect(
-            isUsableMappingPlan(
-                strategy,
-                "ACT-REV",
-                doc.plan,
-                doc.versificationSummary?.projectedVerseMatchPercent
-            )
-        ).toBe(false);
-    });
-
-    it("accepts Portuguese JOS-EST mapping as usable", () => {
-        const strategy = getBibleSwapLanguageStrategy("portuguese");
-        const doc = loadMapping("portuguese", "JOS-EST");
-        expect(
-            isUsableMappingPlan(
-                strategy,
-                "JOS-EST",
-                doc.plan,
-                doc.versificationSummary?.projectedVerseMatchPercent
-            )
-        ).toBe(true);
-    });
-});
-
-describe("mapping files on disk", () => {
-    it("has mapping JSON for every strategy availableVolume", () => {
-        for (const lang of BIBLE_SWAP_LANGUAGES.filter((l) => l.hasMappings)) {
-            const strategy = getBibleSwapLanguageStrategy(lang.id);
-            for (const volume of strategy.availableVolumes) {
-                const file = mappingFilePath(lang.id, volume);
-                expect(fs.existsSync(file), `${lang.id}/${volume}`).toBe(true);
-            }
-        }
-    });
-});
-
-describe("deserializeVersificationPlan (portuguese JOS-EST)", () => {
-    const doc = loadMapping("portuguese", "JOS-EST");
-    const plan = deserializeVersificationPlan(doc.plan);
-
-    it("rebuilds the verse map with the same entry count", () => {
-        expect(plan.verseMap.size).toBe(doc.plan.verseMappings.length);
-        const first = plan.verseMap.get(verseKey("1CH", "1", "1"));
-        expect(first).toEqual({
+    it("patches the Portuguese Isaiah plan for the Habakkuk 3 superscription gap", () => {
+        const refined = applyLanguagePlanRefinements(
+            "portuguese",
+            "ISA-MAL",
+            emptyRuntimePlan()
+        );
+        expect(refined.verseMap.get(verseKey("HAB", "3", "1"))).toEqual({
             action: "replace",
-            bible: { book: "1CH", chapter: "1", verse: "1" },
+            bible: { book: "HAB", chapter: "3", verse: "1" },
+        });
+        expect(refined.chapterInserts.get(chapterBlockKey("HAB", "3"))).toContainEqual({
+            book: "HAB",
+            chapter: "3",
+            verse: "19",
         });
     });
 
-    it("rebuilds chapter inserts (RUT 4:22 bible-only verse)", () => {
-        const rut4 = plan.chapterInserts.get(chapterBlockKey("RUT", "4"));
-        expect(rut4).toBeDefined();
-        expect(rut4).toContainEqual({ book: "RUT", chapter: "4", verse: "22" });
+    it("leaves a Portuguese plan for another volume unchanged", () => {
+        const plan = emptyRuntimePlan();
+        expect(applyLanguagePlanRefinements("portuguese", "GEN-DEU", plan)).toBe(plan);
+    });
+});
+
+describe("deserializeVersificationPlan", () => {
+    const plan = deserializeVersificationPlan(samplePlan());
+
+    it("rebuilds replace and remove entries", () => {
+        expect(plan.verseMap.size).toBe(2);
+        expect(plan.verseMap.get(verseKey("JOS", "1", "1"))).toEqual({
+            action: "replace",
+            bible: { book: "JOS", chapter: "1", verse: "1" },
+        });
+        expect(plan.verseMap.get(verseKey("JOS", "1", "2"))).toEqual({ action: "remove" });
     });
 
-    it("rebuilds structure chapters keyed by book|chapter", () => {
-        expect(plan.structureChapters.size).toBe(doc.plan.structureChapters.length);
-        const jos1 = plan.structureChapters.get(chapterBlockKey("JOS", "1"));
-        expect(jos1).toMatchObject({
+    it("rebuilds chapter inserts", () => {
+        expect(plan.chapterInserts.get(chapterBlockKey("RUT", "4"))).toContainEqual({
+            book: "RUT",
+            chapter: "4",
+            verse: "22",
+        });
+    });
+
+    it("rebuilds structure chapters keyed by book and chapter", () => {
+        expect(plan.structureChapters.get(chapterBlockKey("JOS", "1"))).toMatchObject({
             studyBook: "JOS",
             studyChapter: "1",
             insertOnly: false,
         });
-    });
-});
-
-describe("deserializeVersificationPlan (french JOB-SNG sample)", () => {
-    it("loads french JOB-SNG plan with inserts", () => {
-        const doc = loadMapping("french", "JOB-SNG");
-        const plan = deserializeVersificationPlan(doc.plan);
-        expect(plan.verseMap.size).toBe(doc.plan.verseMappings.length);
-        expect(plan.stats.versesInserted).toBeGreaterThan(0);
     });
 });

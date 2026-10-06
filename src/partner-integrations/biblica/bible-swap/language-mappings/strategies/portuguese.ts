@@ -4,15 +4,15 @@ import { chapterBlockKey, verseKey } from "../../types";
 import type { VersificationPlan } from "../../versificationPlan";
 
 /**
- * Portuguese — near-perfect verse overlap with the preset Bible files.
+ * Portuguese — near-perfect verse overlap with a Portuguese Bible file.
  *
  * Structure mode is preferred: Portuguese Bible IDMLs share study-style
  * `p_dc1`/`p_dc2` chapter-boundary paragraphs, and Structure + clipped Bible
  * chapter blocks is what keeps NEH 7/8, 1SA 7, 2CO 2, JER 39, etc. clean.
  *
- * Precomputed plans cover trailing bible-only verses (RUT 4:22, 2CH 36:23, …).
- * `refinePlan` patches known HAB 3 gaps the offline generator missed
- * (study superscription 3:1 kept; bible 3:19 inserted).
+ * The live plan covers trailing bible-only verses (RUT 4:22, 2CH 36:23, …).
+ * `refinePlan` patches known HAB 3 gaps the plan builder misses (study
+ * superscription 3:1 kept; bible 3:19 inserted).
  */
 function refinePortuguesePlan(plan: VersificationPlan, volume: string): VersificationPlan {
     if (volume !== "ISA-MAL") return plan;
@@ -59,7 +59,7 @@ function refinePortuguesePlan(plan: VersificationPlan, volume: string): Versific
 export const portugueseStrategy: BibleSwapLanguageStrategy = {
     id: "portuguese",
     label: "Portuguese",
-    hasMappings: true,
+    hasMappings: false,
     availableVolumes: ALL_STUDY_VOLUMES,
     preferredMode: "structure",
     minUsableProjectedMatchPercent: 95,
@@ -71,5 +71,5 @@ export const portugueseStrategy: BibleSwapLanguageStrategy = {
     },
     refinePlan: refinePortuguesePlan,
     description:
-        "Preset Portuguese Bible. Structure recommended — clipped chapter blocks prevent boundary bleed; versification mapping drives inserts.",
+        "Portuguese Bible. Structure recommended — clipped chapter blocks prevent boundary bleed; the selected file decides which verses to add or remove.",
 };

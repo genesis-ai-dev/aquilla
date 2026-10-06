@@ -57,7 +57,7 @@ export type BibleSwapParallelRunner = (
 export interface BibleSwapPassOptions {
   swapMode?: BibleSwapMode
   parallelRunner?: BibleSwapParallelRunner
-  /** Precomputed plan from a shipped language mapping; skips analyze-at-export. */
+  /** Optional caller-supplied plan. Omit to build one from the selected Bible. */
   serializedPlan?: SerializedVersificationPlan
   language?: string
   /** Study volume id derived from the file name, e.g. `JOS-EST`. */
@@ -274,7 +274,7 @@ export async function applyBibleSwapToIdml(
   const { swapMode = "surgical", serializedPlan, language, studyVolume } = options
   console.log(
     `[Bible Swap] Using ${swapMode} mode with Bible story (${bibleStoryXml.length} chars)` +
-      (serializedPlan ? " with precomputed language mapping plan" : "") +
+      (serializedPlan ? " with a caller-supplied versification plan" : " (plan built from the selected Bible)") +
       (language && language !== "any"
         ? ` [language=${language}${studyVolume ? `/${studyVolume}` : ""}]`
         : ""),

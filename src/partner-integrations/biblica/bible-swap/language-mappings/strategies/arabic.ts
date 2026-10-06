@@ -9,7 +9,7 @@ import { ALL_STUDY_VOLUMES } from "./types";
 export const arabicStrategy: BibleSwapLanguageStrategy = {
     id: "arabic",
     label: "Arabic",
-    hasMappings: true,
+    hasMappings: false,
     availableVolumes: ALL_STUDY_VOLUMES,
     preferredMode: "structure",
     forceStructureVolumes: [],
@@ -20,5 +20,5 @@ export const arabicStrategy: BibleSwapLanguageStrategy = {
         retainAcrosticHeadings: true,
     },
     description:
-        "Preset Arabic Bible (MAT–JHN / ACT–REV). Structure recommended for RTL layout.",
+        "Arabic Bible (MAT–JHN / ACT–REV). Structure recommended for RTL layout. The plan is built from the selected file.",
 };

@@ -1,18 +1,15 @@
 import type { BibleSwapLanguageStrategy } from "./types";
+import { ALL_STUDY_VOLUMES } from "./types";
 
 /**
- * Ukrainian — only ACT-REV and MAT-JOHN mapping files exist today, and both
- * currently project 0% verse match (bible indexes did not align when the
- * mappings were generated). Those volumes are marked unusable so the loader
- * refuses the plan and falls back to analyze-at-export until remapped.
- * OT volumes have no mapping files yet.
+ * Ukrainian — the plan is built from the selected Bible file, same as every
+ * other language. Chapter blocks keep section, speaker, and acrostic headings.
  */
 export const ukrainianStrategy: BibleSwapLanguageStrategy = {
     id: "ukrainian",
     label: "Ukrainian",
-    hasMappings: true,
-    availableVolumes: ["ACT-REV", "MAT-JOHN"],
-    unusableVolumes: ["ACT-REV", "MAT-JOHN"],
+    hasMappings: false,
+    availableVolumes: ALL_STUDY_VOLUMES,
     preferredMode: "structure",
     minUsableProjectedMatchPercent: 50,
     chapterBlockOptions: {
@@ -21,5 +18,5 @@ export const ukrainianStrategy: BibleSwapLanguageStrategy = {
         retainAcrosticHeadings: true,
     },
     description:
-        "Preset Ukrainian Bible. OT volumes not mapped yet; NT mappings currently fall back to analyze-at-export until remapped.",
+        "Ukrainian Bible. Structure recommended. The plan is built from the selected file.",
 };

@@ -12,6 +12,7 @@ import { Book, FileArchive, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
@@ -21,7 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { BIBLE_SWAP_LANGUAGES } from "./language-mappings"
-import type { BibleSwapCompatibilityReport } from "./compatibility"
+import type {
+  BibleSwapAnalysisProgress,
+  BibleSwapCompatibilityReport,
+} from "./compatibility"
 import type {
   BibleSwapSelection,
   BibleSwapSettings,
@@ -31,7 +35,10 @@ export interface BibleSwapPanelProps {
   settings: BibleSwapSettings
   onChange: (settings: BibleSwapSettings) => void
   /** Study volumes in scope, used to score the chosen Bible before export. */
-  onAnalyze?: (bibleFile: File) => Promise<BibleSwapCompatibilityReport>
+  onAnalyze?: (
+    bibleFile: File,
+    onProgress?: (progress: BibleSwapAnalysisProgress) => void,
+  ) => Promise<BibleSwapCompatibilityReport>
   disabled?: boolean
 }
 
@@ -50,6 +57,7 @@ export function BibleSwapPanel({
   const t = useT()
   const [report, setReport] = useState<BibleSwapCompatibilityReport | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [progressPercent, setProgressPercent] = useState<number | null>(null)
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
 
   // Guards against a slow analysis of a Bible the user has already replaced.
@@ -60,10 +68,14 @@ export function BibleSwapPanel({
       if (!onAnalyze) return
       const sequence = ++analysisSequence.current
       setAnalyzing(true)
+      setProgressPercent(0)
       setAnalyzeError(null)
       setReport(null)
       try {
-        const result = await onAnalyze(file)
+        const result = await onAnalyze(file, (progress) => {
+          if (analysisSequence.current !== sequence) return
+          setProgressPercent(progress.percent)
+        })
         if (analysisSequence.current !== sequence) return
         setReport(result)
       } catch (err) {
@@ -83,6 +95,7 @@ export function BibleSwapPanel({
       setReport(null)
       setAnalyzeError(null)
       setAnalyzing(false)
+      setProgressPercent(null)
     }
   }, [settings.mode, settings.bibleFile])
 
@@ -232,9 +245,7 @@ export function BibleSwapPanel({
           </div>
 
           {analyzing && (
-            <p role="status" className="text-xs text-muted-foreground mt-1.5">
-              {t("importExport.bibleSwap.analyzing")}
-            </p>
+            <CompatibilityLoading percent={progressPercent} />
           )}
 
           {analyzeError && (
@@ -243,7 +254,7 @@ export function BibleSwapPanel({
             </p>
           )}
 
-          {report && <CompatibilitySummary report={report} />}
+          {!analyzing && report && <CompatibilitySummary report={report} />}
 
           <details className="mt-1.5">
             <summary className="text-xs text-muted-foreground cursor-pointer">
@@ -261,12 +272,33 @@ export function BibleSwapPanel({
   )
 }
 
+const compatibilityCardClass =
+  "mt-1.5 flex flex-col gap-1.5 rounded-xl bg-accent/40 px-2.5 py-2"
+
+function CompatibilityLoading({ percent }: { percent: number | null }) {
+  const t = useT()
+  return (
+    <div className={compatibilityCardClass} aria-busy="true">
+      <span className="text-xs font-medium">{t("importExport.bibleSwap.compatibilityLegend")}</span>
+      <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <Spinner className="size-3.5 shrink-0" />
+        <span>{t("importExport.bibleSwap.analyzing")}</span>
+        {percent != null && (
+          <span className="tabular-nums">
+            {t("importExport.bibleSwap.analyzingPercent", { percent: formatNumber(percent) })}
+          </span>
+        )}
+      </span>
+    </div>
+  )
+}
+
 function CompatibilitySummary({ report }: { report: BibleSwapCompatibilityReport }) {
   const t = useT()
   const plan = report.versificationPlan
 
   return (
-    <div role="status" className="mt-1.5 flex flex-col gap-0.5 rounded-xl bg-accent/40 px-2.5 py-2">
+    <div role="status" className={compatibilityCardClass}>
       <span className="text-xs font-medium">{t("importExport.bibleSwap.compatibilityLegend")}</span>
       <span className="text-[10px] text-muted-foreground">
         {t("importExport.bibleSwap.booksMatched", {

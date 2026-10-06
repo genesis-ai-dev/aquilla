@@ -8,7 +8,7 @@ import { ALL_STUDY_VOLUMES } from "./types";
 export const hindiStrategy: BibleSwapLanguageStrategy = {
     id: "hindi",
     label: "Hindi",
-    hasMappings: true,
+    hasMappings: false,
     availableVolumes: ALL_STUDY_VOLUMES,
     preferredMode: "structure",
     forceStructureVolumes: [],
@@ -19,5 +19,5 @@ export const hindiStrategy: BibleSwapLanguageStrategy = {
         retainAcrosticHeadings: true,
     },
     description:
-        "Preset Hindi Bible (MAT–JHN / ACT–REV). Structure recommended for Devanagari layout.",
+        "Hindi Bible (MAT–JHN / ACT–REV). Structure recommended for Devanagari layout. The plan is built from the selected file.",
 };

@@ -137,17 +137,22 @@ describe("analyzeBibleSwapCompatibility", () => {
     const bibleIdml = await idmlWith({ "Stories/Story_b.xml": story("JOS", body) })
     const studyIdml = await idmlWith({ "Stories/Story_s.xml": story("JOS", body) })
     const stages: string[] = []
+    const percents: number[] = []
 
     const report = await analyzeBibleSwapCompatibility(
       "portuguese.idml",
       bibleIdml,
       [{ fileName: "JOS-EST.idml", idmlData: studyIdml }],
-      (p) => stages.push(p.stage),
+      (p) => {
+        stages.push(p.stage)
+        percents.push(p.percent)
+      },
     )
 
     expect(report.bibleFileName).toBe("portuguese.idml")
     expect(report.versesMatched).toBe(2)
-    expect(stages).toEqual(["loading", "indexing", "summarizing"])
+    expect(stages).toEqual(["loading", "indexing", "planning", "summarizing"])
+    expect(percents).toEqual([5, 25, 60, 100])
   })
 
   it("skips an unreadable study volume instead of failing the report", async () => {

@@ -290,6 +290,7 @@ export async function analyzeBibleSwapCompatibility(
     percent: 5,
     message: "Reading Bible and study IDML files…",
   })
+  await yieldToPaint()
 
   const bibleStoryXml = await loadStoryXmlFromIdmlBytes(bibleIdmlData, bibleFileName)
 
@@ -309,9 +310,24 @@ export async function analyzeBibleSwapCompatibility(
     percent: 25,
     message: `Loaded Bible + ${studyStoryXmls.length} study file(s)`,
   })
+  await yieldToPaint()
+
+  onProgress?.({
+    stage: "planning",
+    percent: 60,
+    message: "Building the verse plan…",
+  })
+  await yieldToPaint()
 
   const report = scoreBibleSwapCompatibility(bibleFileName, bibleStoryXml, studyStoryXmls)
 
   onProgress?.({ stage: "summarizing", percent: 100, message: "Analysis complete" })
   return report
+}
+
+/** Lets the export dialog paint a progress update before the next sync stretch. */
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0)
+  })
 }

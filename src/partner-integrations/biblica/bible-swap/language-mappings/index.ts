@@ -1,16 +1,13 @@
 /**
- * Language mappings for Bible Swap.
+ * Language strategies for Bible Swap.
  *
- * The Biblica Bible IDML files per language are preset and never change, so
- * the versification plan (study verse → bible verse alignment) for each
- * (language, study volume) pair is precomputed offline and shipped as
- * `{language}/{VOLUME}.mapping.json` next to this file. At export time the
- * user picks a supported language and the swap applies the stored plan
- * directly instead of re-deriving it from both IDMLs — the "Any" language
- * option keeps the original analyze-at-export behaviour.
+ * The versification plan (which verses to replace, remove, or insert) is built
+ * at export time from the Bible IDML the user selects and the study file being
+ * exported — a GEN-DEU study against a GEN-DEU Bible, and the same for every
+ * other volume. Nothing is loaded from a stored mapping file.
  *
  * Per-language swap behaviour (preferred mode, forced structure volumes,
- * chapter-block flags, usability thresholds) lives in `./strategies`.
+ * chapter-block flags, plan patches) lives in `./strategies`.
  */
 
 import { chapterBlockKey, verseKey } from "../types";
@@ -43,11 +40,11 @@ export type {
     StudyVolumeId,
 } from "./strategies";
 
-/** Language choices offered in the export UI. "any" = analyze at export time. */
+/** Language choices offered in the export UI. Every language analyzes the selected file. */
 export interface BibleSwapLanguageOption {
     id: string;
     label: string;
-    /** True when precomputed mapping files exist for this language. */
+    /** Retained for callers. No language ships a stored mapping file. */
     hasMappings: boolean;
     description: string;
 }
@@ -73,8 +70,8 @@ export function isMappedBibleSwapLanguage(language: string | undefined): boolean
  * importer tags (`JOS-EST-biblica.idml`, `GEN-DEU-notes.codex`), notebook uuids
  * (`ISA-MAL-313c6d48-….codex`) and dedup counters (`JOB-SNG (1).idml`, added by
  * `saveOriginalFileWithDeduplication` on a name clash). Resolving against the
- * known volumes keeps those on the shipped mapping instead of dropping them to
- * analyze-at-export. Unrecognised names pass through unchanged.
+ * known volumes keeps a renamed export on the right book range. Unrecognised
+ * names pass through unchanged.
  */
 export function studyVolumeFromFileName(fileName: string): string {
     const base = fileName
@@ -122,7 +119,8 @@ export function isUsableMappingPlan(
 }
 
 /**
- * Apply language-specific plan refinements after deserialization.
+ * Apply language-specific plan patches after the plan is built from the
+ * selected Bible, or after a caller-supplied plan is deserialized.
  */
 export function applyLanguagePlanRefinements(
     language: string | undefined,
@@ -174,7 +172,7 @@ export interface SerializedVersificationPlan {
     stats: VersificationPlanStats;
 }
 
-/** Full `{VOLUME}.mapping.json` document (fields we care about). */
+/** Shape of a versification plan document, if a caller still supplies one. */
 export interface BibleSwapMappingDocument {
     schemaVersion: number;
     generatedAt: string;

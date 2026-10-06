@@ -1,13 +1,15 @@
 // Export-dialog wrapper for Bible Swap. Owns the settings and turns them into
 // the transform the generic exporter runs after the notes-only IDML is built.
-// The swap engine and the mapping JSON stay behind dynamic imports so they
-// load only when this panel does.
+// The swap engine stays behind a dynamic import so it loads only when this
+// panel does. The versification plan is built from the selected Bible file.
 
 import { useCallback, useEffect, useState } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import type { PartnerIdmlExportPanelProps } from "@/lib/partners/types"
+import type { BibleSwapAnalysisProgress } from "./compatibility"
 import { BibleSwapPanel } from "./BibleSwapPanel"
+import { studyVolumeFromFileName } from "./language-mappings"
 import {
   DEFAULT_BIBLE_SWAP_SETTINGS,
   type BibleSwapSettings,
@@ -22,7 +24,10 @@ export default function BibleSwapExportOption({
   const t = useT()
   const [settings, setSettings] = useState<BibleSwapSettings>(DEFAULT_BIBLE_SWAP_SETTINGS)
 
-  const analyze = useCallback(async (bibleFile: File) => {
+  const analyze = useCallback(async (
+    bibleFile: File,
+    onProgress?: (progress: BibleSwapAnalysisProgress) => void,
+  ) => {
     if (!loadSourcePackage || !fileName) {
       throw new Error("The original Biblica package is not available to score.")
     }
@@ -32,7 +37,7 @@ export default function BibleSwapExportOption({
     return analyzeBibleSwapCompatibility(bibleFile.name, bibleBytes, [{
       fileName,
       idmlData: studyBytes,
-    }])
+    }], onProgress)
   }, [fileName, loadSourcePackage])
 
   useEffect(() => {
@@ -49,22 +54,16 @@ export default function BibleSwapExportOption({
       busyMessage: t("importExport.bibleSwap.status.swapping"),
       failureMessage: (reason) => t("importExport.bibleSwap.status.failed", { reason }),
       apply: async (idml) => {
-        const [
-          { applyBibleSwapToIdml },
-          { createBibleSwapRunner },
-          { loadBibleSwapMappingPlan },
-        ] = await Promise.all([
+        const [{ applyBibleSwapToIdml }, { createBibleSwapRunner }] = await Promise.all([
           import("./swap-runner"),
           import("./swap-worker-client"),
-          import("./mapping-loader"),
         ])
-        const mapping = await loadBibleSwapMappingPlan(language, studyFileName)
         const bibleBytes = new Uint8Array(await bibleFile.arrayBuffer())
         const swapped = await applyBibleSwapToIdml(idml, bibleBytes, {
           swapMode,
           parallelRunner: createBibleSwapRunner(),
           language,
-          ...(mapping ? { serializedPlan: mapping.plan, studyVolume: mapping.volume } : {}),
+          studyVolume: studyVolumeFromFileName(studyFileName),
         })
         const downloaded = studyFileName.replace(/\.[^.]+$/, "") + ".idml"
         return {

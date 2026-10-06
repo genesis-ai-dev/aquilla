@@ -6,14 +6,13 @@
  */
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
 import {
     applyBibleSwapWithShared,
+    applyLanguagePlanRefinements,
     buildBibleSwapSharedResources,
-    deserializeVersificationPlan,
+    buildVersificationPlan,
     normalizeBibleStoryXmlGlyphs,
-    type BibleSwapMappingDocument,
 } from "../index";
 import {
     parseValidatorStory,
@@ -128,31 +127,6 @@ export async function loadMainStory(idmlPath: string): Promise<string> {
     return xml;
 }
 
-/**
- * The codex original resolved this with `__dirname`, which is undefined under
- * Vitest's ESM transform. `process.cwd()` and `path` are no help either: this
- * repo's vite-plugin-node-polyfills replaces both with browser shims, so
- * `path.dirname()` returns "." for a Windows path and `process.cwd()` is "/".
- * URL strings are always forward-slashed, so resolve there and convert once.
- */
-export function mappingFilePath(language: string, volume: string): string {
-    return fileURLToPath(
-        import.meta.url.replace(
-            /\/scripts\/[^/]*$/,
-            `/language-mappings/${language}/${volume}.mapping.json`
-        )
-    );
-}
-
-export function loadMappingDocument(
-    language: string,
-    volume: string
-): BibleSwapMappingDocument {
-    return JSON.parse(
-        fs.readFileSync(mappingFilePath(language, volume), "utf-8")
-    ) as BibleSwapMappingDocument;
-}
-
 export interface VolumeValidation {
     volume: string;
     analysis: ValidatorAnalysis;
@@ -162,8 +136,9 @@ export interface VolumeValidation {
 }
 
 /**
- * Mirrors `exportHandler` → `biblicaExporter` → `applyBibleSwapWithShared`:
- * precomputed plan, language strategy (mode + chapter-block flags + refinements).
+ * Mirrors export: the versification plan is built from the study file and the
+ * selected Bible, then the language strategy (mode, chapter-block flags,
+ * refinements) is applied.
  */
 export async function swapAndValidateVolume(
     pair: VolumePair,
@@ -178,8 +153,10 @@ export async function swapAndValidateVolume(
     // has to be the same string the swap actually reads.
     const bibleXml = normalizeBibleStoryXmlGlyphs(await loadMainStory(bible));
 
-    const plan = deserializeVersificationPlan(
-        loadMappingDocument(language, pair.volume).plan
+    const plan = applyLanguagePlanRefinements(
+        language,
+        pair.volume,
+        buildVersificationPlan(studyXml, bibleXml)
     );
     const shared = buildBibleSwapSharedResources(bibleXml, "structure", language);
     const { xml: exportXml } = applyBibleSwapWithShared(

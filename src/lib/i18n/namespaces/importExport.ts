@@ -299,6 +299,7 @@ export const importExport = defineNamespace({
       "Psalms: English superscriptions are kept; verse text is swapped from verse 1. Surgical mode can " +
       "insert extra verses when the Bible has a subheader offset (e.g. French).",
     "importExport.bibleSwap.analyzing": "Analyzing Bible file compatibility…",
+    "importExport.bibleSwap.analyzingPercent": "{percent}%",
     "importExport.bibleSwap.analyzeFailed": "Compatibility analysis failed: {reason}",
     "importExport.bibleSwap.compatibilityLegend": "Compatibility",
     "importExport.bibleSwap.booksMatched": "{found} of {expected} books",
@@ -1694,6 +1695,11 @@ export const importExport = defineNamespace({
       "importExport.bibleSwap.languageAriaLabel": {
         description:
           "Accessible name for the select that chooses which language's versification mapping the Bible Swap uses.",
+      },
+      "importExport.bibleSwap.analyzingPercent": {
+        description:
+          "Percentage shown beside the spinner in the Bible Swap compatibility card while the chosen Bible file is being scored.",
+        placeholders: { percent: "Analysis progress from 0 to 100, already locale-formatted." },
       },
       "importExport.bibleSwap.analyzeFailed": {
         description:

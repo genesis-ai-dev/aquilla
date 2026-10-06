@@ -130,10 +130,10 @@ export function buildBibleSwapSharedResources(
 
 /**
  * Apply swap using pre-built Bible indexes (avoids re-parsing the Bible for each study story).
- * A precomputed `versificationPlan` (from a shipped language mapping) skips the
- * per-story plan derivation entirely; keys not present in this story are ignored.
- * When `language` is a mapped language, the strategy may force Structure mode for
- * specific volumes and refine the plan after load.
+ * Without a caller-supplied plan, the versification plan (replace, remove, insert)
+ * is built from this story and the selected Bible. Keys that this story does not
+ * contain are ignored. A language strategy may force Structure for a volume and
+ * patch the plan after it is built.
  */
 export function applyBibleSwapWithShared(
     studyStoryXml: string,
@@ -161,7 +161,7 @@ export function applyBibleSwapWithShared(
             studyScan.studyIndex,
             shared.bibleVerseIndex
         );
-    if (options?.language && options.versificationPlan && volume) {
+    if (options?.language && volume) {
         versificationPlan = applyLanguagePlanRefinements(
             options.language,
             volume,

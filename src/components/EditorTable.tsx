@@ -272,6 +272,8 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+/** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
+const COMPLETION_PREFETCH_DWELL_MS = 300
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
@@ -867,6 +869,9 @@ interface EditorTableProps {
    *  user around the file. Omit to keep errors sticky (legacy callers). */
   onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  /** AQU-617: start a draft's few-shot retrieval early, when an empty cell is
+   *  focused, so a Draft click goes straight to generation. */
+  onPrefetchCompletion?: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
    *  `cellId` as one model call. Omit to keep the rail button hidden
@@ -1025,7 +1030,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1423,6 +1428,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
+
+  // AQU-617: once focus settles on an empty cell, start its draft retrieval.
+  // The dwell keeps arrowing through rows from firing a search per row.
+  useEffect(() => {
+    if (!activeEditorCellId || !onPrefetchCompletion || !isCompletionAvailable) return
+    const timer = setTimeout(() => {
+      const cell = cellStore.getCellView(activeEditorCellId)
+      if (cell && !cell.translated.trim()) onPrefetchCompletion(cell)
+    }, COMPLETION_PREFETCH_DWELL_MS)
+    return () => clearTimeout(timer)
+  }, [activeEditorCellId, cellStore, onPrefetchCompletion, isCompletionAvailable])
 
   // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
   // a pin can't belong to a row that no longer renders.

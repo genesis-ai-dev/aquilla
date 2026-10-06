@@ -147,7 +147,9 @@ export async function deleteOrganization(
   env: Env,
   orgId: number,
 ): Promise<DeleteOrganizationResult> {
-  return env.AQUILLA_PG.transaction(async (tx) => {
+  const db = env.AQUILLA_PG
+  if (!db.transaction) throw new Error("Deleting an organization requires Postgres transactions")
+  return db.transaction(async (tx) => {
     const counted = await tx.prepare(
       "SELECT COUNT(*) AS n FROM projects WHERE org_id = ?",
     ).bind(orgId).first<{ n: number | string }>()

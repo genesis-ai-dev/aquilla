@@ -38,7 +38,7 @@ async function project(): Promise<{ id: string; contributor: string; maintainer:
   return { id, contributor: await member(id, 400), maintainer: await member(id, 600) }
 }
 
-function answer(projectId: string, decisionId: string, jwt: string, text: string): Promise<Response> {
+async function answer(projectId: string, decisionId: string, jwt: string, text: string): Promise<Response> {
   return app.request(
     `/api/v2/projects/${projectId}/contextual/decisions/${decisionId}/answer`,
     { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ answer: text }) },

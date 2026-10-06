@@ -12,12 +12,14 @@
 
 import { describe, expect, it } from "vitest"
 import { DISCIPLES, JESUS, SAMARITAN_WOMAN, jhn4People, jhn4Voices } from "./__fixtures__/jhn4"
+import { rutVoices } from "./__fixtures__/ot-pack12"
 import {
   buildVoiceIndex,
   cellVerses,
   cellVoicesFor,
   firstVerseBook,
   sharedVerseRefs,
+  speakerNeedsCheck,
   speaksIn,
   voiceChipModel,
   voiceIndexFor,
@@ -201,5 +203,26 @@ describe("memo per (pack version, book)", () => {
     expect(voiceIndexFor("1.0.1", layer)).not.toBe(first)
     // Same version and book, different file object (a refetch): rebuilt.
     expect(voiceIndexFor("1.0.0", jhn4Voices())).not.toBe(first)
+  })
+})
+
+describe("a speaker worth checking (AQU-1692)", () => {
+  // The pack's speakerConf ladder (bible-wiki pipeline/src/bkp/voices-layer.ts):
+  // agree .97, FCBH only .85, Macula only .75, first person only .6,
+  // sources disagree .5, nobody names a speaker 0.
+  it("marks 'sources disagree' and 'nobody names one', and no reading one source supports", () => {
+    const byConf = new Map(rutVoices().speeches.map((speech) => [speech.speakerConf, speech]))
+    expect(speakerNeedsCheck(byConf.get(0.5)!)).toBe(true)
+    expect(speakerNeedsCheck(byConf.get(0)!)).toBe(true)
+    expect(speakerNeedsCheck(byConf.get(0.6)!)).toBe(false)
+    expect(speakerNeedsCheck(byConf.get(0.85)!)).toBe(false)
+  })
+
+  it("does not mark a speaker the project corrected", () => {
+    const unsure = rutVoices().speeches.find((speech) => speech.speakerConf === 0.5)!
+    const corrected = buildVoiceIndex(rutVoices(), {
+      [unsure.id]: { speaker: "person:Ruth", note: "Our reading.", by: "mara", at: "2026-10-06T12:00:00Z" },
+    })
+    expect(speakerNeedsCheck(corrected.speeches.get(unsure.id)!)).toBe(false)
   })
 })

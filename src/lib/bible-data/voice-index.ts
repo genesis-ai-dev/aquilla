@@ -296,6 +296,8 @@ export interface VoiceChipModel {
   voices: Voice[]
   /** How many more speeches the cell has than the chip shows. */
   more: number
+  /** AQU-1692: a speech in the cell has a disputed boundary, shown or not. */
+  disputed: boolean
 }
 
 /**
@@ -307,9 +309,35 @@ export interface VoiceChipModel {
 export function voiceChipModel(index: VoiceIndex, cell: CellVoices): VoiceChipModel {
   const sequence = voiceSequence(index, cell)
   const speeches = distinctVoices(sequence).filter((voice) => voice.kind === "speech")
-  if (speeches.length <= 1) return { voices: sequence, more: 0 }
+  const disputed = speeches.some((voice) => voice.kind === "speech" && speechDispute(voice.speech) !== null)
+  if (speeches.length <= 1) return { voices: sequence, more: 0, disputed }
   const firstSpeech = sequence.findIndex((voice) => voice.kind === "speech")
-  return { voices: sequence.slice(0, firstSpeech + 1), more: speeches.length - 1 }
+  return { voices: sequence.slice(0, firstSpeech + 1), more: speeches.length - 1, disputed }
+}
+
+// ── What deserves a second look (AQU-1692) ──────────────────────────────────
+
+/**
+ * At or below this, the pack's sources disagree about who speaks (the
+ * pipeline's 0.5), or none of them names anyone (0).
+ */
+export const CHECK_SPEAKER_CONF = 0.5
+
+/** The data is unsure who speaks. A speaker the project corrected is sure. */
+export function speakerNeedsCheck(speech: BkpSpeech): boolean {
+  return typeof speech.speakerConf === "number" && speech.speakerConf <= CHECK_SPEAKER_CONF
+}
+
+/**
+ * Pack slice 3 marks a speech whose boundary scholars dispute (John 3:16–21).
+ * Any object there means disputed; its reason, English data, comes along when
+ * it is text.
+ */
+export function speechDispute(speech: BkpSpeech): { reason: string | null } | null {
+  const disputed: unknown = speech.disputed
+  if (typeof disputed !== "object" || disputed === null || Array.isArray(disputed)) return null
+  const reason: unknown = (disputed as Record<string, unknown>).reason
+  return { reason: typeof reason === "string" && reason.trim() !== "" ? reason : null }
 }
 
 /** True when `speaker` speaks anywhere in the cell, quoted speech included. */

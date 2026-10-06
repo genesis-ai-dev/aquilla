@@ -5,14 +5,21 @@
 // which datasets say so, a "Show every line by …" action per speaker, and
 // where each name came from. Shown in the chip's popover on hover and on
 // keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
-// marks disputed (slice 3).
+// marks disputed (slice 3). AQU-1692: a "Check" badge where the data is unsure
+// who speaks.
 
 import { Fragment } from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, CircleHelp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PopoverTitle } from "@/components/ui/popover"
 import type { BkpEntityId, BkpSpeech } from "@/lib/bible-data/pack-types"
-import { distinctVoices, voiceSequence, type Voice } from "@/lib/bible-data/voice-index"
+import {
+  distinctVoices,
+  speakerNeedsCheck,
+  speechDispute,
+  voiceSequence,
+  type Voice,
+} from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import type { CellVoiceView } from "./voices-context"
@@ -102,20 +109,12 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
   )
 }
 
+/** A badge on a speech that deserves a second look. */
+const BADGE_CLASS =
+  "inline-flex items-center gap-1 self-start rounded-sm border border-amber-600/50 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:border-amber-400/50 dark:text-amber-300"
+
 function voiceListKey(voice: Voice): string {
   return voice.kind === "narrator" ? "narrator" : voice.speech.id
-}
-
-/**
- * Pack slice 3 marks a speech whose boundary scholars dispute (John 3:16–21).
- * Any object there means disputed; its reason, English data, shows when it is
- * text.
- */
-function speechDispute(speech: BkpSpeech): { reason: string | null } | null {
-  const disputed: unknown = speech.disputed
-  if (typeof disputed !== "object" || disputed === null || Array.isArray(disputed)) return null
-  const reason: unknown = (disputed as Record<string, unknown>).reason
-  return { reason: typeof reason === "string" && reason.trim() !== "" ? reason : null }
 }
 
 function SpeechDetails({
@@ -170,12 +169,20 @@ function SpeechDetails({
         </span>
       </span>
       <span className="text-muted-foreground">{facts.join(" · ")}</span>
+      {speakerNeedsCheck(speech) && (
+        <>
+          <span data-testid="speaker-check" className={BADGE_CLASS}>
+            <CircleHelp className="size-3" aria-hidden="true" />
+            {t("bibleVoices.check.badge")}
+          </span>
+          <span className="text-muted-foreground">
+            {t(speech.speaker ? "bibleVoices.check.disagree" : "bibleVoices.check.unknown")}
+          </span>
+        </>
+      )}
       {dispute && (
         <>
-          <span
-            data-testid="speech-disputed"
-            className="inline-flex items-center gap-1 self-start rounded-sm border border-amber-600/50 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:border-amber-400/50 dark:text-amber-300"
-          >
+          <span data-testid="speech-disputed" className={BADGE_CLASS}>
             <AlertTriangle className="size-3" aria-hidden="true" />
             {t("bibleHelps.voices.disputed")}
           </span>

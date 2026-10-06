@@ -666,6 +666,16 @@ export const agent = defineNamespace({
     "agent.finding.bibleCheck.speaker": "Speaker named",
     "agent.finding.bibleCheck.negation": "Negation kept",
     "agent.finding.bibleCheck.youNumber": "Singular or plural “you”",
+    // AQU-1701: the participant questions and the Translation Questions (C1).
+    "agent.finding.bibleCheck.referent": "Clear who is meant",
+    "agent.finding.bibleCheck.introduced": "Participant introduced",
+    "agent.finding.bibleCheck.comprehension": "Comprehension",
+    "agent.finding.bibleCheck.comprehensionEvidence": "Comprehension: the translation may not say that “{answer}”",
+    "agent.finding.bibleCheck.comprehensionQuestion": "Translation Question ({refs}): {question}",
+    "agent.finding.bibleCheck.comprehensionMore": plural({
+      one: "{count} more Translation Question here may not be answered either",
+      other: "{count} more Translation Questions here may not be answered either",
+    }),
     "agent.finding.needsYou": "Needs you",
     "agent.finding.advisory": "Advisory",
   },
@@ -1466,6 +1476,30 @@ export const agent = defineNamespace({
       },
       "agent.finding.bibleCheck.youNumber": {
         description: "Name of a Bible data check: the translation's 'you' is singular or plural as in the source. Shown in Rules → Built-in checks, and as {check} in 'Bible data: {check}' on autopilot drafts.",
+      },
+      "agent.finding.bibleCheck.referent": {
+        description: "Name of an autopilot Bible data check: when two people in a verse could be meant by a word such as 'he', the translation makes clear which one it is. Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.introduced": {
+        description: "Name of an autopilot Bible data check: a person who appears for the first time in a passage is named or described, not only called 'he' or 'she'. Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.comprehension": {
+        description: "Name of a Bible data check: the translation answers a standard comprehension question about these verses (an unfoldingWord Translation Question). Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.comprehensionEvidence": {
+        description: "Evidence line under a comprehension finding: an automatic check thinks the translation may not say what the expected answer says.",
+        placeholders: { answer: "The expected answer, in the gateway language (usually English). Data, not translated." },
+      },
+      "agent.finding.bibleCheck.comprehensionQuestion": {
+        description: "Evidence line under a comprehension finding: the comprehension question that was asked, and the verses it is about.",
+        placeholders: {
+          refs: "Verse references as a list, such as 'JHN 4:9, JHN 4:10' — not translated.",
+          question: "The question, in the gateway language (usually English). Data, not translated.",
+        },
+      },
+      "agent.finding.bibleCheck.comprehensionMore": {
+        description: "Evidence line under a comprehension finding: how many other comprehension questions on the same verses also got a 'no'.",
+        placeholders: { count: "Number of other questions." },
       },
       "agent.finding.needsYou": {
         description: "Badge on a draft whose findings were triaged as needing a person before approval.",

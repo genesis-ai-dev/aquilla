@@ -56,6 +56,9 @@ export interface HarmonizerFinding {
   end: number
   old: string
   new: string
+  /** true: the span needs a person's (or a model's) rewording — there is no
+   *  deterministic replacement, so the editor offers no Accept. `new === old`. */
+  flagOnly?: boolean
   /** i18n key under `harmonizer.*` explaining the suggestion, plus its values. */
   reasonKey: string
   reasonValues: Record<string, string>

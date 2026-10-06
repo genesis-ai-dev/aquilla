@@ -20,6 +20,7 @@ interface HarmonizerSuggestionWire {
   confidence: number
   reasonKey: string
   reasonValues: Record<string, string>
+  flagOnly?: boolean
 }
 
 function isWire(v: unknown): v is HarmonizerSuggestionWire {
@@ -45,6 +46,7 @@ export function toSmartEditSuggestion(w: HarmonizerSuggestionWire): SmartEditSug
     newNorm: w.new,
     confidence: typeof w.confidence === "number" ? w.confidence : 0,
     tier: "harmonize",
+    ...(w.flagOnly ? { flagOnly: true } : {}),
     reasonKey: w.reasonKey,
     reasonValues: w.reasonValues && typeof w.reasonValues === "object" ? w.reasonValues : {},
     support: { strong: 0, weak: 0, keeps: 0 },

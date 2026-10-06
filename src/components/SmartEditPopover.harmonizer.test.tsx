@@ -12,13 +12,13 @@ const base = {
   reasonValues: { openedIn: "JHN 6:26" },
 }
 
-function show(reasonKey: string) {
+function show(reasonKey: string, extra: { flagOnly?: boolean } = {}) {
   const anchor = document.createElement("span")
   document.body.appendChild(anchor)
   render(
     <I18nProvider>
       <SmartEditPopover
-        suggestion={toSmartEditSuggestion({ ...base, reasonKey })}
+        suggestion={toSmartEditSuggestion({ ...base, reasonKey, ...extra })}
         anchor={anchor}
         onAccept={() => {}}
         onDismiss={() => {}}
@@ -37,5 +37,12 @@ describe("SmartEditPopover — harmonizer suggestions", () => {
   it("shows no raw key for a reason this client does not know", () => {
     show("harmonizer.future.check")
     expect(screen.queryByText(/harmonizer\.future/)).toBeNull()
+  })
+
+  it("offers no Accept on a flag — there is no replacement to apply, only a reason", () => {
+    show("harmonizer.reference.unclearSubject", { flagOnly: true })
+    expect(screen.getByText(/may think it is the same person/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy()
   })
 })

@@ -7,10 +7,14 @@
 // eval measures exactly what production asks. Alias-free.
 
 import { quotationCheck } from "./quotes"
+import { referenceCheck } from "./reference"
 import type { HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
 
 /** Registered checks. Order is the order findings are reported in. */
-export const CHECKS: readonly HarmonyCheck<unknown>[] = [quotationCheck as HarmonyCheck<unknown>]
+export const CHECKS: readonly HarmonyCheck<unknown>[] = [
+  quotationCheck as HarmonyCheck<unknown>,
+  referenceCheck as HarmonyCheck<unknown>,
+]
 
 export interface HarmonizerJevRequest {
   model: string

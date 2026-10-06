@@ -22,6 +22,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `cell_attachments` | `rls_cell_attachments_project_access` | 0112 |
 | `cell_audio` | `rls_cell_audio_project_access` | 0034 |
 | `cell_audio_validators` | `rls_cell_audio_validators_project_access` | 0096 |
+| `cell_plan_keys` | `rls_cell_plan_keys_project_access` | 0145 |
 | `cell_validators` | `rls_cell_validators_project_access` | 0034 |
 | `cells` | `rls_cells_project_access` | 0034 |
 | `changesets` | `rls_changesets_project_access` | 0055 |

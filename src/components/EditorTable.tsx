@@ -1023,6 +1023,11 @@ interface EditorTableProps {
   onFootnoteCreated?: () => void
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
+  /**
+   * ProjectWorkspace's parallelBiblesPanelActive: the editor, on a scripture
+   * file. Bible data shows only then (AQU-1685).
+   */
+  bibleOpen?: boolean
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1071,6 +1076,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  bibleOpen = false,
 }, ref) {
   const t = useT()
   // The switcher trigger and the closed pill name the lane the same way.
@@ -1182,9 +1188,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
   // AQU-1687: Bible voices (chips, rails, "Show every line by …"). Null
-  // context and no filter unless the project's Voices enrichment is on.
+  // context and no filter unless the project's Voices enrichment is on, the
+  // Bible data experiment is on and a Bible is open (AQU-1685).
   const bibleVoices = useBibleVoices({
     project,
+    bibleOpen,
     cellStore,
     cellIds: fileCellIds,
     version: cellStoreVersion,

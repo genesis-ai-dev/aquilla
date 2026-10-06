@@ -101,7 +101,7 @@ import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
-import { isBibleOpen } from "@/lib/bible-data/experiment"
+import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -12591,7 +12591,9 @@ export function ProjectWorkspace() {
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           bibleDataVoicesEnabled={
-            !!project && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
           }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
@@ -13689,6 +13691,7 @@ export function ProjectWorkspace() {
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
+            bibleOpen={parallelBiblesPanelActive}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

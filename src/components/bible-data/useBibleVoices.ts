@@ -2,8 +2,9 @@
 //
 // EditorTable calls this once per render. It:
 //   • loads the pack's `voices` and `people` layers for the open book, only
-//     while the project's Voices enrichment is on and the person shows chips
-//     or rails (View settings → Bible data);
+//     while the Bible data experiment is on, a Bible is open (AQU-1685), the
+//     project's Voices enrichment is on and the person shows chips or rails
+//     (View settings → Bible data);
 //   • builds the index once per (pack version, book);
 //   • resolves names through the label chain (project names → interface
 //     language → English, as the person chose);
@@ -15,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { readAtVersion, type CellStore } from "@/hooks/useActiveCellStore"
 import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { loadLayer, loadManifest, type BkpFailureReason } from "@/lib/bible-data/pack-client"
 import type { BkpEntityId, BkpPeopleLayer, BkpVoicesLayer } from "@/lib/bible-data/pack-types"
 import { mapLayerToProject } from "@/lib/bible-data/versification"
@@ -83,6 +85,8 @@ function useVoicesPack(book: string | null): VoicesPack | null {
 
 export interface BibleVoicesOptions {
   project: ProjectRecord
+  /** A Bible is open (EditorTable's `bibleOpen`); false shows nothing and fetches nothing. */
+  bibleOpen: boolean
   cellStore: CellStore
   /** The file's cells, in document order. */
   cellIds: readonly string[]
@@ -109,10 +113,13 @@ export interface BibleVoices {
   clearFilter: () => void
 }
 
-export function useBibleVoices({ project, cellStore, cellIds, version, fileId }: BibleVoicesOptions): BibleVoices {
+export function useBibleVoices({ project, bibleOpen, cellStore, cellIds, version, fileId }: BibleVoicesOptions): BibleVoices {
   const prefs = useBibleDataViewPrefs()
   const { locale } = useI18n()
-  const voicesOn = resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+  // AQU-1685: only on a device with the Bible data experiment on, and only
+  // while a Bible is open. loadLayer does not check the experiment itself.
+  const shown = bibleOpen && isBibleDataExperimentOn(project)
+  const voicesOn = shown && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
   const wanted = voicesOn && (prefs.voiceChips || prefs.speechRails)
 
   // One "type<TAB>ref" line per cell. A string, so everything below survives

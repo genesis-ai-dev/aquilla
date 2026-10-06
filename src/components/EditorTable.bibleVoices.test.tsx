@@ -11,7 +11,9 @@
  *   • the details on keyboard focus, with "Show every line by …" filtering
  *     the rows and a visible way back;
  *   • nothing at all, and nothing fetched, when the Voices enrichment is off,
- *     and live removal when it is switched off.
+ *     and live removal when it is switched off;
+ *   • nothing at all, and nothing fetched, unless this device has the Bible
+ *     data experiment on and a Bible is open (AQU-1685).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -164,11 +166,14 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     // A scripture file: Bible data is on by its derived default.
     files: [{ id: "file-jhn", name: "JHN", type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    // AQU-1685: this device switched on the Bible data experiment.
+    experimentalFlags: { bibleData: true },
     ...overrides,
   }
 }
 
-function renderTable(project: ProjectRecord, cells: readonly CellSpec[] = DEFAULT_CELLS) {
+/** `bibleOpen` is what ProjectWorkspace passes: true while the editor shows a scripture file. */
+function renderTable(project: ProjectRecord, cells: readonly CellSpec[] = DEFAULT_CELLS, bibleOpen = true) {
   const store = makeStore(cells)
   const qc = new QueryClient()
   const ui = (p: ProjectRecord) => (
@@ -191,6 +196,7 @@ function renderTable(project: ProjectRecord, cells: readonly CellSpec[] = DEFAUL
           cellLabelsEnabled
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          bibleOpen={bibleOpen}
         />
       </EditorActionsProvider>
     </QueryClientProvider>
@@ -457,6 +463,30 @@ describe("off means off", () => {
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
     expect(layerFetches()).toEqual([])
+  })
+
+  // AQU-1685: the experiment is device-local and off by default, so a person
+  // who never opted in sees the editor exactly as before the pack, and the
+  // pack's servers see no request from them.
+  it("shows nothing and fetches nothing, not even the manifest, with the Bible data experiment off", async () => {
+    renderTable(makeProject({ experimentalFlags: {} }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
+    expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // Any other EditorTable mount (no Bible open) passes no `bibleOpen`.
+  it("shows nothing and fetches nothing when no Bible is open", async () => {
+    renderTable(makeProject(), DEFAULT_CELLS, false)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
+    expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("shows nothing when Bible data itself is off", async () => {

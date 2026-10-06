@@ -178,6 +178,10 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** AQU-1690 kill switch for autopilot's Bible-data Jev questions
+   *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
+   *  code cannot settle unanswered. Unset = on. */
+  JEV_BIBLE_QA?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -275,6 +279,9 @@ export interface Env {
   /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
    *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
   AQUIFER_USER_AGENT?: string
+  /** AQU-1690: base URL of the Bible Knowledge Pack that autopilot reads
+   *  (lib/bkp/pack-loader.ts). Default https://bibletranslation.org/bkp/v1. */
+  BKP_BASE?: string
 
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.

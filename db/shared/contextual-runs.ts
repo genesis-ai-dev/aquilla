@@ -212,6 +212,11 @@ export type ContextualSpanReason =
   | "rejected_by_quorum"
   | "target_already_filled"
   | "span_failed"
+  // AQU-1690: autopilot uses Bible data, but the pack did not load, so the
+  // span ran without it. One code per typed loader failure.
+  | "bible_data_offline"
+  | "bible_data_not_found"
+  | "bible_data_invalid"
 
 /** Union of every ALLOWED details field. `appendContextualRunEvent` applies a
  * per-kind allowlist again at runtime, so excess properties from untyped JS or
@@ -541,6 +546,9 @@ const SPAN_REASONS = new Set<ContextualSpanReason>([
   "rejected_by_quorum",
   "target_already_filled",
   "span_failed",
+  "bible_data_offline",
+  "bible_data_not_found",
+  "bible_data_invalid",
 ])
 
 function truncateUtf8(value: string, maxBytes: number): string {

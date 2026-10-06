@@ -144,6 +144,44 @@ describe("buildLinkSourcePreview — file rows (AQU-1559)", () => {
   })
 })
 
+describe("buildLinkSourcePreview — the file a row could replace (AQU-1679)", () => {
+  // WHY: "replace the source in my existing file" needs to know WHICH file.
+  // A name answers that only when it identifies one file on each side; anything
+  // else must not offer the option, or the link would overwrite a guess.
+  it("names this project's file only when the name is unique on both sides", () => {
+    const preview = buildLinkSourcePreview(
+      {
+        name: "Upstream",
+        files: [
+          { id: "up-mat", name: "MAT" },
+          { id: "up-mrk", name: "mrk" },
+          { id: "up-luk-1", name: "LUK" },
+          { id: "up-luk-2", name: "luk" },
+          { id: "up-jhn", name: "JHN" },
+          { id: "up-act", name: "ACT" },
+        ],
+      },
+      [
+        { id: "own-mrk", name: "MRK" },
+        { id: "own-luk", name: "LUK" },
+        { id: "own-jhn-1", name: "JHN" },
+        { id: "own-jhn-2", name: "jhn" },
+      ],
+    )
+
+    expect(preview.files.map((f) => [f.name, f.clashes, f.clashFileId])).toEqual([
+      ["MAT", false, undefined],
+      ["mrk", true, "own-mrk"],
+      // Two upstream files share the name: neither can claim the one file here.
+      ["LUK", true, undefined],
+      ["luk", true, undefined],
+      // Two files here share the name: which one is "the same file" is unknown.
+      ["JHN", true, undefined],
+      ["ACT", false, undefined],
+    ])
+  })
+})
+
 describe("loadLinkSourcePreview", () => {
   // WHY: the clash compares like with like only if both file lists come from
   // the same endpoint. This pins that it reads the upstream AND this project,
@@ -162,7 +200,8 @@ describe("loadLinkSourcePreview", () => {
       upstreamName: "English Source",
       files: [
         { id: "f-MAT", name: "MAT", clashes: false },
-        { id: "f-MRK", name: "MRK", clashes: true },
+        // AQU-1679: this project's one MRK is the file the row could replace.
+        { id: "f-MRK", name: "MRK", clashes: true, clashFileId: "f-MRK" },
       ],
       fileCount: 2,
       clashingNames: ["MRK"],

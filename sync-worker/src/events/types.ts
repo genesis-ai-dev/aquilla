@@ -1027,9 +1027,23 @@ export interface EventPayloads {
     /** True = the upstream deleted this cell. Tombstone (stamp
      *  cells.tombstoned_at), never delete the downstream row. */
     deleted?: true
+    /**
+     * AQU-1679: this mirror JOINS a cell the project already had to the
+     * upstream cell named in `upstream.cellId` (link-adopt.ts) — the "replace
+     * the source in my existing file" choice. It carries the upstream's text
+     * like any content mirror, and applies regardless of the row's
+     * `upstream_seq`: the row may hold a seq from an earlier link to a
+     * different upstream, which says nothing about this one.
+     */
+    adopt?: true
     /** Provenance: which upstream event/state this mirror reflects. */
     upstream: {
       projectId: string
+      /**
+       * The upstream's cell. The event's own `cellId` nearly always equals it;
+       * on a file the project already had (AQU-1679) it does not, and the
+       * projection records this one in `cells.upstream_cell_id`.
+       */
       cellId: string
       eventId: string
       /** The upstream event's server_seq — the monotonic apply-guard key. */

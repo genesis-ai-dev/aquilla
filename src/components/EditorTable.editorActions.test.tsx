@@ -567,6 +567,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(row).not.toBeNull()
     expect(row).toHaveAttribute("data-ai-translating", "true")
     expect(row?.className).toContain("animate-pulse")
+    expect(screen.getByRole("progressbar", { name: "Generating translation…" })).toHaveAttribute("data-pass", "1")
   })
 
   it("does not mark the row as AI-translating when no completion is running", async () => {

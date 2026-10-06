@@ -49,8 +49,6 @@ export interface WorkspaceActionRunArgs {
   /** AQU-490: bulk AUDIO validation. Separate from the text one on purpose —
    *  a reviewer signing off translations has not listened to the takes. */
   runBatchValidateAudio: () => void
-  /** File-scoped target import — populate the open file's translations. */
-  runImportIntoFile: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
   navigate: NavigateFunction

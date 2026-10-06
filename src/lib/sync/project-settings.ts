@@ -13,6 +13,7 @@ import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
+import type { DirectionMode } from "@/lib/text-direction"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,6 +50,20 @@ export type CellEditingTier =
 export interface ProjectWideSettings {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * AQU-1471: the project's DEFAULT text direction per side — the answer to
+   * "this project's target language is right-to-left", asked once instead of
+   * once per file.
+   *
+   * "auto", and an ABSENT key, mean "take it from the language"
+   * (`languageDefaultDirection`), which is what every project did before these
+   * keys existed. A per-file direction still wins over this, and nothing copies
+   * this onto the file rows: resolution happens on every read
+   * (db/shared/text-direction.ts states the order), so switching
+   * `targetLanguage` to Arabic moves every file that has no override with it.
+   */
+  sourceTextDirection?: DirectionMode
+  targetTextDirection?: DirectionMode
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
@@ -267,6 +282,10 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** Typing " or ' in the translation editor produces curly quotes in the
+   *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
+   *  (the default) leaves straight quotes alone. */
+  smartQuotes?: boolean
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
@@ -376,10 +395,27 @@ export function resolveCellEditingFloor(
   }
 }
 
+/**
+ * Who last saved the shared settings, as the identity worker sends it: the
+ * saver's user id (`project_settings.updated_by`, a number, or a string id for
+ * an agent-sourced save). The object form is what this type used to promise
+ * and the server never sent; it stays accepted so a server that does send a
+ * name is shown it. Read it through `settingsEditorName`.
+ */
+export type ProjectSettingsEditor = number | string | { id: number; username: string } | null
+
+/** The saver's username when the response carries one, else null. A bare id
+ *  is not a name: the General page printed "Last edited by undefined" by
+ *  reading `.username` off a number (walk 10-02). */
+export function settingsEditorName(editor: ProjectSettingsEditor | undefined): string | null {
+  if (editor == null || typeof editor !== "object") return null
+  return typeof editor.username === "string" && editor.username !== "" ? editor.username : null
+}
+
 export interface ProjectSettingsResponse {
   version: number
   updatedAt: string
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   settings: ProjectWideSettings
   /**
    * AQU-1083: the org default this project inherits when `settings` carries no
@@ -391,6 +427,13 @@ export interface ProjectSettingsResponse {
    * Optional: a server that predates this simply omits it.
    */
   orgCountStructuralCells?: boolean | null
+  /**
+   * Whether the org lets bulk text validation take untouched AI drafts. On
+   * this response for the same reason as the line above, and because a project
+   * member outside the org cannot read the org's settings at all. Null when
+   * the project has no org; optional on an older server.
+   */
+  orgAllowBulkValidateAiDrafts?: boolean | null
   /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
   lanes?: ProjectLaneView[]
 }

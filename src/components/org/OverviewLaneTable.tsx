@@ -45,11 +45,13 @@ import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export interface OverviewLaneTableProps {
   projectId: string
@@ -110,7 +112,8 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
 }
 
 function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string }) {
-  const width = Math.round(pct * 100)
+  // AQU-1493: never 100 while a cell in the lane is outstanding.
+  const width = progressPercentOfFraction(pct)
   return (
     <span className="flex items-center gap-2">
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
@@ -173,11 +176,21 @@ export function OverviewLaneTable({
     return () => { alive = false }
   }, [jwt, projectId, scopableUserIds])
 
+  // AQU-1607: a lane scope is a lane id; the rows below are keyed by lane
+  // tag, so read the ids back as tags through the portfolio's own lane rows.
+  const laneIdentities = useMemo(
+    () =>
+      [...lanes, ...(archivedLanes ?? [])]
+        .filter((lane): lane is PortfolioLane & { laneId: string } => Boolean(lane.laneId))
+        .map((lane) => ({ id: lane.laneId, name: "", legacyTag: lane.lane })),
+    [lanes, archivedLanes],
+  )
+
   // lane tag -> members scoped to that lane.
   const membersByLane = useMemo(() => {
     const map = new Map<string, ProjectMember[]>()
     for (const m of members) {
-      for (const scope of scopesByUser[m.userId] ?? []) {
+      for (const scope of laneScopesAsTags(scopesByUser[m.userId] ?? [], laneIdentities)) {
         if (scope.kind !== "lane") continue
         const list = map.get(scope.value) ?? []
         list.push(m)
@@ -185,7 +198,7 @@ export function OverviewLaneTable({
       }
     }
     return map
-  }, [members, scopesByUser])
+  }, [members, scopesByUser, laneIdentities])
 
   const laneLabel = (lane: PortfolioLane) =>
     lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane)
@@ -269,6 +282,7 @@ export function OverviewLaneTable({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={row.original.lane}
+                    laneId={row.original.laneId}
                     laneLabel={label}
                     orgId={orgId}
                     anchorOnly

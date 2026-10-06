@@ -83,6 +83,19 @@ function unpublishedSelection(preview: InworldDesignedPreview): InworldDesignSel
   return { voiceId: preview.voiceId, unpublished: true, previewAudio: preview.previewAudio }
 }
 
+function haltAudio(audio: HTMLAudioElement | null): void {
+  if (!audio) return
+  audio.pause()
+  audio.onended = null
+  audio.removeAttribute("src")
+  audio.src = ""
+  try {
+    audio.load()
+  } catch {
+    /* stubs / environments without a media pipeline */
+  }
+}
+
 export function InworldVoiceDesignField({
   prompt,
   onPromptChange,
@@ -203,19 +216,6 @@ export function InworldVoiceDesignField({
     savedSrcRef.current = null
   }
 
-  const haltAudio = (audio: HTMLAudioElement | null) => {
-    if (!audio) return
-    audio.pause()
-    audio.onended = null
-    audio.removeAttribute("src")
-    audio.src = ""
-    try {
-      audio.load()
-    } catch {
-      /* stubs / environments without a media pipeline */
-    }
-  }
-
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -233,13 +233,19 @@ export function InworldVoiceDesignField({
     setPlayingId(null)
   }
 
+  // A fresh element every time. Reusing `audioRef.current` and then writing
+  // `onended` / `src` aliases that element to the ref the unmount effect
+  // already captured, which `react-hooks/immutability` rejects (AQU-1402).
+  // The previous element is halted first, so a second preview replaces it.
   const playSrc = (src: string, id: string) => {
-    const audio = audioRef.current ?? new Audio()
-    audioRef.current = audio
+    haltAudio(audioRef.current)
+    audioRef.current = null
+    const audio = new Audio()
     audio.onended = () => {
       if (audioRef.current === audio) setPlayingId(null)
     }
     audio.src = src
+    audioRef.current = audio
     void audio.play().then(() => {
       if (!aliveRef.current || audioRef.current !== audio) {
         haltAudio(audio)

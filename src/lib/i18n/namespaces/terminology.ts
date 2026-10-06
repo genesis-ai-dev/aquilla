@@ -184,6 +184,22 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.section.brief.statusNone": "Not started",
     "terminology.livingMemory.section.brief.statusDraft": "Draft",
     "terminology.livingMemory.section.brief.statusComplete": "Complete",
+    // AQU-1672: the status is DERIVED (briefStatus()) and there is nothing to
+    // approve — a user who had just generated a summary read the permanent
+    // "Draft" badge as an unfinished step blocking the AI. Each status says
+    // what it means for the draft prompts, so the badge stops reading as a
+    // pending action.
+    "terminology.livingMemory.section.brief.statusNoneExplainer":
+      "Optional for translating by hand. Autopilot will not start until at least " +
+      "one question is answered.",
+    "terminology.livingMemory.section.brief.statusDraftExplainer":
+      "Already in force — the AI drafts from every answer saved here, and this " +
+      "brief satisfies Autopilot’s start check. “Draft” only means some " +
+      "questions are unanswered or the summary predates your latest edit; there " +
+      "is nothing to approve.",
+    "terminology.livingMemory.section.brief.statusCompleteExplainer":
+      "Every question is answered and the summary matches your latest edit. The " +
+      "AI drafts from this brief.",
     "terminology.livingMemory.section.instructions.description":
       "How the AI should behave when drafting, and the default prediction prompt",
     "terminology.livingMemory.section.instructions.entryCount": plural({
@@ -585,7 +601,7 @@ export const terminology = defineNamespace({
     "terminology.match.optionsLabel": "Matching options",
     "terminology.match.foldMarks": "Ignore vowel marks and accents",
     "terminology.match.affixes": "Allow prefixes and suffixes",
-    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.caseSensitive": "Match case",
     "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
     "terminology.match.addFormLabel": "Add form",
     "terminology.match.addFormPlaceholder": "Another spelling of this term…",

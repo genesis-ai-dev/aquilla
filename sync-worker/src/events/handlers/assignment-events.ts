@@ -10,11 +10,16 @@
 //   - assignment.create  : INSERT the assignments row, resolve the
 //                           book/chapter/cell scope into assignment_cells from
 //                           the live `cells` projection, then set cells_total.
+//                           A chapter is resolved with the plan board's own
+//                           chapter keys (AQU-1493, db/shared/plan-keys.ts),
+//                           so a person given "JON 2" gets the chapter's
+//                           headings and the lines already added in it,
+//                           exactly the cells the board counts in JON 2.
 //                           A book/chapter scope ALSO records the range itself
 //                           in assignment_scopes, so the read side can
-//                           re-resolve it and pick up lines added later
-//                           (AQU-1629) — a resolved snapshot can only ever
-//                           shrink, never grow.
+//                           re-resolve it by that same key and pick up lines
+//                           added later (AQU-1629) — a resolved snapshot can
+//                           only ever shrink, never grow.
 //   - assignment.reassign : UPDATE assignee_user_id.
 //   - assignment.unassign : set unassigned_at (soft close; row kept for audit).
 //
@@ -27,6 +32,7 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind, EventPayloads } from '../types'
 import { buildEventInsertStmt } from '../event-insert'
 import { laneIdResolveBinds, laneIdResolveSql } from '../lane-id-sql'
+import { planKeysJoinSql, unitSectionKeyExpr } from '../../../../db/shared/plan-keys'
 import type { DispatchResult } from './types'
 
 /** Cell ids per INSERT for a 'cells' scope — keeps one statement's parameter
@@ -98,12 +104,37 @@ export function handleAssignmentEvent(
     )
 
     // 2. Resolve each scope entry -> source cells from the live cells
-    //    projection. One INSERT...SELECT per entry, or per chunk for a
-    //    'cells' scope. The cells projection hard-deletes on *.cell.delete
-    //    (no deleted_at column), so a plain side='source' filter is the live
-    //    set. Chapter scope narrows by canonical_ref (e.g. "GEN 1" -> LIKE
-    //    'GEN 1:%', which excludes "GEN 11:1" because the ':' anchors the
-    //    chapter boundary).
+    //    projection. The cells projection hard-deletes on *.cell.delete (no
+    //    deleted_at column), so a plain side='source' filter is the live set.
+    //    A whole-file entry is one INSERT...SELECT of every source cell; a
+    //    'cells' entry is one per chunk of ids.
+    //
+    //    AQU-1493: a chapter entry takes the cells the plan board counts in
+    //    that chapter, by the board's own key (`unitSectionKeyExpr`): a cell's
+    //    chapter from its reference, or for a line with no reference the
+    //    chapter `inheritedKeysSql` gave it at the last full progress
+    //    recompute (stored in `cell_plan_keys`). Matching on `canonical_ref LIKE
+    //    'JON 2:%'` alone missed every line added in the editor (the walk's
+    //    FAIL: Carol's JON 2 row read "Nothing left" while chapter 2 still had
+    //    a blank added line) and would miss every heading of an imported
+    //    Bible, which now counts in the chapter it opens. Equality on the key
+    //    also keeps "GEN 1" out of "GEN 11" without the LIKE's colon trick.
+    //
+    //    Read from the stored placements, never walked here: this runs inside
+    //    the event's write transaction, where a full-file scan once showed up
+    //    as 200 ms+ lock waits on prod (route.ts). Chapter entries are still
+    //    grouped by file and resolved in ONE statement per file — an
+    //    assignment can pick 50 chapters of one book. Chapters are expanded
+    //    into placeholders rather than bound as an array, which the shim does
+    //    not promise to pass through.
+    //
+    //    Resolution into assignment_cells happens once, here, and existing
+    //    rows are never rewritten: they are the audit record of what the scope
+    //    covered when it was given. Rebuild skips assignment.* events, so
+    //    replay never re-resolves an old one under this rule. What a range
+    //    scope covers TODAY is re-derived on read instead, from the scope row
+    //    written below (AQU-1629), by this same chapter key.
+    const chaptersByFile = new Map<string, Set<string>>()
     for (const entry of p.scope) {
       if (entry.cellIds) {
         // AQU-1628: an explicit line set ('cells' scope — the editor's current
@@ -127,16 +158,11 @@ export function handleAssignmentEvent(
           )
         }
       } else if (entry.chapter) {
-        stmts.push(
-          db
-            .prepare(
-              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
-               SELECT ?, file_id, cell_id FROM cells
-               WHERE project_id = ? AND file_id = ? AND side = 'source' AND canonical_ref LIKE ?
-               ON CONFLICT DO NOTHING`,
-            )
-            .bind(p.assignmentId, event.projectId, entry.fileId, `${entry.chapter}:%`),
-        )
+        const chapters = chaptersByFile.get(entry.fileId) ?? new Set<string>()
+        // Trimmed like the board's key: the picker offers the raw text before
+        // the verse colon (getFileChapters), the board trims it.
+        chapters.add(entry.chapter.trim())
+        chaptersByFile.set(entry.fileId, chapters)
       } else {
         stmts.push(
           db
@@ -156,7 +182,8 @@ export function handleAssignmentEvent(
       // afterwards never joined the assignment — the assignee's progress could
       // read done over a chapter that still had open work. `assignment_scopes`
       // lets the read side re-resolve the scope against live `cells` on every
-      // read (view `assignment_member_cells`, migration 0129).
+      // read (view `assignment_member_cells`, migration 0147), by the same
+      // plan-board chapter key the snapshot above was resolved with (AQU-1493).
       //
       // Deliberately NOT written for a 'cells' entry: an explicit selection is
       // exactly the lines the manager picked, and must not silently acquire
@@ -170,10 +197,31 @@ export function handleAssignmentEvent(
                VALUES (?, ?, ?)
                ON CONFLICT DO NOTHING`,
             )
-            // '' = the whole file (a 'books' scope); see the column comment.
-            .bind(p.assignmentId, entry.fileId, entry.chapter ?? ''),
+            // '' = the whole file (a 'books' scope); see the column comment. A
+            // chapter is trimmed exactly as the key it is matched against
+            // above — the view compares the two for equality.
+            .bind(p.assignmentId, entry.fileId, entry.chapter?.trim() ?? ''),
         )
       }
+    }
+    for (const [fileId, chapterSet] of chaptersByFile) {
+      const chapters = [...chapterSet]
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
+             SELECT ?, c.file_id, c.cell_id
+               FROM cells c
+               ${planKeysJoinSql('c', 'ik')}
+              WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'
+                AND ${unitSectionKeyExpr('c', 'ik')} IN (${chapters.map(() => '?').join(', ')})
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            p.assignmentId, event.projectId, fileId,
+            ...chapters,
+          ),
+      )
     }
 
     // 3. Stamp the resolved denominator.

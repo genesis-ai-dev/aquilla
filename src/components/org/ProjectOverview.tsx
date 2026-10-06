@@ -45,12 +45,14 @@ import {
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneChipLabel } from "./project-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
 import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
 import {
-  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+  assignmentsShowAudio, frontMatterShortUnits, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
 } from "./plan/plan-derive"
 import {
   numberedBookCodes,
@@ -146,6 +148,11 @@ import { SignedOutWorkspace } from "./SignedOutWorkspace"
 import { AnalysisReportDialog } from "@/components/analysis/AnalysisReportDialog"
 import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import {
+  PROJECT_SETTINGS_UPDATED_EVENT,
+  type ProjectSettingsUpdatedDetail,
+} from "@/hooks/useProjectSettings"
+import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
 function ProjectOverviewSkeleton() {
@@ -277,7 +284,7 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -317,7 +324,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
   fillClass: string
   suffix?: string
 }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  const pct = progressPercent(value, total)
   return (
     <div className="flex items-center gap-3">
       <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
@@ -383,6 +390,13 @@ export function ProjectOverview() {
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm, roleLevel } = useProject(id)
   useNavHistoryTitle(project?.name)
+  // AQU-1586: the target lane ROWS — the only place a lane's language is
+  // recorded. A lane's `legacy_tag` is its event key and can be the opaque
+  // lane id, so nothing on this page may label a lane with it.
+  const targetLaneRows = useMemo(
+    () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+    [project?.lanes],
+  )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
@@ -449,6 +463,10 @@ export function ProjectOverview() {
       ),
     ]
   }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
+  // AQU-1586: names for the lanes offered above — the autopilot chooser used
+  // to print each non-default lane's tag, which is the opaque lane id whenever
+  // a sibling already holds the language string.
+  const autopilotLaneLabels = useMemo(() => laneLabelsByTag(targetLaneRows), [targetLaneRows])
   // AQU-656: originals live on `file_source_blobs`, not the plan. The files
   // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
   // PM download gallery is this compact list — only files that have a blob.
@@ -761,6 +779,36 @@ export function ProjectOverview() {
     useState<ReadonlyMap<string, UnitAssignment[]>>(NO_UNIT_ASSIGNMENTS)
   /** Bumped after an assign, to re-read a list nothing pushes to (AD-3). */
   const [planAssignmentsNonce, setPlanAssignmentsNonce] = useState(0)
+  /**
+   * Bumped when this project's settings change, so every count on the plan is
+   * read again.
+   *
+   * Project settings open as a modal OVER this page, so closing them is not a
+   * remount and nothing here re-reads on its own. Several settings move the
+   * numbers without a single cell changing: "Count headings as translatable
+   * content" adds or removes every heading from every total, and the
+   * validation thresholds move every validated count. Before this, only the
+   * reads that happened to run again afterwards were right — the side panel's
+   * chapter tiles, fetched fresh whenever a row is clicked — while the rows,
+   * the panel's own totals and an open chapter card kept the old policy until
+   * a reload (AQU-1493). So it is one signal for all of them.
+   */
+  const [planDataVersion, setPlanDataVersion] = useState(0)
+  useEffect(() => {
+    if (!id || typeof window === "undefined") return
+    const onSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectSettingsUpdatedDetail>).detail
+      if (detail?.projectId !== id) return
+      refreshPlan()
+      setPlanDataVersion((n) => n + 1)
+      // Assignment counts leave headings out by the same policy.
+      setPlanAssignmentsNonce((n) => n + 1)
+      void loadRow()
+      void loadWorkload()
+    }
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+    return () => window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+  }, [id, refreshPlan, loadRow, loadWorkload])
 
   /**
    * The files whose sections the board actually needs, as ONE string.
@@ -853,12 +901,20 @@ export function ProjectOverview() {
       }
     })()
     return () => { cancelled = true }
-  }, [id, getPlanToken, planLane, planFileKey])
+    // `planDataVersion`: a settings change moves every section's counts
+    // without changing which files are read.
+  }, [id, getPlanToken, planLane, planFileKey, planDataVersion])
 
   // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
   // can hold it still; this memo only caches it against the three inputs.
   const planShortChaptersByUnit = useMemo(
     () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
+  )
+  // AQU-1493: …and which of them are short in the book's front matter too, so
+  // the row names it rather than only chapters.
+  const planFrontMatterShortUnits = useMemo(
+    () => frontMatterShortUnits(planUnits, planFileSections, planAudioFiles, planTextFiles),
     [planUnits, planFileSections, planAudioFiles, planTextFiles],
   )
 
@@ -1086,9 +1142,12 @@ export function ProjectOverview() {
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
   // Labeled exactly as the lane tabs label it: the project's target language
-  // for the default lane, the lane tag itself for any other. Derived here
-  // rather than read off `selectedLane`, which is declared further down.
-  const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
+  // for the default lane, the lane row's own name for any other (AQU-1586 —
+  // never the tag, which can be the lane id). Derived here rather than read
+  // off `selectedLane`, which is declared further down.
+  const planLanguageLabel = selectedLaneTag
+    ? laneLabelForTag(selectedLaneTag, targetLaneRows)
+    : project?.targetLanguage || null
   /**
    * How many target languages this project carries: its declared extra lanes
    * plus the default one, which is a real language and always exists (AQU-728).
@@ -1174,6 +1233,7 @@ export function ProjectOverview() {
       projectId={id ?? null}
       getToken={getPlanToken}
       lane={planLane}
+      dataVersion={planDataVersion}
       languageLabel={planLanguageLabel}
       laneCount={planLaneCount}
       // The SAME set the board judges by. Audio expectation is a fact about a
@@ -1263,10 +1323,17 @@ export function ProjectOverview() {
   const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
   const showLaneTabs = activeProjectLanes.length > 1
   const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
+  // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
+  // key and can be the opaque lane id, which read as gibberish on a PM's tabs.
   const laneTabOptions = [
     { label: t("org.orgHome.statusFilter.all"), value: LANE_TAB_ALL },
     ...activeProjectLanes.map((l) => ({
-      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
       value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
     })),
   ]
@@ -1283,7 +1350,13 @@ export function ProjectOverview() {
   const planLaneOptions = useMemo(
     () => projectLanes.filter((l) => l.archived !== true).map((l) => ({
       tag: l.lane,
-      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+      // AQU-1586: the row's name, never the tag (which can be the lane id).
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
     })),
     [projectLanes, project?.targetLanguage, t],
   )
@@ -1990,7 +2063,7 @@ export function ProjectOverview() {
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
                               }),
                             ].join(" ")}
                           />
@@ -2051,7 +2124,7 @@ export function ProjectOverview() {
                     <p className="mt-3 text-xs text-muted-foreground">
                       {t("org.projectOverview.audioRecordedSummary", {
                         minutes: recordedMinutes(audio),
-                        percent: bidiIsolate(`${Math.round(audioPct(audio) * 100)}%`),
+                        percent: bidiIsolate(`${progressPercentOfFraction(audioPct(audio))}%`),
                       })}
                     </p>
                   )}
@@ -2093,6 +2166,7 @@ export function ProjectOverview() {
                   canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
                   lanes={autopilotLanes}
                   defaultLaneLabel={project?.targetLanguage ?? ""}
+                  laneLabels={autopilotLaneLabels}
                 />
               )}
 
@@ -2127,6 +2201,7 @@ export function ProjectOverview() {
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
                 shortChaptersByUnit={planShortChaptersByUnit}
+                frontMatterShortUnits={planFrontMatterShortUnits}
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={handleOpenShortfall}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}
@@ -2368,7 +2443,7 @@ export function ProjectOverview() {
                       ) : (
                         <ul className="space-y-2">
                           {workload.map((w) => {
-                            const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
                             const isSelected = w.username != null && w.username === selectedMemberUsername
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">

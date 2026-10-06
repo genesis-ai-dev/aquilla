@@ -72,7 +72,7 @@ async function seedAssignedFile() {
 }
 
 /** A line added to the file after the assignments were handed out. */
-async function addSourceLine(cellId: string, canonicalRef: string) {
+async function addSourceLine(cellId: string, canonicalRef: string | null) {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
      VALUES ('pa', 'f1', ?, 'source', 's', ?, 'e-pa', 2)`,
@@ -125,8 +125,8 @@ describe("AQU-1629 — a line added later joins its assignment", () => {
 
   it("does not let a chapter scope swallow a higher-numbered chapter", async () => {
     await seedAssignedFile()
-    // The ':' in 'GEN 1:%' is what keeps GEN 11 out — the same anchor
-    // assignment.create resolves with.
+    // The chapter key is compared for equality — "GEN 11" is not "GEN 1" —
+    // the same rule assignment.create resolves with (AQU-1493).
     await addSourceLine("c4", "GEN 11:1")
     expect((await workloadTotals())["as-bob"]).toEqual({ cellsTotal: 2, cellsDone: 0 })
   })
@@ -193,10 +193,10 @@ describe("AQU-1629 — a line added later joins its assignment", () => {
 
   it("keeps a line with no canonical ref in a whole-file scope", async () => {
     await seedAssignedFile()
-    // Media and unversified lines carry no canonical_ref. `LIKE` on NULL is
-    // NULL, so a chapter scope correctly excludes them — but a whole-file
-    // scope must still count them, or a timeline file assigned whole would
-    // read as empty.
+    // Media and unversified lines carry no canonical_ref. With no stored
+    // placement either (cell_plan_keys), such a line has no chapter key, so a
+    // chapter scope correctly excludes it — but a whole-file scope must still
+    // count it, or a timeline file assigned whole would read as empty.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
        VALUES ('pa', 'f1', 'c9', 'source', 's', NULL, 'e-pa', 2)`,
@@ -206,9 +206,25 @@ describe("AQU-1629 — a line added later joins its assignment", () => {
     expect(totals["as-bob"]).toEqual({ cellsTotal: 2, cellsDone: 0 })
   })
 
+  it("counts a line with no reference in the chapter the plan board places it in (AQU-1493)", async () => {
+    await seedAssignedFile()
+    // A heading added above GEN 1:1, or a line added in the editor under GEN
+    // 1:2, carries no reference. The full progress recompute places it in a
+    // chapter (cell_plan_keys, 0145), and assignment.create resolves a chapter
+    // scope by that same key — so the live read does too, instead of leaving
+    // the line out as a `LIKE 'GEN 1:%'` would have.
+    await addSourceLine("c4", null)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO cell_plan_keys (project_id, file_id, cell_id, section_key, place_ref, depth) VALUES ('pa', 'f1', 'c4', 'GEN 1', 'GEN 1:2', 1)",
+    ).run()
+    const totals = await workloadTotals()
+    expect(totals["as-bob"]).toEqual({ cellsTotal: 3, cellsDone: 0 })
+    expect(totals["as-anna"]).toEqual({ cellsTotal: 4, cellsDone: 0 })
+  })
+
   it("falls back to the snapshot for an assignment with no scope row", async () => {
     await seedAssignedFile()
-    // Pre-0129 assignments the backfill could not reach (no assignment.create
+    // Pre-0147 assignments the backfill could not reach (no assignment.create
     // event to read a scope from) keep exactly what they resolved to.
     await env.AQUILLA_PG.prepare("DELETE FROM assignment_scopes WHERE assignment_id = 'as-anna'").run()
     await addSourceLine("c4", "GEN 1:3")

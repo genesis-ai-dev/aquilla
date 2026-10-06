@@ -276,9 +276,9 @@ SELECT t.id AS target_file, s.id AS source_file, t.name
 FROM files t JOIN files s ON s.id = t.source_file_id
 WHERE t.project_id = :project AND t.deleted_at IS NULL
 
-Counters maintained by the projection (cheap overview without scanning
-cells): files.cell_count, filled_count (non-empty targets), approved_count
-(validated), ai_drafted_count, word_count, last_edit_at (ms).
+files.cell_count is distinct cells, shared by every lane. files.filled_count,
+approved_count, ai_drafted_count, and word_count sum every target lane, so
+do not report them as one lane's progress. last_edit_at is epoch ms.
 
 Renaming a file label (CONTRIBUTOR+):
 emit: [{kind:'file.rename', fileId:'#f1', payload:{name:'Mark (draft 2)'}}]

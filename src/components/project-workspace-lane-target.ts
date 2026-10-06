@@ -1,10 +1,15 @@
 // AQU-602: resolve the editor's active target language from the active lane.
 //
 // The lanes model (AQU-538) is "one source, N target lanes"; a non-default
-// lane's tag IS its target language (e.g. lane `'es'` translates into Spanish),
-// while the default lane (`''`) uses the project's `targetLanguage`. Switching
-// lanes must therefore switch the target language the editor
-// reads/writes/translates into — not just the cell filter.
+// lane has its own target language, while the default lane (`''`) uses the
+// project's `targetLanguage`. Switching lanes must therefore switch the target
+// language the editor reads/writes/translates into — not just the cell filter.
+//
+// AQU-1586: that language comes from the lane ROW, never from the lane's tag.
+// The tag is the event key (`target_lang`), and `planNewTargetLane` sets it to
+// the opaque lane id whenever the language string is taken by a sibling or
+// matches the project default — so reading the tag as the language drafted a
+// second Spanish lane "into a3f09c1e". `laneLanguageForTag` owns that rule.
 //
 // AQU-583: the default lane is driven SOLELY by the PROJECT target, never by a
 // per-file one. A file's `targetLanguage` is only ever an import-time snapshot
@@ -21,23 +26,64 @@
 // component so it can be unit-tested without a harness, mirroring
 // `project-workspace-lane-deeplink.ts`.
 
+import { laneLanguageForTag, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+
 /**
  * The target language for the currently active lane.
  *
- * - A non-default lane (`activeLane` truthy) → the lane tag itself; a lane's
- *   tag is its target language.
+ * - A non-default lane (`activeLane` truthy) → the language recorded on that
+ *   lane's row (AQU-1586). Without rows (a server that predates AQU-1418) the
+ *   tag is the only thing available and is used as before. A lane whose row
+ *   records no language of its own inherits the project's `targetLanguage`,
+ *   exactly as the default lane does — never an empty string, and never the
+ *   lane's own id.
  * - The default lane (`''`) → the project's `targetLanguage` only (AQU-583);
  *   the per-file target is ignored so the project setting is authoritative.
  *
- * Returns `undefined` when the default lane is active and the project carries no
- * target language — the caller then shows the "Set target language" prompt.
+ * Returns `undefined` only when NOTHING records a target language — then the
+ * caller shows the "Set target language" prompt.
  */
 export function resolveActiveTargetLanguage(
   activeLane: string,
   // Retained for signature stability; the default lane no longer consults it.
   _fileTargetLanguage: string | null | undefined,
   projectTargetLanguage: string | null | undefined,
+  lanes?: readonly LaneLanguageRow[] | null,
 ): string | undefined {
-  if (activeLane) return activeLane
+  if (activeLane) {
+    return laneLanguageForTag(activeLane, lanes) || projectTargetLanguage || undefined
+  }
   return projectTargetLanguage || undefined
+}
+
+/** One target lane as the Import dialog's "Is this a translation?" check sees
+ *  it (`TranslationTargetLanguage` in ImportDialog). */
+export interface LaneTargetLanguage {
+  language: string
+  label: string | null
+  active: boolean
+}
+
+/**
+ * AQU-1365: every lane's target language, for telling a translation upload
+ * from a source one, and which of them is the open lane (the one a translation
+ * import fills).
+ *
+ * The language follows the same rule as the editor's (AQU-1586): from the
+ * lane ROW, never the tag, which can be the lane's opaque id. The default lane
+ * is the project's target language. A lane whose row records no language is
+ * left out rather than given the project's, so it can't pass for the default
+ * lane's language.
+ */
+export function laneTargetLanguages(
+  lanes: readonly string[],
+  activeLane: string,
+  projectTargetLanguage: string | null | undefined,
+  laneLabels: Readonly<Record<string, string>>,
+  rows?: readonly LaneLanguageRow[] | null,
+): LaneTargetLanguage[] {
+  return lanes.flatMap((lane) => {
+    const language = lane === "" ? projectTargetLanguage?.trim() : laneLanguageForTag(lane, rows)
+    return language ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }] : []
+  })
 }

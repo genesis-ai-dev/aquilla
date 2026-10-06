@@ -1,6 +1,6 @@
 // @vitest-environment node
 //
-// AQU-1629 migration 0129: the backfill is the retroactive half of the fix —
+// AQU-1629 migration 0147: the backfill is the retroactive half of the fix —
 // the reported bug is older behaviour, so assignments that already exist have
 // to start growing too. Their scope is still in the immutable
 // `assignment.create` payload, and this pins that we read it correctly: a
@@ -12,13 +12,13 @@ import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 const migration = readFileSync(
-  new URL("../db/postgres/migrations/0129_assignment_scopes.sql", import.meta.url),
+  new URL("../db/postgres/migrations/0147_assignment_scopes.sql", import.meta.url),
   "utf8",
 )
 
 let db: PGlite
 
-// The pre-0129 shape of just the tables 0129 reads and writes.
+// The pre-0147 shape of just the tables 0147 reads and writes.
 beforeEach(async () => {
   db = new PGlite()
   await db.exec(`
@@ -36,6 +36,13 @@ beforeEach(async () => {
       project_id text NOT NULL, file_id text NOT NULL, cell_id text NOT NULL,
       side text NOT NULL, canonical_ref text, start_ms bigint, type text,
       PRIMARY KEY (project_id, file_id, cell_id, side)
+    );
+    -- 0145 (AQU-1493): where a line with no reference counts, as the full
+    -- progress recompute stored it. The view resolves a chapter scope by it.
+    CREATE TABLE cell_plan_keys (
+      project_id text NOT NULL, file_id text NOT NULL, cell_id text NOT NULL,
+      section_key text NOT NULL, place_ref text NOT NULL DEFAULT '', depth integer NOT NULL DEFAULT 0,
+      PRIMARY KEY (project_id, file_id, cell_id)
     );
 
     INSERT INTO assignments VALUES
@@ -102,7 +109,7 @@ async function membership(assignmentId: string) {
   ).rows.map((r) => r.cell_id)
 }
 
-describe("0129_assignment_scopes", () => {
+describe("0147_assignment_scopes", () => {
   it("backfills a range scope from the assignment.create payload", async () => {
     await apply()
     expect(await scopes()).toEqual([
@@ -128,6 +135,24 @@ describe("0129_assignment_scopes", () => {
   it("resolves a backfilled chapter scope to that chapter only", async () => {
     await apply()
     expect(await membership("as-chap")).toEqual(["c1", "c2"])
+  })
+
+  it("places a line with no reference by the plan board's own key (AQU-1493)", async () => {
+    await apply()
+    // A heading, or a line added in the editor, carries no reference. The full
+    // progress recompute stores the chapter it counts in; assignment.create
+    // resolves a chapter scope by that key, and so does the live read — c4 is
+    // in Genesis 1, c5 nobody has placed yet, so it is in no chapter but still
+    // in the whole file.
+    await db.exec(`
+      INSERT INTO cells (project_id, file_id, cell_id, side, canonical_ref, type) VALUES
+        ('p1', 'f1', 'c4', 'source', NULL, 'heading'),
+        ('p1', 'f1', 'c5', 'source', NULL, NULL);
+      INSERT INTO cell_plan_keys (project_id, file_id, cell_id, section_key, place_ref, depth)
+        VALUES ('p1', 'f1', 'c4', 'GEN 1', 'GEN 1:1', -1);
+    `)
+    expect(await membership("as-chap")).toEqual(["c1", "c2", "c4"])
+    expect(await membership("as-book")).toEqual(["c1", "c2", "c3", "c4", "c5"])
   })
 
   it("leaves an assignment with no scope row on its frozen snapshot", async () => {

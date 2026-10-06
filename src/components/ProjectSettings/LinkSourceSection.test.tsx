@@ -48,6 +48,16 @@ vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
 }))
 
+// AQU-1679: the server's comparison of one of this project's files with the
+// upstream file it could follow. Mocked at the fetch so these tests stay about
+// what the step does with the answer — the pairing itself is pinned in
+// `db/shared/link-file-match.test.ts` and the route in auth-worker.
+const fetchLinkFileMatches = vi.fn()
+
+vi.mock("@/lib/sync/link-file-match", () => ({
+  fetchLinkFileMatches: (...args: unknown[]) => fetchLinkFileMatches(...args),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "lead" }, loading: false }),
 }))
@@ -142,6 +152,7 @@ beforeEach(() => {
   resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
+  fetchLinkFileMatches.mockReset()
   navigationError = null
   navigationProjects = [
     summary("proj-upstream", "English Source"),
@@ -882,5 +893,191 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       await screen.findByText("3 source files will be added to this project."),
     ).toBeTruthy()
     expect(linkProjectSource).not.toHaveBeenCalled()
+  })
+})
+
+describe("LinkSourceSection — replacing the source of a file already here (AQU-1679)", () => {
+  // A preview where this project already has one MRK of its own.
+  function previewWithOwnMark() {
+    const preview = previewOf("English Source", UPSTREAM_FILES, ["MRK"])
+    return {
+      ...preview,
+      files: preview.files.map((f) => (f.name === "MRK" ? { ...f, clashFileId: "own-mrk" } : f)),
+    }
+  }
+  function matchOf(extra: Record<string, unknown> = {}) {
+    return {
+      upstreamFileId: "up-MRK",
+      fileId: "own-mrk",
+      missing: false,
+      upstreamLines: 678,
+      localLines: 678,
+      same: 678,
+      changed: 0,
+      added: 0,
+      kept: 0,
+      canReplace: true,
+      ...extra,
+    }
+  }
+  const replaceCheckbox = () =>
+    screen.getByRole("checkbox", {
+      name: "Replace the source in my existing MRK and keep its translations",
+    })
+
+  beforeEach(() => {
+    loadLinkSourcePreview.mockResolvedValue(previewWithOwnMark())
+    linkProjectSource.mockResolvedValue({ seeded: true })
+  })
+
+  // WHY: adding alongside is still what a link does unless the lead says
+  // otherwise. The option must arrive off, and an untouched confirm must send
+  // exactly the request it sent before this slice.
+  it("offers the option off by default, and links as before when it is left off", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+    await pick(user, "English Source")
+
+    expect((await screen.findByRole("alert")).textContent).toContain("MRK")
+    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("false")
+    // Only the file with a counterpart here offers it.
+    expect(screen.getAllByRole("checkbox", { name: /^Replace the source/ })).toHaveLength(1)
+
+    await user.click(linkButton())
+
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+    })
+    expect(fetchLinkFileMatches).not.toHaveBeenCalled()
+  })
+
+  // WHY: the whole feature. Turning it on has to say what will happen first,
+  // stop warning about a duplicate that is no longer coming, and send the pair.
+  it("shows how the files compare, drops the duplicate warning, and posts the pair", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 670, changed: 5, added: 3, kept: 2 })])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+
+    expect(await screen.findByText("670 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream", [
+      { upstreamFileId: "up-MRK", fileId: "own-mrk" },
+    ])
+    expect(
+      screen.getByText(
+        "5 lines differ and will take the source project's text. Their translations will be flagged as source changed.",
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText("3 lines only the source project has will be added to your file.")).toBeTruthy()
+    expect(screen.getByText("2 lines only your file has will stay as they are.")).toBeTruthy()
+    // MRK no longer arrives as a copy: two files are added, one follows the link.
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(
+        "1 file you already have will take its source from this link and keep its translations.",
+      ),
+    ).toBeTruthy()
+
+    await user.click(linkButton())
+
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mrk" }],
+    })
+  })
+
+  // WHY: sharing a name is not sharing content. A replace the server says makes
+  // no sense must not be confirmable — and turning it off must put the lead
+  // straight back on the path that always worked.
+  it("will not link while a replace is not possible, and links again once it is turned off", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 12, changed: 666, canReplace: false })])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+
+    expect(
+      await screen.findByText(
+        "These two files are not the same material: only 12 of 678 lines match. " +
+          "Turn this off to add the file as a separate copy.",
+      ),
+    ).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(replaceCheckbox())
+
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+    await user.click(linkButton())
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).not.toHaveProperty("replaceFiles")
+  })
+
+  // WHY: no answer is not a yes. If the comparison cannot be made the link must
+  // wait, and asking again has to be possible without leaving the step.
+  it("holds the link when the comparison fails, and compares again when asked", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockRejectedValueOnce(new UserError(500, "", "project"))
+    fetchLinkFileMatches.mockResolvedValueOnce([matchOf()])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+    expect(await screen.findByText(/Couldn't compare the two files\./)).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(replaceCheckbox())
+    await user.click(replaceCheckbox())
+
+    expect(await screen.findByText("678 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+  })
+
+  // WHY: an unchecked file is not coming at all, so it can replace nothing —
+  // the request must not carry a pair for a file outside its own selection
+  // (the server refuses that link outright).
+  it("sends no pair for a file that is then unchecked", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+    await user.click(replaceCheckbox())
+    await screen.findByText("678 of 678 lines are the same in both files.")
+
+    await user.click(fileCheckbox("MRK"))
+
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+    await user.click(linkButton())
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      fileIds: ["up-MAT", "up-LUK"],
+    })
+  })
+
+  // WHY: a chain link's source is the upstream's TRANSLATIONS. A file imported
+  // on its own cannot line up with those, and the server refuses the request.
+  it("does not offer the option on a chain link", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+    await pick(user, "English Source", "target")
+
+    await screen.findByRole("alert")
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
   })
 })

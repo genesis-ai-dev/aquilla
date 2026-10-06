@@ -132,7 +132,7 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidateAudio.description": plural({
       one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
-    }),
+    }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
     // unvalidated count — untranslated cells, untouched AI drafts and cells
@@ -149,6 +149,22 @@ export const nav = defineNamespace({
         other:
           "This validates {count} eligible cells under your name — human-authored " +
           "or human-edited text you have not signed off yet.",
+      },
+      "count",
+    ),
+    // The org setting that lets bulk validation take untouched AI drafts: with
+    // it on, "human-authored or human-edited" above would misdescribe the very
+    // cells the reader is signing off.
+    "nav.workspaceActions.batchValidate.willValidateWithDrafts": plural(
+      {
+        one:
+          "This validates {count} eligible cell under your name — text you have " +
+          "not signed off yet, including untouched AI drafts, which your " +
+          "organization allows in batch validation.",
+        other:
+          "This validates {count} eligible cells under your name — text you have " +
+          "not signed off yet, including untouched AI drafts, which your " +
+          "organization allows in batch validation.",
       },
       "count",
     ),
@@ -169,7 +185,6 @@ export const nav = defineNamespace({
       "cap",
     ),
     "nav.workspaceActions.export": "Export",
-    "nav.workspaceActions.importIntoFile": "Import target translations into this file",
     "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
@@ -257,7 +272,7 @@ export const nav = defineNamespace({
     "nav.beta.title": "Heads up — we're in beta",
     "nav.beta.description":
       "Things might move around, break, or change without warning. That's the deal for now.",
-    "nav.beta.pointEvolving": "The UI is actively evolving",
+    "nav.beta.pointEvolving": "The UI is changing",
     "nav.beta.pointFeatures": "Features may appear or disappear",
     "nav.beta.pointFeedback": "Your feedback shapes what we build next",
     "nav.beta.joinDiscord": "Join our Discord",
@@ -383,7 +398,7 @@ export const nav = defineNamespace({
     "nav.outbox.allCaughtUpTitle": "You’re all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
-    "nav.outbox.footerPending": "Edits stay saved locally until they sync.",
+    "nav.outbox.footerPending": "Edits stay saved on this device until they sync.",
     "nav.outbox.footerSynced": "Local changes sync automatically.",
     "nav.outbox.statusPending": "Pending",
     "nav.outbox.statusRetrying": "Retrying",
@@ -829,6 +844,18 @@ export const nav = defineNamespace({
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.willValidateWithDrafts": {
+        description:
+          "Replaces willValidate when the run includes untouched AI drafts, which " +
+          "happens only when the organization has turned on bulk validation of AI " +
+          "drafts. Same position and punctuation rules as willValidate: the " +
+          "skipped clause and capNote follow it, so end with a period and no " +
+          "trailing space.",
+        placeholders: {
+          count: "How many cells this run will validate. Selects the plural form.",
+        },
+        maxLength: 500,
+      },
       "nav.workspaceActions.batchValidate.nothingToValidate": {
         description:
           "Stands in for willValidate when the run would validate nothing at all, " +
@@ -850,15 +877,6 @@ export const nav = defineNamespace({
       "nav.workspaceActions.export": {
         description:
           "Primary file-scoped action that opens the export dialog. Imperative verb.",
-      },
-      "nav.workspaceActions.importIntoFile": {
-        description:
-          "AQU-503: secondary action-menu item, distinct from " +
-          "nav.workspaceActions.import — this one is file-scoped and populates the " +
-          "open file's TARGET column from an already-translated document. Must keep " +
-          "a word equivalent to 'target' so it isn't confused with the primary " +
-          "source import.",
-        maxLength: 60,
       },
       "nav.workspaceActions.transcribeAll.label": {
         description:

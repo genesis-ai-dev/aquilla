@@ -73,10 +73,8 @@ interface MemSample {
   deltaMB: number // change in usedMB since previous sample
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function heapUsedBytes(): number | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mem = (performance as any)?.memory
+  const mem = (performance as Performance & { memory?: { usedJSHeapSize?: number } })?.memory
   return mem && typeof mem.usedJSHeapSize === "number" ? mem.usedJSHeapSize : null
 }
 
@@ -205,14 +203,16 @@ function memReport(): MemSample[] {
 
 // Expose a console-friendly toggle so you don't have to reach for localStorage.
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).togglePerfLog = () => setPerfLog(!enabled)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).setPerfLog = setPerfLog
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).startMemSampler = startMemSampler
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).stopMemSampler = stopMemSampler
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).memReport = memReport
+  const consoleHandles = window as typeof window & {
+    togglePerfLog?: () => void
+    setPerfLog?: typeof setPerfLog
+    startMemSampler?: typeof startMemSampler
+    stopMemSampler?: typeof stopMemSampler
+    memReport?: typeof memReport
+  }
+  consoleHandles.togglePerfLog = () => setPerfLog(!enabled)
+  consoleHandles.setPerfLog = setPerfLog
+  consoleHandles.startMemSampler = startMemSampler
+  consoleHandles.stopMemSampler = stopMemSampler
+  consoleHandles.memReport = memReport
 }

@@ -8,12 +8,21 @@
 // for. Enforcement, sync-token embedding, and sync-worker gating already exist
 // and need no change — this module only owns the invite side of the seam.
 //
-// Storage: a JSON-encoded string[] on project_invites.scope_lanes. A lane value
-// is a target-language code; the default lane is the literal empty string ''.
+// Storage: a JSON-encoded string[] on project_invites.scope_lanes. AQU-1607:
+// a lane value is a `lanes.id`. Invite routes convert what the caller sent
+// (an id, or a legacy language tag that names exactly one lane) before
+// storing, so nothing written from here on is a tag and no new `''` appears.
+// Rows minted before that — and before the AQU-1616 backfill converts them —
+// still hold tags, so the apply path below resolves either shape.
 
 import { ROLE } from "../types"
 import type { Env } from "../types"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import { laneScopeIdsForStorage, resolveLaneScopeValue } from "../../../src/lib/lanes/scope-ids"
+import {
+  loadTargetLaneIdentities,
+  loadTargetLaneIdentitiesForProjects,
+} from "../../../db/shared/lane-visibility"
 import type { LaneIdentity } from "../../../src/lib/lanes/read-wall"
 
 /** Max distinct lanes a single invite may carry (defensive bound). */
@@ -85,30 +94,38 @@ export async function applyInviteLaneScopes(
   // lane list is an unscoped invite. Both still need a grant per current
   // target lane, or the write wall treats "no rows" as "no access".
   const restrictive = finalRole < ROLE.PROJECT_LEAD && lanes.length > 0
+
+  // AQU-1607: both tables key the lane by id. One resolution for both, so a
+  // scope row and its grant can never disagree about which lane was meant.
+  //
+  // A multi-project link carries one lane list for every project it covers,
+  // so most of its ids belong to a sibling project here. Those are dropped.
+  // When NOTHING resolves — a stale id, a tag that names two lanes — the raw
+  // values are stored instead of nothing at all: a scope nobody's lane
+  // matches lets the joiner write in no lane, which is what an unresolvable
+  // scope did before this ticket. Storing no rows would instead read as
+  // "unscoped" and hand them every lane.
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const resolved = restrictive ? laneScopeIdsForStorage(lanes, identities).laneIds : []
+  const laneIds = restrictive && resolved.length === 0 ? [...lanes] : resolved
+
   if (restrictive) {
     const now = Date.now()
-    for (const lane of lanes) {
+    for (const laneId of laneIds) {
       await env.AQUILLA_PG.prepare(
         `INSERT INTO project_member_scopes
            (project_id, user_id, kind, value, created_by, created_at)
          VALUES (?, ?, 'lane', ?, ?, ?)
          ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
       )
-        .bind(projectId, userId, lane, String(createdBy), now)
+        .bind(projectId, userId, laneId, String(createdBy), now)
         .run()
     }
   }
 
-  // AQU-1415: the write wall reads laneGrants (lanes.id). A tag that matches
-  // zero or two lanes is skipped. An empty list grants every current lane.
-  await applyInviteLaneGrants(
-    env,
-    projectId,
-    userId,
-    restrictive ? lanes : [],
-    createdBy,
-    finalRole,
-  )
+  // AQU-1415: the write wall reads laneGrants (lanes.id). An empty list
+  // grants every current lane.
+  await applyInviteLaneGrants(env, projectId, userId, laneIds, createdBy, finalRole, identities)
 }
 
 async function applyInviteLaneGrants(
@@ -118,18 +135,8 @@ async function applyInviteLaneGrants(
   lanes: readonly string[],
   createdBy: number,
   finalRole: number,
+  identities: readonly LaneIdentity[],
 ): Promise<void> {
-  const { results } = await env.AQUILLA_PG.prepare(
-    `SELECT id, name, legacy_tag FROM lanes
-      WHERE project_id = ? AND role = 'target'`,
-  )
-    .bind(projectId)
-    .all<{ id: string; name: string; legacy_tag: string | null }>()
-  const identities: LaneIdentity[] = results.map((row) => ({
-    id: row.id,
-    name: row.name,
-    legacyTag: row.legacy_tag,
-  }))
   const plan = planLaneGrants({
     roleLevel: finalRole,
     laneScopes: lanes,
@@ -145,4 +152,57 @@ async function applyInviteLaneGrants(
       .bind(projectId, userId, grant.laneId, grant.level, createdBy)
       .run()
   }
+}
+
+/**
+ * AQU-1607: the lane ids an invite should store for what the caller asked
+ * for. A value that is already a lane id of one of the invite's projects is
+ * kept; a legacy language tag is converted where it names exactly one lane.
+ *
+ * A multi-project link shares one lane list, so each value is resolved
+ * against every project the token covers and the ids are unioned — the
+ * accept path then picks out the ones belonging to the project being joined.
+ * A value that names two lanes in any of those projects, or no lane in any
+ * of them, is refused: the caller says which lane they meant, we never guess.
+ */
+export type InviteLaneScopeResolution =
+  | { ok: true; laneIds: string[] }
+  | { ok: false; ambiguous: string[]; unmatched: string[] }
+
+export async function resolveInviteLaneScopes(
+  env: Pick<Env, "AQUILLA_PG">,
+  projectIds: readonly string[],
+  lanes: readonly string[],
+): Promise<InviteLaneScopeResolution> {
+  if (lanes.length === 0) return { ok: true, laneIds: [] }
+  const byProject = await loadTargetLaneIdentitiesForProjects(env.AQUILLA_PG, projectIds)
+  // No lane rows anywhere to resolve against — a project whose lanes table
+  // has not been populated yet. Store what the caller sent, exactly as this
+  // did before lane ids; the AQU-1616 backfill converts it with the rest.
+  const anyLanes = projectIds.some((projectId) => (byProject.get(projectId) ?? []).length > 0)
+  if (!anyLanes) return { ok: true, laneIds: [...lanes] }
+  const laneIds: string[] = []
+  const seen = new Set<string>()
+  const ambiguous: string[] = []
+  const unmatched: string[] = []
+  for (const value of lanes) {
+    let matchedSomewhere = false
+    let ambiguousSomewhere = false
+    for (const projectId of projectIds) {
+      const resolved = resolveLaneScopeValue(value, byProject.get(projectId) ?? [])
+      if (resolved.ok) {
+        matchedSomewhere = true
+        if (!seen.has(resolved.laneId)) {
+          seen.add(resolved.laneId)
+          laneIds.push(resolved.laneId)
+        }
+      } else if (resolved.reason === "ambiguous") {
+        ambiguousSomewhere = true
+      }
+    }
+    if (ambiguousSomewhere) ambiguous.push(value)
+    else if (!matchedSomewhere) unmatched.push(value)
+  }
+  if (ambiguous.length > 0 || unmatched.length > 0) return { ok: false, ambiguous, unmatched }
+  return { ok: true, laneIds }
 }

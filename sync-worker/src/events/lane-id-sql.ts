@@ -88,9 +88,85 @@ export function targetLaneDualReadBinds(projectId: string, tag: string): unknown
 }
 
 /**
+ * A back-translation row belongs to one target lane (AQU-1589).
+ *
+ * `lane_id` stays nullable until the AQU-1616 backfill. A NULL `lane_id` is
+ * the lane whose `legacy_tag` is `''` — rows written before the column
+ * existed. A named lane does not see them. The tag is matched to
+ * `legacy_tag`, never to the lane's name.
+ *
+ * Binds: projectId, tag, tag ({@link backtranslationLaneMatchBinds}).
+ */
+export function backtranslationLaneMatchSql(alias = ''): string {
+  const col = alias ? `${alias}.` : ''
+  return `(${col}lane_id = ${laneIdResolveSql('target')} OR (${col}lane_id IS NULL AND ? = ''))`
+}
+
+/** Binds for {@link backtranslationLaneMatchSql}. */
+export function backtranslationLaneMatchBinds(projectId: string, tag: string): unknown[] {
+  return [...laneIdResolveBinds('target', projectId, tag), tag]
+}
+
+/**
  * Cells-read `?lane=` filter: source rows always included; target rows
  * dual-read by tag. Same binds as {@link targetLaneDualReadBinds}.
  */
 export function sourceOrTargetLaneSql(): string {
   return `AND (side = 'source' OR ${targetLaneDualReadSql()})`
+}
+
+/**
+ * AQU-1591: resolve an audio TAKE's `lane_id` from (project, take role, tag).
+ *
+ * Audio's lane rule is the artifact-binding rule with a different column name:
+ * `role = 'source'` — the shared programme audio an import attached — belongs to
+ * the project's single source lane, and every dub (a recording, a TTS take, a
+ * clone) to the target lane whose `legacy_tag` is the event's `targetLang`.
+ * Resolves to NULL until the project's lanes exist, so ON CONFLICT callers
+ * COALESCE the way {@link laneIdResolveSql}'s do.
+ *
+ * The caller MUST splice {@link audioLaneResolveBinds} at the value's position.
+ */
+export function audioLaneResolveSql(): string {
+  return `(SELECT id FROM public.lanes WHERE project_id = ?
+    AND ( (? = 'source' AND role = 'source')
+       OR (? <> 'source' AND role = 'target' AND legacy_tag = ?) )
+    LIMIT 1)`
+}
+
+/** Binds for {@link audioLaneResolveSql}: projectId, role, role, targetLang. */
+export function audioLaneResolveBinds(
+  projectId: string,
+  role: string,
+  targetLang: string,
+): unknown[] {
+  return [projectId, role, role, targetLang]
+}
+
+/**
+ * AQU-1591: "is this take visible in the lane the caller asked for?"
+ *
+ * Three clauses, and each one is a rule rather than a defensive OR:
+ *
+ *   - `role = 'source'` is SHARED. The programme audio is the source side of
+ *     the line, so it shows in every lane, exactly as the source TEXT does.
+ *   - a dub whose `lane_id` matches is that lane's own take.
+ *   - a dub with NO lane yet belongs to the lane whose `legacy_tag` is `''` —
+ *     which is the backfill's own rule for it (AQU-1616, "dub without an event
+ *     targetLang -> the '' lane"). Applying it at read time is what makes the
+ *     before- and after-backfill answers the same, instead of hiding every
+ *     pre-1591 take until that PR ships.
+ *
+ * Binds: {@link audioLaneDualReadBinds} — projectId, tag, tag.
+ */
+export function audioLaneDualReadSql(alias = ''): string {
+  const col = alias ? `${alias}.` : ''
+  return `(${col}role = 'source'
+    OR ${col}lane_id = (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?)
+    OR (${col}lane_id IS NULL AND ? = ''))`
+}
+
+/** Binds for {@link audioLaneDualReadSql}: projectId, tag, tag. */
+export function audioLaneDualReadBinds(projectId: string, tag: string): unknown[] {
+  return [projectId, tag, tag]
 }

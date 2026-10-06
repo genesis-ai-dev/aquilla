@@ -31,7 +31,12 @@ import {
 } from "./freshness"
 import { computeOptionsHash } from "./options-hash"
 import { readEgressCache, writeEgressCache } from "./export-cache"
-import { buildProjectExport, egressSlug, type EgressZipEntry } from "./build-project-export"
+import {
+  audioListingKey,
+  buildProjectExport,
+  egressSlug,
+  type EgressZipEntry,
+} from "./build-project-export"
 import {
   createEgressZipPacker,
   type EgressZipPacker,
@@ -186,13 +191,29 @@ async function runWithPacker(
       // this project (no read, no write) and say so in the manifest.
       const audioListings =
         args.options.audioMode !== "none" ? new Map<string, FileAudioAttachmentsResponse>() : null
+      // AQU-1591: the lanes this run writes audio for. Empty would mean no
+      // listing and therefore no audio freshness at all, so the default lane
+      // stands in — the same lane buildProjectExport falls back to.
+      const exportLanes = args.options.lanes.length > 0 ? args.options.lanes : [""]
       const projectErrors: string[] = []
       let cacheBypassed = false
       if (audioListings) {
         for (const f of exportable) {
           throwIfAborted()
           try {
-            audioListings.set(f.id, await fetchAudioAttachments(selection.projectId, f.id, await mintToken(f.id)))
+            // AQU-1591: one listing per (file, LANE) being exported, under the
+            // key buildProjectExport memoizes on, so the pre-fetch is still a
+            // hit rather than a second request. This is also what keeps the
+            // freshness digest honest: it now covers exactly the takes this
+            // run will write, so a recording in a lane nobody asked for stops
+            // busting a cache entry whose bytes it cannot change.
+            const token = await mintToken(f.id)
+            for (const lane of exportLanes) {
+              audioListings.set(
+                audioListingKey(f.id, lane),
+                await fetchAudioAttachments(selection.projectId, f.id, token, lane),
+              )
+            }
           } catch (err) {
             rethrowIfAborted(err)
             cacheBypassed = true

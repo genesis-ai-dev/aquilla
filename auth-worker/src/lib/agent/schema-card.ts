@@ -119,7 +119,7 @@ All tables carry project_id; ALWAYS filter with :project.
   · cells.event_id = the current head event of that side's chain; cells.source_event_id = the source head a target commit was based on. Stale target ⇔ source.event_id <> target.source_event_id.
   · Full-text search: WHERE value_tsv @@ to_tsquery('simple', 'word & other'). Never SELECT value_tsv.
   · "Untranslated" ⇔ target side row with value = '' (or no target row).
-- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active.
+- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active. cell_count is distinct cells. filled_count, approved_count, ai_drafted_count, and word_count sum every target lane, so they are not one lane's progress.
 - events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside. Timestamps are epoch ms — render them for humans (to_timestamp(server_ts/1000)::date or similar), never raw.
 - cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) — one row per validator per cell.
 - cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts).

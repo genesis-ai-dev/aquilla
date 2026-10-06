@@ -559,6 +559,13 @@ export const editor = defineNamespace({
     "editor.history.draftKeptTooltip":
       "How much of the AI draft above survived this revision, measured character " +
       "by character. 100% means the draft was approved unchanged.",
+    "editor.history.aiTrace.show": "Show prompt",
+    "editor.history.aiTrace.hide": "Hide prompt",
+    "editor.history.aiTrace.output": "Model output",
+    "editor.history.aiTrace.olderVersion":
+      "This draft was made on an older version of the cell. The prompt below explains that version, not the current text.",
+    "editor.history.aiTrace.missing": "The prompt for this draft was not stored.",
+    "editor.history.aiTrace.loadFailed": "Couldn't load the prompt. Open it again to retry.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
       "This edit lost the first-child-of-parent race for its slot. It was logged " +
@@ -594,6 +601,15 @@ export const editor = defineNamespace({
     "editor.selection.voiceUnavailable": "Voicing isn't available here",
     "editor.selection.voiceNeedTwo": "Select at least two translated lines",
     "editor.selection.voiceTooltip": "Voice {count} lines as one clip",
+    "editor.selection.voiceTogetherFailed": "Couldn't voice these lines together",
+    "editor.selection.voiceTogetherInworldNotConfigured":
+      "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
+    "editor.selection.voiceTogetherInworldFailed":
+      "Inworld TTS couldn't voice these lines. This is not a Gemini key problem.",
+    "editor.selection.voiceTogetherSeedVcNotConfigured":
+      "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
+    "editor.selection.voiceTogetherSeedVcFailed":
+      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -607,11 +623,37 @@ export const editor = defineNamespace({
       one: "Validate {count} cell",
       other: "Validate {count} cells",
     }),
+    "editor.selection.validatePartial": plural({
+      one: "Validate {count} of {total} selected cells",
+      other: "Validate {count} of {total} selected cells",
+    }),
+    "editor.selection.validatePartialNamed": plural({
+      one: "Validate {count} of {total} selected cells: {refs}",
+      other: "Validate {count} of {total} selected cells: {refs}",
+    }),
+    "editor.selection.validatePartialRows": plural({
+      one: "Validate {count} of {total} selected cells: row {refs}",
+      other: "Validate {count} of {total} selected cells: rows {refs}",
+    }),
+    "editor.selection.validatePartialMoreRefs": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
+    "editor.selection.validatePartialSkips": plural({
+      one: "{count} will be skipped — {reasons}",
+      other: "{count} will be skipped — {reasons}",
+    }),
     "editor.selection.validateOutOfScope":
       "Some selected cells are outside your assigned files or lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
+    "editor.selection.validateOwnEdits":
+      "You made the latest change to these cells, so someone else must validate them",
+    "editor.selection.validateOwnEditsSome":
+      "Some selected cells have your latest change, so someone else must validate them",
     "editor.selection.validateAiDrafts":
       "Nothing eligible — untouched AI drafts require individual review",
+    "editor.selection.validateAiDraftsOrgHint":
+      "An organization maintainer can allow this under Settings → Project defaults.",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
@@ -681,6 +723,10 @@ export const editor = defineNamespace({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
     }),
+    "editor.batchValidate.skip.ownEdit": plural({
+      one: "{count} has your latest change, so someone else must validate it",
+      other: "{count} have your latest change, so someone else must validate them",
+    }),
     "editor.batchValidate.skip.aiDraft": plural({
       one: "{count} is an untouched AI draft, reviewed one at a time",
       other: "{count} are untouched AI drafts, reviewed one at a time",
@@ -703,6 +749,8 @@ export const editor = defineNamespace({
     "editor.batchValidate.noCandidates": "There are no cells here to validate.",
     "editor.batchValidate.noPermission":
       "Your role cannot validate cells in this project.",
+    "editor.batchValidate.notNamedValidator":
+      "Only the people this project names can validate text.",
     "editor.batchValidate.noTarget": "Open a file before validating.",
     "editor.batchValidate.failedTitle": "Validation could not be saved",
     "editor.batchValidate.failedBody":
@@ -1353,7 +1401,7 @@ export const editor = defineNamespace({
     "editor.timeline.cueLinkCrossScriptCandidatesHint":
       "The timings line up, but nothing could compare the words — so this was not " +
       "paired for you.",
-    "editor.timeline.cueLinkWeakTitle": "Overlapping, words barely agree",
+    "editor.timeline.cueLinkWeakTitle": "Overlapping, few words match",
     "editor.timeline.cueLinkWeakHint":
       "Enough shared wording to notice, not enough to pair on its own.",
     "editor.timeline.cueLinkUncertainTitle": "The only candidate nearby",
@@ -1362,7 +1410,7 @@ export const editor = defineNamespace({
     "editor.timeline.cueLinkCrossScriptTitle": "Paired on timing alone",
     "editor.timeline.cueLinkCrossScriptHint":
       "Different writing systems, so nothing compared the words.",
-    "editor.timeline.cueLinkLowConfidenceTitle": "Paired, but barely",
+    "editor.timeline.cueLinkLowConfidenceTitle": "Paired, with a weak match",
     "editor.timeline.cueLinkLowConfidenceHint": "Weak wording agreement. Probably fine.",
     "editor.timeline.cueLinkOrphanCues": plural({
       one: "{count} heard line with no subtitle nearby",
@@ -1445,16 +1493,21 @@ export const editor = defineNamespace({
     "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
     "editor.validation.unavailableTooltip": "Text validation unavailable",
+    "editor.validation.ownEditTooltip":
+      "You made the latest change to this text, so someone else must validate it",
     "editor.validation.noContentTooltip": "No text to validate",
     "editor.validation.ariaNoContent": "No text to validate — {ref}.",
-    "editor.validation.ariaValidated":
-      "Validated — {ref}. Click to remove your validation.",
+    "editor.validation.ariaValidatedByYou":
+      "Validated by you, {ref}. Click to see the list, where you can remove your validation.",
+    "editor.validation.ariaValidatedByYouNoAction": "Validated by you, {ref}.",
     "editor.validation.ariaValidatedByOthers":
       "Validated by others — {ref}. Click to add your validation.",
     "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
     "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
     "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
     "editor.validation.validatedBy": "Text validated by",
+    "editor.readOnly.reviewerNoTextValidation":
+      "Viewing as reviewer. You can comment, but this project does not let you validate text.",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -1796,7 +1849,7 @@ export const editor = defineNamespace({
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
-    "editor.sync.offlineTooltip": "Offline — changes are saved locally and will sync when reconnected",
+    "editor.sync.offlineTooltip": "Offline — changes are saved on this device and will sync when reconnected",
     "editor.sync.paused": "Paused",
     "editor.sync.pausedTooltip": "Sync paused while the tab is hidden — will resume when you return",
     "editor.sync.noFileOpen": "No file open",
@@ -4176,6 +4229,18 @@ export const editor = defineNamespace({
           "(the AI draft against this revision) and that the unit is characters, so " +
           "a reader does not mistake it for a quality score.",
       },
+      "editor.history.aiTrace.show": {
+        description:
+          "Toggle under an AI-drafted version in the cell history. Opens the exact " +
+          "instructions and examples sent to the AI model for that draft.",
+        maxLength: 24,
+      },
+      "editor.history.aiTrace.output": {
+        description:
+          "Heading above the AI model's raw reply, shown after the prompt messages. " +
+          "May differ from the saved text when the reply was cleaned up before saving.",
+        maxLength: 24,
+      },
       "editor.history.staleBadge": {
         description:
           "Amber badge on a history entry that was recorded but never became the " +
@@ -4337,6 +4402,38 @@ export const editor = defineNamespace({
           "action. 'Voice' is a verb here: produce spoken audio.",
         placeholders: { count: "Number of translated lines that will be joined." },
       },
+      "editor.selection.voiceTogetherFailed": {
+        description:
+          "Heading of the error notice shown when 'Voice together' fails. The " +
+          "notice's body gives the reason in plain words. 'Voice' is a verb: " +
+          "produce one spoken recording of the selected lines.",
+      },
+      "editor.selection.voiceTogetherInworldNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the lines use the " +
+          "hosted Inworld voice engine and this server has no Inworld setup. Says " +
+          "plainly that adding a Gemini key would not help. 'Inworld TTS', " +
+          "'Gemini' and 'API key' are product and technical names: keep them.",
+      },
+      "editor.selection.voiceTogetherInworldFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the hosted Inworld " +
+          "voice engine failed on the selected lines. Says plainly that this is " +
+          "not about the Gemini key. Keep 'Inworld TTS' and 'Gemini'.",
+      },
+      "editor.selection.voiceTogetherSeedVcNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the chosen clone voice " +
+          "needs the Seed-VC voice-conversion step and this server has none. Keep " +
+          "'Seed-VC' and 'Inworld'; a clone voice is a voice copied from a " +
+          "recording.",
+      },
+      "editor.selection.voiceTogetherSeedVcFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the Seed-VC " +
+          "voice-conversion step failed on the selected lines. Says plainly that " +
+          "this is not about the Gemini key. Keep 'Seed-VC' and 'Gemini'.",
+      },
       "editor.selection.translate": {
         description:
           "Button in the selection toolbar that asks the AI to draft the untranslated " +
@@ -4384,6 +4481,53 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.selection.validatePartial": {
+        description:
+          "Tooltip on the enabled bulk-validate button when the click would sign " +
+          "off only some of the selected cells. A second line says why the rest " +
+          "are left.",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form.",
+          total: "Cells selected in all (always more than count).",
+        },
+      },
+      "editor.selection.validatePartialNamed": {
+        description:
+          "Same tooltip as validatePartial, naming the cells the click would sign " +
+          "off by their references (verse or line labels).",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form.",
+          total: "Cells selected in all (always more than count).",
+          refs: "A list of cell references such as \"GEN 1:1, GEN 1:2 and 3 more\".",
+        },
+      },
+      "editor.selection.validatePartialRows": {
+        description:
+          "Same tooltip as validatePartial, naming the cells the click would sign " +
+          "off by their row numbers in the editor's # column, for files whose " +
+          "lines have no verse or line labels.",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form (row/rows).",
+          total: "Cells selected in all (always more than count).",
+          refs: "A list of row numbers such as \"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
+        },
+      },
+      "editor.selection.validatePartialMoreRefs": {
+        description:
+          "Last item of the cell list in validatePartialNamed when it is cut " +
+          "short: how many further cells the click would also sign off.",
+        placeholders: { count: "Cells not named in the list." },
+      },
+      "editor.selection.validatePartialSkips": {
+        description:
+          "Second line of the partial bulk-validate tooltip: how many selected " +
+          "cells the click will leave alone, then the reasons. Future tense: " +
+          "nothing has happened yet.",
+        placeholders: {
+          count: "Cells the click will leave alone; selects the plural form.",
+          reasons: "A list of reason clauses such as \"7 are untouched AI drafts, reviewed one at a time\".",
+        },
+      },
       "editor.selection.validateOutOfScope": {
         description:
           "Tooltip when bulk-validate is disabled because the selection reaches into " +
@@ -4395,12 +4539,33 @@ export const editor = defineNamespace({
           "Tooltip when bulk-validate is disabled because this user has already " +
           "signed off every selected cell. Nothing is wrong.",
       },
+      "editor.selection.validateOwnEdits": {
+        description:
+          "Tooltip when bulk-validate is disabled because the project does not " +
+          "let people validate their own work and this user made the latest " +
+          "change to the selected cells. A project rule: someone else has to " +
+          "sign them off.",
+      },
+      "editor.selection.validateOwnEditsSome": {
+        description:
+          "Tooltip when bulk-validate is disabled and some, but not all, of the " +
+          "selected cells were last changed by this user on a project that does " +
+          "not let people validate their own work. The rest are blocked for " +
+          "another reason (already validated, or no translation yet).",
+      },
       "editor.selection.validateAiDrafts": {
         description:
           "Tooltip when bulk-validate is disabled because the selected cells are " +
           "untouched AI drafts. Policy: a human must open each AI draft " +
           "individually, so they cannot be approved in bulk. The reason after the " +
           "dash is the important half.",
+      },
+      "editor.selection.validateAiDraftsOrgHint": {
+        description:
+          "Second sentence of that same tooltip: an organization can switch the " +
+          "rule off. 'Settings → Project defaults' names the organization " +
+          "settings page where the switch lives — use this catalog's wording for " +
+          "both names, keeping the arrow.",
       },
       "editor.selection.validateNeedTranslation": {
         description:
@@ -4594,6 +4759,15 @@ export const editor = defineNamespace({
           count: "How many cells this reader had already validated. Selects the plural form.",
         },
       },
+      "editor.batchValidate.skip.ownEdit": {
+        description:
+          "One clause inside {reasons}: cells whose latest change this reader "
+          + "made, on a project that does not let people validate their own "
+          + "work, so someone else has to. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells carried this reader's own latest change. Selects the plural form.",
+        },
+      },
       "editor.batchValidate.skip.aiDraft": {
         description:
           "One clause inside {reasons}: untouched AI drafts. Bulk validation "
@@ -4653,6 +4827,13 @@ export const editor = defineNamespace({
           "Toast when the reader's project role is below the validation floor. "
           + "The server is authoritative; this is the client saying so first "
           + "rather than sending a request it knows will be refused.",
+      },
+      "editor.batchValidate.notNamedValidator": {
+        description:
+          "Toast, disabled-button tooltip and confirmation text when the project "
+          + "keeps a list of named people who may validate text and this user is "
+          + "not on it. Their role is not the reason, so the sentence must not "
+          + "mention roles.",
       },
       "editor.batchValidate.noTarget": {
         description:
@@ -5403,16 +5584,42 @@ export const editor = defineNamespace({
           "Tooltip when validation is unavailable for any other reason, typically " +
           "the user's project role. Deliberately vague — do not guess a cause.",
       },
-      "editor.validation.ariaValidated": {
+      "editor.validation.ownEditTooltip": {
+        description:
+          "Tooltip on a row's validation button when the project does not let " +
+          "people validate their own work and this user made the latest change " +
+          "to the cell's translation. A project rule, not a fault: someone else " +
+          "has to sign it off. Same idea as the audio control's \"You recorded " +
+          "this\" tooltip.",
+      },
+      "editor.validation.ariaValidatedByYou": {
         description:
           "Screen-reader name of the validation button when THIS user has already " +
-          "signed the cell off; pressing it withdraws that sign-off. Three parts: " +
-          "state, which cell, what the press does.",
+          "signed the cell off. Pressing it opens and keeps open the list of who " +
+          "validated the text; that list has a 'Remove your validation' button. " +
+          "The press itself does not withdraw anything. Three parts: state, which " +
+          "cell, what the press does.",
         placeholders: {
           ref:
             "The cell's reference, e.g. 'MAT 3:16', or a fallback row number. From " +
             "the data — do not translate.",
         },
+      },
+      "editor.validation.ariaValidatedByYouNoAction": {
+        description:
+          "Screen-reader name of the validation button when THIS user has already " +
+          "signed the cell off but can no longer change validations here (for " +
+          "example their role changed), so the press offers nothing.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.readOnly.reviewerNoTextValidation": {
+        description:
+          "Banner above the editor for a reviewer (who cannot edit) when the " +
+          "project's minimum role to validate or its list of named validators " +
+          "leaves them out, so they cannot validate text here either. Replaces " +
+          "the usual 'Viewing as reviewer, you can validate and comment' banner.",
       },
       "editor.validation.ariaValidatedByOthers": {
         description:

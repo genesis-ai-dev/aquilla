@@ -27,16 +27,20 @@
 // other way: a line added to an assigned chapter or file never joined the
 // assignment, and the assignee's progress could read done over a chapter that
 // still had open work. Every query below therefore joins the view
-// `assignment_member_cells` (migration 0129), which re-resolves a book or
-// chapter scope from `assignment_scopes` against live `cells` on each read and
-// keeps the frozen list only for an explicit line selection ('cells' scope,
-// AQU-1628) — a selection is exactly the lines the manager picked and must not
-// silently acquire new ones. Nothing here reads `assignment_cells` directly;
+// `assignment_member_cells` (migration 0147), which re-resolves a book or
+// chapter scope from `assignment_scopes` against live `cells` on each read —
+// a chapter by the plan board's own chapter key (AQU-1493), the rule
+// assignment.create resolves the snapshot with — and keeps the frozen list
+// only for an explicit line selection ('cells' scope, AQU-1628): a selection
+// is exactly the lines the manager picked and must not silently acquire new
+// ones. Nothing here reads `assignment_cells` directly;
 // that table is now the audit record of what the scope resolved to at
 // creation.
 
 import type { Env } from "../types"
-import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
+import {
+  planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
+} from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
 import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 
@@ -52,15 +56,59 @@ export interface AssigneeWorkload {
   cellsDone: number
 }
 
+/**
+ * AQU-1083 / AQU-1493: whether the assignment's project leaves headings and
+ * titles out of its counts — the project's answer, else its org's, else no.
+ * The same stored columns, and the same answer, as the `policy` CTE in
+ * `getUnitAssignments`, correlated on the outer `a` so every per-assignment
+ * figure below can ask it once.
+ */
+const EXCLUDES_STRUCTURAL_SQL = `COALESCE((
+  SELECT COALESCE(ps.count_structural, os.count_structural) = 'false'
+    FROM projects p
+    LEFT JOIN project_settings ps ON ps.project_id = p.id
+    LEFT JOIN org_settings os ON os.org_id = p.org_id
+   WHERE p.id = a.project_id
+), false)`
+
+/**
+ * The structural cell types, on the SOURCE row `alias` — target rows carry no
+ * type. COALESCE because a null type means content and `NULL IN (...)` would
+ * drop every untyped cell (see the note in `getUnitAssignments`).
+ */
+const isStructuralSql = (alias: string) => `COALESCE(${alias}.type, '') IN ('heading', 'paratext')`
+
+/**
+ * Picks between two forms of one count by the project's policy, so the policy
+ * is read once per assignment and a project that counts headings — nearly all
+ * of them — pays nothing for the filter.
+ */
+const byStructuralPolicy = (counting: string, excluding: string) =>
+  `(CASE WHEN ${EXCLUDES_STRUCTURAL_SQL} THEN ${excluding} ELSE ${counting} END)`
+
 /** The denominator: assigned cells that still EXIST, counted live. The view is
  *  already the live SOURCE membership — it does the `side = 'source'` join to
  *  `cells` itself, which is also what makes each assigned cell count exactly
  *  once (source rows are lane-independent, one per cell) — so there is nothing
- *  left to join here. */
-const CELLS_TOTAL_SUBQUERY = `(
+ *  left to join here.
+ *
+ *  AQU-1493: and without the headings, when the project does not count them.
+ *  A chapter assignment takes the chapter's headings along (they count in the
+ *  chapter on the board), so with headings off "Assigned to me" read 23/24 for
+ *  a chapter whose every verse was done, while the plan inspector's row for the
+ *  same person — which applies the policy — said "Nothing left". Applied when
+ *  READING, not when the assignment is made, because the setting can change
+ *  afterwards; that also squares whole-file assignments, which always held the
+ *  headings. The view carries the source row's `type`, so the filter reads it
+ *  off `ac` directly. */
+const cellsTotalSql = (structural: string) => `(
   SELECT COUNT(*) FROM assignment_member_cells ac
-   WHERE ac.assignment_id = a.assignment_id
+   WHERE ac.assignment_id = a.assignment_id${structural}
 )`
+const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
+  cellsTotalSql(""),
+  cellsTotalSql(`\n     AND NOT ${isStructuralSql("ac")}`),
+)
 
 /**
  * The numerator: assigned cells whose TARGET row is validated — in the lane the
@@ -85,14 +133,28 @@ const CELLS_TOTAL_SUBQUERY = `(
  *
  * `a.lane_id` rather than a bound lane is deliberate: an assignment IS pinned
  * to one lane (AQU-538 §3.5), so its progress is only ever measured there.
+ *
+ * AQU-1493: with headings left out (see CELLS_TOTAL_SUBQUERY), the type is
+ * read from each cell's SOURCE row, the only side that carries one — which
+ * the view already carries as `ac.type`, so no second join to `cells`.
  */
-const CELLS_DONE_SUBQUERY = `(
+const CELLS_DONE_SUBQUERY = byStructuralPolicy(
+  `(
   SELECT COUNT(*) FROM assignment_member_cells ac
     JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
-)`
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+    JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
+                 AND c.cell_id = ac.cell_id AND c.side = 'target'
+                 AND c.lane_id = a.lane_id AND c.validated = 1
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("ac")}
+)`,
+)
 
 /**
  * AQU-1609: the `lanes.id` a legacy target-language tag names, or `''` when the
@@ -362,7 +424,7 @@ async function readThreshold(
  *
  * `sectionKey` is '' for a file-grain unit and a Bible book code ("GEN") for a
  * sub-file one. A file-grain unit IS the whole file, so it takes no section
- * predicate; a book unit filters on bookKeyExpr, the same expression
+ * predicate; a book unit filters on unitBookKeyExpr, the same expression
  * sync-worker builds file_section_progress's book rows from
  * (db/shared/plan-keys.ts). Deriving membership any other way would let this
  * panel count a different set of cells than the bar directly above it.
@@ -372,10 +434,12 @@ async function readThreshold(
  * bar. An assignment pinned to a DIFFERENT lane still appears — the cells are
  * spoken for either way, and hiding the row would make the unit look
  * unassigned — which is why every row carries its own `targetLang` for the
- * caller to label. Audio has no lane at all (below).
+ * caller to label. Audio is measured in that same lane (AQU-1591, below).
  *
  * AQU-1609: `laneId` is `lanes.id`. The route resolves it, accepting a legacy
- * `?lane=` tag from an older client; nothing below compares tags.
+ * `?lane=` tag from an older client; nothing below takes a tag from the caller.
+ * The one tag comparison left is the audio join's, and it derives the tag from
+ * this id inside the statement (AQU-1591: the shared audio CTE groups by tag).
  */
 export async function getUnitAssignments(
   env: Env,
@@ -391,7 +455,11 @@ export async function getUnitAssignments(
 
   // A book unit filters by book key; a file-grain unit ('') does not filter at
   // all. Built as a fragment so the bind only exists when the predicate does.
-  const sectionPredicate = sectionKey === "" ? "" : `AND (${bookKeyExpr("ac")}) = ?`
+  // AQU-1493: by the key the projection COUNTS a cell toward, so a line added
+  // with no reference is a person's share of the book (and chapter) it is
+  // counted in — the line above it, or for a heading the verse below it —
+  // here exactly as it is a cell of that book's bar above.
+  const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("ac", "ik")}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
     // The audio CTE is lifted from sync-worker's AUDIO_CTE_SQL, verbatim
@@ -403,9 +471,11 @@ export async function getUnitAssignments(
     // so joining takes straight onto the cell rows would multiply every other
     // count by the number of takes.
     //
-    // cell_audio has NO target_lang column, so audio is lane-independent BY
-    // CONSTRUCTION — one recording is the recording, whichever text lane you
-    // are looking at. That is a schema fact, not a simplification here.
+    // AQU-1591: audio IS per lane now. `cell_audio.lane_id` arrived with
+    // migration 0135, the shared CTE groups by it, and the join below pins the
+    // takes to the unit's own lane — the one `a.target_lang` names. Until then
+    // this panel counted every language's recordings as this assignee's, so a
+    // line voiced in Swahili read as recorded on the French unit too.
     `WITH policy AS (
        -- AQU-1083. Whether chapter headings and section titles count as
        -- translatable content is a team setting: the project's answer, else its
@@ -442,7 +512,7 @@ export async function getUnitAssignments(
             -- still owes work in, and which chapters of the unit nobody holds.
             -- The aggregate the panel already showed is the sum over these,
             -- folded below, so no existing number moves.
-            ${sectionKeyExpr("ac")} AS chapter_key,
+            ${unitSectionKeyExpr("ac", "ik")} AS chapter_key,
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
@@ -468,7 +538,25 @@ export async function getUnitAssignments(
        LEFT JOIN cells t ON t.project_id = ac.project_id AND t.file_id = ac.file_id
                         AND t.cell_id = ac.cell_id AND t.side = 'target'
                         AND t.lane_id = ?
+       -- AQU-1591: ...and in THIS unit's lane. The audio CTE returns one row
+       -- per (cell, lane); joining on the cell alone would hand a unit every
+       -- lane's takes, which is what it used to do.
+       --
+       -- The caller holds a lane ID (AQU-1609) and the shared CTE names a
+       -- take's lane by its TAG, so the id is turned into that tag here, by
+       -- the same lanes-row lookup audioLaneTagSql makes for the take — both
+       -- sides read the lane row as it is now, so a retagged lane still
+       -- matches itself. No row (an unknown id, or the '' an unresolvable tag
+       -- becomes) is NULL, which equals nothing: the unit reads no audio
+       -- rather than borrowing the default lane's, as its text join does.
        LEFT JOIN audio au ON au.cell_id = ac.cell_id
+                         AND au.lane = (SELECT COALESCE(ul.legacy_tag, '') FROM lanes ul
+                                         WHERE ul.project_id = a.project_id
+                                           AND ul.id = ? AND ul.role = 'target')
+       -- AQU-1493: where a line with no reference is counted (the chapter of
+       -- the line above it, or a heading's verse below it), as the full
+       -- progress recompute stored it, so the chapter breakdown matches the grid.
+       ${planKeysJoinSql("ac", "ik")}
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
          ON ln.project_id = a.project_id AND ln.id = a.lane_id
@@ -489,14 +577,15 @@ export async function getUnitAssignments(
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
                a.target_lang, a.lane_id, a.deadline, a.created_at,
-               ${sectionKeyExpr("ac")}
+               ${unitSectionKeyExpr("ac", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
     // policy CTE's project, the audio CTE's (project, file), the text then
-    // audio thresholds in the SELECT list, the lane id on the target join, then
-    // the WHERE — and the section key last, only when the fragment above put a
-    // placeholder there. Adding a CTE ahead of another means inserting its
+    // audio thresholds in the SELECT list, the lane id on the target join, the
+    // same lane id on the audio join (AQU-1591), then the WHERE — and the
+    // section key last, only when the fragment above put a placeholder there.
+    // Adding a CTE ahead of another means inserting its
     // binds ahead of theirs; there is no naming here to catch a mistake.
     .bind(
       projectId,
@@ -504,6 +593,9 @@ export async function getUnitAssignments(
       fileId,
       validationCount,
       validationCountAudio,
+      laneId,
+      // AQU-1591: the audio join's lane, immediately after the target join's —
+      // statement order, which is the only order these binds have.
       laneId,
       projectId,
       fileId,
@@ -926,8 +1018,10 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
  * Distinct chapters present in a file, derived from the source cells'
  * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
  * chapter dropdown so a manager picks a real chapter instead of typing a
- * canonical-ref prefix — and the value feeds the resolver's LIKE 'GEN 1:%'
- * directly. Natural-sorted (book code, then chapter number) so "GEN 2"
+ * canonical-ref prefix — and the value is the chapter key the resolver
+ * (sync-worker assignment-events.ts) matches against the plan board's own
+ * keys, so the person gets the chapter's headings and added lines too
+ * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
  * precedes "GEN 10".
  */
 export async function getFileChapters(
@@ -1005,10 +1099,16 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
        -- cells once instead of twice (measured: twice cost it 5x and a
        -- sequential scan).
        JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       -- AQU-1493: a line with no reference counts toward the book it is
+       -- counted in (unitBookKeyExpr: the line above it's, or for a heading the
+       -- verse below it's), so its assignee belongs on that book's row. Read
+       -- from the placements the full progress recompute stored: walking every
+       -- assigned Bible on each board load cost tens of ms per file.
+       ${planKeysJoinSql("ac", "ik")}
        -- A file with book units has no '' unit and a file without has only
        -- the '' unit, so this OR is exact rather than lenient.
        JOIN units u ON u.project_id = ac.project_id AND u.file_id = ac.file_id
-                   AND (u.section_key = '' OR u.section_key = ${bookKeyExpr("ac")})
+                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("ac", "ik")})
        LEFT JOIN users usr ON usr.id = a.assignee_user_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL

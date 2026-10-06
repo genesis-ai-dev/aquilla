@@ -166,7 +166,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+      'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
       'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
       'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
       'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +
@@ -1012,6 +1013,23 @@ const TOOL_SPECS: McpToolSpec[] = [
         resultIndex: {
           type: 'number',
           description: 'Which parsed file to stage when the parse yields several (multi-book USFM); required in that case.',
+        },
+        sourceTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file source text direction (AQU-1471). OMIT IT for an ordinary import: direction ' +
+            "resolves to the project's sourceTextDirection setting and then to the source language, " +
+            'so a whole RTL project is one patch_settings call rather than one override per file. ' +
+            'Send it only for a file that runs against its project.',
+        },
+        targetTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file target text direction (AQU-1471) — same rule as sourceTextDirection: for an ' +
+            "Arabic/Hebrew/Persian/Urdu project set the project's targetTextDirection setting once " +
+            'instead, and leave this unset.',
         },
         excludeFrontMatter: {
           type: 'boolean',

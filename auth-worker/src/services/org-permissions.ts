@@ -4,7 +4,13 @@ import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
-import { inCountedFileSql, countedFileSql, notHiddenFileSql } from "../../../db/shared/counted-files"
+import {
+  inCountedFileSql,
+  inCountedFileSetSql,
+  uncountedFilesCteSql,
+  countedFileSql,
+  notHiddenFileSql,
+} from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 import {
@@ -20,6 +26,12 @@ import {
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
 import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
+import {
+  emptyPortfolioAggregate,
+  summarizePortfoliosByOrg,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "../../../src/lib/frontier/portfolio-metrics"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1599,6 +1611,32 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * until someone opts out) that CTE is empty and the join costs nothing. The
  * previous shape of this query, three correlated subqueries over ~300k rows,
  * is what caused the 15s dashboard timeout; this must not walk back into it.
+ *
+ * It did walk back into it once (2026-10-05), and both halves of how are now
+ * closed by construction rather than left to the planner:
+ *
+ *   * "Costs nothing" was only true while Postgres happened to hash the
+ *     excluding projects first and skip `cells` on finding none. `cells` was
+ *     joined TO `policy`, so nothing required that order, and one more
+ *     predicate on the join (AQU-1626's counted-files probe) flipped it to a
+ *     merge join that read all of `cells` — 2.2M pages — before discovering
+ *     there was nothing to match. `structural_cells` therefore names its
+ *     projects up front, as an array the executor has in hand before it
+ *     touches `cells`: empty array, no read; otherwise an index lookup per
+ *     excluding project.
+ *   * The counted-files rule is applied against `uncounted_files`, one small
+ *     set built once for the page's projects, never as a probe per audio row
+ *     (see `inCountedFileSetSql`). That probe ran ~140k times here.
+ *
+ * Measured on the dev database for an 8-org, 433-project caller, same rows
+ * either way: 6-9s warm and 74s cold before, 0.7s after.
+ *
+ * What this does NOT make free is a scope where many projects really do
+ * exclude headings. The array bounds the read to those projects' source cells
+ * (about 1.3s per million cells; 5s with a 198-project org simulated as opted
+ * out), which beats reading the whole table but is not nothing. If orgs start
+ * opting out at that scale the answer is a partial index on structural source
+ * cells, not another join shape.
  */
 const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
@@ -1618,16 +1656,21 @@ const portfolioCtes = (orgPredicate: string) => `
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
-     ), structural_cells AS (
+     ), ${uncountedFilesCteSql('SELECT project_id FROM policy')},
+     structural_cells AS (
        -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
        -- and has to describe the same files the totals above now do. A heading
        -- inside a hidden or deleted file is no longer in the numerator, so
        -- subtracting it would push a project's count below its real one.
+       --
+       -- The project filter is an ARRAY on purpose, not a join to policy: see
+       -- the note above portfolioCtes. Do not turn it back into a join.
        SELECT DISTINCT c.project_id, c.file_id, c.cell_id
          FROM cells c
-         JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
-        WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
-          AND ${inCountedFileSql('c')}
+        WHERE c.project_id = ANY(ARRAY(
+                SELECT pol.project_id FROM policy pol WHERE pol.excluded))
+          AND c.side = 'source' AND c.type IN ('heading', 'paratext')
+          AND ${inCountedFileSetSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1662,7 +1705,7 @@ const portfolioCtes = (orgPredicate: string) => `
           -- not coverage of the work. The recorded-milliseconds sum takes the
           -- same filter: a tombstoned file's hours are not hours the project
           -- has banked.
-          AND ${inCountedFileSql('a')}
+          AND ${inCountedFileSetSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
@@ -1981,6 +2024,29 @@ export async function getOrgPortfolios(
 ): Promise<OrgPortfolioRow[]> {
   const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
   return projects
+}
+
+/**
+ * Overview totals for the same visible projects `getOrgPortfolios` would
+ * return. The client dashboard no longer needs that full payload to paint
+ * translated/validated averages and stalled, overdue, and attention counts.
+ *
+ * This does not change the portfolio SQL. Query-plan work on that rollup is
+ * separate (the cells-scan follow-up). Values stay the unweighted per-project
+ * mean, under the same visibility predicate and lane-activity rules.
+ */
+export async function summarizeVisiblePortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<{ totals: PortfolioAggregate; orgs: OrgPortfolioAggregate[] }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) {
+    return { totals: emptyPortfolioAggregate(), orgs: [] }
+  }
+  const { projects } = await listOrgPortfolioPage(env, uniqueOrgIds, viewer, null, now)
+  return summarizePortfoliosByOrg(projects, uniqueOrgIds, now)
 }
 
 export interface ProjectAccessBreakdown {

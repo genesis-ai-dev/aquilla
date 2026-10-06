@@ -487,7 +487,13 @@ describe("off means off", () => {
     const { rerender } = renderTable(makeProject())
     await mentionsLoaded()
     rerender(makeProject({ bibleEnrichments: { "whos-who": false } }))
+    // The Context tab still needs the people layer: let that reload settle,
+    // so the check is on where things end up, not on a loading moment.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
     expect(allMentions()).toEqual([])
+    expect(row(cellIdFor("4:10")).textContent).toContain("αὐτὸν")
   })
 
   it("fetches no people data when Bible data itself is off", async () => {

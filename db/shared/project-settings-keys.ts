@@ -19,6 +19,7 @@
 // Adding a settings key? Add it here too, or agents cannot write it.
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
+import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -34,15 +35,24 @@ export interface SettingsKeySpec {
   kind: SettingsValueKind
   /** Allowed values when `kind` is 'enum'. */
   values?: readonly string[]
+  /**
+   * AQU-1686: when `kind` is 'object', the only keys the object may hold, and
+   * each must hold a boolean. Absent means any plain object.
+   */
+  booleanFlags?: readonly string[]
 }
 
-function isPlainObject(v: unknown): boolean {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
-  return spec.kind === 'enum' ? (spec.values ?? []).map((v) => `"${v}"`).join(' | ') : spec.kind
+  if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.kind === 'object' && spec.booleanFlags) {
+    return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
+  }
+  return spec.kind
 }
 
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
@@ -55,8 +65,14 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return typeof value === 'boolean'
     case 'string[]':
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
-    case 'object':
-      return isPlainObject(value)
+    case 'object': {
+      if (!isPlainObject(value)) return false
+      const flags = spec.booleanFlags
+      if (!flags) return true
+      return Object.entries(value).every(
+        ([key, flag]) => flags.includes(key) && typeof flag === 'boolean',
+      )
+    }
     case 'object[]':
       return Array.isArray(value) && value.every(isPlainObject)
     case 'enum':
@@ -140,6 +156,9 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   timingLocked: { kind: 'boolean' },
   audioTimingMode: { kind: 'enum', values: ['dubbing', 'audioFirst'] },
   bibleResourcesEnabled: { kind: 'boolean' },
+  // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
+  // A missing id means that enrichment's default.
+  bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
   smartQuotes: { kind: 'boolean' },

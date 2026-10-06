@@ -76,6 +76,9 @@ export function overlaySettings(
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
+  // AQU-1686: must reach the workspace, or the pack client loads layers for
+  // enrichments the project switched off.
+  assign("bibleEnrichments", settings.bibleEnrichments)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

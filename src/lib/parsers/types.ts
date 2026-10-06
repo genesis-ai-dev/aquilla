@@ -739,6 +739,12 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1686: explicit per-enrichment Bible data choices, synced via
+   *  ProjectWideSettings. A missing id means that enrichment's default. Do not
+   *  read it directly for gating; use `resolveBibleEnrichment`
+   *  (db/shared/bible-enrichments.ts), which also applies the Bible data
+   *  switch above. */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

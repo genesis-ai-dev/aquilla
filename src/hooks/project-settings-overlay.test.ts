@@ -61,6 +61,7 @@ describe("overlaySettings", () => {
       timingLocked: false,
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
+      bibleEnrichments: { voices: false, autopilot: true },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
@@ -72,6 +73,9 @@ describe("overlaySettings", () => {
     expect(out.timingLocked).toBe(false)
     expect(out.cellEditingFloor).toBe("contributor")
     expect(out.bibleResourcesEnabled).toBe(false)
+    // AQU-1686: a dropped key would load layers for enrichments the project
+    // switched off.
+    expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
     expect(out.importExcludeFrontMatter).toBe(true)
     expect(out.draftContext).toEqual({ precedingTargetCells: 4 })
     expect(out.termMatching).toEqual({ prefixes: ["re"], suffixes: [] })

@@ -75,19 +75,20 @@ export function MentionDetails({ id, view, at, onJumped }: MentionDetailsProps) 
       </PopoverTitle>
       {facts.length > 0 && <p className="text-muted-foreground">{facts.join(" · ")}</p>}
       {first && <p>{t("bibleData.whosWho.firstMention", { ref: fmt.isolate(first.ref) })}</p>}
-      <p className="text-muted-foreground">
-        {sources.length > 0
-          ? t("bibleData.whosWho.evidence", {
+      {(sources.length > 0 || hops >= SHOW_HOPS_FROM) && (
+        <p className="text-muted-foreground">
+          {sources.length > 0 &&
+            t("bibleData.whosWho.evidence", {
               confidence: fmt.isolate(fmt.percent(conf)),
               sources: fmt.list(sources, { type: "conjunction" }),
-            })
-          : null}
-        {hops >= SHOW_HOPS_FROM && (
-          <span data-testid="mention-hops" className="block">
-            {t("bibleData.whosWho.hops", { count: hops })}
-          </span>
-        )}
-      </p>
+            })}
+          {hops >= SHOW_HOPS_FROM && (
+            <span data-testid="mention-hops" className="block">
+              {t("bibleData.whosWho.hops", { count: hops })}
+            </span>
+          )}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {previous ? (
           <Button

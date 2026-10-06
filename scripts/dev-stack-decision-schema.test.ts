@@ -1,4 +1,4 @@
-// AQU-1691: a local container created before migration 0142 must accept fact
+// AQU-1691: a local container created before migration 0151 must accept fact
 // questions after `pnpm dev` reconciles it. The generic reconciler adds the new
 // columns but cannot widen a CHECK or drop NOT NULL, so without this step every
 // fact question 500s locally while tests (fresh schema) stay green.

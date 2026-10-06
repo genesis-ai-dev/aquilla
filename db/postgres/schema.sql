@@ -2030,13 +2030,13 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   id text PRIMARY KEY,                  -- uuidv7
   project_id text NOT NULL,
   run_id text,                          -- NULL once the owning run ends
-  file_id text,                         -- NULL for a project-wide question (0142)
+  file_id text,                         -- NULL for a project-wide question (0151)
   span_id text,
   cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   -- WHY the agent cannot proceed, in the user's words. Never "review this".
   reason text NOT NULL,
   -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
-  -- which the deterministic sweep can never close. 'bible-fact' (0142) asks
+  -- which the deterministic sweep can never close. 'bible-fact' (0151) asks
   -- for a durable project fact.
   readiness_item text
     CHECK (readiness_item IS NULL OR
@@ -2054,7 +2054,7 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   assigned_user_id integer,
   assigned_invite_id text,
   resolution jsonb,                     -- {kind:'answered'|'researched', …}
-  -- 0142 (AQU-1691): a fact question stores its answer as a project fact
+  -- 0151 (AQU-1691): a fact question stores its answer as a project fact
   -- under fact_key (db/shared/project-facts.ts), offers one-click options,
   -- and says where the fact applies. Keep each on one line: the dev-stack
   -- schema reconciler (scripts/dev-stack-schema-parser.ts) ALTERs them in.

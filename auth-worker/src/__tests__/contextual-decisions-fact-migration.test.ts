@@ -1,4 +1,4 @@
-// AQU-1691 — migration 0142 lets a contextual decision ask for a project fact.
+// AQU-1691 — migration 0151 lets a contextual decision ask for a project fact.
 //
 // WHY: the decision lifecycle now stores an answer as a durable fact, and a
 // fact question has no file and a new readiness item. On a database without
@@ -12,12 +12,12 @@ import { PGlite } from "@electric-sql/pglite"
 import { expect, it } from "vitest"
 
 const MIGRATION = readFileSync(
-  new URL("../../../db/postgres/migrations/0142_contextual_decisions_fact_questions.sql", import.meta.url),
+  new URL("../../../db/postgres/migrations/0151_contextual_decisions_fact_questions.sql", import.meta.url),
   "utf8",
 )
 
 /** contextual_decisions as 0076 created it, with the columns this migration touches. */
-const PRE_0142 = `CREATE TABLE contextual_decisions (
+const PRE_0151 = `CREATE TABLE contextual_decisions (
   id text PRIMARY KEY,
   project_id text NOT NULL,
   run_id text,
@@ -44,7 +44,7 @@ const insertFactQuestion = (pg: PGlite, id: string) =>
 it("accepts a project-wide bible-fact question with its key, options and scope, and re-runs cleanly", async () => {
   const pg = new PGlite()
   try {
-    await pg.exec(PRE_0142)
+    await pg.exec(PRE_0151)
     // Before: a fact question cannot be stored at all.
     await expect(insertFactQuestion(pg, "too-early")).rejects.toThrow()
 

@@ -98,6 +98,7 @@ export function deleteConcept(project: ProjectRecord, id: string): ProjectRecord
  *   entry wins, otherwise the first occurrence encountered wins.
  * - Notes are concatenated (survivor first, then others, separated by " | "), de-duped.
  * - Status: the survivor's status is preserved.
+ * - Bible entity link (`externalIds`): the survivor's, else the first merged-away one.
  * - Merged-away concepts (all in `mergeIds` except `survivorId`) are removed.
  * - `updatedAt` is set to now on the survivor.
  *
@@ -151,11 +152,16 @@ export function mergeConcepts(
   }
   const mergedNotes = notesParts.length > 0 ? notesParts.join(" | ") : undefined
 
+  // AQU-1693: the survivor's Bible entity link, else the first one a merged-away
+  // concept carries. Merging duplicates must not drop the only link.
+  const linkedFrom = [survivor, ...others].find((c) => c.externalIds?.acai)
+
   const now = new Date().toISOString()
   const mergedSurvivor = {
     ...survivor,
     renderings: mergedRenderings,
     notes: mergedNotes,
+    ...(linkedFrom ? { externalIds: linkedFrom.externalIds } : {}),
     updatedAt: now,
   }
 

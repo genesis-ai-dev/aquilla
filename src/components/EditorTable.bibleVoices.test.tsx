@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { ReactNode } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -173,7 +173,12 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 /** `bibleOpen` is what ProjectWorkspace passes: true while the editor shows a scripture file. */
-function renderTable(project: ProjectRecord, cells: readonly CellSpec[] = DEFAULT_CELLS, bibleOpen = true) {
+function renderTable(
+  project: ProjectRecord,
+  cells: readonly CellSpec[] = DEFAULT_CELLS,
+  bibleOpen = true,
+  extra: Partial<ComponentProps<typeof EditorTable>> = {},
+) {
   const store = makeStore(cells)
   const qc = new QueryClient()
   const ui = (p: ProjectRecord) => (
@@ -197,12 +202,13 @@ function renderTable(project: ProjectRecord, cells: readonly CellSpec[] = DEFAUL
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           bibleOpen={bibleOpen}
+          {...extra}
         />
       </EditorActionsProvider>
     </QueryClientProvider>
   )
   const view = render(ui(project))
-  return { rerender: (next: ProjectRecord) => view.rerender(ui(next)) }
+  return { rerender: (next: ProjectRecord) => view.rerender(ui(next)), unmount: () => view.unmount() }
 }
 
 function row(cellId: string): HTMLElement {
@@ -450,6 +456,73 @@ describe("label language", () => {
 
     act(() => setBibleDataViewPrefs({ labelMode: "english" }))
     expect(chipText(cellIdFor("4:7"))).toBe("Narrator·Jesus→Samaritan woman")
+  })
+
+  // AQU-1693: a concept linked to Jesus names him where no headword can match
+  // (the pack has no Greek label), and the popover says the name is the project's.
+  it("names a linked entity from its concept, even with a Greek source, and says so", async () => {
+    const linked: Concept[] = [{ ...terminology[0], sourceTerm: "Ἰησοῦς", externalIds: { acai: "person:Jesus.2" } }]
+    renderTable(makeProject({ terminology: linked, sourceLanguage: "grc" }))
+    await voicesLoaded()
+    expect(chipText(cellIdFor("4:7"))).toBe("Narrator·Yesus→Samaritan woman")
+
+    const chip = chipIn(cellIdFor("4:7"))
+    if (!chip) throw new Error("no chip")
+    act(() => chip.focus())
+    expect(visible((await screen.findByTestId("voice-details")).textContent)).toContain("YesusFrom your terminology")
+  })
+})
+
+// AQU-1693: "Add to terminology" in the voice popover. One click suggests a
+// draft linked to the speaker; where an entry already names him, the popover
+// offers to link it instead, and only to someone who may change terms, so a
+// contributor never makes a duplicate.
+describe("add to terminology from the voice popover", () => {
+  async function openDetails() {
+    await voicesLoaded()
+    const chip = chipIn(cellIdFor("4:7"))
+    if (!chip) throw new Error("no chip")
+    act(() => chip.focus())
+    return screen.findByTestId("voice-details")
+  }
+
+  it("suggests a draft linked to a speaker the project has not named, in one click", async () => {
+    const add = vi.fn()
+    renderTable(makeProject(), DEFAULT_CELLS, true, { onAddConceptFromSelection: add })
+    const details = await openDetails()
+
+    // The Samaritan woman is a local participant: no stable id, so nothing to link.
+    expect(within(details).getAllByRole("button", { name: /to terminology/ })).toHaveLength(1)
+    fireEvent.click(within(details).getByRole("button", { name: /Add .*Jesus.* to terminology/ }))
+    expect(add).toHaveBeenCalledWith({ sourceTerm: "Jesus", externalIds: { acai: "person:Jesus.2" } })
+  })
+
+  it("offers to link the entry that already names him, only at the termbase floor", async () => {
+    const terminology: Concept[] = [
+      { id: "c-jesus", sourceTerm: "Jesus", renderings: [{ rendering: "Yesus", status: "preferred" }], status: "active", createdAt: "2026-10-05T00:00:00Z" },
+    ]
+    const link = vi.fn()
+    const lead = renderTable(makeProject({ terminology }), DEFAULT_CELLS, true, {
+      onAddConceptFromSelection: vi.fn(),
+      onLinkConceptToEntity: link,
+      canApproveConcept: true,
+    })
+    fireEvent.click(within(await openDetails()).getByRole("button", { name: /Link .*Jesus.* to .*Yesus/ }))
+    expect(link).toHaveBeenCalledWith({
+      conceptId: "c-jesus",
+      externalIds: { acai: "person:Jesus.2" },
+      term: "Jesus",
+      name: "Yesus",
+    })
+    lead.unmount()
+
+    renderTable(makeProject({ terminology }), DEFAULT_CELLS, true, {
+      onAddConceptFromSelection: vi.fn(),
+      onLinkConceptToEntity: link,
+      canApproveConcept: false,
+    })
+    const details = await openDetails()
+    expect(within(details).queryByRole("button", { name: /terminology|Link/ })).toBeNull()
   })
 })
 

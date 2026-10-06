@@ -10,6 +10,8 @@
  *       <termEntry id="...">
  *         <descrip type="subjectField">terminology</descrip>
  *         <note>...</note>             <!-- concept.notes -->
+ *         <xref type="externalCrossReference" target="acai:person:Jesus.2">…</xref>
+ *                                      <!-- concept.externalIds.acai (AQU-1693) -->
  *         <langSet xml:lang="source">
  *           <tig><term>...</term></tig>  <!-- concept.sourceTerm -->
  *         </langSet>
@@ -33,11 +35,20 @@
  * and <termNote type="administrativeStatus"> elements. The first langSet is
  * treated as source; subsequent langSets as target. Missing status defaults to
  * "preferred".
+ *
+ * The Bible entity link (AQU-1693) is a concept-level TBX-Basic
+ * `externalCrossReference`, not an Aquilla termNote: it describes the concept,
+ * not one term (termNote is term-level), and it is a standard category, so
+ * other TBX tools keep it. Its `target` is a URI with the `acai:` prefix;
+ * import reads only those, so another tool's web links are ignored.
  */
 
 import { v4 as uuid } from "uuid"
 import type { Concept, TermRendering, RenderingStatus, TermMatchOptions } from "./types"
 import { coerceMatchOptions } from "./match-options"
+import { acaiIdOf } from "./external-ids"
+
+const ACAI_TARGET_PREFIX = "acai:"
 
 // ---------------------------------------------------------------------------
 // TBX administrative-status ↔ RenderingStatus mapping
@@ -86,6 +97,10 @@ ${entries}
 
 function termEntry(c: Concept): string {
   const note = c.notes ? `\n      <note>${xmlEscape(c.notes)}</note>` : ""
+  const acai = acaiIdOf(c.externalIds?.acai)
+  const xref = acai
+    ? `\n      <xref type="externalCrossReference" target="${xmlEscape(ACAI_TARGET_PREFIX + acai)}">ACAI ${xmlEscape(acai)}</xref>`
+    : ""
   const { forms = [], ...optionsOnly } = c.match ?? {}
   const optionNote =
     Object.keys(optionsOnly).length > 0
@@ -109,7 +124,7 @@ function termEntry(c: Concept): string {
     c.renderings.length > 0
       ? `\n      <langSet xml:lang="target">\n${targetTigs}\n      </langSet>`
       : ""
-  return `    <termEntry id="${xmlAttr(c.id)}">${note}${sourceLang}${targetLang}\n    </termEntry>`
+  return `    <termEntry id="${xmlAttr(c.id)}">${note}${xref}${sourceLang}${targetLang}\n    </termEntry>`
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +154,8 @@ export function importConceptsTbx(xml: string): Concept[] {
     // notes: first <note> inside termEntry.
     const noteMatch = block.match(/<note[^>]*>([\s\S]*?)<\/note>/)
     const notes = noteMatch ? xmlUnescape(noteMatch[1].trim()) : undefined
+
+    const acai = conceptAcaiId(block)
 
     // Collect langSets in order: first = source, rest = target.
     const langSets: Array<{
@@ -213,10 +230,31 @@ export function importConceptsTbx(xml: string): Concept[] {
       status: "active",
       createdAt: now,
       ...(match ? { match } : {}),
+      ...(acai ? { externalIds: { acai } } : {}),
     })
   }
 
   return concepts
+}
+
+/**
+ * The entry's Bible entity link: the first concept-level
+ * `<xref type="externalCrossReference">` whose target is `acai:<id>`. Attribute
+ * order does not matter; xrefs inside a langSet belong to a term, not the
+ * concept, and are not read.
+ */
+function conceptAcaiId(entryBlock: string): string | null {
+  const conceptLevel = entryBlock.replace(/<langSet[\s\S]*?<\/langSet>/g, "")
+  const xrefRe = /<xref\b([^>]*)>/g
+  let tag: RegExpExecArray | null
+  while ((tag = xrefRe.exec(conceptLevel)) !== null) {
+    const type = tag[1].match(/\btype="([^"]*)"/)?.[1]
+    const target = xmlUnescape(tag[1].match(/\btarget="([^"]*)"/)?.[1] ?? "").trim()
+    if (type !== "externalCrossReference" || !target.startsWith(ACAI_TARGET_PREFIX)) continue
+    const id = acaiIdOf(target.slice(ACAI_TARGET_PREFIX.length))
+    if (id) return id
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------

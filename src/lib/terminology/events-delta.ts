@@ -9,6 +9,7 @@
 // that into the smallest set of `term.*` events that takes the projection
 // from `prev` to `next`. Every write lands in the outbox like any other event.
 import type { Concept, TermMatchOptions, TermRendering } from "./types"
+import { sameExternalIds } from "./external-ids"
 import {
   emitTermApprove,
   emitTermCreate,
@@ -73,6 +74,8 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
           status: c.status,
           ...(c.notes ? { notes: c.notes } : {}),
           ...(c.caseSensitive ? { caseSensitive: true } : {}),
+          ...(c.match ? { match: c.match } : {}),
+          ...(c.externalIds?.acai ? { externalIds: c.externalIds } : {}),
           author,
         }),
       )
@@ -101,6 +104,13 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
       // `{}` (not undefined) so clearing every option actually reaches the
       // projector — same reason `notes` clears with "".
       update.match = c.match ?? {}
+      changed = true
+    }
+    if (!sameExternalIds(c.externalIds, was.externalIds)) {
+      // AQU-1693: `{}` unlinks, for the same reason `match` clears with `{}`.
+      // An edit that leaves the link alone sends no key, so a stale snapshot
+      // never overwrites a link someone else set.
+      update.externalIds = c.externalIds?.acai ? c.externalIds : {}
       changed = true
     }
     if (changed) ids.push(await emitTermUpdate(update))

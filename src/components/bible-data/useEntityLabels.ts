@@ -12,6 +12,7 @@ import type { BkpEntity, BkpEntityId } from "@/lib/bible-data/pack-types"
 import {
   acaiLanguageFor,
   acaiLanguageForLocale,
+  linkedConceptIndex,
   pickLabelText,
   resolveVoiceLabel,
   type VoiceLabel,
@@ -20,8 +21,11 @@ import {
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
+import type { Concept } from "@/lib/terminology/types"
 
 export type EntityLabeler = (entityId: BkpEntityId) => VoiceLabel | null
+
+const NO_CONCEPTS: readonly Concept[] = []
 
 /** The label chain over one pack's entities, cached per entity; null until the entities load. */
 export function useEntityLabels(
@@ -33,14 +37,21 @@ export function useEntityLabels(
   const multiLane = projectTargetLaneLanguages(project).length > 1
   return useMemo(() => {
     if (!entities) return null
+    const concepts = project.terminology ?? []
+    // AQU-1693: concepts linked to an entity by its ACAI id name it first.
+    const linked = linkedConceptIndex(concepts)
     const options: VoiceLabelOptions = {
       mode: labelMode,
       interfaceLanguage: acaiLanguageForLocale(locale),
       projectNames: {
-        concepts: project.terminology ?? [],
+        concepts,
         termMatching: project.termMatching,
         sourceLanguage: acaiLanguageFor(project.sourceLanguage),
         multiLane,
+        conceptsForEntity: (entityId) => {
+          const acai = Object.hasOwn(entities, entityId) ? entities[entityId].acai : undefined
+          return (acai && linked.get(acai)) || NO_CONCEPTS
+        },
       },
     }
     const cache = new Map<BkpEntityId, VoiceLabel | null>()

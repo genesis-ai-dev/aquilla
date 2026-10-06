@@ -5,7 +5,8 @@
 // which datasets say so, a "Show every line by …" action per speaker, and
 // where each name came from. Shown in the chip's popover on hover and on
 // keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
-// marks disputed (slice 3).
+// marks disputed (slice 3). AQU-1693: "Add to terminology" by each name the
+// project has not agreed yet.
 
 import { Fragment } from "react"
 import { AlertTriangle } from "lucide-react"
@@ -15,6 +16,7 @@ import type { BkpEntityId, BkpSpeech } from "@/lib/bible-data/pack-types"
 import { distinctVoices, voiceSequence, type Voice } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import { EntityTermAction } from "./EntityTermAction"
 import type { CellVoiceView } from "./voices-context"
 import { evidenceSourceKey, labelSourceKey, narratorKey, speechTypeKey } from "./voice-text"
 
@@ -91,7 +93,13 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
                   <dt dir="auto">
                     <bdi>{label.label}</bdi>
                   </dt>
-                  <dd className="text-muted-foreground">{t(labelSourceKey(label))}</dd>
+                  <dd className="flex flex-wrap items-baseline gap-x-2 text-muted-foreground">
+                    <span>{t(labelSourceKey(label))}</span>
+                    <EntityTermAction
+                      entity={Object.hasOwn(context.entities, id) ? context.entities[id] : undefined}
+                      name={label.label}
+                    />
+                  </dd>
                 </Fragment>
               )
             })}

@@ -226,6 +226,8 @@ import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { BibleDataProvider } from "./bible-data/BibleDataProvider"
+import type { EntityLinkRequest, EntityTermActions } from "./bible-data/entity-term-context"
+import { acaiLanguageFor } from "@/lib/bible-data/voice-labels"
 import { CellContextTab } from "./bible-data/CellContextTab"
 import { MentionSourceText } from "./bible-data/MentionSourceText"
 import { SpeechRails } from "./bible-data/SpeechRails"
@@ -971,6 +973,8 @@ interface EditorTableProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
+  /** AQU-1693: link an existing terminology entry to a Bible entity, from a Voices or Who's Who popover. */
+  onLinkConceptToEntity?: (request: EntityLinkRequest) => void | Promise<void>
   /** Non-null when the user cannot write terminology (below Maintainer) —
    *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
@@ -1056,7 +1060,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+  onProjectChanged, onAddConceptFromSelection, onLinkConceptToEntity, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
   onValidated,
   repetitionCounts,
@@ -1210,6 +1214,24 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     jumpToCell: jumpToBibleCell,
     getTokenForFile,
   })
+  // AQU-1693: "Add to terminology" in the Voices and Who's Who popovers.
+  // Suggesting a draft needs only what adding a term from a selection needs;
+  // linking an existing entry is a term.update, gated at the termbase floor.
+  const bibleTermAdd = onAddConceptFromSelection && !addConceptBlockedReason ? onAddConceptFromSelection : null
+  const bibleTermLink = onLinkConceptToEntity && canApproveConcept ? onLinkConceptToEntity : null
+  const bibleTermActions = useMemo<EntityTermActions | null>(
+    () =>
+      bibleTermAdd || bibleTermLink
+        ? {
+            concepts: project.terminology ?? [],
+            termMatching: project.termMatching,
+            sourceLanguage: acaiLanguageFor(project.sourceLanguage),
+            add: bibleTermAdd ? (draft) => void bibleTermAdd(draft) : null,
+            link: bibleTermLink ? (request) => void bibleTermLink(request) : null,
+          }
+        : null,
+    [bibleTermAdd, bibleTermLink, project.terminology, project.termMatching, project.sourceLanguage],
+  )
   const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleData
   const voiceFilterActive = bibleData.filteredCellIds !== null
   const splitByMilestone = useMilestoneSplit()
@@ -3112,7 +3134,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onFollowRest={handleFollowRest}
             />
           )}
-          <BibleDataProvider data={bibleData}>
+          <BibleDataProvider data={bibleData} termActions={bibleTermActions}>
             <LegendList
               ref={listRef}
               refScrollView={setListScrollElement}

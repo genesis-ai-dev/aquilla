@@ -36,7 +36,9 @@ import { useTerminologyViolations } from "@/hooks/useTerminologyViolations"
 
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
-import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
+import type { Concept, ConceptExternalIds, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
+import { isBibleEntityLinkAvailable } from "@/lib/bible-data/experiment"
+import { cellVerses } from "@/lib/bible-data/voice-index"
 import {
   addConcept,
   updateConcept,
@@ -398,6 +400,23 @@ export function GlossaryEditor({
     },
     [project, canManage, persist],
   )
+  // AQU-1693: link the concept to a Bible person, place or group (or unlink
+  // it). The delta sends `externalIds` only when it changed, so no other edit
+  // on this page ever touches a link, whatever the flags say.
+  const onExternalIdsChange = useCallback(
+    (cid: string, externalIds: ConceptExternalIds | undefined) => {
+      const p = guard()
+      if (p) void persist(updateConcept(p, cid, { externalIds }))
+    },
+    [project, canManage, persist],
+  )
+  // The picker is offered only with this device's Bible data experiment and
+  // the project's Bible data switch; it lists the book the term first occurs in.
+  const bibleLinkAvailable = isBibleEntityLinkAvailable(project)
+  const bibleLinkBook = useMemo(
+    () => occurrences.cells.map((cell) => cellVerses({ ref: cell.context })?.book).find(Boolean),
+    [occurrences.cells],
+  )
   const onArchive = useCallback(
     (cid: string) => {
       const p = guard()
@@ -618,6 +637,8 @@ export function GlossaryEditor({
         onMatchChange={onMatchChange}
         onCaseSensitiveChange={onCaseSensitiveChange}
         onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
+        bibleLink={bibleLinkAvailable ? { defaultBook: bibleLinkBook } : undefined}
+        onExternalIdsChange={onExternalIdsChange}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}

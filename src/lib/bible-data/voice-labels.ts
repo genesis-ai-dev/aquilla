@@ -130,11 +130,23 @@ export function acaiLanguageForLocale(locale: string): InterfaceLabelLanguage | 
 // ── Project names ───────────────────────────────────────────────────────────
 
 /**
- * Concepts linked to an entity by id. This is where the planned
- * `Concept.externalIds.acai` link plugs in (follow-up to AQU-1687); nothing
- * provides it yet, so names come from the source-surface match only.
+ * Concepts linked to an entity by `Concept.externalIds.acai` (AQU-1693), of
+ * any status: `agreedRendering` reads only the active ones.
  */
 export type ConceptsForEntity = (entityId: BkpEntityId) => readonly Concept[]
+
+/** Concepts by the ACAI id they link to (AQU-1693). */
+export function linkedConceptIndex(concepts: readonly Concept[]): ReadonlyMap<string, readonly Concept[]> {
+  const index = new Map<string, Concept[]>()
+  for (const concept of concepts) {
+    const acai = concept.externalIds?.acai
+    if (!acai) continue
+    const list = index.get(acai)
+    if (list) list.push(concept)
+    else index.set(acai, [concept])
+  }
+  return index
+}
 
 export interface ProjectNameSource {
   concepts: readonly Concept[]
@@ -194,14 +206,25 @@ export function agreedRendering(concepts: readonly Concept[], multiLane: boolean
   return distinct[0]
 }
 
-/** The project's own name for an entity, or null when it has not agreed one. */
+/**
+ * The project's own name for an entity, or null when it has not agreed one.
+ *
+ * AQU-1693: a concept linked to the entity is exact, so it decides. When an
+ * active one exists, its agreed rendering is the name, or there is none (it
+ * only forbids, or several lanes disagree) and the chain moves on. The headword
+ * match is not asked instead: it could answer with a rendering the linked
+ * concept forbids. The headword match also skips concepts linked to another
+ * entity, so "Joseph" linked to one Joseph never names his namesake.
+ */
 export function projectNameFor(entityId: BkpEntityId, entity: BkpEntity, source: ProjectNameSource): string | null {
-  const linked = source.conceptsForEntity?.(entityId) ?? []
-  const fromLink = linked.length > 0 ? agreedRendering(linked, source.multiLane) : null
-  if (fromLink) return fromLink
+  const linked = (source.conceptsForEntity?.(entityId) ?? []).filter((concept) => concept.status === "active")
+  if (linked.length > 0) return agreedRendering(linked, source.multiLane)
   const sourceName = source.sourceLanguage ? entity.labels[source.sourceLanguage] : undefined
   if (!sourceName) return null
-  return agreedRendering(conceptsNamed(sourceName, source), source.multiLane)
+  const named = conceptsNamed(sourceName, source).filter(
+    (concept) => concept.externalIds?.acai === undefined || concept.externalIds.acai === entity.acai,
+  )
+  return agreedRendering(named, source.multiLane)
 }
 
 // ── The chain ───────────────────────────────────────────────────────────────

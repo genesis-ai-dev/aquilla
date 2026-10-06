@@ -12,11 +12,18 @@
 //   3. A non-scripture project with the setting UNSET shows the switch OFF.
 //   4. Toggling the switch marks the form dirty (about to persist an
 //      explicit value), proving persistence only happens on user action.
+//
+// AQU-1686 renamed the card to "Bible data" and put one switch per Bible data
+// enrichment under it. The second describe block covers how those rows ride
+// the page: stored choices show on load without a dirty flag, a change joins
+// the deferred Save bar and saves only `bibleEnrichments`, and the rows follow
+// the master switch, including an unsaved change to it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 
 vi.mock("@/components/org/OrgSidebar", () => ({
@@ -54,6 +61,10 @@ let currentProject: ProjectRecord = makeProject()
 // GET hasn't resolved yet. Defaults to true (hydrated) so the other tests in
 // this file — which don't care about the race — keep their prior behavior.
 let currentHasFetched = true
+// AQU-1686: the shared settings blob the page reads (and overlays once
+// fetched), and the PATCH it saves through.
+let currentSettings: ProjectWideSettings = {}
+const patch = vi.fn()
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -67,13 +78,13 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit: true,
     reasonCannotEdit: null,
-    patch: vi.fn().mockResolvedValue({ kind: "ok" }),
+    patch,
     version: 1,
     updatedAt: null,
     updatedBy: null,
     conflict: false,
     dismissConflict: vi.fn(),
-    settings: {},
+    settings: currentSettings,
     hasFetched: currentHasFetched,
     isOnline: true,
     refresh: vi.fn(),
@@ -143,6 +154,7 @@ function renderSettings() {
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+        <Route path="/project/:id/memory/:section" element={<p>Living Memory pane</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -150,7 +162,9 @@ function renderSettings() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  patch.mockResolvedValue({ kind: "ok" })
   currentHasFetched = true
+  currentSettings = {}
 })
 
 describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
@@ -160,7 +174,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "true")
     // Nothing was toggled by the user — the page must not report unsaved changes
     // just from rendering the derived state.
@@ -173,7 +187,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: false,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -183,7 +197,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -193,7 +207,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     fireEvent.click(toggle)
     expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
   })
@@ -240,9 +254,70 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     currentHasFetched = true
     rerenderSettings()
 
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+  })
+})
+
+describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
+  const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
+  const enrichmentSwitch = (name: string) => screen.getByRole("switch", { name })
+  const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
+
+  it("renames the card to Bible data", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    renderSettings()
+    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible data/)
+    expect(screen.queryByText("Bible resources")).toBeNull()
+  })
+
+  // A stored choice must read back as stored after a reload, and settling to
+  // it must not count as an edit (the AQU-460 trust bug, one level down).
+  it("shows stored choices and defaults on load without a dirty flag", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentSettings = { bibleEnrichments: { voices: false, autopilot: true }, autopilotEnabled: true }
+    renderSettings()
+    expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-checked", "false")
+    expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-checked", "true")
+    // Not stored → its registry default.
+    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "true")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("joins the Save bar and saves only the bibleEnrichments key", async () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    renderSettings()
+    fireEvent.click(enrichmentSwitch("Places and maps"))
+    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    expect(patch.mock.calls[0]?.[0]).toEqual({ bibleEnrichments: { places: false } })
+  })
+
+  it("disables every enrichment, with the reason, while Bible data is off — even an unsaved off", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    renderSettings()
+    expect(enrichmentSwitch("Voices")).not.toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.click(screen.getByRole("switch", { name: /enable bible data/i }))
+    expect(screen.getByText("Turn on Bible data to use these enrichments.")).toBeInTheDocument()
+    expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-disabled", "true")
+    expect(enrichmentSwitch("Bible data checks")).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("disables the autopilot row with its reason while Autopilot is off for the project", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    renderSettings()
+    expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText(/Autopilot is off for this project/)).toBeInTheDocument()
+  })
+
+  it("opens Rules → Built-in checks from the checks row", async () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    renderSettings()
+    fireEvent.click(screen.getByRole("button", { name: "Open built-in checks" }))
+    expect(await screen.findByText("Living Memory pane")).toBeInTheDocument()
   })
 })

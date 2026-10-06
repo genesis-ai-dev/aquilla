@@ -85,8 +85,10 @@ import type {
 import {
   AUDIO_MEDIA_STRATEGY_LABELS,
   projectHasScriptureFiles,
-  resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
+import { isAutopilotVisible } from "@/lib/features/flags"
+import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
+import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -265,6 +267,8 @@ interface Baseline {
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
+  /** AQU-1686: EXPLICIT enrichment choices only; a missing id shows its default. */
+  bibleEnrichments: BibleEnrichmentSettings
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -324,6 +328,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
+    // AQU-1686: explicit choices only — never fill in the defaults, or Save
+    // would pin today's defaults onto the project.
+    bibleEnrichments: project.bibleEnrichments ?? {},
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
@@ -352,6 +359,7 @@ const BLOB_BACKED_KEYS = [
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
+  "bibleEnrichments",
   "precedingTargetCells",
   "importExcludeFrontMatter",
   "smartQuotes",
@@ -658,6 +666,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
+  // AQU-1686: explicit enrichment choices — same "persist only what was
+  // chosen" contract as the switch above.
+  const [bibleEnrichments, setBibleEnrichments] = useState<BibleEnrichmentSettings>({})
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
@@ -722,6 +733,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
+    setBibleEnrichments(b.bibleEnrichments)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
@@ -790,6 +802,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
+      bibleEnrichments: setBibleEnrichments,
       precedingTargetCells: setPrecedingTargetCells,
       importExcludeFrontMatter: setImportExcludeFrontMatter,
       smartQuotes: setSmartQuotes,
@@ -901,6 +914,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
+      !sameSetting(bibleEnrichments, baseline.bibleEnrichments) ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
@@ -919,7 +933,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
     timingLocked,
-    harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
+    harmonizeMinRole, bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching,
   ])
 
@@ -1137,7 +1151,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible data") }
+      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
       if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
@@ -1219,6 +1234,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
+        bibleEnrichments,
         decaySettings,
         audioMediaStrategy,
         geminiApiKey,
@@ -1276,7 +1292,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
-    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
+    bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
@@ -1342,7 +1358,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
-    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    // AQU-1686: "translation notes" stays. It used to mislead (this card did
+    // not control the Translation Notes sidebar, and still does not), but the
+    // card now holds the Translation helps enrichment, which shows
+    // unfoldingWord's Translation Notes. "bible resources" keeps the old name
+    // findable.
+    {
+      id: "section-bible-resources",
+      label: "Bible data",
+      keywords: [
+        "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
+        "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
+        "hebrew", "translation helps", "translation notes", "translation questions", "key terms",
+        "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
+      ],
+    },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
@@ -1418,7 +1448,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, content structure, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible data",
       icon: SlidersHorizontal,
       hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
@@ -2026,36 +2056,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <div id="section-bible-resources">
-            <SettingsGroup label={t("projectSettings.section.bibleResources")}>
-              <SettingsRow
-                label={<label htmlFor="bible-resources-enabled">{t("projectSettings.bible.enableLabel")}</label>}
-                description={
-                  <>
-                    {t("projectSettings.bible.description")}
-                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.scriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.nonScriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === false ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.disabledHint")}</span>
-                    ) : null}
-                  </>
-                }
-                control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                    <Switch
-                      id="bible-resources-enabled"
-                      checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
-                      onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
-                      disabled={!canEditShared}
-                      aria-label={t("projectSettings.bible.enableLabel")}
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-            </SettingsGroup>
+            <BibleDataSection
+              switchValue={bibleResourcesEnabled}
+              onSwitchChange={setBibleResourcesEnabled}
+              enrichments={bibleEnrichments}
+              onEnrichmentChange={(enrichment, checked) =>
+                setBibleEnrichments((prev) => ({ ...prev, [enrichment]: checked }))
+              }
+              hasScriptureFiles={projectHasScriptureFiles(project?.files)}
+              canEdit={canEditShared}
+              lockedTooltip={sharedDisabledTooltip ?? null}
+              // The project-wide opt-in, or the legacy device-local flag that
+              // useProject overlays onto the record (AQU-1246).
+              autopilotOn={isAutopilotVisible({
+                autopilotEnabled: sharedSettingsBlob.autopilotEnabled,
+                experimentalFlags: project?.experimentalFlags,
+              })}
+              // Through requestNavigate, so unsaved edits get the discard prompt.
+              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "quality")) : undefined}
+            />
           </div>
         )}
 

@@ -357,7 +357,7 @@ export const projectSettings = defineNamespace({
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
+    "projectSettings.group.generalDescription": "Name, languages, username, Bible data",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI & completion",
@@ -379,7 +379,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.dcsUpstream": "Door43 upstream",
     "projectSettings.section.projectInfo": "Project Info",
     "projectSettings.section.languages": "Languages",
-    "projectSettings.section.bibleResources": "Bible resources",
+    "projectSettings.section.bibleResources": "Bible data",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
     "projectSettings.section.aiInstructions": "AI Instructions",
@@ -405,9 +405,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.smartQuotesLabel": "Smart quotes",
     "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
-    // ── Bible resources card ──
-    "projectSettings.bible.enableLabel": "Enable Bible resources",
-    "projectSettings.bible.description": "Scholarly reference data from bibletranslation.org in Search and the agent.",
+    // ── Bible data card (was "Bible resources"; renamed in AQU-1686) ──
+    "projectSettings.bible.enableLabel": "Enable Bible data",
+    "projectSettings.bible.description":
+      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and unfoldingWord. It powers Verse Resources, Bible search, the agent's Bible lookups and the enrichments below.",
     "projectSettings.bible.scriptureDefaultHint": "Available by default for scripture projects — turn off to disable.",
     "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
     "projectSettings.bible.disabledHint": "Turned off for this project. This is always respected, even for scripture projects.",
@@ -1132,6 +1133,24 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.section.bibleResources": {
+        description:
+          "Title of the settings card that turns Bible reference data on or off for " +
+          "the project, and the name of that setting. Formerly 'Bible resources'.",
+      },
+      "projectSettings.bible.enableLabel": {
+        description:
+          "Label of the main switch in the Bible data card. Turning it off turns off " +
+          "every Bible data feature listed under it.",
+      },
+      "projectSettings.bible.description": {
+        description:
+          "Explanation under the Bible data switch. bibletranslation.org, Macula, " +
+          "OpenText, ACAI and unfoldingWord are proper names: keep them untranslated. " +
+          "Verse Resources is the name of a side panel; 'Bible search' is the Bible " +
+          "mode of the Search panel; 'the enrichments below' are the switches listed " +
+          "under this one.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

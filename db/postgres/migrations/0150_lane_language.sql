@@ -1,4 +1,4 @@
--- Migration 0140: lane identity is language + optional name + optional code
+-- Migration 0150: lane identity is language + optional name + optional code
 -- override — AQU-1592 "Lane schema: required language, optional name, optional
 -- code override".
 --
@@ -30,7 +30,7 @@
 -- Apply by hand against Neon (same convention as prior migrations here —
 -- NOT applied automatically):
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0140_lane_language.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0150_lane_language.sql
 -- Verify: `\d lanes` shows a nullable `language` column and a nullable `name`.
 
 ALTER TABLE lanes ADD COLUMN IF NOT EXISTS language TEXT;

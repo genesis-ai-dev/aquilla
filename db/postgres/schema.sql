@@ -1372,7 +1372,7 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 --   * language  — the freeform language the maintainer typed, never derived.
 --                 What the AI is told and what "same language?" comparisons
 --                 read. Nullable only until the AQU-1616 backfill fills the
---                 rows that predate 0140 (readers fall back to `name`).
+--                 rows that predate 0150 (readers fall back to `name`).
 --   * name      — OPTIONAL display override; NOT unique (the UI disambiguates).
 --                 NULL means "display the language"; the "Source" / "Untitled
 --                 lane" placeholders are derived at read time, never stored.
@@ -1385,9 +1385,9 @@ CREATE TABLE IF NOT EXISTS lanes (
     id          TEXT        NOT NULL,   -- opaque 8-hex, globally unique, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
-    language    TEXT,                   -- 0140: freeform, required for new rows
-    name        TEXT,                   -- 0140: nullable display override
-    lang_code   TEXT,                   -- 0140: nullable BCP 47 override
+    language    TEXT,                   -- 0150: freeform, required for new rows
+    name        TEXT,                   -- 0150: nullable display override
+    lang_code   TEXT,                   -- 0150: nullable BCP 47 override
     legacy_tag  TEXT,
     position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
     archived_at TIMESTAMPTZ,

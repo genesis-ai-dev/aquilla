@@ -223,24 +223,26 @@ export const editor = defineNamespace({
       "Its captions are on the Media view's timeline, in {tracks}.",
     "editor.media.openMediaView": "Open Media view",
     // Sam's D1 (2026-10-05): the empty state is one card with one action;
-    // the original recording is a quiet second way in, and its explanation
+    // an audio or video file is a quiet second way in, and its explanation
     // waits on the step it explains.
     // Sam, Oct 5: only the action is underlined, not the "or" that joins it to
-    // the button above, so the link is its own key inside the sentence.
+    // the button above, so the link is its own key inside the sentence. Also
+    // Oct 5: "the original recording" read as "record your own voice", so the
+    // link says what it does and what you bring.
     "editor.media.linkedVideoUseRecording": "or {link}",
-    "editor.media.linkedVideoUseRecordingLink": "use the original recording",
-    "editor.media.linkedVideoAddRecording": "Add the original recording",
-    "editor.media.linkedVideoRecordingTitle": "Use the original recording",
+    "editor.media.linkedVideoUseRecordingLink": "make rows from an audio or video file",
+    "editor.media.linkedVideoAddRecording": "Make rows from an audio or video file",
+    "editor.media.linkedVideoRecordingTitle": "Make rows from an audio or video file",
     "editor.media.linkedVideoBackToCaptions": "Back to captions",
     // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
     // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The recording has to run to the same timing as the video. Its segments " +
-      "become this file's rows. The video keeps playing with its own sound; to " +
-      "hear the recording instead, pick it from the sound menu on the video.",
+      "The file has to run to the same timing as the video. Its speech becomes " +
+      "this file's rows. The video keeps playing with its own sound; to hear the " +
+      "file instead, pick it from the Sound menu on the video.",
     "editor.media.linkedVideoUploadHintGeneric":
-      "The recording has to run to the same timing as the linked video. Its " +
-      "segments become this file's rows.",
+      "The file has to run to the same timing as the linked video. Its speech " +
+      "becomes this file's rows.",
     // AQU-1566 (option b): on such a file the first captions attached become
     // its OWN rows, so a maintainer gets the action in place, and a caption
     // track that is already on the timeline can be turned into the rows.
@@ -2811,22 +2813,23 @@ export const editor = defineNamespace({
       "editor.media.linkedVideoUseRecordingLink": {
         description:
           "The clickable part of that line. It opens a second step for uploading " +
-          "the original audio or video recording instead, which also produces rows " +
-          "for this file. Lower-case: it continues the sentence.",
-        maxLength: 36,
+          "an audio or video file of this same video instead; its speech is split " +
+          "into rows for this file. Lower-case: it continues the sentence.",
+        maxLength: 44,
       },
       "editor.media.linkedVideoAddRecording": {
         description:
           "The same link when there is no 'Attach captions' button above it (the " +
-          "person may upload a recording but not attach captions), so it stands " +
-          "on its own.",
-        maxLength: 40,
+          "person may upload a file but not attach captions), so it stands on its " +
+          "own and starts with a capital.",
+        maxLength: 44,
       },
       "editor.media.linkedVideoRecordingTitle": {
         description:
-          "Heading of that second step of the linked-video empty state: upload " +
-          "the original recording of this video.",
-        maxLength: 40,
+          "Heading of that second step of the linked-video empty state: upload an " +
+          "audio or video file of this same video, and its speech becomes this " +
+          "file's rows.",
+        maxLength: 44,
       },
       "editor.media.linkedVideoBackToCaptions": {
         description:
@@ -2836,17 +2839,17 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoUploadHint": {
         description:
-          "Caveat under that offer, for a YouTube video. The uploaded recording is " +
-          "cut into this file's rows by its own timings, so a recording that runs " +
-          "to a different timing than the video would put the rows out of step " +
-          "with it. The last sentence says the video keeps its own sound after the " +
-          "upload; 'sound menu' is the speaker icon in the video's bottom-right " +
-          "corner (editor.timeline.soundSourceHeading).",
+          "Caveat under that offer, for a YouTube video. The uploaded file is cut " +
+          "into this file's rows where its speech is, so a file that runs to a " +
+          "different timing than the video would put the rows out of step with it. " +
+          "The last sentence says the video keeps its own sound after the upload; " +
+          "'Sound menu' is the 'Sound: …' button in the video's bottom-right " +
+          "corner (editor.timeline.soundSourcePillLabel).",
       },
       "editor.media.linkedVideoUploadHintGeneric": {
         description:
           "The same caveat for a linked video that is not on YouTube, where there " +
-          "is no sound menu: the uploaded recording becomes what plays.",
+          "is no Sound menu: the uploaded file becomes what plays.",
       },
       "editor.media.linkedVideoAttachHint": {
         description:
@@ -2866,7 +2869,8 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoStudioVideo": {
         description:
-          "Line on the 'Use the original recording' step, only for a YouTube video. " +
+          "Line on the 'Make rows from an audio or video file' step, only for a " +
+          "YouTube video. " +
           "Whoever uploaded the video can download it as a video file in YouTube " +
           "Studio, and that file can be uploaded on this step. 'YouTube Studio' is a " +
           "product name; keep it as it is.",

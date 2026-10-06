@@ -21,8 +21,10 @@
 // source audio get the offer; a viewer gets the sentence and nothing else.
 //
 // Sam's D1 (2026-10-05): ONE card — a short title, one sentence, "Attach
-// captions" as the one primary action, and "or use the original recording" as
-// a quiet link to a second step that holds the upload and its explanation.
+// captions" as the one primary action, and "or make rows from an audio or
+// video file" as a quiet link to a second step that holds the upload and its
+// explanation. (It said "or use the original recording" until Sam, Oct 5:
+// "original recording" read as "record your own voice".)
 // "Open Media view" stays only for people who cannot attach captions: for them
 // it is the one useful thing to do (watch the video, see where captions go);
 // for a maintainer it would be a second button competing with the action the

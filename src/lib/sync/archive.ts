@@ -189,6 +189,16 @@ export async function linkProjectSource(
      * because "follow no files" is a mistake rather than a link.
      */
     fileIds?: string[]
+    /**
+     * AQU-1679: files this project ALREADY has that should follow an upstream
+     * file, in place of that upstream file arriving as a second copy. The
+     * project's file keeps its translations and takes the upstream's source.
+     * Only for a live link to the upstream's source; every `upstreamFileId`
+     * must be among `fileIds` when those are sent. The server refuses the whole
+     * link (422) if a pair is not the same material — check first with
+     * `fetchLinkFileMatches`.
+     */
+    replaceFiles?: Array<{ upstreamFileId: string; fileId: string }>
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {
@@ -237,6 +247,13 @@ export async function addLinkedSourceFiles(
   projectId: string,
   /** UPSTREAM file ids, as the link-source preview lists them. Non-empty. */
   fileIds: string[],
+  /**
+   * AQU-1679: files this project ALREADY has that an added upstream file
+   * should follow into, instead of arriving as a second copy — same shape and
+   * rules as `linkProjectSource`'s `replaceFiles`; every `upstreamFileId` must
+   * be among `fileIds`. Omit when nothing is replaced.
+   */
+  replaceFiles?: Array<{ upstreamFileId: string; fileId: string }>,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<AddLinkedSourceFilesResult> {
   const res = await fetch(
@@ -247,7 +264,10 @@ export async function addLinkedSourceFiles(
         "Content-Type": "application/json",
         Authorization: `Bearer ${jwt}`,
       },
-      body: JSON.stringify({ fileIds }),
+      body: JSON.stringify({
+        fileIds,
+        ...(replaceFiles && replaceFiles.length > 0 ? { replaceFiles } : {}),
+      }),
     },
   )
   if (!res.ok) {

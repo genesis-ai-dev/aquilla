@@ -2969,6 +2969,20 @@ case 'cell.audio.attach': {
       const hiddenProvided = typeof p.hidden === 'boolean'
       const hiddenAt = hiddenProvided && p.hidden ? event.serverTs : null
       const hiddenAtAssign = hiddenProvided ? 'hidden_at         = excluded.hidden_at,' : ''
+      // AQU-1679: on a file the project already had, the row keeps its own
+      // cell_id and stands in for a DIFFERENT upstream cell, which is recorded
+      // so the mirror can find the row again. Composed in, like `hidden_at`
+      // above, and only for such a mirror: an ordinary one never names the
+      // column, so a database that predates migration 0140 keeps mirroring.
+      const standsInFor = p.upstream.cellId !== event.cellId ? p.upstream.cellId : null
+      const upstreamCellCol = standsInFor ? ', upstream_cell_id' : ''
+      const upstreamCellVal = standsInFor ? ', ?' : ''
+      const upstreamCellAssign = standsInFor ? 'upstream_cell_id  = excluded.upstream_cell_id,' : ''
+      // The join itself is not subject to the monotonic guard — see `adopt` on
+      // the payload type.
+      const applyGuard = p.adopt === true
+        ? ''
+        : 'WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq'
       stmts.push(
         db
           .prepare(
@@ -2977,14 +2991,15 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at, hidden_at, lane_id
+              upstream_event_id, upstream_seq, tombstoned_at, hidden_at${upstreamCellCol}, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL, ?, ${laneIdResolveSql('source')}
+              ?, ?, NULL, ?${upstreamCellVal}, ${laneIdResolveSql('source')}
             )
             ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
               ${hiddenAtAssign}
+              ${upstreamCellAssign}
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),
@@ -3006,7 +3021,7 @@ case 'cell.audio.attach': {
               upstream_seq      = excluded.upstream_seq,
               tombstoned_at     = NULL,
               lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
-            WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
+            ${applyGuard}`,
           )
           .bind(
             event.projectId,
@@ -3032,6 +3047,7 @@ case 'cell.audio.attach': {
             p.upstream.eventId,
             upstreamSeq,
             hiddenAt,
+            ...(standsInFor ? [standsInFor] : []),
             ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )

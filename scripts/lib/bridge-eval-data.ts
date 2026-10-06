@@ -4,7 +4,9 @@
 //   • Clear-Bible Alignments (CC BY 4.0, https://github.com/Clear-Bible/Alignments):
 //     a manual alignment `data/<lang>/alignments/<TEXT>/SBLGNT-<TEXT>-manual.json`
 //     (records `{"source":["n43004007009"],"target":["43004007012","43004007013"]}`)
-//     and its target tokens `data/<lang>/targets/<TEXT>/nt_<TEXT>.tsv`;
+//     and its target tokens `data/<lang>/targets/<TEXT>/nt_<TEXT>.tsv`; for an
+//     OT book (AQU-1700) `WLCM-<TEXT>-manual.json`, whose sources are Macula
+//     Hebrew morpheme ids ("o080010160052"), and `ot_<TEXT>.tsv`;
 //   • the Bible Knowledge Pack v1 `text/` and `people/` layers (bibletranslation.org).
 // Nothing here downloads; scripts/bridge-align-eval.ts prints where to get them.
 
@@ -33,11 +35,27 @@ export const NT_BOOKS = [
   "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD", "REV",
 ] as const
 
-/** "JHN" → "43". */
+export const OT_BOOKS = [
+  "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH", "2CH",
+  "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK", "DAN", "HOS",
+  "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
+] as const
+
+export type Testament = "ot" | "nt"
+
+export function testamentOf(book: string): Testament {
+  if ((NT_BOOKS as readonly string[]).includes(book)) return "nt"
+  if ((OT_BOOKS as readonly string[]).includes(book)) return "ot"
+  throw new Error(`not a Bible book: ${book}`)
+}
+
+/** "JHN" → "43", "RUT" → "08": the book number of Macula's and Clear's ids. */
 export function bookNumber(book: string): string {
-  const index = (NT_BOOKS as readonly string[]).indexOf(book)
-  if (index < 0) throw new Error(`not a New Testament book: ${book}`)
-  return String(40 + index)
+  const nt = (NT_BOOKS as readonly string[]).indexOf(book)
+  if (nt >= 0) return String(40 + nt)
+  const ot = (OT_BOOKS as readonly string[]).indexOf(book)
+  if (ot >= 0) return String(ot + 1).padStart(2, "0")
+  throw new Error(`not a Bible book: ${book}`)
 }
 
 /** The pack's Greek, verse by verse, for the given books (all NT books by default). */
@@ -100,15 +118,17 @@ export function loadTargetText(tsvFile: string): Map<string, TextVerse> {
   return out
 }
 
-/** Gold links of one book: Greek word id → the target token ids it is aligned to. */
+/** Gold links of one book: Greek word id (or Hebrew morpheme id) → the target token ids it is aligned to. */
 export function loadGold(alignmentFile: string, book: string): Map<string, Set<string>> {
-  const prefix = `n${bookNumber(book)}`
+  const ot = testamentOf(book) === "ot"
+  const prefix = `${ot ? "o" : "n"}${bookNumber(book)}`
   const data = JSON.parse(readFileSync(alignmentFile, "utf8")) as { records: { source: string[]; target: string[] }[] }
   const out = new Map<string, Set<string>>()
   for (const record of data.records) {
     for (const source of record.source) {
       if (!source.startsWith(prefix)) continue
-      const id = source.slice(0, 12)
+      // An OT id has a morpheme digit after the word's.
+      const id = source.slice(0, ot ? 13 : 12)
       let targets = out.get(id)
       if (!targets) out.set(id, (targets = new Set()))
       for (const target of record.target) targets.add(target.slice(0, 11))
@@ -118,14 +138,16 @@ export function loadGold(alignmentFile: string, book: string): Map<string, Set<s
 }
 
 /** The files of one Clear text in a local checkout (or a folder holding the same file names). */
-export function clearFiles(dataDir: string, text: string): { alignment: string; tsv: string } {
+export function clearFiles(dataDir: string, text: string, testament: Testament = "nt"): { alignment: string; tsv: string } {
   const lang = { BSB: "eng", YLT: "eng", LSG: "fra", RV09: "spa" }[text]
+  const alignmentName = `${testament === "ot" ? "WLCM" : "SBLGNT"}-${text}-manual.json`
+  const tsvName = `${testament}_${text}.tsv`
   const candidates = [
-    { alignment: path.join(dataDir, `SBLGNT-${text}-manual.json`), tsv: path.join(dataDir, `nt_${text}.tsv`) },
+    { alignment: path.join(dataDir, alignmentName), tsv: path.join(dataDir, tsvName) },
     lang
       ? {
-          alignment: path.join(dataDir, "data", lang, "alignments", text, `SBLGNT-${text}-manual.json`),
-          tsv: path.join(dataDir, "data", lang, "targets", text, `nt_${text}.tsv`),
+          alignment: path.join(dataDir, "data", lang, "alignments", text, alignmentName),
+          tsv: path.join(dataDir, "data", lang, "targets", text, tsvName),
         }
       : null,
   ]
@@ -133,5 +155,5 @@ export function clearFiles(dataDir: string, text: string): { alignment: string; 
     if (!candidate) continue
     if (existsSync(candidate.alignment) && existsSync(candidate.tsv)) return candidate
   }
-  throw new Error(`no SBLGNT-${text}-manual.json / nt_${text}.tsv under ${dataDir}`)
+  throw new Error(`no ${alignmentName} / ${tsvName} under ${dataDir}`)
 }

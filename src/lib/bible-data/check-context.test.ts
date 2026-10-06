@@ -12,7 +12,8 @@ import { bibleChecksGate, bibleChecksGateFor, isMultiLaneProject, type BibleChec
 import { NO_READINESS } from "../../../db/shared/bible-checks/participant-types"
 
 const scripture = [{ type: "usfm" as const }]
-const ON: BibleChecksProject = { bibleResourcesEnabled: true, files: scripture }
+/** Bible data on, on a device with the Bible data experiment on (AQU-1685). */
+const ON: BibleChecksProject = { bibleResourcesEnabled: true, files: scripture, experimentalFlags: { bibleData: true } }
 const renderPeter = { id: "f1", key: "render.person.Peter", value: "Peter", scope: {}, author: "dev", at: "2026-10-06T00:00:00.000Z" }
 
 describe("the gate", () => {

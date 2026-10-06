@@ -35,6 +35,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { BibleFactsEvidence } from "./BibleFactsEvidence"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -839,6 +840,9 @@ export function AutopilotActivityInspector({
   onRunChanged,
 }: AutopilotActivityInspectorProps) {
   const { locale, t } = useI18n()
+  // AQU-1685: Bible data (the graph's Bible steps, each span's Bible facts)
+  // shows only on a device with the Bible data experiment on.
+  const bibleData = useBibleDataExperiment(projectId)
   const fallbackRuns = useMemo(() => mergeRuns(
     fallbackRun ? [fallbackRun] : [],
     (overview?.files ?? []).map(runFromOverview),
@@ -1461,7 +1465,7 @@ export function AutopilotActivityInspector({
             {selectedRun && (
               <>
                 <Separator />
-                <AutopilotProcessGraph run={selectedRun} activity={activity} />
+                <AutopilotProcessGraph run={selectedRun} activity={activity} bibleData={bibleData} />
                 <Card size="sm">
                   <CardHeader>
                     <CardTitle>{fileNames?.get(selectedRun.fileId) ?? selectedRun.fileId}</CardTitle>
@@ -1778,7 +1782,9 @@ export function AutopilotActivityInspector({
                     </div>
                   )}
                   {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
-                  <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
+                  {bibleData && (
+                    <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
+                  )}
                   {!readiness && sceneBriefs.length === 0 && (
                     <p className="text-sm text-muted-foreground">
                       {t("autopilot.inspector.context.noEvidence")}

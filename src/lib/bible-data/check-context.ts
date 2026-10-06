@@ -8,6 +8,7 @@ import type { CellCheckContext } from "@/lib/rules/rule-engine"
 import { projectHasScriptureFiles, type FileReference, type ProjectRecord } from "@/lib/parsers/types"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
+import { isBibleDataExperimentOn } from "./experiment"
 import { readLanguageProfile, type LanguageProfile } from "../../../db/shared/language-profile"
 import { readProjectFacts } from "../../../db/shared/project-facts"
 import { readinessFromDecisions } from "../../../db/shared/bible-checks/agreed-names"
@@ -25,7 +26,8 @@ import {
 
 /**
  * Whether a project's Bible data checks can run:
- *   off     — Bible data, or its Bible data checks enrichment, is off;
+ *   off     — the Bible data experiment is off on this device, or Bible data,
+ *             or its Bible data checks enrichment, is off;
  *   dormant — on, but every check of a cell waits for an empty Language-profile slot
  *             (AQU-1699: or for decisions or terminology the project does not have);
  *   on      — at least one check of a cell can run with this profile.
@@ -38,16 +40,31 @@ export type BibleChecksGate =
 /** What the gate reads from a project. A ProjectRecord fits. */
 export type BibleChecksProject = Pick<
   ProjectRecord,
-  "bibleResourcesEnabled" | "bibleEnrichments" | "languageProfile" | "projectFacts" | "targetLanes" | "archivedLanes" | "lanes"
+  | "bibleResourcesEnabled"
+  | "bibleEnrichments"
+  | "languageProfile"
+  | "experimentalFlags"
+  | "projectFacts"
+  | "targetLanes"
+  | "archivedLanes"
+  | "lanes"
 > &
   // AQU-1699: the agreed names read the source language, and the lanes the target's.
   Partial<Pick<ProjectRecord, "sourceLanguage" | "targetLanguage">> & {
     files?: Pick<FileReference, "type" | "hasScriptureContent">[]
   }
 
-/** Is the project's Bible data checks enrichment on? (It needs Bible data on too.) */
+/**
+ * Is the project's Bible data checks enrichment on? (It needs Bible data on
+ * too.) AQU-1685: and only on a device with the Bible data experiment on, so
+ * with the experiment off no Bible data check is listed, run or counted.
+ */
 export function bibleChecksEnabled(project: BibleChecksProject | null | undefined): boolean {
-  return !!project && resolveBibleEnrichment(project, "checks", projectHasScriptureFiles(project.files))
+  return (
+    !!project &&
+    isBibleDataExperimentOn(project) &&
+    resolveBibleEnrichment(project, "checks", projectHasScriptureFiles(project.files))
+  )
 }
 
 /**

@@ -55,7 +55,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -154,6 +154,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
 | Repetition auto-propagation: typing a translation into a repeated segment (validated by the edit itself) fills the file's other identical-source rows once the cell is left; filled rows stay unvalidated; the projection and a cold reload agree (AQU-1484 — not smoke: a regression leaves rows unfilled, it loses nothing. The settle-on-leave timing, the mid-typing hold and the self-validation-off gate are covered in RTL, `EditorTable.repetitionTrigger.test.tsx`; the per-cell chain/pin planning in `repetition-propagation.test.ts`) | `e2e/specs/validation/repetition-propagation.spec.ts` |
 | Sibling merge: a linked sibling's translations fold into the host as a real lane (a lane record, the switcher shows it, rename works) through the identity → sync call on the real schema (AQU-1550 — not smoke: no UI yet, and a failed merge leaves the donor live. The lane record, its position, re-runs and the no-orphan-on-failure rule are covered in the worker suite, `merge-sibling-lane-record.test.ts`; the fold token's claims and the duplicate-name refusal in auth-worker's `merge-sibling.test.ts`) | `e2e/specs/projects/merge-sibling.spec.ts` |
+| Link replacing an existing file: linking an established project from Settings → Source & sync with "Replace the source in my existing file" keeps ONE file with the same cells and its translation on its line, and a later upstream source edit reaches that same cell; the same option from "Choose files" on an existing link adds the file into the project's own copy (AQU-1679 — full-suite, not smoke: the option is off by default, so a regression strands nobody who did not choose it. The line pairing is pinned in `db/shared/link-file-match.test.ts`; the join, later edits/deletes, added and kept lines, the windowed first sync and the fall-back to a separate copy in `sync-worker/src/__tests__/link-sync-adopt-existing-file.test.ts`; the match route, the link and add-files requests' refusals and detach in auth-worker's `source-linking-replace-files.test.ts`; the confirm step's states in `LinkSourceSection.test.tsx` and the dialog's in `ChooseLinkedFilesDialog.test.tsx`) | `e2e/specs/projects/link-replace-existing-file.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
@@ -166,6 +167,13 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
+
+- Costly model waits show a shared fills-twice bar (editor AI draft, and
+  suggest-rules-from-edits). The draft or the suggestions appear as soon as
+  the call returns; the bar then finishes in about 200ms, and reduced motion
+  stays a static mark. Covered in RTL (`fills-twice-indicator.test.tsx`,
+  and the editor row assertion in `EditorTable.editorActions.test.tsx`).
+  The sparkle still filling a cell stays `e2e/specs/ai/completion.smoke.spec.ts`.
 
 - Unified Agent conversation/document/knowledge navigation and same-task
   re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).

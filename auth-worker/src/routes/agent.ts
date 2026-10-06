@@ -190,7 +190,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "read",
         description:
-          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). Start most tasks here.",
+          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). filter 'flagged' lists drafted/translated cells that break an enabled project rule nobody waived, naming the rule. Start most tasks here.",
         parameters: {
           type: "object",
           properties: {

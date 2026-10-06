@@ -8,7 +8,7 @@ export interface BillingPlanSelection {
 }
 export type BillingPlanReview = {
   workspace: Pick<BillingWorkspace, 'orgId' | 'name' | 'scope'>
-  checkoutEnabled: false
+  checkoutEnabled: boolean
 } & ({
   ready: true
   offer: BillingOffer

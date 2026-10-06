@@ -24,7 +24,7 @@
 import { AliasMap } from "./compress"
 import { resolveLaneIdOrTag, type ResolvedLane } from "../../../../db/shared/lane-ref"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
-import { loadLintRules, lintDraft } from "./lint"
+import { loadLintRules, lintDraft, rulesForLane } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
@@ -713,7 +713,7 @@ export async function stageEvents(
   const anyCommit = rawEvents.some(
     (r) => (r as RawEmitEvent)?.kind === "target.cell.commit",
   )
-  const lintRules = anyCommit ? await loadLintRules(db, ctx.projectId) : []
+  const lintRules = anyCommit ? rulesForLane(await loadLintRules(db, ctx.projectId), ctx.lane) : []
   const lintLines: string[] = []
 
   // Same once-per-emit discipline as the lint rules above: only read settings

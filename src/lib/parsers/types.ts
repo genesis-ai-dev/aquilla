@@ -4,11 +4,14 @@
 // here so every existing "@/lib/parsers/types" import keeps working unchanged.
 export type {
   CellType,
+  CellUnit,
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
   ExportCellFields,
 } from "./core-types"
+// Also needed in local type positions below, not just re-exported.
+import type { CellUnit } from "./core-types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -746,6 +749,14 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
   /** Curly quotes as you type in the translation editor. Synced via
    *  ProjectWideSettings; absent/false leaves straight quotes alone. */
   smartQuotes?: boolean

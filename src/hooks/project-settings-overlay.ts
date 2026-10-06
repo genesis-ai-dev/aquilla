@@ -86,6 +86,9 @@ export function overlaySettings(
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
+  // AQU-1720: the import cell unit must reach the workspace, where
+  // ImportDialog forwards it into the parse.
+  assign("importCellUnit", settings.importCellUnit)
   assign("harmonize_min_role", settings.harmonize_min_role)
   // Smart quotes must reach the workspace, where the cell editor reads it.
   assign("smartQuotes", settings.smartQuotes)

@@ -14382,6 +14382,7 @@ export function ProjectWorkspace() {
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
           excludeFrontMatter={project.importExcludeFrontMatter}
+          cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an

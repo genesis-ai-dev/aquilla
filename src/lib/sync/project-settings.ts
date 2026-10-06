@@ -246,6 +246,13 @@ export interface ProjectWideSettings {
    */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /**
+   * AQU-1688: facts about the target language that Bible data checks need,
+   * one optional slot each (db/shared/language-profile.ts). A check whose slot
+   * is empty is dormant. Maintainer floor, like the rest of the blob. Written
+   * whole, so a writer merges over the stored value to keep other slots.
+   */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

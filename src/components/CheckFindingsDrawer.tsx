@@ -16,7 +16,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
-import { formatTime, formatCount } from "@/lib/i18n/format"
+import { formatTime, formatCount, useFormat } from "@/lib/i18n/format"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { isBibleCheckInfraction } from "@/lib/bible-data/check-messages"
+import { formatInfractionEvidence, formatInfractionReason } from "@/lib/rules/format-infraction"
 import type { CellData } from "@/hooks/useCells"
 import type {
   CheckRunResult,
@@ -101,9 +104,11 @@ interface CellRefButtonProps {
   onNavigateToCell: (cellId: string) => void
   onOpenComments?: (cellId: string) => void
   detail?: string
+  /** AQU-1688: where a Bible data finding's fact comes from. */
+  evidence?: string[]
 }
 
-function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
+function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail, evidence }: CellRefButtonProps) {
   const t = useT()
   return (
     // min-w-0 on the flex item + button (SUB-5): without it, long unbroken
@@ -119,6 +124,9 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
         >
         <div className="truncate font-medium">{label}</div>
         {detail && <div className="truncate text-muted-foreground">{detail}</div>}
+        {evidence?.map((line) => (
+          <div key={line} className="truncate text-muted-foreground/80">{line}</div>
+        ))}
         {cell && (
           <div className="truncate text-muted-foreground">
             {truncateCellText(cellTextForDisplay(cell.translated), 60)}
@@ -155,16 +163,16 @@ function RuleFindingCard({
   onOpenComments?: (cellId: string) => void
 }) {
   const t = useT()
+  const format = useFormat()
   const SeverityIcon = group.rule.severity === "major" ? AlertTriangle : AlertCircle
   const severityColor = group.rule.severity === "major" ? "text-red-500" : "text-amber-500"
   return (
     <div className="min-w-0 rounded-md border p-2">
       <div className="mb-1 flex min-w-0 items-center gap-1.5">
         <SeverityIcon className={`h-3.5 w-3.5 shrink-0 ${severityColor}`} />
-        {/* group.rule.name is the user's OWN rule name (or, for a built-in
-            check, app-authored chrome resolved by translateRuleName) —
-            content, never keyed here. */}
-        <span className="min-w-0 truncate text-xs font-semibold">{group.rule.name}</span>
+        {/* The user's OWN rule name is content and stays as written; a
+            built-in check's name is app chrome, resolved by translateRuleName. */}
+        <span className="min-w-0 truncate text-xs font-semibold">{translateRuleName(group.rule, t)}</span>
         <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
           {t("common.cellCount", { count: group.infractions.length })}
         </span>
@@ -179,10 +187,14 @@ function RuleFindingCard({
               label={findingCellLabel(cell, inf.cellId)}
               cell={cell}
               detail={
-                inf.spans[0]?.matchedText
-                  ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
-                  : undefined
+                // AQU-1688: a Bible data finding explains itself; its marks alone say little.
+                isBibleCheckInfraction(inf)
+                  ? formatInfractionReason(inf, t)
+                  : inf.spans[0]?.matchedText
+                    ? t("rules.checkDrawer.matchedDetail", { text: inf.spans[0].matchedText })
+                    : undefined
               }
+              evidence={formatInfractionEvidence(inf, t, format)}
               onNavigateToCell={onNavigateToCell}
               onOpenComments={onOpenComments}
             />

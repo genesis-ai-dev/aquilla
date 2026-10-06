@@ -54,3 +54,40 @@ describe("BuiltinChecksList", () => {
     expect(row.textContent).toMatch(/2/)
   })
 })
+
+// AQU-1688: Bible data checks sit in their own group, and a dormant one says
+// which Language-profile slot it waits for (the spec: never dormant silently).
+describe("BuiltinChecksList — Bible data checks", () => {
+  const textOnly = resolveBuiltinRules(undefined)
+  const withBible = resolveBuiltinRules(undefined, { bibleChecks: true })
+  const quoteMarks = { levels: [{ open: "“", close: "”" }], continuation: "none" as const }
+
+  it("groups the Bible data checks under their own heading, only when they exist", () => {
+    const { unmount } = render(<BuiltinChecksList builtinRules={textOnly} infractions={new Map()} onSetOverride={() => {}} />)
+    expect(screen.queryByTestId("builtin-bible-checks")).toBeNull()
+    unmount()
+    render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} />)
+    const group = screen.getByTestId("builtin-bible-checks")
+    expect(within(group).getByText("Bible data checks")).toBeInTheDocument()
+    expect(within(group).getAllByTestId("builtin-row")).toHaveLength(8)
+    expect(within(group).getByText("Question kept")).toBeInTheDocument()
+  })
+
+  it("says each check needs quotation marks while the Language profile has none", () => {
+    render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{}} />)
+    const needs = within(screen.getByTestId("builtin-bible-checks")).getAllByTestId("builtin-row-needs")
+    expect(needs).toHaveLength(8)
+    expect(needs[0]).toHaveTextContent("Needs: quotation marks in Language profile")
+  })
+
+  it("drops the reason once the marks are set, and keeps the switch and severity", () => {
+    const spy = vi.fn()
+    render(
+      <BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={spy} languageProfile={{ quoteMarks }} />,
+    )
+    expect(screen.queryByTestId("builtin-row-needs")).toBeNull()
+    const row = screen.getByText("Quotation closes").closest("[data-testid='builtin-row']") as HTMLElement
+    fireEvent.click(within(row).getByRole("switch"))
+    expect(spy).toHaveBeenCalledWith("bkp:V2", expect.objectContaining({ enabled: false }))
+  })
+})

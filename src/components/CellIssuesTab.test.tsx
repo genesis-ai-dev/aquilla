@@ -53,6 +53,36 @@ function row(ruleId: string): HTMLElement {
   return el as HTMLElement
 }
 
+describe("CellIssuesTab — Bible data findings (AQU-1688)", () => {
+  // The story: the finding reads as an explanation tied to this verse, and an
+  // evidence line shows where the fact came from.
+  it("shows the localized explanation and the evidence line under the check's name", () => {
+    const bibleRule: TranslationRule = {
+      ...rule("builtin:bkp:V2", "Quotation closes"),
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "bkp:V2" },
+    }
+    const finding: RuleInfraction = {
+      ruleId: "builtin:bkp:V2",
+      cellId: "cell-1",
+      fileId: "file-1",
+      reason: "builtin:bkp:V2",
+      reasonParams: {
+        kind: "close-missing", level: "1", evidence: "speech", startRef: "JHN 4:9", startWord: "8",
+        endRef: "JHN 4:9", endWord: "18", speakerSources: "fcbh", speakerConf: "0.97",
+      },
+      spans: [],
+    }
+    renderTab({ activeInfractions: [finding], waivedInfractions: [], ruleMap: new Map([[bibleRule.id, bibleRule]]) })
+    const issue = row("builtin:bkp:V2")
+    expect(issue).toHaveTextContent("Quotation closes")
+    expect(issue).toHaveTextContent("A speech ends in this verse, but the translation has no closing quotation mark for it (level 1).")
+    expect(within(issue).getByTestId("issue-evidence")).toHaveTextContent(
+      "OpenText speech JHN 4:9 words 8–18; speaker from Clear speaker-quotations (confidence 97%)",
+    )
+  })
+})
+
 describe("CellIssuesTab (AQU-1133)", () => {
   it("un-waives a waived issue straight from the cell-detail row", () => {
     const props = renderTab()

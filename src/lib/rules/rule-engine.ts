@@ -2,6 +2,19 @@ import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
+import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
+import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-rules"
+
+/**
+ * AQU-1688: per-cell inputs for checks that need more than the cell's own
+ * text and source. Each field is about THIS cell only, so a keystroke in one
+ * cell still never re-evaluates another. A missing field means the checks
+ * that need it produce nothing for this cell.
+ */
+export interface CellCheckContext {
+  /** Pack facts and the Language profile for the Bible data checks. */
+  bible?: BibleCellCheckInput
+}
 
 // Compiled-regex cache. Rule patterns are stable across cells and across
 // calls; without this the hot keystroke path recompiles every pattern for
@@ -69,11 +82,14 @@ export function checkRules(
  * keystroke in X never requires re-evaluating rules on any Y.
  *
  * Pass pre-filtered `enabledRules` to avoid re-filtering on every call.
+ * `context` carries this cell's extra inputs (AQU-1688); omit it and the
+ * checks that need it stay silent.
  */
 export function checkRulesForCell(
   cell: CellData,
   fileId: string,
   enabledRules: TranslationRule[],
+  context?: CellCheckContext,
 ): RuleInfraction[] {
   if (enabledRules.length === 0) return []
   const out: RuleInfraction[] = []
@@ -88,7 +104,7 @@ export function checkRulesForCell(
     // the caller has to make the distinction — a dub with no text was being
     // reported as a MAJOR infraction on work that is finished.
     if (rule.check.checkId === "empty-target" && cell.hasOwnTake) continue
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, context)
     if (infraction) out.push(infraction)
   }
 
@@ -101,13 +117,18 @@ export function checkRulesForCell(
       const def = BUILTIN_CHECKS[rule.check.checkId]
       if (def?.runsOnEmptyTarget) continue
     }
-    const infraction = checkRule(rule, cell, fileId)
+    const infraction = checkRule(rule, cell, fileId, context)
     if (infraction) out.push(infraction)
   }
   return out
 }
 
-function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleInfraction | null {
+function checkRule(
+  rule: TranslationRule,
+  cell: CellData,
+  fileId: string,
+  context: CellCheckContext | undefined,
+): RuleInfraction | null {
   // SUB-28: media sections match rules against their transcript (the displayed
   // source), never the import filename / span offsets stay display-aligned.
   const source = effectiveSourceText(cell)
@@ -197,6 +218,9 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "builtin": {
       const def = BUILTIN_CHECKS[check.checkId]
       if (!def) return null
+      if (isBibleCheckId(check.checkId)) {
+        return bibleCheckInfraction(rule.id, check.checkId, cell.id, fileId, cell.translated, context?.bible)
+      }
       const spans = def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       return {

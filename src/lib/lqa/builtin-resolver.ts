@@ -6,6 +6,7 @@ import type {
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
+import { BIBLE_BUILTIN_CHECK_IDS } from "./bible-builtin-checks"
 
 const FROZEN_CREATED_AT = "1970-01-01T00:00:00.000Z"
 
@@ -32,6 +33,14 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.name",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.name",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.name",
+  "bkp:V1": "bibleData.check.v1.name",
+  "bkp:V2": "bibleData.check.v2.name",
+  "bkp:V3": "bibleData.check.v3.name",
+  "bkp:V5": "bibleData.check.v5.name",
+  "bkp:V7": "bibleData.check.v7.name",
+  "bkp:V8": "bibleData.check.v8.name",
+  "bkp:V9": "bibleData.check.v9.name",
+  "bkp:M1": "bibleData.check.m1.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -45,6 +54,14 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.description",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.description",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.description",
+  "bkp:V1": "bibleData.check.v1.description",
+  "bkp:V2": "bibleData.check.v2.description",
+  "bkp:V3": "bibleData.check.v3.description",
+  "bkp:V5": "bibleData.check.v5.description",
+  "bkp:V7": "bibleData.check.v7.description",
+  "bkp:V8": "bibleData.check.v8.description",
+  "bkp:V9": "bibleData.check.v9.description",
+  "bkp:M1": "bibleData.check.m1.description",
 }
 
 /**
@@ -67,10 +84,24 @@ export function translateRuleDescription(
   return checkId ? t(DESCRIPTION_KEY[checkId]) : rule.description
 }
 
+export interface ResolveBuiltinRulesOptions {
+  /**
+   * AQU-1688: the project's Bible data checks enrichment is on
+   * (`resolveBibleEnrichment(project, "checks", …)`). Only then do the Bible
+   * data checks exist as rules, so a project without Bible data never sees,
+   * counts or evaluates them.
+   */
+  bibleChecks?: boolean
+}
+
 export function resolveBuiltinRules(
   overrides: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>> | undefined,
+  options: ResolveBuiltinRulesOptions = {},
 ): TranslationRule[] {
-  return BUILTIN_CHECK_IDS.map((id) => {
+  const ids: readonly BuiltinCheckId[] = options.bibleChecks
+    ? [...BUILTIN_CHECK_IDS, ...BIBLE_BUILTIN_CHECK_IDS]
+    : BUILTIN_CHECK_IDS
+  return ids.map((id) => {
     const def = BUILTIN_CHECKS[id]
     const ov = overrides?.[id]
     return {

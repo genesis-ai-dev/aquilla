@@ -103,6 +103,9 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
+   *  only while the project's Bible data checks enrichment is on. */
+  | import("../../../db/shared/bible-checks/types").BibleCheckId
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -745,6 +748,10 @@ export interface ProjectRecord {
    *  (db/shared/bible-enrichments.ts), which also applies the Bible data
    *  switch above. */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /** AQU-1688: the Language profile Bible data checks read, synced via
+   *  ProjectWideSettings. Read it through `readLanguageProfile`
+   *  (db/shared/language-profile.ts), which drops a damaged slot. */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

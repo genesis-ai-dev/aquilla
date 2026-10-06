@@ -14,6 +14,10 @@
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { RuleInfraction, RuleInfractionReason } from "@/lib/parsers/types"
+import { formatBibleCheckReason, isBibleCheckInfraction } from "@/lib/bible-data/check-messages"
+
+// AQU-1688: the Bible data checks' evidence lines, for surfaces with room for them.
+export { formatBibleCheckEvidence as formatInfractionEvidence } from "@/lib/bible-data/check-messages"
 
 const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "target-forbids": "rules.infraction.targetForbids",
@@ -45,6 +49,8 @@ export function formatInfractionReason(infraction: RuleInfraction, t: TFunction)
     }
     return t("rules.infraction.sourceRequiresTarget")
   }
+  // AQU-1688: Bible data checks explain themselves from their own reason code.
+  if (isBibleCheckInfraction(infraction)) return formatBibleCheckReason(infraction, t)
   const key = STATIC_REASON_KEY[infraction.reason]
   return key ? t(key) : infraction.reason
 }

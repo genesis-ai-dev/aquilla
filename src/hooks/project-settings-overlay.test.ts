@@ -62,6 +62,9 @@ describe("overlaySettings", () => {
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
       bibleEnrichments: { voices: false, autopilot: true },
+      languageProfile: {
+        quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "continuation-mark" },
+      },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
@@ -76,6 +79,9 @@ describe("overlaySettings", () => {
     // AQU-1686: a dropped key would load layers for enrichments the project
     // switched off.
     expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
+    // AQU-1688: a dropped profile would leave Bible data checks dormant for a
+    // project that has set its quotation marks.
+    expect(out.languageProfile?.quoteMarks?.levels).toEqual([{ open: "«", close: "»" }])
     expect(out.importExcludeFrontMatter).toBe(true)
     expect(out.draftContext).toEqual({ precedingTargetCells: 4 })
     expect(out.termMatching).toEqual({ prefixes: ["re"], suffixes: [] })

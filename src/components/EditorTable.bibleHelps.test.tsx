@@ -9,10 +9,8 @@
  *   • a note is highlighted on exactly the Greek words it discusses, and only
  *     when the pack found its quote in one place; every other note is listed
  *     for the verse without pointing at any word;
- *   • a question's answer stays hidden until asked for, and a question on
- *     several verses says so;
- *   • key terms sit on the words that carry them, and only while Key terms
- *     is on;
+ *   • a question's answer stays hidden until asked for; a range says so;
+ *   • key terms sit on the words that carry them, only while Key terms is on;
  *   • "αὐτόν → Jesus" says which word the chain went through;
  *   • the 1.3 MB notes layer is fetched only when Translation helps is on AND
  *     a Context tab opens, once per book;
@@ -449,16 +447,10 @@ describe("Who's Who popover, pack 1.1", () => {
 
 // Pack slice 3 is not built yet; these files add its fields to real records.
 describe("pack slice 3, accepted before it ships", () => {
-  function withPeople(change: (people: BkpPeopleLayer) => void): string {
-    const people = JSON.parse(JHN4_11_PEOPLE_JSON) as BkpPeopleLayer
-    change(people)
-    return JSON.stringify(people)
-  }
-
   it("names τοῦ θεοῦ in JHN 4:10 by its form, 'God', where the entity's label is 'LORD'", async () => {
-    files["/people/JHN.json"] = withPeople((people) => {
-      people.mentions[THEOU_4_10] = { ...people.mentions[THEOU_4_10], form: { eng: "God" } }
-    })
+    const people = JSON.parse(JHN4_11_PEOPLE_JSON) as BkpPeopleLayer
+    people.mentions[THEOU_4_10] = { ...people.mentions[THEOU_4_10], form: { eng: "God" } }
+    files["/people/JHN.json"] = JSON.stringify(people)
     renderTable(makeProject())
     await waitFor(() => mentionOf(cellIdFor("4:10"), "deity:Lord"))
     const word = mentionOf(cellIdFor("4:10"), "deity:Lord")

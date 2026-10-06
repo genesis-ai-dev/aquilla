@@ -90,4 +90,6 @@ export interface ConceptDraft {
    */
   approve?: boolean
   match?: TermMatchOptions
+  /** AQU-1693: "Add to terminology" from a Voices or Who's Who popover links the entity. */
+  externalIds?: ConceptExternalIds
 }

@@ -234,6 +234,11 @@ export const bibleData = defineNamespace({
     "bibleData.view.impliedSubjectHints": "Implied-subject hints",
     "bibleData.view.impliedSubjectHints.names": "Names only",
     "bibleData.view.impliedSubjectHints.all": "All implied subjects",
+
+    // ── Voices and Who's Who popovers: add to terminology (AQU-1693) ──
+    "bibleData.terms.addAria": "Add {name} to terminology",
+    "bibleData.terms.linkEntry": "Link “{term}” to {name}",
+    "bibleData.terms.linkedToast": "Linked “{term}” to {name}",
   },
   context: {
     _context: {
@@ -1053,6 +1058,29 @@ export const bibleData = defineNamespace({
       },
       "bibleData.view.impliedSubjectHints.all": {
         description: "Option under 'Implied-subject hints': for every verb whose subject is implied.",
+      },
+      "bibleData.terms.addAria": {
+        description:
+          "Accessible name of the 'Add to terminology' button in the popover about a Bible " +
+          "person, place or group. It suggests a new terminology entry linked to them.",
+        placeholders: { name: "The person's, place's or group's name, e.g. Jesus." },
+      },
+      "bibleData.terms.linkEntry": {
+        description:
+          "Button in the popover about a Bible person, place or group: links the project's " +
+          "existing terminology entry (its source term) to that person, so the entry's " +
+          "rendering becomes their name.",
+        placeholders: {
+          term: "The terminology entry's source term, as the user wrote it, e.g. Jesus.",
+          name: "The person's, place's or group's name, e.g. Jesus.",
+        },
+      },
+      "bibleData.terms.linkedToast": {
+        description: "Confirmation toast after a terminology entry was linked to a Bible person, place or group.",
+        placeholders: {
+          term: "The terminology entry's source term, as the user wrote it.",
+          name: "The person's, place's or group's name.",
+        },
       },
     },
   },

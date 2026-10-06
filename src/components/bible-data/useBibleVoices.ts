@@ -95,11 +95,12 @@ export function useBibleVoices({
   const index = useMemo(() => (pack?.ok ? voiceIndexFor(pack.version, pack.voices) : null), [pack])
   const labelFor = useEntityLabels(project, pack?.ok ? pack.people.entities : null)
 
+  const entities = pack?.ok ? pack.people.entities : null
   return useMemo<BibleVoicesContextValue | null>(
     () =>
-      index && labelFor
-        ? { index, shared, labelFor, showChips: prefs.voiceChips, showRails: prefs.speechRails, showLinesBy }
+      index && labelFor && entities
+        ? { index, shared, labelFor, entities, showChips: prefs.voiceChips, showRails: prefs.speechRails, showLinesBy }
         : null,
-    [index, shared, labelFor, prefs.voiceChips, prefs.speechRails, showLinesBy],
+    [index, shared, labelFor, entities, prefs.voiceChips, prefs.speechRails, showLinesBy],
   )
 }

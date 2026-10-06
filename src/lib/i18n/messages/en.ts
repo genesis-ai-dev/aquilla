@@ -45,6 +45,8 @@ import { agent } from "../namespaces/agent"
 import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
+import { smartEdits } from "../namespaces/smartEdits"
+import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
 import { bibleAlignment } from "../namespaces/bibleAlignment"
 import type { MessageValue } from "../plurals"
@@ -76,6 +78,8 @@ export const en = {
   ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
+  ...smartEdits.keys,
+  ...harmonizer.keys,
   ...bibleData.keys,
   ...bibleAlignment.keys,
 } as const

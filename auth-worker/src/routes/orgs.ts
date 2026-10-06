@@ -16,6 +16,7 @@ import {
   createGroup,
   createOrgForUser,
   deleteGroup,
+  deleteOrganization,
   detachGroupProject,
   getEffectiveOrgRole,
   getMemberEffectiveAccess,
@@ -244,6 +245,32 @@ orgs.patch("/:orgId", zValidator("json", renameOrgBody), async (c) => {
   const { name } = c.req.valid("json")
   await renameOrg(c.env, orgId, name)
   return c.json({ id: orgId, name })
+})
+
+/**
+ * DELETE /api/v2/orgs/:orgId — owner only (AQU-1108).
+ * Membership role, not getEffectiveOrgRole: a platform admin who is not an
+ * owner of this org cannot delete it.
+ */
+orgs.delete("/:orgId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT id FROM organizations WHERE id = ?",
+  ).bind(orgId).first<{ id: number }>()
+  if (!row) return c.json({ error: "not found" }, 404)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.OWNER) return c.json({ error: "org owner required" }, 403)
+  const result = await deleteOrganization(c.env, orgId)
+  if (!result.ok) {
+    return c.json({
+      error: "organization_has_projects",
+      projectCount: result.projectCount,
+      message: "This organization still has projects. Remove them before deleting the organization.",
+    }, 409)
+  }
+  return c.json({ removed: true })
 })
 
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
@@ -1258,8 +1285,16 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   )
     .bind(invite.org_id, user.id)
     .first<{ role_level: number }>()
+  // [Pen test 2026-10-06] Same-user re-redeem is idempotent-while-member only
+  // (mirrors AQU-347 for projects): a removed member's old link is dead and a
+  // demoted member's role is not restored.
+  if (invite.used_at && invite.used_by === user.id && !existing) {
+    return c.json({ error: "Invite already used" }, 410)
+  }
   const finalRole = existing
-    ? Math.max(existing.role_level, invite.role_level)
+    ? invite.used_at
+      ? existing.role_level
+      : Math.max(existing.role_level, invite.role_level)
     : invite.role_level
 
   try {

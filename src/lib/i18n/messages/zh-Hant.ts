@@ -3283,7 +3283,6 @@ export const zh_Hant: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "只有維護者可以設定目標日期。",
   "org.projectOverview.plan.completion": "完成狀態",
   "org.projectOverview.plan.markDone": "標記完成",
-  "org.projectOverview.plan.markDoneHint": "可復原。",
   "org.projectOverview.plan.markDoneAnyway": "仍標記完成",
   "org.projectOverview.plan.unmarkDone": "取消標記",
   "org.projectOverview.plan.notMarkedDone": "尚未標記完成。",

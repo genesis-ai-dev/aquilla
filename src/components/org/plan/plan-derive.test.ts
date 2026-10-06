@@ -3,7 +3,7 @@ import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import type { PlanUnit } from "@/lib/plan/plan-status"
 import type { UnitAssignment } from "@/lib/sync/assignments"
 import {
-  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+  assignmentsShowAudio, frontMatterShortUnits, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
 } from "./plan-derive"
 
 const unit = (over: Partial<PlanUnit> = {}): PlanUnit => ({
@@ -64,6 +64,27 @@ describe("shortChaptersByUnit", () => {
     // Text complete, 15 takes missing: short only if the file expects audio.
     expect(shortChaptersByUnit([unit()], sections, new Set(["bible"])).get("bible:GEN")).toEqual(["3"])
     expect(shortChaptersByUnit([unit()], sections, new Set()).has("bible:GEN")).toBe(false)
+  })
+})
+
+describe("frontMatterShortUnits (AQU-1493)", () => {
+  it("names the units whose book front matter is short, so the row can say so", () => {
+    // A line added above a book's first verse counts in its front matter; the
+    // chapter list leaves that out, so this is how the row learns of it.
+    const sections = new Map<string, PlanSection[]>([["bible", [
+      section("GEN", { filledCount: 2, validatedCount: 2, totalCount: 3 }), // short
+      section("GEN 1"),
+      section("EXO"),                                                        // complete
+      section("EXO 1", { validatedCount: 18 }),
+    ]]])
+    const short = frontMatterShortUnits([unit(), unit({ sectionKey: "EXO" })], sections, new Set())
+    expect([...short]).toEqual(["bible:GEN"])
+  })
+
+  it("never counts a chapter, and says nothing for a file that has not arrived", () => {
+    const sections = new Map<string, PlanSection[]>([["bible", [section("GEN 1", { validatedCount: 1 })]]])
+    expect(frontMatterShortUnits([unit()], sections, new Set()).size).toBe(0)
+    expect(frontMatterShortUnits([unit({ fileId: "elsewhere" })], sections, new Set()).size).toBe(0)
   })
 })
 

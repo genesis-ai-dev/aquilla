@@ -238,6 +238,19 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
     expect(flagged.text).toContain("rule-es-only")
     expect(flagged.text).not.toContain("rule-fr-only")
+
+    // Production passes lanes.id. The rule stays pinned to the tag "es".
+    const laneRow = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = 'es'`,
+    )
+      .bind(PROJECT)
+      .first<{ id: string }>()
+    expect(laneRow?.id).toBeTruthy()
+    expect(laneRow!.id).not.toBe("es")
+    const byId = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx(laneRow!.id))
+    expect(byId.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    expect(byId.text).toContain("rule-es-only")
+    expect(byId.text).not.toContain("rule-fr-only")
   })
 })
 

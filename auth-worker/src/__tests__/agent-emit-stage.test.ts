@@ -616,6 +616,35 @@ describe("stageEvents — lane-scoped lint rules (AQU-609)", () => {
     expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
     expect(result.modelVerdictBlock).toContain(RULE_NAME)
   })
+
+  // The copilot passes lanes.id. The rule is still pinned to the legacy tag,
+  // so filtering on the id would drop the rule the editor shows for this lane.
+  it("lints by the lane row's tag when the run names the lane by id", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('a3f09c1e', ?, 'target', 'French', 'fr', 'fr', 2)`,
+    )
+      .bind(PROJECT)
+      .run()
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: "a3f09c1e" }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain(RULE_NAME)
+  })
+
+  it("does not apply that rule when the run names a different lane by id", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('a3f09c1e', ?, 'target', 'French', 'fr', 'fr', 2),
+              ('b4e10d2f', ?, 'target', 'Spanish', 'es', 'es', 3)`,
+    )
+      .bind(PROJECT, PROJECT)
+      .run()
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: "b4e10d2f" }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).not.toContain(RULE_NAME)
+  })
 })
 
 // AQU-1670: staging a whole-file proposal used to cost one Hyperdrive→Neon

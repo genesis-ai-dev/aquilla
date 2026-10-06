@@ -710,10 +710,15 @@ export async function stageEvents(
 
   // Deterministic lint on staged drafts: load the project's enabled rules once
   // per emit so the MODEL sees violations and can redraft before the user does.
+  // The run names the lane by id (AQU-1610). Lane-scoped rules are pinned to
+  // the legacy tag the editor stores (`rule.lane`, '' for the former default
+  // lane), so the filter uses that tag — the same spelling contextual drafts
+  // already pass as `run.targetLang`.
   const anyCommit = rawEvents.some(
     (r) => (r as RawEmitEvent)?.kind === "target.cell.commit",
   )
-  const lintRules = anyCommit ? rulesForLane(await loadLintRules(db, ctx.projectId), ctx.lane) : []
+  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  const lintRules = anyCommit ? rulesForLane(await loadLintRules(db, ctx.projectId), lane.targetLang) : []
   const lintLines: string[] = []
 
   // Same once-per-emit discipline as the lint rules above: only read settings
@@ -722,7 +727,6 @@ export async function stageEvents(
     (r) => typeof (r as RawEmitEvent)?.kind === "string" && isCellEditingKind((r as RawEmitEvent).kind as string),
   )
   const cellEditingFloor = anyCellEditing ? await loadCellEditingFloor(db, ctx.projectId) : undefined
-  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
 
   // AQU-1670: ONE read for every cell the batch names, BEFORE the per-event
   // loop. This is what keeps staging flat in cell count instead of one

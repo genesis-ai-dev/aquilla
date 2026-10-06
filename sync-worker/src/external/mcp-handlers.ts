@@ -197,7 +197,8 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'before you patch. Floors: `terminology` needs the org termbase-edit floor (default ' +
         'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-        'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+        'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+        'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
         'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
         'RESTRICTIVE direction ONLY (AQU-1282) — TIGHTENING oversight stages like any other ' +
         'write, LOOSENING it returns permission_denied naming the key in details.loosening. ' +

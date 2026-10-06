@@ -44,7 +44,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_COMPLETION_SETTINGS, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, retainTranslationPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -71,6 +71,7 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { mergeInRunDraftContext, gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import type { ModelCallRecord, RecordModelCall } from "@/lib/ai-interventions/client"
 import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/lib/completion/translate-as-read"
 import {
   idmlCompletionPromptSource,
@@ -111,21 +112,9 @@ const REGENERATE_TEMPERATURE = 0.8
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
 // Exported for other LLM call sites (e.g. back-translation) that must apply
-// the same "project settings else Frontier default" precedence.
-export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
-  provider: "frontier",
-  endpoint: "",
-  model: "",
-  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
-  temperature: 0.3,
-  systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
-  top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
-  contextSize: "medium",
-  useOnlyValidatedExamples: true,
-  main_chat_language: "",
-  fewShotExampleFormat: "source-and-target",
-}
+// the same "project settings else Frontier default" precedence. Aliases the
+// single definition in completion-service so the two cannot drift (AQU-1671).
+export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = DEFAULT_COMPLETION_SETTINGS
 
 export type CommitCompletedCell = (
   cell: CellData,
@@ -250,6 +239,9 @@ export function useCompletion(
   /** Style-rule instructions in force for one cell, resolved from the
    *  applicability graph (AQU-934). Omitted → no style block is injected. */
   styleInstructionsFor?: (cell: CellData) => string[],
+  /** AQU-1656: audit trail for each model call that committed a draft.
+   *  Fire-and-forget — never awaited, never fails a draft. */
+  recordModelCall?: RecordModelCall,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -338,7 +330,9 @@ export function useCompletion(
     exampleIds: string[],
     approvedExampleCount: number,
     evidence?: TranslationEvidenceSnapshot,
+    interventionId?: string,
   ): AiDraftProvenance => ({
+    ...(interventionId ? { interventionId } : {}),
     model: modelName,
     provider,
     promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
@@ -514,17 +508,33 @@ export function useCompletion(
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
         return false
       }
+      const mode = opts?.mode ?? "single"
+      const exampleIds = uniqueExampleIds(approvedExamples.map((example) => example.cellId))
+      const interventionId = crypto.randomUUID()
+      const committedText = completed.valueHtml ?? completed.value
       await commitCompletedCell?.(
         cell,
-        completed.valueHtml ?? completed.value,
+        committedText,
         llmAuthor,
-        draftProvenance(
-          opts?.mode ?? "single",
-          uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
-          approvedExamples.length,
-          evidence.snapshot,
-        ),
+        draftProvenance(mode, exampleIds, approvedExamples.length, evidence.snapshot, interventionId),
       )
+      recordModelCall?.({
+        callId: interventionId,
+        kind: "draft",
+        mode,
+        model: modelName,
+        provider,
+        messages,
+        rawOutput: result,
+        cells: [{
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: exampleIds,
+        }],
+      })
       setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       return true
@@ -545,7 +555,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -861,6 +871,8 @@ export function useCompletion(
                   "batch",
                   uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
                   batchApprovedExamples.length,
+                  undefined,
+                  crypto.randomUUID(),
                 ),
               })
             } catch (err) {
@@ -958,6 +970,29 @@ export function useCompletion(
           incrementBatchCompletionFailed(runId, 1)
         }
 
+        // AQU-1656: one trail record per model call, covering only the cells
+        // that actually committed.
+        const recorded = preparedDrafts.filter((_, i) => commitResults[i]?.status === "fulfilled")
+        if (recorded.length > 0) {
+          recordModelCall?.({
+            callId: crypto.randomUUID(),
+            kind: "draft",
+            mode: "batch",
+            model: modelName,
+            provider,
+            messages,
+            rawOutput: result,
+            cells: recorded.map((d) => ({
+              interventionId: d.provenance.interventionId ?? crypto.randomUUID(),
+              fileId: d.cell.fileId,
+              cellId: d.cell.id,
+              basedOnEventId: d.cell.targetEventId ?? null,
+              output: d.text,
+              exampleCellIds: d.provenance.exampleIds,
+            })),
+          })
+        }
+
         // If we broke out of the inner loop due to supersession, stop chunks.
         if (isBatchCompletionCancelled(runId)) break
 
@@ -1002,7 +1037,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1160,6 +1195,8 @@ export function useCompletion(
 
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
       const llmAuthor = modelName
+      const paragraphExampleIds = uniqueExampleIds(approvedExamples.map((example) => example.cellId))
+      const recordedCells: ModelCallRecord["cells"] = []
       for (const { cellId, text } of mapped) {
         const cell = draftCells.find((c) => c.id === cellId)
         if (!cell) continue
@@ -1187,19 +1224,38 @@ export function useCompletion(
             signal,
           }),
         )
+        const interventionId = crypto.randomUUID()
+        const committedText = completed.valueHtml ?? completed.value
         await commitCompletedCell?.(
           cell,
-          completed.valueHtml ?? completed.value,
+          committedText,
           llmAuthor,
-          draftProvenance(
-            "paragraph",
-            uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
-            approvedExamples.length,
-          ),
+          draftProvenance("paragraph", paragraphExampleIds, approvedExamples.length, undefined, interventionId),
         )
         committedIds.add(cellId)
+        recordedCells.push({
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: paragraphExampleIds,
+        })
         setPreviews((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
+      }
+
+      if (recordedCells.length > 0) {
+        recordModelCall?.({
+          callId: crypto.randomUUID(),
+          kind: "draft",
+          mode: "paragraph",
+          model: modelName,
+          provider,
+          messages,
+          rawOutput: result,
+          cells: recordedCells,
+        })
       }
 
       posthog.capture("ai paragraph translation completed", {
@@ -1236,7 +1292,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(lk(c.id), msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

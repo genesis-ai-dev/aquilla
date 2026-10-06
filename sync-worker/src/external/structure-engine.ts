@@ -45,6 +45,7 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -899,12 +900,14 @@ export async function commitStructure(
 
   const acceptedIds = new Set(out.accepted.map((a) => a.id))
   const rejected = out.rejected
+  // AQU-1571: a refusal names the file and line it was about.
+  const where = locateEvents(events)
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -913,9 +916,7 @@ export async function commitStructure(
   await stampProvenance(db, provenance, appliedIds)
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId, cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
   // A structural plan is one indivisible edit: a partially applied chain is a
   // broken document, so a rejection keeps the row in 'committing' and a retry
   // re-posts the same ids until every event lands.

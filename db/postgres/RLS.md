@@ -8,7 +8,7 @@ Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ## What is protected
 
-**21 of the schema's 55 project-scoped tables have RLS enabled.** The list below is
+**29 of the schema's 64 project-scoped tables have RLS enabled.** The list below is
 generated from the migrations; `scripts/rls-coverage.test.ts` fails if this table and
 the migrations disagree, and if any project-scoped table is neither covered nor
 explicitly recorded as uncovered. Before that guard existed this section said "nine
@@ -22,6 +22,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `cell_attachments` | `rls_cell_attachments_project_access` | 0112 |
 | `cell_audio` | `rls_cell_audio_project_access` | 0034 |
 | `cell_audio_validators` | `rls_cell_audio_validators_project_access` | 0096 |
+| `cell_plan_keys` | `rls_cell_plan_keys_project_access` | 0145 |
 | `cell_validators` | `rls_cell_validators_project_access` | 0034 |
 | `cells` | `rls_cells_project_access` | 0034 |
 | `changesets` | `rls_changesets_project_access` | 0055 |
@@ -30,6 +31,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `contextual_drafts` | `rls_contextual_drafts_select` / `_insert` / `_update` | 0074 |
 | `contextual_project_leases` | `rls_contextual_project_leases_select` / `_insert` / `_update` / `_delete` | 0074 |
 | `contextual_run_events` | `rls_contextual_run_events_select` / `_insert` | 0074 |
+| `contextual_run_traces` | `rls_contextual_run_traces_select` / `_insert` / `_delete` | 0136 |
 | `contextual_runs` | `rls_contextual_runs_select` / `_insert` / `_update` | 0074 |
 | `contextual_steering` | `rls_contextual_steering_select` / `_insert` / `_update` | 0074 |
 | `events` | `rls_events_project_access` | 0034 |
@@ -38,11 +40,14 @@ while four OPSEC passes cited it as a live mitigation.
 | `plan_units` | `rls_plan_units_project_access` | 0089 |
 | `project_settings` | `rls_project_settings_project_access` | 0034 |
 | `scene_briefs` | `rls_scene_briefs_select` / `_insert` / `_update` | 0074 |
+| `smart_edit_feedback` | `rls_smart_edit_feedback` | 0130 |
+| `smart_edit_observations` | `rls_smart_edit_observations` | 0130 |
+| `smart_edit_state` | `rls_smart_edit_state` | 0130 |
 | `team_handoffs` | `rls_team_handoffs` | 0126 |
 | `team_messages` | `rls_team_messages` | 0122 |
 | `team_threads` | `rls_team_threads` | 0122 |
 
-The 0034-family policies call `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant. The 0074-family (contextual/autopilot) policies additionally require `project_id = current_setting('app.project_id', true)` — exact-project rather than any-accessible-project.
+The 0034-family policies call `app_user_can_access_project(project_id)`, which checks all four membership paths (direct / group / org-at-Maintainer+ / creator) using `current_setting('app.user_id', true)`. AQU-1107 floors the org path at `org_members.role_level >= 600` so a Contributor org row is not a data-access grant. The 0074-family (contextual/autopilot) policies additionally require `project_id = current_setting('app.project_id', true)` — exact-project rather than any-accessible-project. The team-channel and smart-edit policies (0122 / 0126 / 0130) check *only* that exact-project match, and only when `app.project_id` is set — with it unset they admit every row. Their routes never set it (today only the agent SQL guard does), so tenant scoping for those tables lives at the authenticated route boundary.
 
 ### What is NOT protected
 

@@ -87,4 +87,44 @@ describe("local dev schema parser", () => {
       "CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project ON artifact_bindings(project_id);",
     ])
   })
+
+  it("collects CREATE VIEW statements, with OR REPLACE forced in, without disturbing tables", () => {
+    // Regression (2026-10-06): assignment_member_cells (migration 0147) is a
+    // view, so the additive reconciler never created it in a long-lived
+    // container and every assignments read 500ed with "relation does not
+    // exist". Views come back in file order, comments stripped, so the
+    // reconciler can CREATE OR REPLACE them after the tables they read.
+    const { tables, views } = parsePgSchema(`
+      CREATE TABLE assignment_scopes (
+        assignment_id TEXT NOT NULL,
+        chapter TEXT NOT NULL DEFAULT ''
+      );
+      -- AQU-1629: membership derived on read.
+      CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
+        -- the frozen snapshot half
+        SELECT s.assignment_id, s.chapter
+          FROM assignment_scopes s
+         WHERE s.chapter = ''; -- whole file
+      CREATE VIEW plain_view AS SELECT 1 AS one;
+      CREATE TABLE after_views (
+        id TEXT PRIMARY KEY
+      );
+    `)
+
+    expect(views.map((view) => view.name)).toEqual(["assignment_member_cells", "plain_view"])
+    expect(views[0].createSql).toBe(
+      [
+        "CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS",
+        "SELECT s.assignment_id, s.chapter",
+        "FROM assignment_scopes s",
+        "WHERE s.chapter = '';",
+      ].join("\n"),
+    )
+    expect(views[1].createSql).toBe("CREATE OR REPLACE VIEW plain_view AS SELECT 1 AS one;")
+    expect([...tables.keys()]).toEqual(["assignment_scopes", "after_views"])
+    expect(tables.get("assignment_scopes")?.columns.map((column) => column.name)).toEqual([
+      "assignment_id",
+      "chapter",
+    ])
+  })
 })

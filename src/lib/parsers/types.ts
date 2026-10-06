@@ -608,31 +608,23 @@ export interface ProjectRecord {
   /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"
-   * Server enforcement: sync-worker cell.validate branch must check the
-   * validator's syncRole.level against the floor before accepting the event.
-   * SWARM-TODO(server-enforcement): apply validationRoleFloor in
-   *   sync-worker/src/routes/sync.ts — the cell.validate event-projection
-   *   branch. Fetch the validator's role from the project member list (or
-   *   the sync-token claim) and reject if role.level < floor.
+   * Enforced by the server on every `cell.validate` (sync-worker
+   * src/events/route.ts, FRO-189) and mirrored client-side by
+   * `textValidationScope` (AQU-1571) so the UI never offers a refused vote.
    */
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   /**
    * Optional allowlist of usernames that may cast validation votes.
-   * When present AND non-empty, only listed users' votes count toward the
-   * threshold (AND'd with validationRoleFloor).
-   * SWARM-TODO(server-enforcement): apply validationNamedUsers in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. If list is
-   *   non-empty, reject votes from users not in the list.
+   * When present AND non-empty, only listed users may validate (AND'd with
+   * validationRoleFloor). Enforced and mirrored as the floor above.
    */
   validationNamedUsers?: string[]
   /**
    * When true (default), a contributor may validate their own commit and
    * the vote counts toward the threshold.
-   * When false, self-votes are silently ignored in threshold counting.
-   * SWARM-TODO(server-enforcement): apply allowSelfValidation in
-   *   sync-worker/src/routes/sync.ts — cell.validate branch. Compare
-   *   validator identity to the last-editor identity; skip if equal and
-   *   allowSelfValidation is false.
+   * When false, the server refuses a vote from the cell's last editor in the
+   * validated lane (route.ts, FRO-189/AQU-1571); the client blocks it up
+   * front with `isOwnTextEdit` and skips auto-validate-on-edit.
    */
   allowSelfValidation?: boolean
   /**
@@ -640,8 +632,8 @@ export interface ProjectRecord {
    * ruling — a project can want two ears on a recording and one on a
    * translation, or trust a different set of people with each. Neither set is
    * ever read as a fallback for the other; absent means unrestricted on both
-   * sides. All three ARE enforced server-side (sync-worker route.ts), unlike
-   * the text trio's long-standing SWARM-TODOs.
+   * sides. All three are enforced server-side (sync-worker route.ts), as the
+   * text trio is.
    */
   validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsersAudio?: string[]
@@ -1079,6 +1071,9 @@ export interface CellHistoryEntry {
   isStale?: boolean
   /** Local outbox state; absent once the server history has acknowledged it. */
   syncState?: "pending" | "failed"
+  /** AQU-1656: ai_interventions row holding this AI draft's prompt and raw
+   *  model output (from the commit's `ai_draft.interventionId`). */
+  interventionId?: string
 }
 
 export interface CommentMessage {

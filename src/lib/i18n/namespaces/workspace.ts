@@ -44,6 +44,15 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
+    // Tauri offline mode: the server refuses to sync a downloaded project —
+    // deleted, access removed, archived or frozen (src/lib/offline/project-access.ts).
+    "workspace.offline.projectUnavailableToast": "“{name}” is no longer available to you on the server, so this device has stopped syncing it.",
+    "workspace.offline.projectUnavailableHint": "It may have been deleted or archived, or your access was removed. You can still read the copy on this device.",
+    "workspace.offline.projectUnavailableQueued": plural({
+      one: "{count} change on this device hasn't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+      other: "{count} changes on this device haven't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+    }),
+    "workspace.offline.projectUnavailableRemove": "Remove offline copy",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -550,6 +559,36 @@ export const workspace = defineNamespace({
         description:
           "Action button on the 'changes aren't being saved' toast; quits and " +
           "relaunches the desktop app. Short imperative.",
+      },
+      "workspace.offline.projectUnavailableToast": {
+        description:
+          "Title of a persistent toast in the Tauri desktop app when the server " +
+          "stops letting this device sync a project it downloaded for offline " +
+          "use. Full sentence with a period. Plain language — no 'token' or " +
+          "'403' jargon.",
+        placeholders: {
+          name: "The project's name, shown in quotation marks.",
+        },
+      },
+      "workspace.offline.projectUnavailableHint": {
+        description:
+          "Body of the 'no longer available' toast when nothing is waiting to be " +
+          "sent. Lists the likely causes without blame and reassures that the " +
+          "local copy is still readable. Two full sentences with periods.",
+      },
+      "workspace.offline.projectUnavailableQueued": {
+        description:
+          "Body of the 'no longer available' toast when edits made on this " +
+          "device are still waiting to be sent. Warns they can't be delivered and " +
+          "that removing the offline copy would lose them. Two full sentences.",
+        placeholders: {
+          count: "How many unsent changes are on this device.",
+        },
+      },
+      "workspace.offline.projectUnavailableRemove": {
+        description:
+          "Action button on the 'no longer available' toast; deletes this " +
+          "project's copy from the device. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:

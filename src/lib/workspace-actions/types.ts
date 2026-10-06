@@ -49,8 +49,6 @@ export interface WorkspaceActionRunArgs {
   /** AQU-490: bulk AUDIO validation. Separate from the text one on purpose —
    *  a reviewer signing off translations has not listened to the takes. */
   runBatchValidateAudio: () => void
-  /** File-scoped target import — populate the open file's translations. */
-  runImportIntoFile: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
   navigate: NavigateFunction
@@ -83,6 +81,14 @@ export interface WorkspaceAction {
       joinList: (items: readonly string[]) => string,
     ) => string
     confirmLabelKey: MessageKey
+    /**
+     * False when the body already says this run can do nothing (the reader
+     * may not validate, or nothing here is eligible). The dialog then offers
+     * no acknowledgement and no confirm button, only Close: a confirm that
+     * sends nothing and repeats the body in an error toast is a dead end.
+     * Absent means the action can always be confirmed.
+     */
+    canConfirm?: (ctx: WorkspaceActionContext) => boolean
   }
   comingSoon?: boolean
   run: (ctx: WorkspaceActionContext, args: WorkspaceActionRunArgs) => void

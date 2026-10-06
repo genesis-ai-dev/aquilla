@@ -519,6 +519,7 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
         username,
         text: t.text,
         voiceCellId: t.voiceCellId,
+        surface: "generate-all", // AQU-1572
       }),
     {
       kind: "synth",

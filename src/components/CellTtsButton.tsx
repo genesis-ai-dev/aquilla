@@ -238,6 +238,7 @@ export function CellTtsButton({
               session,
               username: session.username,
               onProgress,
+              surface: "cell", // AQU-1572
             })
             blob = gen.blob
             // The other heard lines performing this same subtitle. Sequential,
@@ -260,6 +261,7 @@ export function CellTtsButton({
                   geminiContext,
                   session,
                   username: session.username,
+                  surface: "cell", // AQU-1572: one event per line it voiced
                 })
                 alsoWritten += 1
               } catch (e) {

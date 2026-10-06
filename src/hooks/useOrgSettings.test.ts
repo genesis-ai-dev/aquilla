@@ -828,3 +828,58 @@ describe("orgRules identity (AQU-1104)", () => {
     expect(afterFetch).toEqual([])
   })
 })
+
+// Sam, 2026-10-01: bulk text validation may take untouched AI drafts only when
+// the org says so. Unset is OFF — the opposite default to the two "unset is on"
+// keys beside it — and only a real boolean true turns it on.
+describe("useOrgSettings — allowBulkValidateAiDrafts is opt-in", () => {
+  const withSettings = (settings: Record<string, unknown>): OrgSettingsResponse => ({
+    ...makeResponse(),
+    settings,
+  })
+
+  it("is off in an org that has never set it", async () => {
+    mockFetchResponse = withSettings({})
+    const { result } = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.allowBulkValidateAiDrafts).toBe(false)
+  })
+
+  it("is on only for an explicit true", async () => {
+    mockFetchResponse = withSettings({ allowBulkValidateAiDrafts: true })
+    const on = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(on.result.current.hasFetched).toBe(true))
+    expect(on.result.current.allowBulkValidateAiDrafts).toBe(true)
+
+    mockFetchResponse = withSettings({ allowBulkValidateAiDrafts: "true" })
+    const garbage = renderHook(() => useOrgSettings(1, 400))
+    await waitFor(() => expect(garbage.result.current.hasFetched).toBe(true))
+    expect(garbage.result.current.allowBulkValidateAiDrafts).toBe(false)
+  })
+})
+
+// A setting changed in another tab used to reach an open editor only on reload,
+// so turning bulk validation of AI drafts OFF left the open editor offering it.
+describe("useOrgSettings — re-reads when the tab comes back", () => {
+  it("fetches again on return, but not more than once per 10 seconds", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000)
+    mockFetchResponse = makeResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const fetches = () => vi.mocked(restClient.fetchOrgSettings).mock.calls.length
+    const first = fetches()
+
+    // Straight back: too soon to ask again.
+    now.mockReturnValue(1_005_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    expect(fetches()).toBe(first)
+
+    // Later, the org turned the setting on elsewhere; returning picks it up.
+    mockFetchResponse = { ...makeResponse(), version: 2, settings: { allowBulkValidateAiDrafts: true } }
+    now.mockReturnValue(1_020_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.allowBulkValidateAiDrafts).toBe(true))
+    expect(fetches()).toBe(first + 1)
+    now.mockRestore()
+  })
+})

@@ -226,3 +226,20 @@ export function usePlanReadoutTips(): (
         }
   }
 }
+
+/**
+ * AQU-1493: "Front matter" as a label standing on its own — the tile under the
+ * chapter grid and the title of that tile's card — in sentence case, like
+ * "Chapter 3" beside it (Sam, 2026-10-03: the tile read lower case while the
+ * card it opens read "Front matter"). The catalogue word stays lower case for
+ * the places it runs inside a phrase, such as a row's "front matter and
+ * chapters 1 and 2". Cased here rather than a second catalogue string that
+ * differs only in case, which most target languages would translate twice for
+ * nothing — and which the duplicate-value check would refuse.
+ */
+export function useFrontMatterLabel(): string {
+  const t = useT()
+  const { locale } = useI18n()
+  const words = t("org.projectOverview.plan.frontMatter")
+  return words.charAt(0).toLocaleUpperCase(locale) + words.slice(1)
+}

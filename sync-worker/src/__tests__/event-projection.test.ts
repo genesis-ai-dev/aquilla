@@ -532,7 +532,15 @@ describe('buildEventProjectionStmts — cell.audio.validate / cell.audio.unvalid
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain('INSERT INTO cell_audio_validators')
     expect(recorded[0].sql).toContain('ON CONFLICT')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000])
+    // AQU-1591: the four trailing binds belong to the lane_id subquery, which
+    // reads the lane off the TAKE — a vote is a fact about one take, so it
+    // cannot take the lane of whoever happened to cast it. See
+    // audio-lane-projection.test.ts for the row that proves it.
+    expect(recorded[0].sql).toContain('SELECT lane_id FROM cell_audio')
+    expect(recorded[0].args).toEqual([
+      'proj-1', 'file-a', 'cell-1', 'a1', 'alice', 2000,
+      'proj-1', 'file-a', 'cell-1', 'a1',
+    ])
     expect(recorded[1].sql).toContain('SET validator_count')
   })
 
@@ -1075,11 +1083,17 @@ describe('source.cell.delete — dependent cleanup', () => {
   it("a target delete's cleanup tests the TARGET row's head, not the source's", () => {
     // The gate must follow the row the accompanying write targets, or a lane
     // delete would be gated on a row it is not touching.
-    const validators = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
-      .filter((r) => r.sql.includes('cell_validators'))
+    const recorded = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
+    const validators = recorded.filter((r) => r.sql.includes('cell_validators'))
     expect(validators).toHaveLength(1)
     expect(validators[0].args).toContain('target')
     expect(validators[0].args).toContain('fr')
+    const backtranslations = recorded.filter((r) => r.sql.includes('cell_backtranslations'))
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('FROM chain_claims')
+    expect(backtranslations[0].sql).toContain('FROM cells WHERE')
+    expect(backtranslations[0].args).toContain('target')
+    expect(backtranslations[0].args).toContain('fr')
   })
 
   // AQU-1068 review round: the translations are the SOURCE delete's business.
@@ -1181,11 +1195,24 @@ describe('source.cell.delete — dependent cleanup', () => {
     expect(validators).toHaveLength(1)
     expect(validators[0].sql).toContain('target_lang = ?')
     expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'fr'])
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('legacy_tag = ?')
+    expect(backtranslations[0].sql).toContain("lane_id IS NULL AND ? = ''")
+    // Named lane: the NULL-lane (default) rows are not selected.
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr', 'fr'])
     // The cell itself survives a lane delete, so its takes, pairings and
     // comments must all survive with it.
     for (const table of ['cell_audio', 'cell_links', 'UPDATE comments', 'cell_waivers', 'cell_word_morph']) {
       expect(sqlFor(recorded, table), table).toHaveLength(0)
     }
+  })
+
+  it('a default-lane target delete also removes NULL-lane back-translations', () => {
+    const recorded = deleteStmts('target.cell.delete', {})
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', '', ''])
   })
 
   it('gates every dependent write on the chain claim, like the cells write', () => {

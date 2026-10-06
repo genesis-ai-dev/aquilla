@@ -189,7 +189,7 @@ CREATE TABLE projects (
     -- clears this, in one statement.
     source_link_backfill TEXT,
     -- AQU-1679: files of THIS project that stand in for upstream files
-    -- (migration 0137). NULL = none. A JSON object {"files": {<upstream file
+    -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
     -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
     -- mirror writes those upstream files' source onto the named files instead
     -- of adding copies; `pending` are the ones whose lines are not matched yet.
@@ -606,7 +606,7 @@ CREATE TABLE cells (
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
     -- AQU-1679: the upstream cell this source row stands in for, when that is
-    -- not the row's own cell_id (migration 0137). Set by source.cell.mirror on
+    -- not the row's own cell_id (migration 0140). Set by source.cell.mirror on
     -- a file the project already had and chose to follow the link into
     -- (projects.source_link_adopt) — the row keeps its own cell_id, so its
     -- translations stay attached, and the mirror finds it through this. NULL

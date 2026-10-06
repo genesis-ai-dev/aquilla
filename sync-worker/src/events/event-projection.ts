@@ -2934,7 +2934,7 @@ case 'cell.audio.attach': {
       // cell_id and stands in for a DIFFERENT upstream cell, which is recorded
       // so the mirror can find the row again. Composed in, like `hidden_at`
       // above, and only for such a mirror: an ordinary one never names the
-      // column, so a database that predates migration 0137 keeps mirroring.
+      // column, so a database that predates migration 0140 keeps mirroring.
       const standsInFor = p.upstream.cellId !== event.cellId ? p.upstream.cellId : null
       const upstreamCellCol = standsInFor ? ', upstream_cell_id' : ''
       const upstreamCellVal = standsInFor ? ', ?' : ''

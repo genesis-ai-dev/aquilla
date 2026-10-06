@@ -1,4 +1,4 @@
--- Migration 0137 (AQU-1679): a link that follows INTO a file the project
+-- Migration 0140 (AQU-1679): a link that follows INTO a file the project
 -- already has, instead of adding a second copy of it.
 --
 -- Linking an established project is additive (AQU-1525): every upstream file

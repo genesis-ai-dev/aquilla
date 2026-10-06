@@ -5,7 +5,7 @@
 // second copy, and the team's translations stayed on the unlinked one. A
 // Project Lead can now choose to have the link replace the source in the
 // existing file instead. auth-worker records that on
-// `projects.source_link_adopt` (migration 0137); the mirror sync joins the two
+// `projects.source_link_adopt` (migration 0140); the mirror sync joins the two
 // files line by line and from then on writes the upstream's source onto the
 // project's own cells.
 //

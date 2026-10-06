@@ -7,7 +7,7 @@
 //
 // When the Project Lead chooses "replace the source in my existing file", the
 // link request records the pair on `projects.source_link_adopt` (migration
-// 0137, db/shared/source-link-adopt.ts) and this module does the joining, once
+// 0140, db/shared/source-link-adopt.ts) and this module does the joining, once
 // per file, before the mirror's forward fold:
 //
 //   1. Match the upstream file's lines to the file's own lines by content and
@@ -60,7 +60,7 @@ const ADOPT_CHUNK_LINES = 500
  * id>` → this project's cell id.
  *
  * Read one file at a time off the primary key's (project_id, file_id) prefix.
- * A database that predates migration 0137 has no such column and no adopted
+ * A database that predates migration 0140 has no such column and no adopted
  * files either, so a failed read answers "no mapping" rather than failing the
  * sync that asked.
  */

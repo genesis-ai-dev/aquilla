@@ -262,7 +262,7 @@ export async function loadLink(db: AquillaDb, downstreamProjectId: string): Prom
   } catch {
     link.source_link_backfill = null
   }
-  // AQU-1679: and again for the adopted files (migration 0137). Unreadable =
+  // AQU-1679: and again for the adopted files (migration 0140). Unreadable =
   // none adopted: every upstream file mirrors into its own copy, as before.
   try {
     const row = await db

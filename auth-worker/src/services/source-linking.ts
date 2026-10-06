@@ -446,7 +446,7 @@ export async function loadStoppedUpstreamFileIds(
 
 /**
  * AQU-1679: the project's own files that stand in for upstream files, from
- * `projects.source_link_adopt` (migration 0137).
+ * `projects.source_link_adopt` (migration 0140).
  *
  * Read in a statement of its own, like the selection and the pending addition
  * above: on a database that predates the column the answer is `null`, "none" —
@@ -479,7 +479,7 @@ export async function clearLinkAdoption(env: Env, projectId: string): Promise<vo
       .bind(projectId)
       .run()
   } catch {
-    // Pre-0137 database: there is no column, so there is nothing to clear.
+    // Pre-0140 database: there is no column, so there is nothing to clear.
   }
 }
 
@@ -912,7 +912,7 @@ async function deletedFileIds(env: Env, projectId: string): Promise<Set<string> 
 
 /**
  * AQU-1679: `<file id>\0<upstream cell id>` → the project's own cell id, for
- * the files the link followed into (`cells.upstream_cell_id`, migration 0137).
+ * the files the link followed into (`cells.upstream_cell_id`, migration 0140).
  *
  * Empty on any failure, and on a database that predates the column — where no
  * file can have been adopted, so there is nothing to map.

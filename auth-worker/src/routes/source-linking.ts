@@ -247,7 +247,7 @@ sourceLinking.post(
       //
       // AQU-1679: the adopted files ride in the SAME statement as the link —
       // a link saved without them would mirror those files in as copies before
-      // a second write could say otherwise. The column (migration 0137) is only
+      // a second write could say otherwise. The column (migration 0140) is only
       // named when there is something to put in it, so a link that replaces
       // nothing still saves on a database that predates it.
       await c.env.AQUILLA_PG.prepare(

@@ -1,6 +1,6 @@
 // AQU-1679: files of a linked project that stand in for upstream files.
 //
-// `projects.source_link_adopt` (migration 0137) records, for a live link, which
+// `projects.source_link_adopt` (migration 0140) records, for a live link, which
 // of the project's OWN files follow which upstream files — the "replace the
 // source in my existing file" choice in the link flow. auth-worker writes it
 // with the link; sync-worker's mirror sync matches each pending file's lines to

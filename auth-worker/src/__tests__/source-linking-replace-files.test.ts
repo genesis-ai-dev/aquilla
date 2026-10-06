@@ -15,7 +15,7 @@
 //      paired twice, or two files that are not the same material.
 //   4. Detach writes the upstream's text onto the project's own cells in a
 //      followed-into file, and creates no second copy of it.
-//   5. A database that predates migration 0137 still links.
+//   5. A database that predates migration 0140 still links.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"

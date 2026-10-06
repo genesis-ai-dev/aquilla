@@ -64,7 +64,7 @@ export interface SetBriefCommand {
   ifMatchVersion: number
 }
 
-/** Same floor PatchSettings applies to a non-`terminology` settings key. Kept
+/** Same floor PatchSettings applies to the `translationBrief` key. Kept
  *  identical on purpose — see the header note on not being a cheaper door. */
 export const SET_BRIEF_REQUIRED_ROLE = ROLE.MAINTAINER
 

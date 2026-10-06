@@ -81,6 +81,24 @@ function patchCmd(ops: { key: string; value: unknown }[], ifMatchVersion = 1) {
   return [{ kind: 'PatchSettings', projectId: PROJECT, ops, ifMatchVersion }]
 }
 
+/** AQU-1724: a `terminology` write is refused, and the refusal must name the
+ *  key AND say where terms go now — an agent told only "no" retries the same
+ *  write or gives up; told "term.create / term.update in EmitEvents" it lands
+ *  the term where the editor actually reads it. */
+function expectRetiredTerminologyPointer(error: unknown) {
+  const text = JSON.stringify(error)
+  expect(text).toContain('terminology')
+  expect(text).toContain('term.create')
+  expect(text).toContain('term.update')
+  expect(text).toContain('EmitEvents')
+}
+
+/** The legacy blob the beforeEach seeds — it must survive every refused write. */
+async function storedTerminology(): Promise<unknown> {
+  const rows = await tdb.rows<{ settings: string }>('project_settings')
+  return JSON.parse(rows[0].settings).terminology
+}
+
 let tdb: TestDb
 beforeEach(async () => {
   nextUserId = 500
@@ -129,36 +147,69 @@ describe('PatchSettings — per-key floors', () => {
     expect(rows[0].version).toBe(2)
   })
 
-  it('terminology uses the org default floor 500: project_lead allowed, contributor denied', async () => {
+  it('terminology is retired (AQU-1724): prepare refuses it for every role, pointing to term.* events', async () => {
+    // Key terms live in the concepts table; the editor never reads this key on
+    // a migrated project, so a write here is silently lost. The lead the old
+    // termbase floor admitted and the owner no floor ever stopped are both
+    // refused — including a null "clear", which on an unmigrated project would
+    // delete the only copy of its terms.
     const env = makeEnv(tdb.db)
-    const contributor = await memberToken(tdb, 400)
-    const { res: deniedRes } = await prepare(env, contributor.token, patchCmd([
-      { key: 'terminology', value: [{ id: 'c1', sourceTerm: 'grace' }] },
-    ]))
-    expect(deniedRes.status).toBe(403)
-
     const lead = await memberToken(tdb, 500)
-    const { res, body } = await prepare(env, lead.token, patchCmd([
-      { key: 'terminology', value: [{ id: 'c1', sourceTerm: 'grace' }] },
-    ]))
-    expect(res.status).toBe(200)
-    const { res: commitRes } = await commit(env, lead.token, body.changeset.id)
-    expect(commitRes.status).toBe(200)
+    const owner = await memberToken(tdb, 700)
+    for (const [caller, value] of [
+      [lead, [{ id: 'c1', sourceTerm: 'grace' }]],
+      [owner, [{ id: 'c1', sourceTerm: 'grace' }]],
+      [owner, null],
+    ] as const) {
+      const { res, body } = await prepare(env, caller.token, patchCmd([{ key: 'terminology', value }]))
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expectRetiredTerminologyPointer(body.error)
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+    expect(await storedTerminology()).toEqual({ concepts: [] })
   })
 
-  it('an org termbaseEditMinRole override lowers the terminology floor', async () => {
+  it('an org termbaseEditMinRole override opens no settings write any more (AQU-1724)', async () => {
     const env = makeEnv(tdb.db)
     await tdb.pg.query(
       `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
       [ORG_ID, JSON.stringify({ termbaseEditMinRole: 400 })],
     )
     const contributor = await memberToken(tdb, 400)
-    const { res, body } = await prepare(env, contributor.token, patchCmd([
+    // The key the lowered floor used to open is refused outright...
+    const { res: termRes, body: termBody } = await prepare(env, contributor.token, patchCmd([
       { key: 'terminology', value: [] },
     ]))
+    expect(termRes.status).toBe(400)
+    expect(termBody.error.code).toBe('validation_failed')
+    // ...and the floor lends nothing to any other key: still MAINTAINER.
+    const { res: otherRes, body: otherBody } = await prepare(env, contributor.token, patchCmd([
+      { key: 'systemPrompt', value: 'x' },
+    ]))
+    expect(otherRes.status).toBe(403)
+    expect(otherBody.error.details.requiredRole).toBe(600)
+  })
+
+  it('a plan staged before the key was retired is refused at commit, not applied (AQU-1724)', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'systemPrompt', value: 'x' }]))
     expect(res.status).toBe(200)
-    const { res: commitRes } = await commit(env, contributor.token, body.changeset.id)
-    expect(commitRes.status).toBe(200)
+    // The plan a pre-AQU-1724 prepare would have staged — it may still be
+    // sitting in the approval queue when this deploys.
+    await tdb.db
+      .prepare(`UPDATE changesets SET commands = ? WHERE id = ?`)
+      .bind(JSON.stringify(patchCmd([{ key: 'terminology', value: [{ id: 'c1', sourceTerm: 'grace' }] }])), body.changeset.id)
+      .run()
+
+    const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(400)
+    expect(committed.error.code).toBe('validation_failed')
+    expectRetiredTerminologyPointer(committed.error)
+    const rows = await tdb.rows<{ version: number }>('project_settings')
+    expect(rows[0].version).toBe(1)
+    expect(await storedTerminology()).toEqual({ concepts: [] })
   })
 
   it('language keys default to MAINTAINER (600), and an org languageEditMinRole override lowers them (AQU-1086)', async () => {
@@ -204,22 +255,27 @@ describe('PatchSettings — per-key floors', () => {
     ]))
     expect(mixedRes.status).toBe(403)
 
-    // Terminology keeps its own (unchanged) floor — a contributor stays denied.
+    // Terminology is refused outright (AQU-1724) — a lowered language floor
+    // cannot reopen it for anyone.
     const contributor = await memberToken(tdb, 400)
-    const { res: termRes } = await prepare(env, contributor.token, patchCmd([
+    const { res: termRes, body: termBody } = await prepare(env, contributor.token, patchCmd([
       { key: 'terminology', value: [] },
     ]))
-    expect(termRes.status).toBe(403)
+    expect(termRes.status).toBe(400)
+    expect(termBody.error.code).toBe('validation_failed')
   })
 
-  it('mixing terminology with another key takes the max floor (600)', async () => {
+  it("a terminology op sinks a mixed batch — even a maintainer's — so the other op does not land either (AQU-1724)", async () => {
     const env = makeEnv(tdb.db)
-    const lead = await memberToken(tdb, 500)
-    const { res } = await prepare(env, lead.token, patchCmd([
-      { key: 'terminology', value: [] },
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
       { key: 'systemPrompt', value: 'x' },
+      { key: 'terminology', value: [] },
     ]))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expectRetiredTerminologyPointer(body.error)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 })
 
@@ -496,6 +552,44 @@ describe('UpdateProjectSettings — policy guard re-check at commit (AQU-926)', 
     expect(rows[0].version).toBe(1)
     const cs = await tdb.rows<{ status: string }>('changesets')
     expect(cs[0].status).toBe('staged')
+  })
+})
+
+describe('UpdateProjectSettings — retired terminology key (AQU-1724)', () => {
+  function updateCmd(settings: Record<string, unknown>) {
+    return [{ kind: 'UpdateProjectSettings', projectId: PROJECT, settings, ifMatchVersion: 1 }]
+  }
+
+  it('refuses a whole blob that changes or drops terminology, pointing to term.* events', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    // Changed, and dropped: on a project not yet migrated, dropping the key
+    // deletes the only copy of its terms.
+    for (const settings of [
+      { targetLanguage: 'de', terminology: [{ id: 'c1', sourceTerm: 'grace' }], validationCount: 3 },
+      { targetLanguage: 'de', validationCount: 3 },
+    ]) {
+      const { res, body } = await prepare(env, maintainer.token, updateCmd(settings))
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expectRetiredTerminologyPointer(body.error)
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+    expect(await storedTerminology()).toEqual({ concepts: [] })
+  })
+
+  it('a read-modify-write that echoes the stored terminology unchanged still stages and commits', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, updateCmd(
+      { targetLanguage: 'de', terminology: { concepts: [] }, validationCount: 3 },
+    ))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.targetLanguage).toBe('de')
+    expect(stored.terminology).toEqual({ concepts: [] })
   })
 })
 

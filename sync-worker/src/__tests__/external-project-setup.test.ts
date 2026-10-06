@@ -649,6 +649,26 @@ describe('ProjectSetup — prepare rejections name the field', () => {
     expect(body.error?.details?.field).toBe('settings.notAKey')
   })
 
+  it('refuses the retired terminology key, naming it and pointing to term.* events (AQU-1724)', async () => {
+    // Key terms live in the concepts table; a settings write would be lost,
+    // so the plan is refused before it reaches the approval queue — and the
+    // owner the old termbase floor never stopped is refused too.
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({ settings: { targetLanguage: 'fr', terminology: [{ id: 'c1', sourceTerm: 'grace' }] } }),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error?.code).toBe('validation_failed')
+    expect(body.error?.details?.field).toBe('settings.terminology')
+    for (const pointer of ['terminology', 'term.create', 'term.update', 'EmitEvents']) {
+      expect(body.error?.message).toContain(pointer)
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('refuses a policy write that would LOOSEN, naming the key', async () => {
     const env = makeEnv(tdb.db, bucket)
     const caller = await memberToken(700)

@@ -33,7 +33,12 @@ import {
 } from './commands'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
-import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import {
+  changedPolicyKeys,
+  preparePatchSettings,
+  previewSettingValue,
+  retiredTerminologyBlobDenial,
+} from './commands-patch-settings'
 import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
@@ -1342,6 +1347,9 @@ async function prepareUpdateProjectSettings(
       { policyKeys: changedPolicy },
     )
   }
+  // AQU-1724: nor the retired `terminology` key (an unchanged echo passes).
+  const retired = retiredTerminologyBlobDenial(cmd.settings, current.settings)
+  if (retired) return retired
 
   const plannedIds: PlannedEventIds = {
     updateProjectSettings: { version: cmd.ifMatchVersion },

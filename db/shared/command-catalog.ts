@@ -180,7 +180,8 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     agentReachable: true,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
-Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
+Floors: every key needs MAINTAINER 600 (the language keys — sourceLanguage, targetLanguage, targetLanes, archivedLanes — use the org's language-edit floor, default 600, which an org may lower to PROJECT_LEAD 500).
+\`terminology\` is RETIRED (AQU-1724): key terms live in the concepts table, so prepare rejects a \`terminology\` op with \`validation_failed\`. Write terms with \`term.create\` / \`term.update\` events in an EmitEvents changeset (read the termbase with \`list_terms\` first).
 Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").

@@ -194,8 +194,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'keys with patch_settings { projectId, ops: [{ key, value }], ifMatchVersion } — a ' +
         'field-scoped write: keys you do not name stay byte-identical. `ifMatchVersion` must ' +
         'equal the live version at prepare AND commit (plan_stale on drift), so always read ' +
-        'before you patch. Floors: `terminology` needs the org termbase-edit floor (default ' +
-        'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
+        'before you patch. Floors: MAINTAINER 600 for every key (the language keys use the ' +
+        'org language-edit floor, default 600). `terminology` is retired (AQU-1724) and ' +
+        'rejected — write key terms with term.create / term.update events in an EmitEvents ' +
+        'changeset. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
         'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
         'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +

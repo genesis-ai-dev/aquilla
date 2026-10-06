@@ -20,14 +20,17 @@
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
 // purely a downstream interpretation.
 //
-// THREE keys are permission-scoped rather than dumb-stored:
+// One key is REFUSED rather than stored:
 //
-//   AQU-822  `terminology` (the project's termbase concepts). A write whose
-//            only *changed* key is `terminology` is gated by the org's
-//            configurable `termbaseEditMinRole` floor (default project_lead
-//            500) instead of the maintainer floor below, so an org can let its
-//            translators own terminology without also handing them AI config,
-//            health thresholds, or languages.
+//   AQU-1724 `terminology`, retired. Key terms live in the `concepts` table,
+//            written with term.* events; the editor never reads this key on a
+//            migrated project. A write that CHANGES it — sets, edits or drops
+//            it — is a 400 pointing to term.* events, for every role. An echo
+//            of the stored value is not a change and passes. (AQU-822 used to
+//            give it its own `termbaseEditMinRole` floor.)
+//
+// These keys are permission-scoped rather than dumb-stored:
+//
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
 //            `targetLanes`, `archivedLanes`). A write whose only *changed*
 //            keys are language keys is gated by the org's configurable
@@ -40,9 +43,9 @@
 //            project_lead 500 — whether your own project tries an experiment
 //            is a lead's call.
 //
-// Everything else keeps the maintainer gate, unchanged. All three carve-outs
-// are scoped to a write that changes NOTHING ELSE, so none widens access to
-// any other key.
+// Everything else keeps the maintainer gate, unchanged. Each carve-out is
+// scoped to a write that changes NOTHING ELSE, so none widens access to any
+// other key.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -64,6 +67,10 @@ import {
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
 import {
+  RETIRED_TERMINOLOGY_KEY,
+  RETIRED_TERMINOLOGY_MESSAGE,
+} from "../../../db/shared/project-settings-keys"
+import {
   createTargetLane,
   readLaneLastChange,
   renameTargetLane,
@@ -83,9 +90,6 @@ const projectSettings = new Hono<AuthHonoEnv>()
 // (project-configuration stories: name-and-configure-project,
 // customize-ai-settings, monitor-project-health, validate-translation).
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
-
-/** The termbase key — its own (org-configurable) write floor. */
-const TERMINOLOGY_KEY = "terminology"
 
 /**
  * AQU-1083: this project's override for whether headings count toward
@@ -155,8 +159,9 @@ const ALIGNMENT_SEEDS_WRITE_MIN_ROLE = ROLE.CONTRIBUTOR
  * Top-level settings keys whose value differs between the stored blob and an
  * incoming write. Compared on the CHANGE, not on presence: the client patch
  * is a whole-object read-modify-write, so every write echoes back every key
- * it didn't touch — treating presence as a change would make the
- * terminology carve-out below unreachable in practice.
+ * it didn't touch — treating presence as a change would make every carve-out
+ * below unreachable in practice, and would refuse every save on a project
+ * that still carries the retired `terminology` blob (AQU-1724).
  *
  * Values are compared by JSON serialization. Echoed keys round-trip through
  * `JSON.parse` of the stored blob, so nested key order is preserved and this
@@ -287,30 +292,29 @@ projectSettings.on(
 
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
+
+    // The diff against the stored blob, for EVERY role: the retired
+    // `terminology` key is refused whoever writes it (AQU-1724), and the
+    // sub-maintainer carve-outs below are judged on the same diff.
+    const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    const changed = changedSettingsKeys(stored.settings, body.settings)
+    if (changed.includes(RETIRED_TERMINOLOGY_KEY)) {
+      return c.json({ error: RETIRED_TERMINOLOGY_MESSAGE }, 400)
+    }
+
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
-      // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
-      // allowed are a terminology-only one (gated by the org's configured
-      // termbaseEditMinRole) or a language-only one (gated by the org's
-      // configured languageEditMinRole). Any other changed key falls through
-      // to the maintainer 403 — lowering either floor must never widen write
-      // access to AI config, health, validation, or anything else.
-      //
-      // The scopes are tested in this order because a no-op write (nothing
-      // changed) satisfies both vacuously; keeping terminology first preserves
-      // the pre-AQU-1086 behaviour for that case exactly.
-      const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-      const changed = changedSettingsKeys(stored.settings, body.settings)
+      // AQU-1086 and the single-key scopes below: below the maintainer floor,
+      // the ONLY writes allowed are a no-op one or one whose changed keys all
+      // sit in one scope, gated by that scope's floor. Any other changed key
+      // falls through to the maintainer 403 — lowering a floor must never
+      // widen write access to AI config, health, validation, or anything else.
       // Each carve-out is key-exact and carries its own floor. A write that
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
-      // terminologyOnly/languageOnly are deliberately NOT guarded by
-      // `changed.length > 0` — a no-op write (nothing changed) satisfies both
-      // vacuously, and checking terminology first below preserves the
-      // pre-AQU-1086 behaviour for that case exactly (a read-modify-write
-      // client always echoes every key it didn't touch).
-      const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
-      const languageOnly = changed.every((key) => LANGUAGE_KEYS.has(key))
+      const noop = changed.length === 0
+      const languageOnly = changed.length > 0
+        && changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
@@ -318,7 +322,7 @@ projectSettings.on(
       const alignmentSeedsOnly = changed.length > 0
         && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
       if (
-        !terminologyOnly && !languageOnly && !autopilotOnly
+        !noop && !languageOnly && !autopilotOnly
         && !countStructuralOnly && !alignmentSeedsOnly
       ) {
         return c.json(
@@ -326,13 +330,18 @@ projectSettings.on(
           403,
         )
       }
-      if (terminologyOnly) {
-        const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
-        if (role.level < termbaseFloor) {
+      if (noop) {
+        // A write that changes nothing — a read-modify-write client echoes
+        // every key it didn't touch. Before AQU-1724 it reached the
+        // terminology-only branch (vacuously true for an empty diff) and was
+        // admitted at the org's termbaseEditMinRole floor. It keeps exactly
+        // that floor, so retiring the key changes no one's no-op save; routed
+        // to the language scope instead it would need languageEditMinRole
+        // (default maintainer), and a lead's save would 403.
+        const noopFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
+        if (role.level < noopFloor) {
           return c.json(
-            {
-              error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
-            },
+            { error: `role >= ${noopFloor} required to save project settings (org termbaseEditMinRole)` },
             403,
           )
         }

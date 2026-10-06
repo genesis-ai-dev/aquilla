@@ -94,7 +94,8 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   rules: { kind: 'object[]' },
   rulePenalties: { kind: 'object' },
   algorithmicChecks: { kind: 'object' },
-  terminology: { kind: 'object[]' },
+  // `terminology` is NOT here: it is retired (AQU-1724) — see
+  // RETIRED_TERMINOLOGY_KEY below.
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
   // only, see db/shared/policy-direction.ts; a loosening write resolves to
@@ -156,6 +157,21 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
 
 export const PROJECT_SETTINGS_KEYS: readonly string[] = Object.keys(PROJECT_SETTINGS_KEY_SPECS)
 
+/**
+ * AQU-1724: the settings key that used to hold a project's termbase. Key terms
+ * now live in the Postgres `concepts` table, projected from term.* events
+ * (db/postgres/migrations/0084_concepts.sql); scripts/migrate-concepts.ts
+ * deletes this key once a project migrates, and the editor reads it only while
+ * the table has no live rows. A settings write to it is therefore lost without
+ * a word, so every settings door refuses one with this message instead.
+ */
+export const RETIRED_TERMINOLOGY_KEY = 'terminology'
+
+export const RETIRED_TERMINOLOGY_MESSAGE =
+  'settings key "terminology" is retired — key terms live in the concepts table, and a settings write to ' +
+  'this key never reaches the editor. Write terms with term.create / term.update events in an EmitEvents ' +
+  'changeset (read the current termbase with list_terms first).'
+
 export function isKnownSettingsKey(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(PROJECT_SETTINGS_KEY_SPECS, key)
 }
@@ -164,11 +180,14 @@ export function isKnownSettingsKey(key: string): boolean {
  * Validate one `{key, value}` settings op against the registry.
  *
  * Returns null when it is fine, else a message naming what is wrong — the
- * unknown key, or the type the key actually expects. `null` is accepted for
- * every key: JSON cannot carry `undefined`, so storing null is the only way a
- * caller can clear a key (see PatchSettingsOp).
+ * unknown key, the retired one, or the type the key actually expects. `null`
+ * is accepted for every live key: JSON cannot carry `undefined`, so storing
+ * null is the only way a caller can clear a key (see PatchSettingsOp).
  */
 export function validateSettingsKeyValue(key: string, value: unknown): string | null {
+  // Before the null pass-through: clearing the retired key is a write to it
+  // too, and on a project not yet migrated it would delete its only termbase.
+  if (key === RETIRED_TERMINOLOGY_KEY) return RETIRED_TERMINOLOGY_MESSAGE
   const spec = PROJECT_SETTINGS_KEY_SPECS[key]
   if (!spec) {
     return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`

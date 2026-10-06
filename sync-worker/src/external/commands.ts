@@ -17,7 +17,6 @@ import {
   type PlanImportVariant,
 } from './import-manifest'
 import {
-  staticPatchSettingsFloor,
   validatePatchSettingsCommand,
   type PatchSettingsCommand,
 } from './commands-patch-settings'
@@ -929,11 +928,12 @@ export function requiredRoleForCommand(
   ) {
     return ROLE.MAINTAINER
   }
-  // PatchSettings also takes its own path (dynamic per-key floors, incl. the
-  // org termbase floor for `terminology`); this static value is the honest
-  // index-filtering floor per the command catalog.
+  // PatchSettings also takes its own path (dynamic per-key floors). Every key's
+  // DEFAULT floor is MAINTAINER now that `terminology` is retired (AQU-1724):
+  // an org that lowers `languageEditMinRole` admits its leads at prepare and
+  // commit, and this static value stays the conservative default.
   if (c.kind === 'PatchSettings') {
-    return staticPatchSettingsFloor(c)
+    return ROLE.MAINTAINER
   }
   // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
   // floor (the same one PatchSettings applies to the translationBrief key).

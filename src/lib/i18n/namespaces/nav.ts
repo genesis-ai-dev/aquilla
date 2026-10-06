@@ -135,43 +135,27 @@ export const nav = defineNamespace({
     }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
-    // unvalidated count — untranslated cells, untouched AI drafts and cells
-    // already signed off by the reader included — while the run validates only
-    // what `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
-    // translated catalogs cannot keep serving the number that was wrong: these
-    // two keys state what THIS run will do, and the skipped cells are named by
-    // the shared `editor.batchValidate.skip.*` clauses after them.
+    // unvalidated count — untranslated cells and cells already signed off by
+    // the reader included — while the run validates only what
+    // `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: this
+    // key states what THIS run will do, and the skipped cells are named by the
+    // shared `editor.batchValidate.skip.*` clauses after it.
     "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This validates {count} eligible cell under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
+          "This validates {count} eligible cell under your name — committed " +
+          "text you have not signed off yet.",
         other:
-          "This validates {count} eligible cells under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
-      },
-      "count",
-    ),
-    // The org setting that lets bulk validation take untouched AI drafts: with
-    // it on, "human-authored or human-edited" above would misdescribe the very
-    // cells the reader is signing off.
-    "nav.workspaceActions.batchValidate.willValidateWithDrafts": plural(
-      {
-        one:
-          "This validates {count} eligible cell under your name — text you have " +
-          "not signed off yet, including untouched AI drafts, which your " +
-          "organization allows in batch validation.",
-        other:
-          "This validates {count} eligible cells under your name — text you have " +
-          "not signed off yet, including untouched AI drafts, which your " +
-          "organization allows in batch validation.",
+          "This validates {count} eligible cells under your name — committed " +
+          "text you have not signed off yet.",
       },
       "count",
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
     // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
-    // confirmation body built from the two keys above — same composition as
+    // confirmation body built from the keys above — same composition as
     // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
@@ -841,18 +825,6 @@ export const nav = defineNamespace({
           "A skipped-cells clause and then batchValidate.capNote are concatenated " +
           "after it, each with its own leading space, so end this string with a " +
           "period and no trailing space.",
-        placeholders: {
-          count: "How many cells this run will validate. Selects the plural form.",
-        },
-        maxLength: 500,
-      },
-      "nav.workspaceActions.batchValidate.willValidateWithDrafts": {
-        description:
-          "Replaces willValidate when the run includes untouched AI drafts, which " +
-          "happens only when the organization has turned on bulk validation of AI " +
-          "drafts. Same position and punctuation rules as willValidate: the " +
-          "skipped clause and capNote follow it, so end with a period and no " +
-          "trailing space.",
         placeholders: {
           count: "How many cells this run will validate. Selects the plural form.",
         },

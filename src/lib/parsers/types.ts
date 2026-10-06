@@ -745,6 +745,9 @@ export interface ProjectRecord {
    *  (db/shared/bible-enrichments.ts), which also applies the Bible data
    *  switch above. */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
+   *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

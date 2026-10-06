@@ -5,7 +5,7 @@
 // Bible data is off, nothing is on. Otherwise an explicit choice wins, then the
 // registry default. A project that switched an enrichment off must never have
 // it used on the server, and the read must come from the generated columns
-// (migration 0141), not from the multi-MB settings blob.
+// (migration 0150), not from the multi-MB settings blob.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"

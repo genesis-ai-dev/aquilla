@@ -7,7 +7,7 @@
  *   npx tsx scripts/jev-shadow-eval.ts \
  *     --pack <bible-wiki>/content/bkp/v1 \
  *     --text <ebible>/corpus/eng-engwebp.txt --vref <ebible>/metadata/vref.txt \
- *     [--max-calls 2000] [--samples 150] [--tq-chapters 30] [--questions speaker,tq] \
+ *     [--max-calls 2000] [--samples 150] [--tq-chapters 40] [--questions speaker,tq] \
  *     [--seed 1701] [--concurrency 4] [--out docs/JEV-SHADOW-EVAL-2026-10-06.md] \
  *     [--dev-vars auth-worker/.dev.vars] [--fake]
  *
@@ -89,7 +89,7 @@ const HOW: Readonly<Record<string, string>> = {
   referent: "Verses where the pack finds an implied subject with a same-gender, same-number look-alike, and WEB puts a pronoun right before that verb's gloss (\"He brought\"); planted: that pronoun made the look-alike's name. The question names the Greek verb's gloss, which WEB may word otherwise.",
   we_inclusive: "Verses where the pack decides the clusivity of every \"we\"; Tok Pisin \"yumi\" (inclusive) / \"mipela\" (exclusive) planted for English \"we\", then swapped.",
   introduced: "Verses with a participant's first mention after a pericope boundary, named in the Greek and in WEB, not in an apposition (\"John the Baptizer\" stays identified without \"John\"); planted: the name made a pronoun.",
-  tq: "Whole chapters: each Translation Question whose verses WEB has; planted: other chapters' questions with answers swapped in from another book.",
+  tq: "Whole chapters, one call each as production asks: of the Translation Questions whose verses WEB has, half keep their answer and half (the planted errors) get the answer of a question from another book.",
 }
 
 function arg(name: string): string | undefined {
@@ -234,16 +234,18 @@ function interleave<T>(lists: readonly T[][]): T[] {
   return out
 }
 
-/** Swap answers between the planted chapters' questions so none keeps an answer from its own chapter. */
-function swappedAnswers(questions: readonly (BkpQuestion & { chapter: string })[]): BkpQuestion[] {
-  const n = questions.length
-  return questions.map((tq, i) => {
-    for (let shift = Math.floor(n / 2); shift < n + Math.floor(n / 2); shift++) {
-      const other = questions[(i + shift) % n]
-      if (other.chapter !== tq.chapter && other.a !== tq.a) return { id: `${tq.id}~swap`, refs: tq.refs, q: tq.q, a: other.a }
-    }
-    return { id: `${tq.id}~swap`, refs: tq.refs, q: tq.q, a: tq.a }
-  })
+/**
+ * C1's planted error: the question keeps its verses, and gets the answer of a
+ * question half the New Testament away, in another book. Null when none is.
+ */
+function swapIn(tq: BkpQuestion, all: readonly BkpQuestion[], index: number): BkpQuestion | null {
+  const book = tq.refs[0].split(" ")[0]
+  const half = Math.floor(all.length / 2)
+  for (let shift = half; shift < all.length + half; shift++) {
+    const other = all[(index + shift) % all.length]
+    if (other.refs[0].split(" ")[0] !== book) return { id: `${tq.id}~swap`, refs: tq.refs, q: tq.q, a: other.a }
+  }
+  return null
 }
 
 async function main(): Promise<void> {
@@ -252,7 +254,7 @@ async function main(): Promise<void> {
   const vrefLines = readFileSync(required("vref"), "utf8").split("\n")
   const maxCalls = int("max-calls", 2000)
   const samples = int("samples", 150)
-  const tqChapters = int("tq-chapters", 30)
+  const tqChapters = int("tq-chapters", 40)
   const seed = int("seed", 1701)
   const concurrency = Math.max(1, int("concurrency", 4))
   const questions = (arg("questions")?.split(",") ?? [...ALL_QUESTIONS]).filter((q): q is (typeof ALL_QUESTIONS)[number] =>
@@ -315,30 +317,27 @@ async function main(): Promise<void> {
     if (!questions.includes(question)) continue
     const pairs = casePairs(question, verses, prompts)
     available[question] = pairs.length
+    // Shuffled before batching, so a call mixes published verses and planted errors, as production's calls mix right and wrong.
     const cases = sampleCases(pairs, samples, rand)
-    unitLists.push(batchCases(cases, CELLS_PER_CALL).map((batch) => ({ question, cases: batch, calls: 1 })))
+    const mixed = sample(cases, cases.length, rand)
+    unitLists.push(batchCases(mixed, CELLS_PER_CALL).map((batch) => ({ question, cases: batch, calls: 1 })))
   }
   if (questions.includes("tq")) {
-    const chapters = sample([...tqByChapter.keys()].sort(), tqChapters * 2, rand)
     available.tq = tqByChapter.size
-    const correct = chapters.slice(0, tqChapters)
-    const planted = chapters.slice(tqChapters)
-    const plantedTqs = swappedAnswers(planted.flatMap((chapter) => (tqByChapter.get(chapter) ?? []).map((tq) => ({ ...tq, chapter }))))
-    const unitOf = (chapter: string, kind: TqCase["kind"], tqs: BkpQuestion[]): EvalUnit<AnyCase> => ({
-      question: "tq",
-      cases: tqs.map((tq) => ({ question: "tq", kind, passWhenYes: true, ref: chapter, tq, chapter })),
-      calls: Math.ceil(tqs.length / MAX_TQ_PER_CALL),
-    })
-    const plantedByChapter = new Map<string, BkpQuestion[]>()
-    for (const tq of plantedTqs) {
-      const chapter = tq.refs[0].replace(/:\d+$/u, "")
-      plantedByChapter.set(chapter, [...(plantedByChapter.get(chapter) ?? []), tq])
-    }
+    const all = [...tqByChapter.values()].flat()
+    const indexOf = new Map(all.map((tq, i) => [tq.id, i]))
+    // One call per chapter, as production asks; in each, half the questions keep their answer and half get another book's.
     unitLists.push(
-      interleave([
-        correct.map((chapter) => unitOf(chapter, "correct", tqByChapter.get(chapter) ?? [])),
-        planted.map((chapter) => unitOf(chapter, "planted", plantedByChapter.get(chapter) ?? [])),
-      ]),
+      sample([...tqByChapter.keys()].sort(), tqChapters, rand).map((chapter) => {
+        const tqs = sample(tqByChapter.get(chapter) ?? [], Number.MAX_SAFE_INTEGER, rand)
+        const cases: TqCase[] = tqs.flatMap((tq, i): TqCase[] => {
+          const base = { question: "tq" as const, passWhenYes: true, ref: chapter, chapter }
+          if (i % 2 === 0) return [{ ...base, kind: "correct", tq }]
+          const swapped = swapIn(tq, all, indexOf.get(tq.id) ?? 0)
+          return swapped ? [{ ...base, kind: "planted", tq: swapped }] : []
+        })
+        return { question: "tq", cases, calls: Math.ceil(cases.length / MAX_TQ_PER_CALL) }
+      }),
     )
   }
 
@@ -362,7 +361,7 @@ async function main(): Promise<void> {
     `- Run: ${new Date().toISOString().slice(0, 10)}, ${fake ? "FAKE Jev (plumbing check only)" : `model ${JEV_MODEL}`}, pack ${manifest.version}, the World English Bible NT (eng-engwebp, public domain).`,
     `- Calls: ${budget.used} of a cap of ${maxCalls}${run.capped ? " (cap reached: the cases left are listed as not asked)" : ""}; ${run.errors} failed outright; ${((Date.now() - started) / 1000).toFixed(0)} s.`,
     `- Cost: ${estimated ? "≈ " : ""}$${totalCost.toFixed(4)}${estimated ? " (estimated at $0.00003 a call: the responses reported no cost)" : " (as the responses reported it)"}.`,
-    `- Cases: up to ${samples} published verses per question and their planted twins (seed ${seed}); C1: ${tqChapters} chapters as published, ${tqChapters} with swapped answers. ${CELLS_PER_CALL} cells per call, one call per chapter for C1, never a verse beside its planted twin.`,
+    `- Cases: up to ${samples} published verses per question and their planted twins (seed ${seed}); C1: ${tqChapters} chapters, half of each one's questions with an answer from another book. ${CELLS_PER_CALL} cells per call, one call per chapter for C1, never a verse beside its planted twin.`,
     "",
     "A flag is a \"no\" at the band's certainty |p − 0.5|·2. Precision: flags on planted errors over all flags. Recall: flags on planted errors over all planted errors (an abstention is a miss). Abstain: answers below certainty 0.4, as production abstains.",
     "",

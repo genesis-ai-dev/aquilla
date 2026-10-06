@@ -44,6 +44,7 @@ import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
 import { bibleData } from "./bibleData"
 import { bibleAlignment } from "./bibleAlignment"
+import { bibleHelps } from "./bibleHelps"
 
 export const NAMESPACES = [
   common,
@@ -74,4 +75,5 @@ export const NAMESPACES = [
   segmentation,
   bibleData,
   bibleAlignment,
+  bibleHelps,
 ] as const

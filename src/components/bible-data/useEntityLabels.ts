@@ -12,6 +12,7 @@ import type { BkpEntity, BkpEntityId } from "@/lib/bible-data/pack-types"
 import {
   acaiLanguageFor,
   acaiLanguageForLocale,
+  pickLabelText,
   resolveVoiceLabel,
   type VoiceLabel,
   type VoiceLabelOptions,
@@ -52,4 +53,30 @@ export function useEntityLabels(
       return label
     }
   }, [entities, labelMode, locale, project.terminology, project.termMatching, project.sourceLanguage, multiLane])
+}
+
+/** Text picked in the label language, with the BCP 47 tag for its `lang` attribute. */
+export interface PickedText {
+  text: string
+  lang: string
+}
+
+export type LabelTextPicker = (byLanguage: Readonly<Record<string, unknown>> | undefined) => PickedText | null
+
+/**
+ * AQU-1695: descriptions, key-term titles and deity forms in the label
+ * language (see `pickLabelText`): the interface language, falling back to
+ * English, or English only when the person chose it.
+ */
+export function useLabelText(): LabelTextPicker {
+  const { labelMode } = useBibleDataViewPrefs()
+  const { locale } = useI18n()
+  return useMemo(() => {
+    const ui = acaiLanguageForLocale(locale)
+    return (byLanguage) => {
+      const picked = pickLabelText(byLanguage, labelMode, ui)
+      // The only other language it can pick is the interface language.
+      return picked ? { text: picked.text, lang: picked.language === "eng" ? "en" : locale } : null
+    }
+  }, [labelMode, locale])
 }

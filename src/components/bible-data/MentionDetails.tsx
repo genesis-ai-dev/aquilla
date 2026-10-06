@@ -5,6 +5,10 @@
 // where the current passage first mentions them, how sure the data is and
 // which datasets say so, previous/next mention jumps, the cell filter, and
 // where the name came from. Opened on hover and on keyboard focus.
+//
+// AQU-1695: the title is the mention's own name (a deity's form at that word,
+// when the pack gives one), and pack 1.1's description and family follow the
+// facts (EntityAbout).
 
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +24,7 @@ import {
 } from "@/lib/bible-data/people-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import { EntityAbout } from "./EntityAbout"
 import { GENDER_KEYS, NUMBER_KEYS, mentionKindKey, mentionSourceKeys } from "./people-text"
 import { labelSourceKey } from "./voice-text"
 import type { CellMentionView } from "./whos-who-context"
@@ -77,9 +82,22 @@ export function MentionDetails({ id, view, at, placement = "exact", onJumped }: 
   return (
     <div id={id} data-testid="mention-details" className="flex flex-col gap-2 text-xs">
       <PopoverTitle className="text-sm" dir="auto">
-        {isGroup ? t("bibleData.whosWho.groupMembers", { members: fmt.isolate(name) }) : <bdi>{name}</bdi>}
+        {isGroup ? (
+          t("bibleData.whosWho.groupMembers", { members: fmt.isolate(name) })
+        ) : (
+          <bdi>{context.mentionName(at)}</bdi>
+        )}
       </PopoverTitle>
       {facts.length > 0 && <p className="text-muted-foreground">{facts.join(" · ")}</p>}
+      <EntityAbout
+        index={context.index}
+        entity={entity}
+        nameOf={context.nameOf}
+        jump={(ref, relative) => {
+          context.jumpTo(ref, relative)
+          onJumped()
+        }}
+      />
       {first && <p>{t("bibleData.whosWho.firstMention", { ref: fmt.isolate(first.ref) })}</p>}
       {placement !== "exact" && (
         <p data-testid="mention-placement" className="text-muted-foreground">

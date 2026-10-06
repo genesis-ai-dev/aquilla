@@ -47,6 +47,7 @@ import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
 import { bibleData } from "../namespaces/bibleData"
 import { bibleAlignment } from "../namespaces/bibleAlignment"
+import { bibleHelps } from "../namespaces/bibleHelps"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -78,6 +79,7 @@ export const en = {
   ...segmentation.keys,
   ...bibleData.keys,
   ...bibleAlignment.keys,
+  ...bibleHelps.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -140,9 +140,16 @@ export function useCellMentionWords(cellId: string, ref: string, type: string, s
       bridged = bridge.bridged
       placed = wordsFromSpans(sourceText, spansFromLinks(bridge.links, bridge.trainedPairs, (id) => byWord.has(id)))
     }
+    // AQU-1700: a Hebrew word written whole carries all its morphemes, so
+    // two of them may name people ("her mother-in-law": the noun and its
+    // suffix). One mention per word, the first, as spansFromLinks keeps the
+    // first of two equally sure links: the word renders once.
+    const taken = new Set<number>()
     const words = (placed ?? []).flatMap((word) => {
       const at = byWord.get(word.wordId)
-      return at ? [{ ...word, at, bridged }] : []
+      if (!at || taken.has(word.start)) return []
+      taken.add(word.start)
+      return [{ ...word, at, bridged }]
     })
     return words.length > 0 ? { context, refs: verses.refs, words } : null
   }, [context, cellId, ref, type, sourceText])

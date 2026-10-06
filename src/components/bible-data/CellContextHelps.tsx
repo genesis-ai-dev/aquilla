@@ -7,9 +7,11 @@
 // the question; its answer is behind a disclosure. A note or question on
 // several verses says which. Their text is unfoldingWord's English, marked as
 // such. The pack gives no link to a note's full text, so there is none.
+// AQU-1700: an OT note quotes the Hebrew, which reads right to left.
 
 import type { BkpNote, BkpQuestion } from "@/lib/bible-data/pack-types"
 import { noteParagraphs, noteRange, questionRange } from "@/lib/bible-data/helps-index"
+import { bookScript } from "@/lib/bible-data/original-script"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -90,6 +92,7 @@ function NoteItem({ note, number }: { note: BkpNote; number: number | null }) {
   const range = noteRange(note)
   // Only the id, ref and text are checked when the file is read.
   const quote: unknown = note.quote
+  const script = bookScript(note.ref.split(" ")[0] ?? "")
   return (
     <article data-testid="context-note" data-note-id={note.id} data-anchor={note.anchor ?? "none"} className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -112,9 +115,9 @@ function NoteItem({ note, number }: { note: BkpNote; number: number | null }) {
           </span>
         )}
       </div>
-      {/* An unhighlighted note says which Greek it is about. */}
+      {/* An unhighlighted note says which Greek (or Hebrew) it is about. */}
       {number === null && typeof quote === "string" && quote !== "" && (
-        <p lang="grc" dir="ltr" className="text-sm">
+        <p lang={script.lang} dir={script.dir} data-testid="note-quote" className="text-sm">
           {quote}
         </p>
       )}

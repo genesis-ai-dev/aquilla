@@ -244,6 +244,14 @@ describe("virtualOwnsFile", () => {
   it("takes over when a linked film is not actually the transport", () => {
     expect(virtualOwnsFile(videoOwnsFile("https://cdn/x.m3u8", false, false), false, 640)).toBe(true)
   })
+
+  // AQU-1704: a video-less subtitle file in Free timing has no film and no
+  // source recording, which used to hand it to the virtual clock. That clock
+  // fires takes at their cue times, so the queue must own it instead.
+  it("is not the transport in Free timing, so the queue plays the programme", () => {
+    expect(virtualOwnsFile(false, false, 640, true)).toBe(false)
+    expect(virtualOwnsFile(false, false, 640, false)).toBe(true)
+  })
 })
 
 describe("selectTransportForFile — the virtual arm", () => {

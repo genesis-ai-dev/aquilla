@@ -10802,6 +10802,8 @@ export function ProjectWorkspace() {
     videoIsTransport,
     audioMergedCells.some((c) => queueClockIsFileTime(c)),
     timelineDurationSec,
+    // AQU-1704: the same answer the playback bar gets through `freeTiming`.
+    timingMode === "audioFirst",
   )
   useEffect(() => {
     if (!virtualIsTransport) {
@@ -14199,6 +14201,7 @@ export function ProjectWorkspace() {
                   // arrangement and leaves the bar exactly as it was.
                   timelineDurationSec={timelineDurationSec}
                   virtualSoundingCellId={virtualSoundingCellId}
+                  freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
                   below={
                     <>

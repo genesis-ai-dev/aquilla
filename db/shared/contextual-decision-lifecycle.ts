@@ -163,7 +163,8 @@ export async function resolveBlockingDecision(
       ? await db.transaction((tx) => resolveInTransaction(tx, input))
       : await resolveInTransaction(db, input)
   } catch (err) {
-    // The transaction has rolled back: the card stays open and no fact was written.
+    // With a transaction (production, PGlite) everything has rolled back: the
+    // card stays open and no fact was written.
     if (err instanceof FactAnswerRejected) return { status: "invalid_answer", reason: err.reason }
     throw err
   }

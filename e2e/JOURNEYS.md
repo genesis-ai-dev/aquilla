@@ -55,7 +55,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -167,6 +167,13 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
+
+- Costly model waits show a shared fills-twice bar (editor AI draft, and
+  suggest-rules-from-edits). The draft or the suggestions appear as soon as
+  the call returns; the bar then finishes in about 200ms, and reduced motion
+  stays a static mark. Covered in RTL (`fills-twice-indicator.test.tsx`,
+  and the editor row assertion in `EditorTable.editorActions.test.tsx`).
+  The sparkle still filling a cell stays `e2e/specs/ai/completion.smoke.spec.ts`.
 
 - Unified Agent conversation/document/knowledge navigation and same-task
   re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
@@ -373,6 +380,16 @@ UI chrome that used to be one smoke file per click is covered under
   `sync-worker/src/__tests__/import-caption-promotion.test.ts`. No smoke for it: the
   new UI can no longer create the "empty file with a timeline track" it starts from,
   so only legacy files reach it, and the server step is already pinned.
+- AQU-1702 file sidebar cross-group drag: dropping a file on another corpus group
+  moves it there (group marker + slot in the new group, as one call), the group under
+  the pointer shows the ring and the insertion line, and the one drop the sidebar
+  cannot express — a Bible book sent to Ungrouped, which the book-code fallback would
+  pull straight back — says why and writes nothing. "Move to corpus…" is the same
+  move without a drag. Covered in RTL (`ExpandableFileList.reorder.test.tsx`), with
+  the rule in `lib/sidebar/file-regroup.test.ts` and the numbers in
+  `lib/sidebar/file-sort-index.test.ts`. No smoke, same reasoning as AQU-1569: it is
+  sidebar chrome in one component, and the events it writes (`file.corpus.set`,
+  `file.reorder`) are already exercised by the worker projection tests.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),

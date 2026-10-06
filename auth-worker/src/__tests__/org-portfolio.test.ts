@@ -1104,6 +1104,129 @@ describe("AQU-1421 portfolio lane visibility", () => {
     }
   })
 
+  // The per-lane machine-draft count is the one number on this page that has
+  // to be read from `cells`. It was a scan of the whole table on dev (2.28M
+  // pages, 75s cold, to find 132 rows). These pin what it counts, then the
+  // two things that keep it off that scan: the statement's shape and the index.
+  describe("machine-drafted cells behind the wall", () => {
+    async function drafted(cellId: string, fileId: string, lane = "es") {
+      await sql(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted)
+         VALUES ('pa', '${fileId}', '${cellId}', 'target', '${lane}', 'draft', 'e1', 1, 1)`,
+      )
+    }
+
+    async function walledRow() {
+      env.LANE_READ_WALL = "1"
+      try {
+        return await rowFor(2)
+      } finally {
+        env.LANE_READ_WALL = undefined
+      }
+    }
+
+    it("counts drafts in the granted lane only, and only in files that count as work", async () => {
+      await seedSplitProject()
+      await sql(
+        `INSERT INTO files (id, project_id, name, event_id, deleted_at, role) VALUES
+           ('f-gone', 'pa', 'Deleted episode', 'e1', 5000, NULL),
+           ('f-captions', 'pa', 'Caption track', 'e1', NULL, 'timeline-content')`,
+      )
+      await drafted("c-second", "f1")
+      await drafted("c-in-deleted-file", "f-gone")
+      await drafted("c-in-caption-track", "f-captions")
+      // No files row at all: a projection that has the cell before its file
+      // must not lose the work, so this one stays in (see inCountedFileSql).
+      await drafted("c-file-not-projected-yet", "f-pending")
+      // Another lane's draft in the same file is not this caller's to see.
+      await drafted("c-other-lane", "f1", "")
+
+      // c-mine (from the seed), c-second, and the one whose file is pending.
+      expect((await walledRow()).aiDraftedCells).toBe(3)
+    })
+
+    it("drops a drafted heading exactly when the project leaves structural cells out", async () => {
+      await seedSplitProject()
+      await sql(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, type, event_id, last_edit_at) VALUES
+           ('pa', 'f1', 'c-heading', 'source', '', 'The Birth of Jesus', 'heading', 'e1', 1),
+           ('pa', 'f1', 'c-mine', 'source', '', 'In those days', 'verse', 'e1', 1)`,
+      )
+      await drafted("c-heading", "f1")
+      expect((await walledRow()).aiDraftedCells).toBe(2)
+
+      await sql(
+        `UPDATE project_settings
+            SET settings = '{"targetLanguage":"Spanish","targetLanes":["es"],"countStructuralCells":false}'
+          WHERE project_id = 'pa'`,
+      )
+      expect((await walledRow()).aiDraftedCells).toBe(1)
+    })
+
+    /** The statement aiDraftedByLane ran for the translator, with its binds. */
+    async function draftedStatement() {
+      const calls: { query: string; args: unknown[] }[] = []
+      const db = {
+        prepare(query: string) {
+          const statement = env.AQUILLA_PG.prepare(query)
+          return {
+            bind(...args: unknown[]) {
+              calls.push({ query, args })
+              return statement.bind(...args)
+            },
+          }
+        },
+      }
+      await getOrgPortfolios(
+        { ...env, AQUILLA_PG: db, LANE_READ_WALL: "1" } as unknown as Env,
+        [1],
+        { userId: 2, isAdmin: false },
+      )
+      return calls.find((call) => call.query.includes("c.ai_drafted = 1"))!
+    }
+
+    it("names its projects to `cells` as an array, so the planner cannot choose to read the table", async () => {
+      await seedSplitProject()
+      const { query, args } = await draftedStatement()
+
+      expect(args).toEqual(["pa"])
+      // Joined to the policy and nothing else, `cells` was read in full for a
+      // 155-project page (an index served a 52-project one). An array is
+      // resolved before the scan and costed as a few lookups, whatever its
+      // length.
+      expect(query).toContain("c.project_id = ANY(ARRAY(SELECT project_id FROM pol))")
+      // The counted-files rule as one small set, not a probe per drafted row.
+      expect(query).toContain("uncounted_files AS MATERIALIZED")
+      expect(query).not.toMatch(/FROM files uncounted_file\b/)
+    })
+
+    it("is answered from idx_cells_ai_drafted, whose predicate the statement spells out", async () => {
+      await seedSplitProject()
+      const { query, args } = await draftedStatement()
+
+      // A partial index is usable only when the query implies its WHERE. If
+      // either side is reworded the index silently stops applying and the
+      // statement goes back to reading every target cell on the page.
+      const index = await env.AQUILLA_PG.prepare(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'cells' AND indexname = 'idx_cells_ai_drafted'",
+      ).first<{ indexdef: string }>()
+      expect(index?.indexdef).toContain("(project_id, file_id) WHERE ((side = 'target'::text) AND (ai_drafted = 1))")
+      expect(query).toContain("c.side = 'target' AND c.ai_drafted = 1")
+
+      // Ten rows fit on one page, where a seq scan always looks cheapest, so
+      // it is switched off to leave the planner the choice it has at 16M rows:
+      // which index.
+      if (!env.AQUILLA_PG.transaction) throw new Error("test database must support transactions")
+      const plan = await env.AQUILLA_PG.transaction(async (tx) => {
+        await tx.prepare("SET LOCAL enable_seqscan = off").run()
+        return tx.prepare(`EXPLAIN (COSTS OFF) ${query}`).bind(...args).all<Record<string, unknown>>()
+      })
+      const rendered = plan.results.flatMap((row) => Object.values(row)).join("\n")
+      expect(rendered).toMatch(/Scan using idx_cells_ai_drafted on cells c|Bitmap Index Scan on idx_cells_ai_drafted/)
+      expect(rendered).not.toMatch(/Seq Scan on cells c\b/)
+    })
+  })
+
   it("leaves the cross-lane totals in place while the wall is off", async () => {
     await seedSplitProject()
     env.LANE_READ_WALL = undefined

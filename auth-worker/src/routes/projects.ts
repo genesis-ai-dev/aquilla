@@ -2174,8 +2174,12 @@ projects.post(
       return c.json({ error: "Invite already used", code: "used" }, 410)
     }
 
+    // [Pen test 2026-10-06] A same-user re-click must not restore a role the
+    // owner has since lowered: only a first redemption may raise the role.
     const finalRole = existing
-      ? Math.max(existing.role_level, invite.role_level)
+      ? invite.used_at
+        ? existing.role_level
+        : Math.max(existing.role_level, invite.role_level)
       : invite.role_level
 
     try {

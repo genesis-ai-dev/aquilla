@@ -1085,6 +1085,9 @@ export interface CellHistoryEntry {
   isStale?: boolean
   /** Local outbox state; absent once the server history has acknowledged it. */
   syncState?: "pending" | "failed"
+  /** AQU-1656: ai_interventions row holding this AI draft's prompt and raw
+   *  model output (from the commit's `ai_draft.interventionId`). */
+  interventionId?: string
 }
 
 export interface CommentMessage {

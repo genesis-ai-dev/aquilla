@@ -53,7 +53,7 @@ import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
 import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
 import {
-  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+  assignmentsShowAudio, frontMatterShortUnits, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
 } from "./plan/plan-derive"
 import {
   numberedBookCodes,
@@ -149,6 +149,11 @@ import { SignedOutWorkspace } from "./SignedOutWorkspace"
 import { AnalysisReportDialog } from "@/components/analysis/AnalysisReportDialog"
 import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import {
+  PROJECT_SETTINGS_UPDATED_EVENT,
+  type ProjectSettingsUpdatedDetail,
+} from "@/hooks/useProjectSettings"
+import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
 function ProjectOverviewSkeleton() {
@@ -280,7 +285,7 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -320,7 +325,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
   fillClass: string
   suffix?: string
 }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  const pct = progressPercent(value, total)
   return (
     <div className="flex items-center gap-3">
       <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
@@ -785,6 +790,36 @@ export function ProjectOverview() {
     useState<ReadonlyMap<string, UnitAssignment[]>>(NO_UNIT_ASSIGNMENTS)
   /** Bumped after an assign, to re-read a list nothing pushes to (AD-3). */
   const [planAssignmentsNonce, setPlanAssignmentsNonce] = useState(0)
+  /**
+   * Bumped when this project's settings change, so every count on the plan is
+   * read again.
+   *
+   * Project settings open as a modal OVER this page, so closing them is not a
+   * remount and nothing here re-reads on its own. Several settings move the
+   * numbers without a single cell changing: "Count headings as translatable
+   * content" adds or removes every heading from every total, and the
+   * validation thresholds move every validated count. Before this, only the
+   * reads that happened to run again afterwards were right — the side panel's
+   * chapter tiles, fetched fresh whenever a row is clicked — while the rows,
+   * the panel's own totals and an open chapter card kept the old policy until
+   * a reload (AQU-1493). So it is one signal for all of them.
+   */
+  const [planDataVersion, setPlanDataVersion] = useState(0)
+  useEffect(() => {
+    if (!id || typeof window === "undefined") return
+    const onSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectSettingsUpdatedDetail>).detail
+      if (detail?.projectId !== id) return
+      refreshPlan()
+      setPlanDataVersion((n) => n + 1)
+      // Assignment counts leave headings out by the same policy.
+      setPlanAssignmentsNonce((n) => n + 1)
+      void loadRow()
+      void loadWorkload()
+    }
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+    return () => window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+  }, [id, refreshPlan, loadRow, loadWorkload])
 
   /**
    * The files whose sections the board actually needs, as ONE string.
@@ -877,12 +912,20 @@ export function ProjectOverview() {
       }
     })()
     return () => { cancelled = true }
-  }, [id, getPlanToken, planLane, planFileKey])
+    // `planDataVersion`: a settings change moves every section's counts
+    // without changing which files are read.
+  }, [id, getPlanToken, planLane, planFileKey, planDataVersion])
 
   // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
   // can hold it still; this memo only caches it against the three inputs.
   const planShortChaptersByUnit = useMemo(
     () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
+  )
+  // AQU-1493: …and which of them are short in the book's front matter too, so
+  // the row names it rather than only chapters.
+  const planFrontMatterShortUnits = useMemo(
+    () => frontMatterShortUnits(planUnits, planFileSections, planAudioFiles, planTextFiles),
     [planUnits, planFileSections, planAudioFiles, planTextFiles],
   )
 
@@ -1201,6 +1244,7 @@ export function ProjectOverview() {
       projectId={id ?? null}
       getToken={getPlanToken}
       lane={planLane}
+      dataVersion={planDataVersion}
       languageLabel={planLanguageLabel}
       laneCount={planLaneCount}
       // The SAME set the board judges by. Audio expectation is a fact about a
@@ -2030,7 +2074,7 @@ export function ProjectOverview() {
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
                               }),
                             ].join(" ")}
                           />
@@ -2091,7 +2135,7 @@ export function ProjectOverview() {
                     <p className="mt-3 text-xs text-muted-foreground">
                       {t("org.projectOverview.audioRecordedSummary", {
                         minutes: recordedMinutes(audio),
-                        percent: bidiIsolate(`${Math.round(audioPct(audio) * 100)}%`),
+                        percent: bidiIsolate(`${progressPercentOfFraction(audioPct(audio))}%`),
                       })}
                     </p>
                   )}
@@ -2168,6 +2212,7 @@ export function ProjectOverview() {
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
                 shortChaptersByUnit={planShortChaptersByUnit}
+                frontMatterShortUnits={planFrontMatterShortUnits}
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={handleOpenShortfall}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}
@@ -2409,7 +2454,7 @@ export function ProjectOverview() {
                       ) : (
                         <ul className="space-y-2">
                           {workload.map((w) => {
-                            const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
                             const isSelected = w.username != null && w.username === selectedMemberUsername
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">

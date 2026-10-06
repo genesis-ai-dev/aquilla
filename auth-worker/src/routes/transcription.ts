@@ -122,7 +122,9 @@ transcription.post("/transcriptions", authMiddleware,
       } else {
         let cost = bound
         try { cost = readProviderCostCents(data) } catch { /* legacy estimate */ }
-        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, seconds)
+        // Whisper bills whole seconds (transcriptionCostBound assumes the same)
+        // and the ledger's units column is INTEGER: never pass the raw duration.
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, Math.ceil(seconds))
       }
       const parsed = upstreamSchema.safeParse(data)
       if (!parsed.success) return c.json({ error: "Invalid transcription response" }, 502)

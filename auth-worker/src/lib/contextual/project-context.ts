@@ -169,12 +169,11 @@ function termMatches(haystack: string, term: string): boolean {
 /**
  * Check one drafted cell against the project's key terms.
  *
- * Deliberately NOT expressed as `LintRule`s run through `lintDraft`. That
- * path's checks compare a single pattern at a time, so "the target must
- * contain AT LEAST ONE of these three approved renderings" cannot be stated in
- * it — an alternation would be escaped as a literal and silently never match,
- * which is the worst possible failure for a check whose whole job is catching
- * silent inconsistency. The any-of test lives here instead.
+ * Deliberately NOT expressed as `LintRule`s run through `lintDraft`. Concepts
+ * hold raw termbase terms, which need term semantics (termToRegexSource: `*`
+ * wildcards, whole-word boundaries), while `lintDraft` compiles rule patterns
+ * as raw regexes, as the editor does (AQU-1705). The any-of test — "the target
+ * must contain AT LEAST ONE of these approved renderings" — lives here instead.
  *
  * Hit ids match the client's compiled rule ids (`term:<conceptId>:approved`,
  * `term:<conceptId>:forbidden:<rendering>`) so findings stay attributable to

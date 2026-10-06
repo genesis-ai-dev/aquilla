@@ -42,7 +42,7 @@ export async function readBillingWorkspace(
 ): Promise<BillingWorkspace | null> {
   const org = await db.prepare(`SELECT o.id, o.name, o.billing_scope,
     b.plan, b.status, b.stripe_customer_id, b.stripe_subscription_id,
-    b.hard_cap_words, b.complimentary_words,
+    b.hard_cap_words, b.complimentary_words, b.weekly_allowance,
     EXISTS (SELECT 1 FROM org_members m
       WHERE m.org_id = o.id AND m.user_id <> o.owner_user_id)
       OR EXISTS (SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id
@@ -54,13 +54,13 @@ export async function readBillingWorkspace(
       id: number; name: string | null; billing_scope: WorkspaceScope | null
       plan: string | null; status: string | null
       stripe_customer_id: string | null; stripe_subscription_id: string | null
-      hard_cap_words: number | null; complimentary_words: number | null
+      hard_cap_words: number | null; complimentary_words: number | null; weekly_allowance: number | null
       collaborators: boolean
     }>()
   if (!org) return null
   const stored = await readWorkspaceEntitlement(db, orgId)
   let reason: BillingWorkspace['eligibility']['reason'] = 'ready'
-  if (await hasPartnerAccess(db, orgId)) reason = 'covered_access'
+  if (await hasPartnerAccess(db, orgId) || (!stored && org.weekly_allowance != null)) reason = 'covered_access'
   else if (stored) reason = 'already_subscribed'
   else if (org.stripe_customer_id || org.stripe_subscription_id
     || (org.plan != null && !['none', 'explore'].includes(org.plan))

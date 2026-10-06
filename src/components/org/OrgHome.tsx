@@ -50,6 +50,7 @@ import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lu
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
@@ -401,9 +402,9 @@ export function ProjectTable({
         </div>
         <div className="divide-y">
           {projects.map((p) => {
-            const tpct = Math.round(translatedPct(p) * 100)
-            const pct = Math.round(validatedPct(p) * 100)
-            const apct = Math.round(audioPct(p) * 100)
+            const tpct = progressPercentOfFraction(translatedPct(p))
+            const pct = progressPercentOfFraction(validatedPct(p))
+            const apct = progressPercentOfFraction(audioPct(p))
             const dstatus = deadlineStatus(p, now)
             return (
               <Link
@@ -881,8 +882,8 @@ export function OrgHome() {
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
                 <StatTile label={t("nav.projects")} value={rollup.projectCount} />
-                <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                <StatTile label={t("org.orgHome.avgTranslated")} value={`${progressPercentOfFraction(avgTranslatedPct)}%`} />
+                <StatTile label={t("org.orgHome.avgValidated")} value={`${progressPercentOfFraction(avgValidatedPct)}%`} />
                 <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                 <StatTile
                   label={t("org.orgHome.overdue")}

@@ -51,6 +51,7 @@ import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/f
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export interface OverviewLaneTableProps {
   projectId: string
@@ -111,7 +112,8 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
 }
 
 function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string }) {
-  const width = Math.round(pct * 100)
+  // AQU-1493: never 100 while a cell in the lane is outstanding.
+  const width = progressPercentOfFraction(pct)
   return (
     <span className="flex items-center gap-2">
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">

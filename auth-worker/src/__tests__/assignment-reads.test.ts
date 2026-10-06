@@ -491,3 +491,77 @@ describe("assignment totals survive a removed cell (AQU-1068)", () => {
     expect(body.assignments[0]).toMatchObject({ cellsTotal: 0, cellsDone: 0 })
   })
 })
+
+// AQU-1493: a chapter assignment now takes the chapter's headings along (they
+// count in the chapter on the board). With headings switched off, every
+// assignee-facing figure has to leave them out too — the plan inspector's row
+// for the same person already does — or the person sits at 2 of 3 forever with
+// nothing left that the team counts.
+describe("assignment progress follows the 'count headings' setting", () => {
+  async function seedWithHeading() {
+    await seedOrgWithAssignments()
+    // A heading in bob's chapter, assigned with it, not translated.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, type) VALUES
+        ('pa', 'f1', 'h1', 'source', 'The Creation', 'e-pa', 1, 'heading')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-bob', 'f1', 'h1')",
+    ).run()
+  }
+  async function bobsRow(path: string, user: string, key = "assignments") {
+    const res = await app.request(path, { headers: authHeader(await jwtFor(user)) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, Array<{ assignmentId: string; cellsTotal: number; cellsDone: number }>>
+    return body[key].find((a) => a.assignmentId === "as-bob")
+  }
+
+  it("counts the heading while the project counts headings", async () => {
+    await seedWithHeading()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 3,
+      cellsDone: 1,
+    })
+  })
+
+  it("leaves the heading out when the project does not count headings", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 2,
+      cellsDone: 1,
+    })
+  })
+
+  it("takes the org's setting when the project has none, and drops a validated heading from done too", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')`,
+    ).run()
+    // Validated anyway: still not part of the count, on either side.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, validated) VALUES
+        ('pa', 'f1', 'h1', 'target', 'x', 'e-pa', 1, 1)`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 2,
+      cellsDone: 1,
+    })
+  })
+
+  it("lets the project's own 'count them' override an org that does not", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":true}')`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 3,
+      cellsDone: 1,
+    })
+  })
+})

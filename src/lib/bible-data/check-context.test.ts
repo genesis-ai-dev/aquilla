@@ -27,6 +27,13 @@ describe("the gate", () => {
   it("stays shut while the checks enrichment is off, whatever is decided", () => {
     expect(bibleChecksGate({ ...ON, bibleEnrichments: { checks: false }, projectFacts: [renderPeter] })).toEqual({ state: "off" })
   })
+
+  // AQU-1685: decisions are project-wide, the experiment is this device's. A
+  // name a collaborator decided must not switch pack B on for a device that
+  // never turned the Bible data experiment on.
+  it("stays shut without the Bible data experiment on this device, whatever is decided", () => {
+    expect(bibleChecksGate({ ...ON, experimentalFlags: {}, projectFacts: [renderPeter] })).toEqual({ state: "off" })
+  })
 })
 
 describe("isMultiLaneProject", () => {

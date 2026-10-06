@@ -1132,7 +1132,7 @@ CREATE TABLE cell_word_morph (
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
 );
 
--- Migration 0143: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- Migration 0152: Bridge 1 of the Bible data layer (AQU-1694). One row per
 -- link between a Bible Knowledge Pack word (Macula id) and a token of a
 -- gateway-language source cell, computed in the browser and uploaded through
 -- the sync-worker's source-word-alignment route. Derived data: rows are valid

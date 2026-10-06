@@ -73,6 +73,7 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
           status: c.status,
           ...(c.notes ? { notes: c.notes } : {}),
           ...(c.caseSensitive ? { caseSensitive: true } : {}),
+          ...(c.match ? { match: c.match } : {}),
           author,
         }),
       )

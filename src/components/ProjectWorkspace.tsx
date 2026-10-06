@@ -13902,6 +13902,12 @@ export function ProjectWorkspace() {
             // so step 1 cannot become a second ungated route to the dialog.
             openImportFlow()
           }}
+          onNavigate={(path) => {
+            // Same as onOpenImport: hide without persisting a dismissal, so the
+            // setup chip can bring the checklist back after the detour.
+            setChecklistOpen(false)
+            navigate(path)
+          }}
         />
       )}
       {project && (

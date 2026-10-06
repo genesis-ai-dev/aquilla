@@ -42,6 +42,7 @@ import { agent } from "./agent"
 import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
+import { smartEdits } from "./smartEdits"
 
 export const NAMESPACES = [
   common,
@@ -70,4 +71,5 @@ export const NAMESPACES = [
   agentDraftReview,
   workspace,
   segmentation,
+  smartEdits,
 ] as const

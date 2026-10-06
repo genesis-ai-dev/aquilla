@@ -839,6 +839,28 @@ describe("AutopilotActivityInspector", () => {
     )
   })
 
+  // AQU-1672: the "Set up" link renders only while an item is unfinished, so a
+  // project past first setup had no route left to the surface behind it. That
+  // mattered most for the translation brief — this list was its only path from
+  // the dashboard, and a reviewer wanting to re-read or revise it found none.
+  it("keeps a route to a finished context item from its own title", async () => {
+    renderInspector({
+      initialSection: "context",
+      readiness: {
+        ready: true,
+        blockingGaps: 0,
+        items: [
+          { id: "brief", label: "Translation brief", level: "ready", detail: "Answered", href: "memory/brief" },
+        ],
+      },
+    })
+
+    expect(await screen.findByRole("link", { name: "Translation brief" })).toHaveAttribute(
+      "href",
+      "/project/p1/memory/brief",
+    )
+  })
+
   it("retries a named-language lane and reviews its drafts in that lane", async () => {
     const frenchLane = {
       ...run,

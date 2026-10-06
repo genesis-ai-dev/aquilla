@@ -45,6 +45,7 @@ import { agent } from "../namespaces/agent"
 import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
+import { smartEdits } from "../namespaces/smartEdits"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -74,6 +75,7 @@ export const en = {
   ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
+  ...smartEdits.keys,
 } as const
 
 export type MessageKey = keyof typeof en

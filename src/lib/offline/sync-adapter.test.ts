@@ -5,6 +5,7 @@ import { schema, tables, events, cellRowId, DEFAULT_LANE_KEY, localLaneKey } fro
 import { createOfflineSyncAdapter, type MintToken } from "./sync-adapter"
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
+import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
 
 // The catch-up pull reads over real HTTP; these tests are about the socket and
 // the flush, so stub it (catch-up.test.ts covers it). The row-mapping helpers
@@ -72,6 +73,7 @@ beforeEach(async () => {
   })
   FakeWebSocket.instances.length = 0
   __resetConflictsForTests()
+  resetProjectAccessForTests()
   vi.mocked(catchUpProject).mockClear()
 })
 
@@ -701,5 +703,94 @@ describe("startup recovery", () => {
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
 
     adapter.close()
+  })
+})
+
+// Project gone server-side (deleted, access removed, archived, frozen): every
+// mint 403s. Before, catch-up returned silently and the flush retried forever,
+// leaving the local copy "ready" but stale with nothing telling the user.
+describe("project no longer available on the server", () => {
+  beforeEach(() => {
+    vi.mocked(catchUpProject).mockImplementation(async () => ({ filesChecked: 0, rowsChanged: 0 }))
+  })
+
+  it("marks the project unavailable on a mint 403 and keeps its queued writes", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    const mintToken = vi.fn<MintToken>(async () => ({ token: null, status: 403 }))
+    const fetchImpl = vi.fn()
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 10_000,
+    })
+
+    await waitFor(() => isProjectUnavailable("proj1"))
+    await waitFor(() => store.query(tables.eventQueue.select().where({ id: "q1" }).first())?.status === "pending")
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    adapter.close()
+  })
+
+  it("clears the mark once a mint succeeds again (unarchived, access re-granted)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    let status = 403
+    const mintToken = vi.fn<MintToken>(async () =>
+      status === 403 ? { token: null, status } : { token: "tok-1", status },
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      flushDebounceMs: 1,
+    })
+    await waitFor(() => isProjectUnavailable("proj1"))
+
+    status = 200
+    await adapter.catchUpNow()
+    expect(isProjectUnavailable("proj1")).toBe(false)
+
+    adapter.close()
+  })
+
+  it("does not treat an expired session or a server error as the project being gone", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    for (const status of [401, 503, null]) {
+      const adapter = createOfflineSyncAdapter({
+        projectId: "proj1",
+        store,
+        mintToken: async () => ({ token: null, status }),
+        baseUrl: "https://sync.example.com",
+        webSocketCtor: FakeWsCtor,
+      })
+      await adapter.catchUpNow()
+      expect(isProjectUnavailable("proj1")).toBe(false)
+      adapter.close()
+    }
+  })
+
+  it("drops the mark when the adapter closes (offline copy removed)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: async () => ({ token: null, status: 403 }),
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+    await adapter.catchUpNow()
+    expect(isProjectUnavailable("proj1")).toBe(true)
+
+    adapter.close()
+    expect(isProjectUnavailable("proj1")).toBe(false)
   })
 })

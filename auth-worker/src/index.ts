@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   DELETE /api/v2/orgs/:orgId   (owner; 409 while any project row remains)
 //   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
@@ -87,6 +88,7 @@ import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
+import aiSmartEditsRoutes from "./routes/ai-smart-edits"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -404,6 +406,10 @@ app.route("/api/v1/ai/seams", aiSeamsRoutes)
 // route; answers who is in a passage, whether it opens a scene, whether it is
 // speech, and which passages it leans on.
 app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
+// Smart edits: suggestions distilled from the project's own human edits
+// (memory → Jev verify). Same session auth and per-user window as the seam
+// route; never fails its caller.
+app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)

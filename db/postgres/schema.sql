@@ -188,6 +188,12 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1679: files of THIS project that stand in for upstream files
+    -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
+    -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
+    -- mirror writes those upstream files' source onto the named files instead
+    -- of adding copies; `pending` are the ones whose lines are not matched yet.
+    source_link_adopt    TEXT,
     -- AQU-507: designated Project Manager (attribution, distinct from the
     -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
     -- so removing a user never orphans the row. (migration 0072)
@@ -599,6 +605,13 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-1679: the upstream cell this source row stands in for, when that is
+    -- not the row's own cell_id (migration 0140). Set by source.cell.mirror on
+    -- a file the project already had and chose to follow the link into
+    -- (projects.source_link_adopt) — the row keeps its own cell_id, so its
+    -- translations stay attached, and the mirror finds it through this. NULL
+    -- everywhere else, including ordinary mirrored rows.
+    upstream_cell_id  TEXT,
     -- AQU-538: target-language lane (migration 0054). '' = the file's single
     -- configured target language (every pre-lane row, and the default lane for
     -- projects that never add a second language — N=1 back-compat). Source-side
@@ -644,6 +657,16 @@ CREATE INDEX IF NOT EXISTS idx_cells_hidden
 CREATE INDEX IF NOT EXISTS idx_cells_tombstoned
   ON cells(project_id, file_id)
   WHERE tombstoned_at IS NOT NULL;
+
+-- Target cells still carrying an untouched machine draft (migration 0137).
+-- The org dashboard counts them per lane for callers behind the read wall
+-- (aiDraftedByLane in auth-worker/src/services/org-permissions.ts), and
+-- without this that count read every target cell of every project on the
+-- page. Few rows carry the flag at a time, so the index stays small. The
+-- predicate is spelled out literally in that query and must match it.
+CREATE INDEX IF NOT EXISTS idx_cells_ai_drafted
+  ON cells(project_id, file_id)
+  WHERE side = 'target' AND ai_drafted = 1;
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,
@@ -707,6 +730,22 @@ CREATE TABLE file_section_progress (
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
 CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
+-- AQU-1493: where each line with no verse reference counts on the plan, as last
+-- projected (0145). Written ONLY by the full progress recompute's first
+-- statement (db/shared/plan-keys.ts `planKeysRefreshSql`), which every path
+-- that moves lines or changes a reference or type already runs; read by the
+-- incremental recompute, the chapter card, "Go to first ...", assignments.
+-- One row per unreferenced source cell of a Scripture file.
+CREATE TABLE cell_plan_keys (
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    section_key TEXT NOT NULL,
+    place_ref   TEXT NOT NULL DEFAULT '',
+    depth       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_id, file_id, cell_id)
+);
+
 -- AQU-1094/1095: per-unit planning metadata — the target date a manager plans
 -- against and the explicit mark that a unit is finished. section_key is '' for
 -- a file-grain unit and a Bible book code for a sub-file one, mirroring
@@ -755,8 +794,7 @@ CREATE TABLE cell_validators (
 );
 
 -- AQU-490: one row per (take, person). Presence IS the vote, exactly as in
--- cell_validators. No target_lang — unlike a translation, a recording is
--- shared by every target language, so a vote on it is not per-lane.
+-- cell_validators.
 CREATE TABLE cell_audio_validators (
     project_id TEXT   NOT NULL,
     file_id    TEXT   NOT NULL,
@@ -764,6 +802,13 @@ CREATE TABLE cell_audio_validators (
     audio_id   TEXT   NOT NULL,
     username   TEXT   NOT NULL,
     decided_ts BIGINT NOT NULL,
+    -- AQU-1591 (migration 0135): the lane of the TAKE this vote is on, copied
+    -- from cell_audio.lane_id at projection time rather than read off the
+    -- voter. A take lives in one lane, so its votes do too, and a lane-scoped
+    -- reader never has to join back to cell_audio to find out which. NULL on
+    -- every row that predates the backfill (AQU-1616); not part of the PK,
+    -- because (take, person) is already unique without it.
+    lane_id    TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id, username)
 );
 
@@ -794,6 +839,17 @@ CREATE TABLE cell_audio (
     deleted            INTEGER NOT NULL DEFAULT 0,
     event_id           TEXT NOT NULL,
     created_ts         BIGINT NOT NULL,
+    -- AQU-1591 (migration 0135): the lane this take belongs to (lanes.id).
+    -- AQU-1200 decided audio is per lane: `role = 'source'` — the shared
+    -- programme audio an import attached — resolves to the project's source
+    -- lane, and every dub to the target lane whose language it performs (the
+    -- event's `targetLang`, which cell.audio.* has carried since AQU-1462).
+    --
+    -- Nullable, unlike cells.lane_id, because the backfill is its own PR
+    -- (AQU-1616). Every reader resolves a NULL by the backfill's own rule —
+    -- source role -> the source lane, dub -> the lane whose legacy_tag is '' —
+    -- so a take reads into the same lane before and after that backfill runs.
+    lane_id            TEXT,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
     -- AQU-646 round 8: a take's PERMANENT display name ("Take 3", or whatever
@@ -882,6 +938,10 @@ CREATE TABLE cell_backtranslations (
     event_id        TEXT NOT NULL,
     server_seq      BIGINT,
     created_at      BIGINT NOT NULL,
+    -- AQU-1589: lanes.id of this reading. Nullable until the AQU-1616 backfill.
+    -- NULL belongs to the target lane whose legacy_tag is '' — rows written
+    -- before this column. Writers resolve the event's tag, never a lane name.
+    lane_id         TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
@@ -1059,10 +1119,16 @@ CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
 CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
+-- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
+-- per-file audio read and the progress audio CTE both filter on the lane now.
+CREATE INDEX idx_cell_audio_lane ON cell_audio(project_id, file_id, lane_id) WHERE deleted = 0;
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
+-- AQU-1589: latest reading per cell within one lane. NULL lane_id stays in the
+-- index so the pre-backfill default-lane read is covered too.
+CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
 CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
@@ -1840,6 +1906,8 @@ CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
 
 -- Autopilot model-call traces (0129_contextual_run_traces.sql): prompt and
 -- reply per call for the Team step inspector. VIEWER-readable, 30-day TTL.
+-- Row-level security: 0136_contextual_run_traces_rls.sql (the exact-project
+-- scope its sibling contextual tables got in 0074/0076; policies live in migrations).
 CREATE TABLE IF NOT EXISTS contextual_run_traces (
   id                bigserial PRIMARY KEY,
   run_id            text NOT NULL,
@@ -2299,6 +2367,9 @@ CREATE INDEX IF NOT EXISTS mcp_oauth_codes_expiry ON mcp_oauth_codes(expires_at)
 -- live databases reach that via migrations 0104–0111, which must run only after
 -- the backfill has filled every row (they fail closed if any NULL remains).
 ALTER TABLE cells                 ADD CONSTRAINT cells_lane_id_fkey                 FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+-- AQU-1591: nullable until AQU-1616. Enforced on new writes; a NULL member is exempt.
+ALTER TABLE cell_audio            ADD CONSTRAINT cell_audio_lane_id_fkey            FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+ALTER TABLE cell_audio_validators ADD CONSTRAINT cell_audio_validators_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE cell_validators       ADD CONSTRAINT cell_validators_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE file_section_progress ADD CONSTRAINT file_section_progress_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE assignments           ADD CONSTRAINT assignments_lane_id_fkey           FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
@@ -2306,6 +2377,8 @@ ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey 
 ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+-- AQU-1589: nullable until AQU-1616. Enforced on new writes; a NULL member is exempt.
+ALTER TABLE cell_backtranslations ADD CONSTRAINT cell_backtranslations_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
 
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
@@ -2344,6 +2417,59 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gm.added_by::BIGINT, gm.added_at
     FROM group_members gm
    WHERE gm.role_level IS NOT NULL;
+
+-- Smart edits: the project's edit memory (0130_smart_edits.sql).
+CREATE TABLE IF NOT EXISTS smart_edit_observations (
+  project_id text NOT NULL,
+  id text NOT NULL,
+  lane text NOT NULL,                  -- payload targetLang ('' = default lane)
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  after_event_id text NOT NULL,
+  before_event_id text NOT NULL,
+  author text NOT NULL,
+  ts bigint NOT NULL,                  -- after event server_ts
+  before_origin text NOT NULL CHECK (before_origin IN ('human', 'ai', 'machine')),
+  bulk_key text,                       -- replace-all: counted once, not per cell
+  old text NOT NULL,
+  old_norm text NOT NULL,
+  new text NOT NULL,
+  new_norm text NOT NULL,
+  left_ctx text NOT NULL,              -- JSON array of normalized tokens
+  right_ctx text NOT NULL,             -- JSON array of normalized tokens
+  source_norms text NOT NULL,          -- JSON array of normalized source tokens
+  source_text text NOT NULL,
+  before_text text NOT NULL,
+  after_text text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS smart_edit_observations_old
+  ON smart_edit_observations(project_id, lane, old_norm);
+
+CREATE TABLE IF NOT EXISTS smart_edit_state (
+  project_id text PRIMARY KEY,
+  -- Events with server_ts <= this have been mined. Always <= now - the settle
+  -- window, so a commit still being typed is never mined half-finished.
+  mined_through bigint NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE IF NOT EXISTS smart_edit_feedback (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  lane text NOT NULL,
+  user_id text NOT NULL,
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  old_norm text NOT NULL,
+  new_norm text NOT NULL,
+  action text NOT NULL CHECK (action IN ('accept', 'dismiss')),
+  tier text NOT NULL CHECK (tier IN ('memory', 'jev', 'llm')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS smart_edit_feedback_old
+  ON smart_edit_feedback(project_id, lane, old_norm);
 
 -- Migration 0146 (AQU-1656): AI intervention audit trail. One row per cell per
 -- model call; the prompt + raw output live in R2 at `trace_key`. `id` is also

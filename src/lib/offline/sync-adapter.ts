@@ -48,6 +48,7 @@ import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sy
 import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
 import { catchUpProject, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
+import { markProjectAvailable, withAccessTracking } from "./project-access"
 
 /** Matches buildProjectAwareMinter's signature (src/lib/sync/cqrs-bridge.ts) —
  *  callers typically pass that function directly. */
@@ -135,6 +136,10 @@ function toRawEvent(row: EventQueueRow): OutboxRawEvent {
 
 export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): OfflineSyncAdapter {
   const { projectId, store } = options
+  // Every mint (WS connect, flush, catch-up) reports a 403 / success to
+  // project-access.ts, so a project gone server-side is surfaced instead of
+  // retried silently forever.
+  const mintToken = withAccessTracking(options.mintToken)
   const baseUrl = options.baseUrl ?? syncWorkerHttpOrigin()
   const fetchFn = options.fetchImpl ?? fetch
   const flushDebounceMs = options.flushDebounceMs ?? 250
@@ -204,7 +209,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   async function getToken(): Promise<string | null> {
     const file = store.query(tables.files.select().where({ projectId }).first())
     if (!file) return null
-    const mint = await options.mintToken(projectId, file.id)
+    const mint = await mintToken(projectId, file.id)
     return mint.token
   }
 
@@ -264,7 +269,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       revertToPending()
       return "retry"
     }
-    const mint = await options.mintToken(projectId, file.id)
+    const mint = await mintToken(projectId, file.id)
     if (!mint.token) {
       revertToPending()
       return "retry"
@@ -470,6 +475,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     catchUpNow,
     close: (): void => {
       closed = true
+      // Removed offline copy (or manager teardown): stop warning about it.
+      markProjectAvailable(projectId)
       cancelFlushTimer()
       unsubscribeQueue()
       reconciler.close()

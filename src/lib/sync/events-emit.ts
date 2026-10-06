@@ -31,7 +31,7 @@ import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 // AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
 // the one seam every such gesture already passes through.
 import { captureAudioAction, captureCellValidation } from "@/lib/cell-telemetry"
-import type { AudioOrigin, TelemetrySource } from "@/lib/cell-telemetry"
+import type { AudioOrigin, TelemetrySource, TelemetrySurface } from "@/lib/cell-telemetry"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -368,6 +368,15 @@ export interface CellValidateInput {
    * wire payload. Defaults to a person in the UI.
    */
   source?: TelemetrySource
+  /**
+   * AQU-1572: this validation was added BY the app, not asked for: the vote
+   * your own edit casts for itself (`shouldAutoValidateHumanEdit`). Telemetry
+   * only, never on the wire. Reported as `auto: true` so a dashboard can
+   * count deliberate reviews apart from it; everything else reports `false`.
+   */
+  auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -414,6 +423,8 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -441,6 +452,8 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -560,11 +573,26 @@ export interface CellAudioAttachInput {
   ttsProvider?: string
   /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
   source?: TelemetrySource
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
 
 /** Emit a `cell.audio.attach` — records a clip and selects it in its slot. */
+/**
+ * AQU-1572: the length that will PLAY, for telemetry. A recorder take is
+ * attached with its trim window (the pre-roll and tail it keeps but does not
+ * play), and the file's own length would overstate every take by that much.
+ * Nothing known, nothing sent.
+ */
+function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
+  const start = input.trimStartMs ?? 0
+  const end = input.trimEndMs ?? input.durationMs
+  if (end === undefined || !Number.isFinite(end) || end - start <= 0) return {}
+  return { durationMs: end - start }
+}
+
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.attach",
@@ -602,9 +630,10 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       slot: input.slot,
       lane: input.targetLang,
       source: input.source,
+      surface: input.surface,
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
-      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...playedDuration(input),
     })
   }
   return eventId
@@ -1094,6 +1123,14 @@ export interface CellAudioValidateInput {
   laneId?: string
   /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
   source?: TelemetrySource
+  /**
+   * AQU-1572: the recorder's own vote for a fresh take
+   * (`shouldAutoValidateFreshRecording`), not a listener's review. Telemetry
+   * only, never on the wire; reported as `auto: true`.
+   */
+  auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -1117,6 +1154,8 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -1154,6 +1193,8 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     cellId: input.cellId,
     lane: input.targetLang,
     source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }

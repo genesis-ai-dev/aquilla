@@ -27,14 +27,13 @@ import {
   LibraryBig,
   ShieldCheck,
   Sparkles,
-  Target,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
-import { LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
+import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
 import { useProject } from "@/hooks/useProject"
@@ -89,7 +88,7 @@ export interface LivingMemorySectionDef {
 export const LIVING_MEMORY_SECTIONS: readonly LivingMemorySectionDef[] = [
   {
     id: "brief",
-    icon: Target,
+    icon: BRIEF_ICON,
     titleKey: "terminology.livingMemory.section.brief.title",
     descriptionKey: "terminology.livingMemory.section.brief.description",
   },
@@ -213,8 +212,9 @@ export function LivingMemoryPage({
   const brief = settings.translationBrief ?? project?.translationBrief
   // completionSettings comes from the overlaid project record (device-local
   // apiKey + server-side voice profiles merged in overlayDeviceLocalSettings /
-  // overlaySettings). If undefined (no LLM configured), the brief pane's
-  // generation affordances fall back to opening the builder.
+  // overlaySettings). Undefined while the record hydrates, and for a project
+  // that never customized AI — the brief pane resolves both to the Frontier
+  // platform default rather than reading them as "no provider" (AQU-1671).
   const completionSettings = project?.completionSettings
 
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {

@@ -523,7 +523,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titlePaired": "Paired Translation Import",
-    "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.pairedNeedsSourceCells":
@@ -1085,7 +1084,8 @@ export const importExport = defineNamespace({
     "importExport.columnMapping.startColumnLabel": "Start timestamp",
     "importExport.columnMapping.targetColumnLabel": "Target translation",
     "importExport.columnMapping.targetModeHint": "Pick the column with the translations. Map a ref column to match by " +
-      "reference; leave it unmapped to match rows to cells in order.",
+      "reference, start and end timestamps to match by timing, or the source text column to pair rows with lines " +
+      "by their source. With none of these, rows match lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
     "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
@@ -1149,11 +1149,38 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.looseFitWarning": "Many cues cover only part of their lines. Check the pairings.",
-    "importExport.review.matchedCount": "{count} matched",
+    "importExport.review.elsewhere": "This file is for {incoming}; the open file is {file}.",
+    "importExport.review.elsewhereNoReferences": "This file is for {incoming}; the open file's lines have no verse " +
+      "references.",
+    "importExport.review.matchedCount": plural({
+      one: "{count} matched",
+      other: "{count} matched",
+    }),
+    "importExport.review.toCheckCount": plural({
+      one: "{count} to check",
+      other: "{count} to check",
+    }),
+    "importExport.review.rowNumber": "Row {number}",
+    "importExport.review.cueNumber": "Cue {number}",
     "importExport.review.orderMatchWarning": "Matched in order, not by reference or timing. Check each row's source text.",
+    "importExport.review.orderMatchLinesUntimedCues": "The open file's lines have no timings, so cues were matched in " +
+      "order. Check each cue's source text.",
+    "importExport.review.orderMatchLinesUntimedRows": "The open file's lines have no timings, so rows were matched in " +
+      "order. Check each row's source text.",
+    "importExport.review.orderMatchRowsUntimed": "Some rows have no timing, so every row was matched in order. Check " +
+      "each row's source text.",
+    "importExport.review.countMismatchRows": "Rows in this file: {rows}. Lines in the open file: {lines}. If a row was " +
+      "added or left out, every row after it is on the wrong line.",
+    "importExport.review.countMismatchCues": "Cues in this file: {rows}. Lines in the open file: {lines}. If a cue was " +
+      "added or left out, every cue after it is on the wrong line.",
     "importExport.review.reasonBackwardsTimecode": "Timecode ends before it starts",
     "importExport.review.reasonLostItsLine": "Lost its line to another cue",
     "importExport.review.reasonNoLineInReach": "No line within reach",
+    "importExport.review.reasonNoReference": "No reference",
+    "importExport.review.reasonRefNotInFile": "No line has this reference",
+    "importExport.review.reasonRefRepeated": "This reference appears twice",
+    "importExport.review.reasonBridgeOverSeparateLines": "Covers verses {first}–{last}, which are separate lines here",
+    "importExport.review.reasonPartOfBridgedLine": "Verses {first}–{last} are one line here",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.rowAlreadyThere": "Already there",
     "importExport.review.rivalHeading": "Also fits this line",
@@ -1163,6 +1190,13 @@ export const importExport = defineNamespace({
     "importExport.review.rowSharedTiming": "Same timing as another cue, check which is which",
     "importExport.review.rowSharedTimingPill": "Same timing",
     "importExport.review.rowTimingDiffers": "Timing differs",
+    "importExport.review.rowSourceDiffersPill": "Source differs",
+    "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
+    "importExport.review.rowIncomingSource": "Source in this row: {text}",
+    "importExport.review.rowWrittenAs": "as written: {ref}",
+    "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
+      "line are left unticked.",
+    "importExport.review.reasonSourceNotInFile": "No line has this source text",
     "importExport.review.showAll": "All {count}",
     "importExport.review.showFilterAriaLabel": "Which rows to show",
     "importExport.review.showToCheck": "To check {count}",
@@ -1201,9 +1235,19 @@ export const importExport = defineNamespace({
       other: "{count} source cells not covered",
     }),
     "importExport.review.unmatchedListTitle": "Cues that didn't find a line",
+    "importExport.review.unmatchedRowsListTitle": "Rows that didn't find a line",
+    "importExport.review.unmatchedVersesListTitle": "Verses that didn't find a line",
     "importExport.review.unmatchedRowCount": plural({
       one: "{count} unmatched row",
       other: "{count} unmatched rows",
+    }),
+    "importExport.review.unmatchedCueCount": plural({
+      one: "{count} unmatched cue",
+      other: "{count} unmatched cues",
+    }),
+    "importExport.review.unmatchedVerseCount": plural({
+      one: "{count} unmatched verse",
+      other: "{count} unmatched verses",
     }),
     "importExport.spreadsheet.acceptedFormats": "CSV, TSV, or XLSX",
     "importExport.spreadsheet.description": "Upload a CSV or XLSX file. You will map columns (source, target, ref, " +
@@ -1224,6 +1268,82 @@ export const importExport = defineNamespace({
     }),
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
+    // AQU-1365: the Import dialog's "What are you importing?" choice and its
+    // translation path.
+    "importExport.intent.groupLabel": "What are you importing?",
+    "importExport.intent.source.title": "New source text",
+    "importExport.intent.source.description": "Adds new files to translate from.",
+    "importExport.intent.translation.title": "A translation",
+    "importExport.intent.translation.description": "Target text for a file that's already in this project.",
+    "importExport.intent.translation.noFiles": "Add a source text first. A translation goes into a file that's already here.",
+    "importExport.translation.destinationLabel": "Which file does it translate?",
+    "importExport.translation.destinationPlaceholder": "Choose a file",
+    "importExport.translation.searchPlaceholder": "Search files",
+    "importExport.translation.noMatches": "No files match.",
+    "importExport.translation.fillsLanguage": "It fills the empty lines of the {language} translation. You check every match before anything is saved.",
+    "importExport.translation.fillsNoLanguage": "It fills the empty lines of the file's translation. You check every match before anything is saved.",
+    "importExport.translation.heldNeedsFile": "Choose the file that {fileName} translates.",
+    // AQU-1365 (PR 3 pass): a held upload names its book and offers that
+    // book's file; it never moves the import by itself.
+    "importExport.translation.heldForBook": "This file is for {book}.",
+    "importExport.translation.heldImportInto": "Import into {fileName}",
+    "importExport.translation.heldSeveralForBook": "This file is for {book}, and more than one file here is for {book}. Choose the one it translates.",
+    "importExport.translation.heldNoFileForBook": "This file is for {book}, but no file here is for {book}. Choose the file it translates.",
+    "importExport.translation.removeHeld": "Remove",
+    "importExport.translation.continue": "Continue",
+    "importExport.translation.oneFileAtATime": "Add one file at a time.",
+    "importExport.translation.titleInto": "Import a translation into {fileName}",
+    "importExport.translation.opening": "Opening {fileName}…",
+    "importExport.translation.openFailed": "Couldn't open {fileName}. Check your connection and try again.",
+    "importExport.translation.tryAgain": "Try again",
+    "importExport.translation.fileGone": "That file is no longer in this project.",
+    "importExport.translation.backToChooser": "Back to choosing a file",
+    "importExport.translation.otherWays": "Other ways to bring in a translation",
+    "importExport.translation.chooseFileFirst": "Choose the file first.",
+    "importExport.translation.fileHasNoLines": "{fileName} has no lines yet, so there is nothing for a translation to fill.",
+    "importExport.translationCheck.sameBookTitle": "{book} is already in this project",
+    "importExport.translationCheck.languageToo": "It also says it's in {language}, the language you translate into.",
+    "importExport.translationCheck.severalSameBook": "{fileName} is for {book}, and this project already has more than one {book}. If it's a translation, choose which file it translates.",
+    "importExport.translationCheck.multiBookTitle": "Some of its books are already in this project",
+    "importExport.translationCheck.multiBookBody": "{fileName} holds more than one book, and this project already has {books}. A translation goes into one file at a time, so to bring it in as a translation, split it into one file per book first.",
+    "importExport.translationCheck.languageTitle": "This looks like a translation",
+    "importExport.translationCheck.languageBody": "{fileName} says it's in {language}, the language you translate into. A translation goes into a file that's already in this project.",
+    // AQU-1365 review: the check when the upload can't be handed to the
+    // translation review (format, another lane), and a Contributor's empty project.
+    "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
+    "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
+    "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+    "importExport.translationCheck.otherLane": "It says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.translationCheck.otherLaneBody": "{fileName} says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
+    "importExport.translationCheck.manyTitle": "Some of these look like translations",
+    "importExport.translationCheck.manyBody": plural({
+      one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
+      other: "{count} of these files may be translations of files already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
+    }),
+    // AQU-1365 (PR 3 pass): the check's answers as option cards, each a short
+    // title and one line saying what choosing it does.
+    "importExport.translationCheck.whatIsIt": "What is it?",
+    "importExport.translationCheck.option.translation.title": "A translation of {book}",
+    "importExport.translationCheck.option.translation.description": "Fills {book}'s empty translation lines. You check every match before anything is saved.",
+    "importExport.translationCheck.option.update.title": "A new version of {book}'s source text",
+    "importExport.translationCheck.option.update.description": "Updates {book}'s source lines from this file. Translations, comments and audio are kept.",
+    "importExport.translationCheck.option.separate.title": "A separate source text",
+    "importExport.translationCheck.option.newSource.title": "New source text",
+    "importExport.translationCheck.option.addAsSource.description": "Adds it to the project as new source text. Nothing already here changes.",
+    "importExport.translationCheck.option.chooseFile.title": "A translation",
+    "importExport.translationCheck.option.chooseFile.description": "Choose the file it translates, then check every match before anything is saved.",
+    "importExport.translationCheck.option.leaveOut.title": plural({
+      one: "Leave it out",
+      other: "Leave those out",
+    }),
+    "importExport.translationCheck.option.leaveOut.description": plural({
+      one: "Imports only {count} other file, as new source text.",
+      other: "Imports only {count} other files, as new source text.",
+    }),
+    "importExport.translationCheck.option.importAll.title": "Import them all",
+    "importExport.translationCheck.option.importAll.description": "Adds every file to the project as new source text, those included.",
+    "importExport.review.useOtherFile": "Import into {fileName} instead",
   },
   context: {
     _context: {
@@ -1722,10 +1842,6 @@ export const importExport = defineNamespace({
           count: "Number of cells uploaded so far, already locale-formatted.",
           total: "Total cell count, already locale-formatted.",
         },
-      },
-      "importExport.dialog.titleFileTarget": {
-        description:
-          "Title of the dialog that fills in the translated column of the file the reader currently has open, from a document or spreadsheet they upload. A heading naming what the dialog does, not a button. 'Target' here means the translated side of the file, as opposed to the original text being translated from.",
       },
       "importExport.dialog.downloadFile": {
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
@@ -2854,10 +2970,11 @@ export const importExport = defineNamespace({
         description:
           "Instruction under the column-mapping heading when the spreadsheet is " +
           "being used to fill in translations for lines that already exist. First " +
-          "sentence names the one required choice. The rest explains the " +
-          "consequence of the optional reference column: name one and rows are " +
-          "paired by that reference, leave it out and rows are paired top to bottom " +
-          "by position.",
+          "sentence names the one required choice. The rest explains the optional " +
+          "columns: a reference column pairs rows with lines by reference; start and " +
+          "end timestamp columns pair them by when they play; a source text column " +
+          "pairs them by the original text each row was translated from; with none " +
+          "of these, rows are paired top to bottom by position.",
       },
       "importExport.columnMapping.typeColumnLabel": {
         description:
@@ -3169,6 +3286,29 @@ export const importExport = defineNamespace({
           count: "Number of ticked lines that will be written into the project.",
         },
       },
+      "importExport.review.elsewhere": {
+        description:
+          "Amber note above the match-review list when almost none of the uploaded " +
+          "file's verses belong to the open file — it is for another book or chapter. " +
+          "Names both sides so the user sees at once they picked the wrong file or " +
+          "opened the wrong one. One sentence.",
+        placeholders: {
+          incoming: "The books and chapters the uploaded file covers, already formatted, " +
+            "such as 'Exodus 1' or 'Genesis 1–50' (English book names).",
+          file: "The books and chapters the open file covers, formatted the same way, " +
+            "such as 'Genesis 1'.",
+        },
+      },
+      "importExport.review.elsewhereNoReferences": {
+        description:
+          "Amber note above the match-review list when the uploaded file's rows carry " +
+          "verse references but the open file's lines carry none, so nothing could be " +
+          "matched by reference. One sentence.",
+        placeholders: {
+          incoming: "The books and chapters the uploaded file covers, already formatted, " +
+            "such as 'Exodus 1' (English book names).",
+        },
+      },
       "importExport.review.looseFitWarning": {
         description:
           "Amber warning above the match-review list: many uploaded cues only partly " +
@@ -3178,11 +3318,41 @@ export const importExport = defineNamespace({
       "importExport.review.matchedCount": {
         description:
           "First figure in the summary strip under the 'Review matches' heading: " +
-          "how many incoming rows were successfully paired with an existing line. " +
-          "Terse count-plus-participle fragment sitting beside sibling fragments, " +
-          "so it must stay short.",
+          "how many incoming rows were paired with an existing line. On the review " +
+          "of a file's target import it counts only those needing no decision — rows " +
+          "to check and conflicts have their own figures beside it. Terse " +
+          "count-plus-participle fragment sitting beside sibling fragments, so it " +
+          "must stay short.",
         placeholders: {
           count: "Number of incoming rows that were paired with an existing line.",
+        },
+      },
+      "importExport.review.toCheckCount": {
+        description:
+          "Amber figure in the summary strip under the 'Review matches' heading, " +
+          "beside the matched count: how many paired rows were left unticked for the " +
+          "user to check before importing (for example, the row's source text differs " +
+          "from its line's). Terse count-plus-phrase fragment, must stay short.",
+        placeholders: {
+          count: "Number of paired rows waiting for the user to check them.",
+        },
+      },
+      "importExport.review.rowNumber": {
+        description:
+          "Label of one row in the match-review lists when the uploaded spreadsheet " +
+          "row has no reference of its own: the row's position in the uploaded file. " +
+          "Shown in small monospace type above the row's text.",
+        placeholders: {
+          number: "The row's position in the uploaded file, counting from 1.",
+        },
+      },
+      "importExport.review.cueNumber": {
+        description:
+          "Label of one subtitle cue in the match-review lists when the cue has no " +
+          "timecode of its own: its position in the uploaded subtitle file. Shown in " +
+          "small monospace type above the cue's text.",
+        placeholders: {
+          number: "The cue's position in the uploaded file, counting from 1.",
         },
       },
       "importExport.review.orderMatchWarning": {
@@ -3191,6 +3361,51 @@ export const importExport = defineNamespace({
           "by position (row 1 to line 1, row 2 to line 2) because neither side had a " +
           "reference or timings to go by. Asks the user to check each row's source " +
           "text, shown beside it. Two short sentences.",
+      },
+      "importExport.review.orderMatchLinesUntimedCues": {
+        description:
+          "Amber warning above the match-review list when a subtitle file was dropped " +
+          "on a file whose lines have no timings (a plain text source, say), so its " +
+          "cues were paired with lines by position (cue 1 to line 1, and so on) " +
+          "instead of by time. Asks the user to check the source text shown beside " +
+          "each cue. Two short sentences.",
+      },
+      "importExport.review.orderMatchLinesUntimedRows": {
+        description:
+          "Amber warning above the match-review list when a spreadsheet with start " +
+          "and end times was dropped on a file whose lines have no timings, so its " +
+          "rows were paired with lines by position (row 1 to line 1, and so on) " +
+          "instead of by time. Asks the user to check the source text shown beside " +
+          "each row. Two short sentences.",
+      },
+      "importExport.review.orderMatchRowsUntimed": {
+        description:
+          "Amber warning above the match-review list when the open file's lines have " +
+          "timings but some uploaded spreadsheet rows don't, so every row was paired " +
+          "with a line by position (row 1 to line 1, and so on) instead of by time. " +
+          "Asks the user to check each row's source text. Two short sentences.",
+      },
+      "importExport.review.countMismatchRows": {
+        description:
+          "Amber note above the match-review list when spreadsheet rows were paired " +
+          "with lines by position and the two counts differ: one row added or left " +
+          "out shifts every later row onto the wrong line. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of rows in the uploaded file.",
+          lines: "Number of lines in the open file.",
+        },
+      },
+      "importExport.review.countMismatchCues": {
+        description:
+          "Amber note above the match-review list when subtitle cues were paired with " +
+          "lines by position and the two counts differ: one cue added or left out " +
+          "shifts every later cue onto the wrong line. Figures are written as " +
+          "'label: number' so no plural agreement is needed.",
+        placeholders: {
+          rows: "Number of cues in the uploaded file.",
+          lines: "Number of lines in the open file.",
+        },
       },
       "importExport.review.reasonBackwardsTimecode": {
         description:
@@ -3210,6 +3425,47 @@ export const importExport = defineNamespace({
           "Reason shown next to one entry in the list of uploaded cues that were not " +
           "paired with any line: no line of the open file plays close enough in time " +
           "to this cue. Short sentence fragment.",
+      },
+      "importExport.review.reasonNoReference": {
+        description:
+          "Reason shown next to one entry in the list of uploaded spreadsheet rows that " +
+          "were not paired with any line: the row's reference cell (such as GEN 1:3) " +
+          "is blank, so there is nothing to match it by. Short fragment.",
+      },
+      "importExport.review.reasonRefNotInFile": {
+        description:
+          "Reason shown next to one entry in the list of uploaded rows or verses that " +
+          "were not paired with any line: no line of the open file carries this " +
+          "reference (such as GEN 1:3), for example because of a typo or a verse the " +
+          "file doesn't have. Short sentence.",
+      },
+      "importExport.review.reasonRefRepeated": {
+        description:
+          "Reason shown next to one entry in the list of uploaded rows or verses that " +
+          "were not paired with any line: the same reference appears earlier in the " +
+          "uploaded file, and that earlier row already took the line. Short sentence.",
+      },
+      "importExport.review.reasonBridgeOverSeparateLines": {
+        description:
+          "Reason shown next to one entry in the list of uploaded verses that were not " +
+          "paired with any line: the uploaded text is one combined passage for several " +
+          "verses (a 'verse bridge', such as verses 1-2), while the open file has a " +
+          "separate line for each of those verses. Short sentence.",
+        placeholders: {
+          first: "First verse number of the combined passage, such as 1.",
+          last: "Last verse number of the combined passage, such as 2.",
+        },
+      },
+      "importExport.review.reasonPartOfBridgedLine": {
+        description:
+          "Reason shown next to one entry in the list of uploaded verses that were not " +
+          "paired with any line: the open file holds this verse together with its " +
+          "neighbours in one combined line (a 'verse bridge', such as verses 1-2), so " +
+          "there is no line for this verse on its own. Short sentence.",
+        placeholders: {
+          first: "First verse number of the open file's combined line, such as 1.",
+          last: "Last verse number of the open file's combined line, such as 2.",
+        },
       },
       "importExport.review.replacesExisting": {
         description:
@@ -3253,6 +3509,56 @@ export const importExport = defineNamespace({
           "another cue for the same line. It is a toggle with a small arrow: clicking " +
           "it opens the row to compare the two cues. One word, the same word the " +
           "warning above the list uses.",
+      },
+      "importExport.review.rowSourceDiffersPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list, shown when the original (source) text the uploaded spreadsheet row " +
+          "carries doesn't match the source text of the line it was paired with, so " +
+          "the pairing may be wrong. The row is left unticked. Two or three words, no " +
+          "closing full stop.",
+      },
+      "importExport.review.rowSourceDiffers": {
+        description:
+          "Tooltip on the 'Source differs' pill of one row of the match-review list: " +
+          "the uploaded row's original (source) text doesn't match the source text of " +
+          "the line it was paired with. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowWrittenAs": {
+        description:
+          "Small grey note beside the reference of one row in the match-review list, " +
+          "shown when the uploaded file spelled the reference differently from the " +
+          "line it matched (for example 'gen 1:2' for GEN 1:2): the row is labelled " +
+          "with the line's own reference, and this says how the file wrote it. " +
+          "Lower-case fragment, label then colon then the reference as typed.",
+        placeholders: {
+          ref: "The reference exactly as the uploaded file wrote it, such as 'gen 1:2'.",
+        },
+      },
+      "importExport.review.rowIncomingSource": {
+        description:
+          "Small amber line inside one row of the match-review list, under the " +
+          "paired line's own source text, showing the source text the uploaded " +
+          "spreadsheet row carries — so the two can be compared when they don't " +
+          "match. 'This row' is the uploaded spreadsheet row, not the open file. " +
+          "Label, colon, then the text (truncated if long).",
+        placeholders: {
+          text: "The original (source) text from the uploaded row.",
+        },
+      },
+      "importExport.review.sourceAligned": {
+        description:
+          "Grey note above the match-review list when spreadsheet rows were paired " +
+          "with the open file's lines by comparing their original (source) text " +
+          "rather than by position. Rows whose source text doesn't match their line " +
+          "start unticked for the user to check. Two short sentences.",
+      },
+      "importExport.review.reasonSourceNotInFile": {
+        description:
+          "Reason shown next to one entry in the list of uploaded spreadsheet rows " +
+          "that were not paired with any line: the row's original (source) text isn't " +
+          "in the open file, as with a title row or a line deleted from the file. " +
+          "Short sentence.",
       },
       "importExport.review.rowTimingDiffers": {
         description:
@@ -3427,6 +3733,18 @@ export const importExport = defineNamespace({
           "the uploaded subtitle file that was not paired with any line, each with " +
           "the reason.",
       },
+      "importExport.review.unmatchedRowsListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every row of " +
+          "the uploaded spreadsheet that was not paired with any line of the open " +
+          "file, each with the reason.",
+      },
+      "importExport.review.unmatchedVersesListTitle": {
+        description:
+          "Title of a collapsible list under the summary strip naming every verse " +
+          "of the uploaded scripture (USFM) file that was not paired with any line " +
+          "of the open file, each with the reason.",
+      },
       "importExport.review.unmatchedRowCount": {
         description:
           "Figure in the summary strip under the 'Review matches' heading: how many " +
@@ -3434,6 +3752,24 @@ export const importExport = defineNamespace({
           "project and will therefore be ignored. Count plus noun phrase, no verb.",
         placeholders: {
           count: "Number of uploaded rows that were not paired with anything.",
+        },
+      },
+      "importExport.review.unmatchedCueCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading for an " +
+          "uploaded subtitle file: how many of its cues could not be paired with any " +
+          "line and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded subtitle cues that were not paired with anything.",
+        },
+      },
+      "importExport.review.unmatchedVerseCount": {
+        description:
+          "Figure in the summary strip under the 'Review matches' heading for an " +
+          "uploaded scripture (USFM) file: how many of its verses could not be paired " +
+          "with any line and will therefore be ignored. Count plus noun phrase, no verb.",
+        placeholders: {
+          count: "Number of uploaded verses that were not paired with anything.",
         },
       },
       "importExport.spreadsheet.acceptedFormats": {
@@ -3526,6 +3862,316 @@ export const importExport = defineNamespace({
           "Heading at the top of the spreadsheet import panel, shown when the user " +
           "has chosen to import a comma- or tab-separated file or an Excel " +
           "workbook. Short noun phrase naming the panel, not an instruction.",
+      },
+      // AQU-1365: the Import dialog's "What are you importing?" choice and its
+      // translation path (choose the file a translation belongs to, open it, review).
+      "importExport.intent.groupLabel": {
+        description:
+          "Accessible name and visible question above the two cards at the top of the Import dialog's first screen, where the user says whether the file is new source text or a translation of a file already in the project. Short question addressed to the user.",
+      },
+      "importExport.intent.source.title": {
+        description:
+          "Title of the first card in the Import dialog's 'What are you importing?' choice, preselected: the upload becomes new files in the project that will be translated FROM. Short noun phrase.",
+      },
+      "importExport.intent.source.description": {
+        description:
+          "One-line hint under the 'New source text' card in the Import dialog, saying what choosing it does. Short sentence.",
+      },
+      "importExport.intent.translation.title": {
+        description:
+          "Title of the second card in the Import dialog's 'What are you importing?' choice: the upload is the translated (target) text of a file already in the project. Short noun phrase; keep the word for 'translation'.",
+      },
+      "importExport.intent.translation.description": {
+        description:
+          "One-line hint under the 'A translation' card in the Import dialog. 'Target text' is the translated text, as opposed to the source text being translated from; people look for the word 'target', so keep it recognisable.",
+      },
+      "importExport.intent.translation.noFiles": {
+        description:
+          "Shown in place of the file picker, and as the tooltip of the disabled 'A translation' card, when the project has no files yet, so there is nothing a translation could go into. Two short sentences.",
+      },
+      "importExport.translation.destinationLabel": {
+        description:
+          "Label of the searchable file picker on the Import dialog's translation screen: the user chooses which project file the uploaded translation belongs to. 'It' is the uploaded translation. Short question.",
+      },
+      "importExport.translation.destinationPlaceholder": {
+        description:
+          "Text on the file picker on the Import dialog's translation screen while no file is chosen yet. Short imperative.",
+      },
+      "importExport.translation.searchPlaceholder": {
+        description:
+          "Placeholder and accessible name of the search box inside the file picker on the Import dialog's translation screen. Short imperative.",
+      },
+      "importExport.translation.noMatches": {
+        description:
+          "Shown in the file picker on the Import dialog's translation screen when the search matches no project file. Short sentence.",
+      },
+      "importExport.translation.fillsLanguage": {
+        description:
+          "Sentence under the file picker on the Import dialog's translation screen, saying what the import will do. 'It' is the uploaded translation; it only fills lines that have no translation yet, and the user reviews every match first.",
+        placeholders: {
+          language: "Name of the language the project translates into (the active target lane), e.g. 'Siberian Tatar'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.fillsNoLanguage": {
+        description:
+          "Same sentence as the one naming the language, used when the project's target language is not known. 'It' is the uploaded translation.",
+      },
+      "importExport.translation.heldNeedsFile": {
+        description:
+          "Shown on the Import dialog's translation screen after the user dropped a file before choosing which project file it belongs to. The upload waits until a file is chosen.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.csv'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldForBook": {
+        description:
+          "Shown on the Import dialog's translation screen under a dropped file that is waiting for its destination, when the file names a Bible book that exactly one project file holds. A button offering that file follows it. Short sentence.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldImportInto": {
+        description:
+          "Button under a dropped file waiting on the Import dialog's translation screen: start importing it as the translation of the one project file that holds its book. Nothing happens until it is clicked. Imperative.",
+        placeholders: {
+          fileName: "Display name of the project file that holds the upload's book, e.g. 'Jonah' or 'JON-source.usfm'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldSeveralForBook": {
+        description:
+          "Shown under a dropped file waiting on the Import dialog's translation screen when two or more project files hold the Bible book the file is for, so none is offered and the user picks one in the file picker above. Two short sentences.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.heldNoFileForBook": {
+        description:
+          "Shown under a dropped file waiting on the Import dialog's translation screen when no project file holds the Bible book the file is for, so none is offered and the user picks one in the file picker above. Two short sentences.",
+        placeholders: {
+          book: "English name of the Bible book the uploaded file is for, e.g. 'Genesis'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.removeHeld": {
+        description:
+          "Link beside the name of a dropped file waiting on the Import dialog's translation screen; removes that file so another can be dropped. Single verb.",
+      },
+      "importExport.translation.continue": {
+        description:
+          "Button on the Import dialog's translation screen that starts reviewing a dropped file once its destination file is chosen. Single verb.",
+      },
+      "importExport.translation.oneFileAtATime": {
+        description:
+          "Error on the Import dialog's translation screen when the user drops several files at once; a translation is imported one file at a time. Short imperative sentence.",
+      },
+      "importExport.translation.titleInto": {
+        description:
+          "Title of the Import dialog while a translation is opened and reviewed for a project file. Imperative phrase naming the destination.",
+        placeholders: {
+          fileName: "Display name of the project file the translation goes into, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.opening": {
+        description:
+          "Status line on the Import dialog while the destination file is opened in the editor and its lines load, before the review can start. Keep the trailing ellipsis.",
+        placeholders: {
+          fileName: "Display name of the project file being opened. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.openFailed": {
+        description:
+          "Error on the Import dialog when the destination file's lines failed to load, shown with a 'Try again' button. Two short sentences.",
+        placeholders: {
+          fileName: "Display name of the project file that failed to open. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.tryAgain": {
+        description:
+          "Button under the error shown when the destination file failed to open on the Import dialog; loads it again. Short imperative.",
+      },
+      "importExport.translation.fileGone": {
+        description:
+          "Shown on the Import dialog's translation screen when the file chosen as the destination was deleted while it was being opened. Short sentence.",
+      },
+      "importExport.translation.backToChooser": {
+        description:
+          "Accessible name of the back arrow in the Import dialog's title while a translation is being opened or reviewed; returns to choosing which file it translates. Never shown as text.",
+      },
+      "importExport.translation.otherWays": {
+        description:
+          "Small section heading on the Import dialog's translation screen, above two options besides dropping a file: eBible (published Bible translations) and a paired source + translation spreadsheet. Sentence case.",
+      },
+      "importExport.translation.chooseFileFirst": {
+        description:
+          "Hint under 'Other ways to bring in a translation' while no project file is chosen yet; both options stay disabled until one is. Short imperative sentence.",
+      },
+      "importExport.translation.fileHasNoLines": {
+        description:
+          "Shown on the Import dialog when the user chose eBible or a paired spreadsheet for a project file that has no lines, so nothing can be matched or filled. One sentence.",
+        placeholders: {
+          fileName: "Display name of the chosen project file, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      // AQU-1365: "Is this a translation?", asked on the New source text path
+      // before any cell is created, when an upload's book is already in the
+      // project or its header says it is in the target language.
+      "importExport.translationCheck.sameBookTitle": {
+        description:
+          "Title of the Import dialog when an uploaded file is for a book the project already has. Statement, not a question.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.languageToo": {
+        description:
+          "Extra sentence on the same screen when the uploaded file's header also names the language the project translates into. 'It' is the uploaded file.",
+        placeholders: { language: "Name of the project's target language that the uploaded file's header names, e.g. 'Siberian Tatar'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.severalSameBook": {
+        description:
+          "Shown instead of the usual question when the project already has two or more files for the uploaded file's book, so it can't say which one it belongs to. Two sentences.",
+        placeholders: { fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.", book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.multiBookTitle": {
+        description:
+          "Title of the Import dialog when one uploaded file holds several Bible books and some of them are already in the project. Statement.",
+      },
+      "importExport.translationCheck.multiBookBody": {
+        description:
+          "Explains that screen: a translation is imported into one project file at a time, so a file holding several books can only be imported as new source text here. Two sentences.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          books: "The names of the project files that already hold some of its books, already joined into a list, e.g. 'Jonah and Ruth'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.languageTitle": {
+        description:
+          "Title of the Import dialog when an uploaded file's header says it is in the language the project translates into, although it was uploaded as new source text. Short statement.",
+      },
+      "importExport.translationCheck.languageBody": {
+        description:
+          "Explains that screen: the upload says it is in the target language, and a translation belongs in a file already in the project. Two sentences.",
+        placeholders: { fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.", language: "Name of the project's target language that the uploaded file's header names, e.g. 'Siberian Tatar'. Do not translate the substituted value." },
+      },
+      // AQU-1365 review: the check's answers when the upload can only come in as
+      // source text, and a Contributor's empty project.
+      "importExport.translationCheck.sameBookPlain": {
+        description:
+          "Opening sentence of the '{book} is already in this project' screen. When the upload could be a translation, the question 'What is it?' follows it; when it can't be imported as one (its format, or its language belongs to another lane), it stands alone. One sentence.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.severalSameBookPlain": {
+        description:
+          "Shown when the project already has two or more files for the uploaded file's book and the upload can't be imported as a translation anyway (its format, or another lane's language). One sentence.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.formatSourceOnly": {
+        description:
+          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence; USFM is a file format name, do not translate it.",
+      },
+      "importExport.translationCheck.otherLane": {
+        description:
+          "Extra sentences on the 'Is this a translation?' screens when the uploaded file's header names a language this project translates into, but not in the language lane open in the editor. A translation import only fills the open lane, so it isn't offered. 'It' is the uploaded file. Two sentences.",
+        placeholders: {
+          language: "Name of a language the project translates into in a lane other than the one open in the editor, e.g. 'Russian'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translationCheck.otherLaneBody": {
+        description:
+          "Explains the 'This looks like a translation' screen when the language the upload names belongs to a language lane other than the one open in the editor. Two sentences.",
+        placeholders: {
+          fileName: "Name of the uploaded file, e.g. 'JON-tatar.usfm'. Do not translate the substituted value.",
+          language: "Name of a language the project translates into in a lane other than the one open in the editor, e.g. 'Russian'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.intent.translation.noFilesLead": {
+        description:
+          "Shown to a Contributor (who can import translations but not new source text) when the project has no files yet: as the tooltip of the disabled Import button and of the disabled 'A translation' card. Two short sentences.",
+      },
+      "importExport.translationCheck.manyTitle": {
+        description:
+          "Title of the Import dialog when several files were uploaded together and some of them look like translations of files already in the project. Statement.",
+      },
+      "importExport.translationCheck.manyBody": {
+        description:
+          "Explains that screen and how to import a translation instead ('A translation' is the Import dialog's choice of that name; keep it quoted and matching its translation). Count-governed.",
+        placeholders: {
+          count: "How many of the uploaded files look like translations; also governs the plural form.",
+          files: "The names of those uploaded files, already joined into a list. Do not translate the substituted value.",
+        },
+      },
+      // AQU-1365 (PR 3 pass): the answers on the 'Is this a translation?'
+      // screens, drawn as cards: a title, and one line saying what it does.
+      "importExport.translationCheck.whatIsIt": {
+        description:
+          "Question closing the '{book} is already in this project' screen, after the sentence saying the uploaded file is for a book the project already has. 'It' is the uploaded file; the cards below answer it (a translation of that book, a new version of its source text, or a separate source text).",
+      },
+      "importExport.translationCheck.option.translation.title": {
+        description:
+          "Title of the first answer card on the '{book} is already in this project' screen: the uploaded file is the translation of that existing file. Answers 'What is it?'. Short noun phrase.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.translation.description": {
+        description:
+          "Line under that card saying what choosing it does: the upload fills the existing file's translation lines that are still empty, after the user reviews each match. Two short sentences.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.update.title": {
+        description:
+          "Title of an answer card on the '{book} is already in this project' screen: the uploaded file is a newer version of that file's source (original-language) text. Answers 'What is it?'. Short noun phrase.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.update.description": {
+        description:
+          "Line under that card saying what choosing it does: the existing file's source lines are updated in place from the upload, and its translations, comments and audio recordings stay. Two short sentences.",
+        placeholders: { book: "Display name of the project file that already holds this book, e.g. 'Jonah'. Do not translate the substituted value." },
+      },
+      "importExport.translationCheck.option.separate.title": {
+        description:
+          "Title of an answer card on the 'Is this a translation?' screens when the upload's book is already in the project: it is a different source text, to be added as a file of its own next to the existing one. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.newSource.title": {
+        description:
+          "Title of the answer card on the 'This looks like a translation' screen for importing the upload as new source text after all. Matches the 'New source text' choice on the Import dialog's first screen. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.addAsSource.description": {
+        description:
+          "Line under the 'A separate source text' and 'New source text' cards saying what choosing them does: the upload is added as new source text, and the files already in the project are left untouched. Two short sentences.",
+      },
+      "importExport.translationCheck.option.chooseFile.title": {
+        description:
+          "Title of the answer card on the 'Is this a translation?' screens that says the upload is a translation, when the screen can't tell which existing file it translates. Short noun phrase.",
+      },
+      "importExport.translationCheck.option.chooseFile.description": {
+        description:
+          "Line under that card saying what choosing it does: the user picks which existing file the upload translates, then reviews each match before anything is saved. One sentence.",
+      },
+      "importExport.translationCheck.option.leaveOut.title": {
+        description:
+          "Title of the suggested answer card on the 'Some of these look like translations' screen: skip the uploaded files that look like translations. Count-governed by how many files are left out (not shown): 'it' for one, 'those' for several. Short imperative.",
+      },
+      "importExport.translationCheck.option.leaveOut.description": {
+        description:
+          "Line under that card saying what choosing it does: only the other uploaded files are imported, as new source text. Count-governed by how many OTHER files are imported.",
+        placeholders: { count: "How many of the uploaded files will be imported; also governs the plural form." },
+      },
+      "importExport.translationCheck.option.importAll.title": {
+        description:
+          "Title of the answer card on the 'Some of these look like translations' screen that ignores the warning. Short imperative.",
+      },
+      "importExport.translationCheck.option.importAll.description": {
+        description:
+          "Line under that card saying what choosing it does: every uploaded file is added as new source text, including the ones that look like translations. One sentence.",
+      },
+      "importExport.review.useOtherFile": {
+        description:
+          "Link-style button after the amber note on the translation import's match review that says the uploaded file is for another book. Runs the same upload against the project file that holds that book. Imperative.",
+        placeholders: {
+          fileName: "Display name of the project file the upload is for, e.g. 'Ruth'. Do not translate the substituted value.",
+        },
       },
     },
   },

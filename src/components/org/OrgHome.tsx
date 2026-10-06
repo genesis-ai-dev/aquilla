@@ -11,7 +11,8 @@ import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-
 import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { emptyPortfolioAggregate } from "@/lib/frontier/portfolio-metrics"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -49,6 +50,7 @@ import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lu
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
@@ -228,10 +230,6 @@ export function readProjectLens(): ProjectLens {
   }
 }
 
-function averagePct(projects: PortfolioProjectRow[], readPct: (project: PortfolioProjectRow) => number): number {
-  return projects.length > 0 ? projects.reduce((sum, project) => sum + readPct(project), 0) / projects.length : 0
-}
-
 function orgDisplayName(org: OrgSummary): string {
   return org.name ?? "Workspace"
 }
@@ -404,9 +402,9 @@ export function ProjectTable({
         </div>
         <div className="divide-y">
           {projects.map((p) => {
-            const tpct = Math.round(translatedPct(p) * 100)
-            const pct = Math.round(validatedPct(p) * 100)
-            const apct = Math.round(audioPct(p) * 100)
+            const tpct = progressPercentOfFraction(translatedPct(p))
+            const pct = progressPercentOfFraction(validatedPct(p))
+            const apct = progressPercentOfFraction(audioPct(p))
             const dstatus = deadlineStatus(p, now)
             return (
               <Link
@@ -551,7 +549,7 @@ export function OrgHome() {
     ? null
     : `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
 
-  const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
+  const [aggregates, setAggregates] = useState<PortfolioAggregates | null>(null)
   // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
@@ -582,31 +580,24 @@ export function OrgHome() {
 
   useEffect(() => {
     if (!jwt) {
-      setProjects([])
+      setAggregates(null)
       setResolvedPortfolioScopeKey(null)
       return
     }
     if (orgLoading) return
     if (orgs.length === 0) {
       setError(null)
-      setProjects([])
+      setAggregates({ ...emptyPortfolioAggregate(), orgs: [] })
       setResolvedPortfolioScopeKey(portfolioScopeKey)
       return
     }
     let cancelled = false
     setError(null)
-    const orgById = new Map(orgs.map((org) => [org.id, org]))
-    getPortfolios(jwt, orgs.map((org) => org.id))
-      .then((portfolios) => {
-        if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
-          const org = orgById.get(orgId)
-          if (!org) return []
-          return list.map((project) => ({
-            ...project,
-            orgId: org.id,
-            orgName: org.name ?? "Workspace",
-          }))
-        }))
+    // Overview totals come from the summary endpoint. The project table stays
+    // on the paged directory below; this must not download every project.
+    getPortfolioAggregates(jwt, orgs.map((org) => org.id))
+      .then((summary) => {
+        if (!cancelled) setAggregates(summary)
       })
       .catch((err) => {
         if (!cancelled) {
@@ -744,19 +735,17 @@ export function OrgHome() {
     )
   }
 
-  // Rollup stats
+  // Rollup stats. Computed on the server from the same visible projects the
+  // unpaged portfolio used to send down, so the tiles do not depend on which
+  // page of the project table is loaded.
   const now = Date.now()
-  const avgTranslatedPct =
-    projects.length > 0
-      ? projects.reduce((sum, p) => sum + translatedPct(p), 0) / projects.length
-      : 0
-  const avgValidatedPct =
-    projects.length > 0
-      ? projects.reduce((sum, p) => sum + validatedPct(p), 0) / projects.length
-      : 0
-  const stalledCount = projects.filter((p) => activityStatus(p, now) === "stalled").length
-  const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
-  const attentionCount = projects.filter((p) => portfolioAttentionReasons(p, now).length > 0).length
+  const rollup = aggregates ?? emptyPortfolioAggregate()
+  const avgTranslatedPct = rollup.avgTranslatedPct
+  const avgValidatedPct = rollup.avgValidatedPct
+  const stalledCount = rollup.stalledCount
+  const overdueCount = rollup.overdueCount
+  const attentionCount = rollup.attentionCount
+  const aggregateByOrgId = new Map((aggregates?.orgs ?? []).map((row) => [row.orgId, row]))
 
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
   // merge it in from the accessible-projects feed when available.
@@ -804,15 +793,15 @@ export function OrgHome() {
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
-      const orgProjects = projects.filter((project) => project.orgId === org.id)
+      const row = aggregateByOrgId.get(org.id)
       return {
         org,
-        projectCount: orgProjects.length,
-        avgTranslatedPct: averagePct(orgProjects, translatedPct),
-        avgValidatedPct: averagePct(orgProjects, validatedPct),
-        avgAudioPct: averagePct(orgProjects, audioPct),
-        stalledCount: orgProjects.filter((project) => activityStatus(project, now) === "stalled").length,
-        overdueCount: orgProjects.filter((project) => deadlineStatus(project, now) === "overdue").length,
+        projectCount: row?.projectCount ?? 0,
+        avgTranslatedPct: row?.avgTranslatedPct ?? 0,
+        avgValidatedPct: row?.avgValidatedPct ?? 0,
+        avgAudioPct: row?.avgAudioPct ?? 0,
+        stalledCount: row?.stalledCount ?? 0,
+        overdueCount: row?.overdueCount ?? 0,
       }
     })
     .sort((a, b) => orgDisplayName(a.org).localeCompare(orgDisplayName(b.org)))
@@ -892,9 +881,9 @@ export function OrgHome() {
               {showOrgRollup && (
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
-                <StatTile label={t("nav.projects")} value={projects.length} />
-                <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                <StatTile label={t("nav.projects")} value={rollup.projectCount} />
+                <StatTile label={t("org.orgHome.avgTranslated")} value={`${progressPercentOfFraction(avgTranslatedPct)}%`} />
+                <StatTile label={t("org.orgHome.avgValidated")} value={`${progressPercentOfFraction(avgValidatedPct)}%`} />
                 <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                 <StatTile
                   label={t("org.orgHome.overdue")}

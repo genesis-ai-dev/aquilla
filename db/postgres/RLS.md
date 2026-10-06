@@ -8,7 +8,7 @@ Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ## What is protected
 
-**21 of the schema's 55 project-scoped tables have RLS enabled.** The list below is
+**25 of the schema's 60 project-scoped tables have RLS enabled.** The list below is
 generated from the migrations; `scripts/rls-coverage.test.ts` fails if this table and
 the migrations disagree, and if any project-scoped table is neither covered nor
 explicitly recorded as uncovered. Before that guard existed this section said "nine
@@ -22,6 +22,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `cell_attachments` | `rls_cell_attachments_project_access` | 0112 |
 | `cell_audio` | `rls_cell_audio_project_access` | 0034 |
 | `cell_audio_validators` | `rls_cell_audio_validators_project_access` | 0096 |
+| `cell_plan_keys` | `rls_cell_plan_keys_project_access` | 0145 |
 | `cell_validators` | `rls_cell_validators_project_access` | 0034 |
 | `cells` | `rls_cells_project_access` | 0034 |
 | `changesets` | `rls_changesets_project_access` | 0055 |
@@ -30,6 +31,7 @@ while four OPSEC passes cited it as a live mitigation.
 | `contextual_drafts` | `rls_contextual_drafts_select` / `_insert` / `_update` | 0074 |
 | `contextual_project_leases` | `rls_contextual_project_leases_select` / `_insert` / `_update` / `_delete` | 0074 |
 | `contextual_run_events` | `rls_contextual_run_events_select` / `_insert` | 0074 |
+| `contextual_run_traces` | `rls_contextual_run_traces_select` / `_insert` / `_delete` | 0136 |
 | `contextual_runs` | `rls_contextual_runs_select` / `_insert` / `_update` | 0074 |
 | `contextual_steering` | `rls_contextual_steering_select` / `_insert` / `_update` | 0074 |
 | `events` | `rls_events_project_access` | 0034 |

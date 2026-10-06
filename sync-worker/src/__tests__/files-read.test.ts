@@ -447,6 +447,158 @@ describe("GET /files with the lane read wall", () => {
     expect(body.files[0]).toMatchObject({ cellCount: 10, filledCount: 3, approvedCount: 2 })
   })
 
+  it("takes the shared denominator once when several non-default lanes are granted", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+        { id: "frlane01", project_id: "proj-a", role: "target", name: "French Team", legacy_tag: "fr" },
+      ],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ countStructuralCells: false }),
+        version: 1,
+      }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 80, filled_count: 20, approved_count: 9,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", total_count: 40, structural_count: 4,
+          filled_count: 20, structural_filled_count: 2,
+          validator_histogram: { "1": 9 }, structural_validator_histogram: { "1": 2 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", lane_id: "eslane01",
+          total_count: 40, structural_count: 4,
+          filled_count: 3, structural_filled_count: 1,
+          validator_histogram: { "1": 2 }, structural_validator_histogram: { "1": 1 },
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "fr", lane_id: "frlane01",
+          total_count: 40, structural_count: 4,
+          filled_count: 5, structural_filled_count: 0,
+          validator_histogram: { "1": 1 }, structural_validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [
+        { lane: "eslane01", level: 400 },
+        { lane: "frlane01", level: 400 },
+      ],
+    })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, LANE_READ_WALL: "1" },
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      files: Array<{ cellCount: number; filledCount: number; approvedCount: number }>
+    }
+    // 40 − 4 once, not twice. Filled and approved are the two lanes' own work.
+    expect(body.files[0]).toMatchObject({ cellCount: 36, filledCount: 7, approvedCount: 2 })
+  })
+
+  it("does not borrow another lane's fill when the default lane has no progress row", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "frlane01", project_id: "proj-a", role: "target", name: "French", legacy_tag: "fr" },
+      ],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ countStructuralCells: false }),
+        version: 1,
+      }],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, structural_cell_count: 2,
+        filled_count: 8, structural_filled_count: 4,
+        approved_count: 3, structural_approved_count: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+        target_lang: "fr", lane_id: "frlane01",
+        total_count: 10, structural_count: 2,
+        filled_count: 8, structural_filled_count: 1,
+        validator_histogram: { "1": 3 },
+        structural_validator_histogram: { "1": 1 },
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-gen", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      file: { cellCount: number; filledCount: number; approvedCount: number }
+    }
+    expect(body.file).toMatchObject({ cellCount: 8, filledCount: 0, approvedCount: 0 })
+  })
+
+  it("uses the files counters for one target lane and not when a second lane is archived", async () => {
+    const file = {
+      name: "Genesis",
+      cell_count: 10, structural_cell_count: 2,
+      filled_count: 8, structural_filled_count: 4,
+      approved_count: 3, structural_approved_count: 1,
+    }
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srconly1", project_id: "proj-one", role: "source", name: "Source" },
+        { id: "onlylane", project_id: "proj-one", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "live0001", project_id: "proj-two", role: "target", name: "Spanish", legacy_tag: "" },
+        {
+          id: "arch0001", project_id: "proj-two", role: "target", name: "French", legacy_tag: "fr",
+          archived_at: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+      project_settings: [
+        { project_id: "proj-one", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+        { project_id: "proj-two", settings: JSON.stringify({ countStructuralCells: false }), version: 1 },
+      ],
+      files: [
+        { id: "file-one", project_id: "proj-one", ...file },
+        { id: "file-two", project_id: "proj-two", ...file },
+      ],
+    })
+    const read = async (projectId: string, fileId: string) => {
+      const token = await makeTestToken(SECRET, { projectId, fileId })
+      const res = (await handleFilesReadRequest(
+        new Request(`https://w/api/v1/projects/${projectId}/files/${fileId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      return (await res.json()) as { file: { cellCount: number; filledCount: number; approvedCount: number } }
+    }
+    // 8 − 4 filled, 3 − 1 approved. A source lane does not count.
+    expect((await read("proj-one", "file-one")).file).toMatchObject({
+      cellCount: 8, filledCount: 4, approvedCount: 2,
+    })
+    expect((await read("proj-two", "file-two")).file).toMatchObject({
+      cellCount: 8, filledCount: 0, approvedCount: 0,
+    })
+  })
+
   it("sorts and reports lastEditAt from the granted lanes", async () => {
     const { db } = await makeTestDb({
       lanes: [

@@ -21,6 +21,7 @@
  * inline ("changeset has expired", "digest mismatch — …").
  */
 
+import { isAnalyticsEnabled } from "@/lib/analytics-consent"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { fetchSyncToken, SyncTokenError } from "@/lib/sync/sync-token"
@@ -327,8 +328,12 @@ export async function commitChangeset(
   changesetId: string,
 ): Promise<ChangesetStatus> {
   const token = await mintProjectSyncToken(jwt, projectId)
+  // AQU-1572: the worker reports the validations and audio this plan applies
+  // to PostHog, and it cannot read this browser's analytics switch, so the
+  // commit states it. Off (or absent) and the worker sends nothing.
+  const analytics = isAnalyticsEnabled() ? "on" : "off"
   const res = await fetchWithTimeout(
-    `${syncWorkerHttpOrigin()}/api/v1/changesets/${encodeURIComponent(projectId)}/${encodeURIComponent(changesetId)}/commit`,
+    `${syncWorkerHttpOrigin()}/api/v1/changesets/${encodeURIComponent(projectId)}/${encodeURIComponent(changesetId)}/commit?analytics=${analytics}`,
     { method: "POST", headers: { Authorization: `Bearer ${token}` } },
   )
   if (!res.ok) return parseErrorAndThrow(res, "commit changeset failed")

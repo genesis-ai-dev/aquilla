@@ -923,30 +923,56 @@ export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | 
 }
 
 /**
- * Resolve a file's audio timing mode: Original timing for every subtitle import
- * (see below), else the file's own choice, else the project-level value (the
- * legacy Project Settings field, kept as a read-only fallback so pre-existing
- * projects keep the mode they had chosen), else Original timing. Mixed-mode
- * projects are allowed by design.
+ * True for a subtitle import that actually HAS the video its cues were timed
+ * against (`coreMediaUrl` — absent means no video). The one case where the
+ * timing mode is not a choice: the cues belong to that footage, so laying them
+ * end to end has nothing to fit.
+ *
+ * AQU-1704: the predicate the withdrawal in `resolveFileTimingMode` is scoped
+ * to. AQU-646 withdrew Free timing from every subtitle import on the grounds
+ * that "their cues are already timed to a video" — true of a film's VTT, and
+ * false of an audio-only dubbing project, whose source IS an SRT and which has
+ * no video at all. LOTE (sermon dubbing: podcast, YouTube, app) is that
+ * project, and the blanket rule made the mode unreachable for it: the picker
+ * was hidden AND the project-level key was inert, so a maintainer who set
+ * `audioTimingMode=audioFirst` through the API saw playback carry on fitting
+ * clips into the English cue slots — dead air after a short clip, overlap after
+ * a long one. The footage, not the file format, is what makes the cues binding.
+ */
+export function isVideoTimedSubtitleFile(
+  file: Pick<FileReference, "type" | "coreMediaUrl"> | null | undefined,
+): boolean {
+  return isSubtitleImportFile(file) && Boolean(file?.coreMediaUrl)
+}
+
+/**
+ * Resolve a file's audio timing mode: the file's own choice, else Original
+ * timing for a subtitle import with footage linked (see
+ * `isVideoTimedSubtitleFile`), else the project-level value (the legacy Project
+ * Settings field, kept as a read-only fallback so pre-existing projects keep
+ * the mode they had chosen), else Original timing. Mixed-mode projects are
+ * allowed by design.
  */
 export function resolveFileTimingMode(
-  file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
+  file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
-  // AQU-646: Free timing does not exist for subtitle imports — their cues are
-  // already timed to a video, so laying them end to end has nothing to fit.
-  // Withdrawing it at RESOLUTION rather than from the picker is the whole
-  // point: hiding the control would have left three ways back in. (a) The
-  // file's own stored `timingMode`, written before the mode was withdrawn.
-  // (b) Inheritance from the LEGACY project-level `audioTimingMode` below — a
-  // VTT nobody has ever touched still resolves to Free timing off a project
-  // setting made back when the control lived in Project Settings. (c) A
-  // `file.timing.set` from an OLDER client that still offers the mode; the
-  // server deliberately keeps accepting it, since rejecting it would break
-  // those clients for no gain. A stray "audioFirst" on a subtitle file is
-  // simply inert from here on — nothing migrates it away.
-  if (isSubtitleImportFile(file)) return "dubbing"
+  // AQU-1704: the file's own choice is read FIRST, so that the picker the
+  // workspace now shows a video-less subtitle file is not inert, and so that
+  // declining the "linking a video switches you back" prompt (Flow B in
+  // ProjectWorkspace) still leaves the file where the user left it rather than
+  // promising a state the resolver would not deliver.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
+  // import whose video is linked here. Withdrawing it at RESOLUTION rather than
+  // from the picker is still the point — hiding the control alone would leave a
+  // way back in: inheritance from the LEGACY project-level `audioTimingMode`
+  // below, so a film's VTT nobody has ever touched resolves to Free timing off
+  // a project setting made back when the control lived in Project Settings.
+  // (A `file.timing.set` from an OLDER client that still offers the mode is no
+  // longer overridden — the server deliberately keeps accepting those, and an
+  // explicit per-file value is now exactly what the picker writes.)
+  if (isVideoTimedSubtitleFile(file)) return "dubbing"
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization

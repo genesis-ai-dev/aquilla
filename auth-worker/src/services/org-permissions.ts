@@ -1737,6 +1737,32 @@ export type PortfolioPageOpts = {
  * caller is about to see. Skipped entirely when the wall does not restrict
  * anyone on the page. Structural cells drop out only when the project excludes
  * them, matching the portfolio's own text totals.
+ *
+ * This is the one statement on the dashboard that has to look at `cells`
+ * itself: `files.ai_drafted_count` is per file, and the wall needs the count
+ * per lane. Two things keep that from being a read of the whole table, which
+ * is what it was (2.28M pages on dev: 4.4s warm, 75s cold, for a caller with
+ * 155 projects below the wall).
+ *
+ *   * `cells` is driven by an ARRAY of the page's project ids, not joined to
+ *     `pol` and left to the planner. Joined, Postgres used an index for 52
+ *     projects and a parallel seq scan of `cells` for 155, and then threw
+ *     away every row but 132. An array is in the executor's hands
+ *     before the scan starts and is costed as a handful of lookups, so the
+ *     plan cannot flip back however long the list gets. Same reasoning as
+ *     `structural_cells` above; do not turn it back into a join.
+ *   * `idx_cells_ai_drafted` (migration 0137) holds only the rows this
+ *     statement wants: target cells still carrying an untouched machine
+ *     draft, keyed by project. With it the read is those rows and nothing
+ *     else. Without it the array still bounds the read to the listed
+ *     projects' target cells through `idx_cells_lane_last_edit`, which for
+ *     the same caller is 255k pages instead of 2.28M: 1.0s when they are
+ *     cached and 23-29s when they are not. So the statement is correct
+ *     either side of the migration, but it is the index that makes it fast.
+ *
+ * The counted-files rule takes its set form for the reason given on
+ * `inCountedFileSetSql`: this filters rows across many projects, and the
+ * per-row probe reads a project's whole file list each time it runs.
  */
 async function aiDraftedByLane(
   env: Env,
@@ -1753,18 +1779,22 @@ async function aiDraftedByLane(
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id IN (${placeholders})
-     )
+     ), ${uncountedFilesCteSql('SELECT project_id FROM pol')}
      SELECT c.project_id AS project_id,
             COALESCE(c.target_lang, '') AS target_lang,
             COUNT(*)::int AS n
        FROM cells c
        JOIN pol ON pol.project_id = c.project_id
-      WHERE c.side = 'target' AND c.ai_drafted = 1
+      WHERE c.project_id = ANY(ARRAY(SELECT project_id FROM pol))
+        -- These two literals are idx_cells_ai_drafted's predicate. Postgres
+        -- uses a partial index only when the query implies its WHERE, so
+        -- they have to stay literals and stay in step with the index.
+        AND c.side = 'target' AND c.ai_drafted = 1
         -- AQU-1626: the client divides this by the portfolio's total_cells, so
         -- it has to be scoped to the same files that total now counts. A
         -- caption track machine-drafted on import would otherwise push the
         -- share past 100% against a denominator that no longer includes it.
-        AND ${inCountedFileSql('c')}
+        AND ${inCountedFileSetSql('c')}
         AND NOT (
           pol.excluded AND EXISTS (
             SELECT 1 FROM cells src

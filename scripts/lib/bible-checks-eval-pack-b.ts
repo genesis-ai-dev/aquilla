@@ -30,6 +30,7 @@ import type {
 } from "../../db/shared/bible-checks/types"
 import type { LanguageProfile } from "../../db/shared/language-profile"
 import type { ProjectFact } from "../../db/shared/project-facts"
+import { dropMatches, ENGLISH_WE, ENGLISH_YOU, plantForm, random, sample, swapNames } from "./bible-mutations"
 
 export interface PackBEvalInput {
   packDir: string
@@ -65,27 +66,6 @@ const ENGLISH_ALIASES: Readonly<Record<string, string>> = {
 function readLayer<T>(packDir: string, layer: string, book: string): T | null {
   const path = join(packDir, layer, `${book}.json`)
   return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as T) : null
-}
-
-/** Deterministic, so a run can be repeated. */
-function random(seed: number): () => number {
-  let state = seed >>> 0
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-function sample<T>(items: readonly T[], n: number, rand: () => number): T[] {
-  const pool = [...items]
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1))
-    ;[pool[i], pool[j]] = [pool[j], pool[i]]
-  }
-  return pool.slice(0, n)
 }
 
 function fact(key: string, value: string): ProjectFact {
@@ -124,8 +104,8 @@ const SYNTHETIC_YOU: LanguageProfile["pronouns"] = { secondPerson: { numberDisti
 const SYNTHETIC_WE: LanguageProfile["pronouns"] = {
   firstPersonPlural: { clusivity: true, inclusive: ["yumi"], exclusive: ["mipela"] },
 }
-const YOU = /\b(?:you|your|yours|yourself|yourselves)\b/giu
-const WE = /\b(?:we|us|our|ours|ourselves)\b/giu
+const YOU = ENGLISH_YOU
+const WE = ENGLISH_WE
 
 export function runPackBEval(input: PackBEvalInput): void {
   const rand = random(input.seed)
@@ -217,7 +197,7 @@ function mutationSwapPeterJohn(runs: readonly BookRun[], profile: LanguageProfil
   let singleP5 = 0
   const picked = sample(candidates, MUTATIONS, rand)
   for (const { run, ref, text } of picked) {
-    const swapped = text.replace(/\b(Peter|John)\b/gu, (word) => (word === "Peter" ? "John" : "Peter"))
+    const swapped = swapNames(text, "Peter", "John")
     const after = evaluateCell(swapped, run.expectations.get(ref), profile)
     const before = run.findings.get(ref) ?? []
     const named = new Set(run.expectations.get(ref)?.participants?.named.map((m) => (m.entity === "person:Peter" ? "Peter" : m.entity.startsWith("person:John") ? "John" : "")))
@@ -256,7 +236,7 @@ function mutationDropName(runs: readonly BookRun[], profile: LanguageProfile, fa
   let caught = 0
   const picked = sample(candidates, MUTATIONS, rand)
   for (const { run, ref, text, drop, entity } of picked) {
-    const dropped = text.replace(drop, "").replace(/\s{2,}/gu, " ")
+    const dropped = dropMatches(text, drop)
     const after = evaluateCell(dropped, run.expectations.get(ref), profile)
     const before = run.findings.get(ref) ?? []
     if (newOf(before, after, "bkp:P1").length > 0) caught++
@@ -278,14 +258,14 @@ function synthetic(runs: readonly BookRun[], profile: LanguageProfile, code: "bk
         if ((number !== "singular" && number !== "plural") || !p.secondPerson?.explicit || !YOU.test(text)) continue
         YOU.lastIndex = 0
         const [right, wrong] = number === "singular" ? ["yu", "yupela"] : ["yupela", "yu"]
-        planted.push({ run, ref, right: text.replace(YOU, right), wrong: text.replace(YOU, wrong) })
+        planted.push({ run, ref, right: plantForm(text, YOU, right), wrong: plantForm(text, YOU, wrong) })
       } else {
         for (const m of p.firstPlural) decided[m.clusivity ?? "unknown"]++
         const values = new Set(p.firstPlural.map((m) => m.clusivity).filter((c) => c !== null))
         if (values.size !== 1 || !WE.test(text)) continue
         WE.lastIndex = 0
         const [right, wrong] = values.has("inclusive") ? ["yumi", "mipela"] : ["mipela", "yumi"]
-        planted.push({ run, ref, right: text.replace(WE, right), wrong: text.replace(WE, wrong) })
+        planted.push({ run, ref, right: plantForm(text, WE, right), wrong: plantForm(text, WE, wrong) })
       }
       YOU.lastIndex = 0
       WE.lastIndex = 0

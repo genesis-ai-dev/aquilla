@@ -62,8 +62,12 @@ function isParticipant(entity: PeopleEntityInput | undefined): entity is PeopleE
   return MANY.has(entity.type)
 }
 
-/** Gender and number as one key ("m:one"); null when either is unknown, so nobody is called a look-alike on a guess. */
-function lookAlikeKey(entity: PeopleEntityInput | undefined): string | null {
+/**
+ * Gender and number as one key ("m:one", "f:many"); null when either is
+ * unknown, so nobody is called a look-alike on a guess. Exported for the Jev
+ * shadow eval, which picks the English pronoun to plant from it.
+ */
+export function lookAlikeKey(entity: PeopleEntityInput | undefined): string | null {
   if (!isParticipant(entity)) return null
   const gender = genderOf(entity)
   return gender ? `${gender}:${ONE.has(entity.type) ? 'one' : 'many'}` : null

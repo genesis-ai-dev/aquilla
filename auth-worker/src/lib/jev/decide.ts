@@ -117,23 +117,36 @@ export async function decide(env: Env, input: DecideInput): Promise<DecideResult
 
   const called = await callJev(env, { model: JEV_MODEL, state: input.state, questions: input.questions }, timeoutMs)
   if (!called.ok) return heuristic(called.reason)
+  return decideResultFromBody(called.body, input.questions, input.fallback)
+}
 
-  const raw = (called.body as { answers?: Record<string, unknown> } | null)?.answers ?? {}
-  const fallback = input.fallback()
+/**
+ * A decisions response as a DecideResult: each question's answer, or its
+ * fallback when the model left it out; all fallbacks when it answered none.
+ * Exported so the shadow eval (scripts/jev-shadow-eval.ts, AQU-1701) reads
+ * answers exactly as production does.
+ */
+export function decideResultFromBody(
+  body: unknown,
+  questions: Record<string, JevQuestion>,
+  fallbackOf: () => Record<string, JevAnswer>,
+): DecideResult {
+  const raw = (body as { answers?: Record<string, unknown> } | null)?.answers ?? {}
+  const fallback = fallbackOf()
   const answers: Record<string, JevAnswer> = {}
   let fromModel = 0
-  for (const [key, question] of Object.entries(input.questions)) {
+  for (const [key, question] of Object.entries(questions)) {
     const parsed = parseAnswer(raw[key], question)
     if (parsed) fromModel += 1
     answers[key] = parsed ?? fallback[key]
   }
-  const total = Object.keys(input.questions).length
-  if (fromModel === 0) return heuristic("upstream")
+  const total = Object.keys(questions).length
+  if (fromModel === 0) return { answers: fallback, decidedBy: "heuristic", reason: "upstream", model: null, usage: null }
   return {
     answers,
     decidedBy: fromModel === total ? "model" : "mixed",
     ...(fromModel === total ? {} : { reason: "partial" as const }),
     model: JEV_MODEL,
-    usage: usageOf(called.body),
+    usage: usageOf(body),
   }
 }

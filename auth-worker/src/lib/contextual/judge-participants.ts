@@ -33,8 +33,15 @@ import type { CellParticipants, Clusivity } from "../../../../db/shared/bible-ch
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { Candidate, JudgeCell } from "./judge-expectations"
 
+/** The questions' wording, shared with the shadow eval (scripts/jev-shadow-eval.ts) so it asks what production asks. */
+export const PARTICIPANT_PROMPTS = {
+  referent: (name: string, verb: string) => `Is it clear in this translation that ${name} is the one who ${verb}?`,
+  we_inclusive: "Does 'we' here include the people being spoken to?",
+  introduced: (name: string) => `Is ${name} clearly identified by name or description in this verse of the translation?`,
+} as const
+
 /** How a question names a participant: the agreed name, else the pack's label ("the brother" for a local one). */
-function nameIn(p: CellParticipants, entity: string, refs: readonly string[]): string {
+export function nameIn(p: CellParticipants, entity: string, refs: readonly string[]): string {
   const agreed = acceptedRenderings(p.names, entity, refs)[0]
   if (agreed) return agreed
   const label = entityLabel(p.names, entity)
@@ -60,7 +67,7 @@ export function referentCandidate(cell: JudgeCell, profile: LanguageProfile): Ca
   return {
     ask: {
       check: "referent",
-      question: `Is it clear in this translation that ${name} is the one who ${subject.gloss}?`,
+      question: PARTICIPANT_PROMPTS.referent(name, subject.gloss),
       passWhenYes: true,
       repair: `Make clear that ${name} is the one who ${subject.gloss}.`,
     },
@@ -86,7 +93,7 @@ export function weInclusiveCandidate(cell: JudgeCell, profile: LanguageProfile):
   return {
     ask: {
       check: "we_inclusive",
-      question: "Does 'we' here include the people being spoken to?",
+      question: PARTICIPANT_PROMPTS.we_inclusive,
       passWhenYes: want === "inclusive",
       repair:
         want === "inclusive"
@@ -105,7 +112,7 @@ export function introducedCandidate(cell: JudgeCell): Candidate {
   return {
     ask: {
       check: "introduced",
-      question: `Is ${nameIn(p, missing.entity, refs)} clearly identified by name or description in this verse of the translation?`,
+      question: PARTICIPANT_PROMPTS.introduced(nameIn(p, missing.entity, refs)),
       passWhenYes: true,
     },
   }

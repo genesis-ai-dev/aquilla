@@ -246,10 +246,10 @@ function extractRuns(
     if (!text) continue
 
     const rPr = firstElementByTagName(run, "w:rPr")
-    const bold = rPr !== undefined && firstElementByTagName(rPr, "w:b") !== undefined
-    const italic = rPr !== undefined && firstElementByTagName(rPr, "w:i") !== undefined
-    const underline = rPr !== undefined && firstElementByTagName(rPr, "w:u") !== undefined
-    const strike = rPr !== undefined && firstElementByTagName(rPr, "w:strike") !== undefined
+    const bold = isToggleOn(rPr, "w:b")
+    const italic = isToggleOn(rPr, "w:i")
+    const underline = isUnderlineOn(rPr)
+    const strike = isToggleOn(rPr, "w:strike")
 
     plain += text
 
@@ -262,6 +262,37 @@ function extractRuns(
   }
 
   return { plain, html, hasFormatting, hasFootnote }
+}
+
+// AQU-1719: an OOXML toggle property is ON when it is present with no `w:val`,
+// and OFF when `w:val` is `0`, `false` or `off` (ECMA-376 ST_OnOff). Google Docs
+// exports write an explicit off flag for every toggle on every run
+// (`<w:b w:val="0"/><w:i w:val="0"/><w:strike w:val="0"/><w:u w:val="none"/>`),
+// so reading mere presence as "on" rendered unformatted source text as
+// `<s><u><i><b>…`. Only short paragraphs showed it, because `originalHtml` is
+// kept for single-segment paragraphs only.
+function isToggleOn(rPr: XmlElement | undefined, tagName: string): boolean {
+  if (rPr === undefined) return false
+  const el = firstElementByTagName(rPr, tagName)
+  if (el === undefined) return false
+  return isOnOffValueTrue(getAttribute(el, "w:val"))
+}
+
+/** `w:val` is ST_OnOff: absent means on; `0`/`false`/`off` mean off. */
+function isOnOffValueTrue(val: string | null): boolean {
+  if (val === null) return true
+  const normalized = val.trim().toLowerCase()
+  return normalized !== "0" && normalized !== "false" && normalized !== "off"
+}
+
+/** `w:u` carries ST_Underline, whose off value is `none` (not an ST_OnOff flag). */
+function isUnderlineOn(rPr: XmlElement | undefined): boolean {
+  if (rPr === undefined) return false
+  const el = firstElementByTagName(rPr, "w:u")
+  if (el === undefined) return false
+  const val = getAttribute(el, "w:val")
+  if (val !== null && val.trim().toLowerCase() === "none") return false
+  return isOnOffValueTrue(val)
 }
 
 function getParaStyle(p: XmlElement): string | null {

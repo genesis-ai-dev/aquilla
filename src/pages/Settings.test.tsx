@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurity } from "./Settings"
-import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
+import { renameOrg, listMyOrgs, deleteOrg, OrgHasProjectsError } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
 // AQU-1277: OrgProvider loads the project directory via
@@ -26,6 +26,15 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
+  deleteOrg: vi.fn(async () => {}),
+  OrgHasProjectsError: class OrgHasProjectsError extends Error {
+    projectCount: number
+    constructor(projectCount: number) {
+      super("organization_has_projects")
+      this.name = "OrgHasProjectsError"
+      this.projectCount = projectCount
+    }
+  },
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/lib/frontier/knowledge-base", () => ({
@@ -85,6 +94,9 @@ vi.mock("@/hooks/useOrgSettings", () => ({
 beforeEach(() => {
   localStorage.clear()
   rosterSettings.canViewRoster = true
+  vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+  vi.mocked(deleteOrg).mockReset()
+  vi.mocked(deleteOrg).mockResolvedValue(undefined)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -112,6 +124,8 @@ function renderSettings(path = "/orgs/1/settings") {
         <Routes>
           <Route path="/orgs/:orgId/settings" element={<Settings />} />
           <Route path="/orgs/:orgId/settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="/orgs/:orgId/overview" element={<div>Org overview</div>} />
+          <Route path="/orgs/all" element={<div>All organizations</div>} />
           <Route path="/orgs/:orgId/settings/security" element={<OrgSettingsSecurity />} />
           <Route path="/orgs/:orgId/settings/knowledge" element={<OrgSettingsKnowledge />} />
           <Route path="/orgs/:orgId/settings/export" element={<Navigate to="../security" replace relative="path" />} />
@@ -163,6 +177,52 @@ describe("Org Settings", () => {
     const input = await screen.findByLabelText(/^Organization name$/i)
     await waitFor(() => expect(input).toHaveValue("Come and See"))
     expect(input).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /delete organization/i })).toBeNull()
+  })
+
+  it("shows a Danger zone only to the owner", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    expect(await screen.findByRole("button", { name: /delete organization/i })).toBeInTheDocument()
+    expect(screen.getByText("Danger zone")).toBeInTheDocument()
+  })
+
+  it("hides the Danger zone from a maintainer who can still rename", async () => {
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }])
+    renderSettings("/orgs/1/settings/identity")
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
+    expect(input).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /delete organization/i })).toBeNull()
+  })
+
+  it("leaves the organization in place when delete is cancelled", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    expect(await screen.findByRole("heading", { name: "Delete 'Come and See'?" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Delete 'Come and See'?" })).toBeNull())
+    expect(deleteOrg).not.toHaveBeenCalled()
+  })
+
+  it("deletes the organization after confirm and switches to another org", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([
+      { id: 2, name: "Fresh workspace", role: { level: 700, name: "owner" } },
+    ])
+    fireEvent.click(await screen.findByRole("button", { name: /^confirm$/i }))
+    await waitFor(() => expect(deleteOrg).toHaveBeenCalledWith("jwt", 1))
+    expect(await screen.findByText("Org overview")).toBeInTheDocument()
+    expect(localStorage.getItem("org:active")).toBe("2")
+  })
+
+  it("keeps the organization and explains when it still has projects", async () => {
+    vi.mocked(deleteOrg).mockRejectedValueOnce(new OrgHasProjectsError(2))
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /^confirm$/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/still has projects/i)
+    expect(screen.getByLabelText(/^Organization name$/i)).toHaveValue("Come and See")
   })
 })
 

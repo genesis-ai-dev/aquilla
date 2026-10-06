@@ -49,8 +49,10 @@ export function BibleDataViewSettings({ voices, whosWho }: BibleDataViewSettings
   const prefs = useBibleDataViewPrefs()
   return (
     <div data-testid="bible-data-view-settings" className="flex flex-col gap-2">
-      {/* The same name as the project's Bible data card. */}
-      <div className="text-xs font-medium text-muted-foreground">{t("projectSettings.section.bibleResources")}</div>
+      {/* The same name as the project's Bible data card, which is titled
+          "Bible data" while the experiment is on (AQU-1685), as it is
+          whenever this section shows. */}
+      <div className="text-xs font-medium text-muted-foreground">{t("bibleData.card.title")}</div>
       {voices && (
         <>
           <Field orientation="horizontal">

@@ -87,6 +87,7 @@ import {
   projectHasScriptureFiles,
 } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import {
@@ -1151,7 +1152,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible data") }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
       if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
       if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
@@ -1349,6 +1350,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // this guard prevents a double mount.
   const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
+  // AQU-1685: the card is "Bible data", with its enrichment rows, only while
+  // this device has the Bible data experiment on; otherwise it is the old
+  // "Bible resources" card, findable by its old keywords.
+  const bibleDataExperiment = isBibleDataExperimentOn(project)
+
   const ALL_SECTIONS: SettingsSection[] = [
     // AQU-1525: the counterpart of section-source-link — exactly one of the two
     // is ever visible, keyed off whether this project already has an upstream.
@@ -1363,16 +1369,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // card now holds the Translation helps enrichment, which shows
     // unfoldingWord's Translation Notes. "bible resources" keeps the old name
     // findable.
-    {
-      id: "section-bible-resources",
-      label: "Bible data",
-      keywords: [
-        "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
-        "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
-        "hebrew", "translation helps", "translation notes", "translation questions", "key terms",
-        "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
-      ],
-    },
+    bibleDataExperiment
+      ? {
+          id: "section-bible-resources",
+          label: "Bible data",
+          keywords: [
+            "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
+            "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
+            "hebrew", "translation helps", "translation notes", "translation questions", "key terms",
+            "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
+          ],
+        }
+      : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
@@ -1448,7 +1456,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, content structure, username, Bible data",
+      description: `Name, languages, content structure, username, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
       icon: SlidersHorizontal,
       hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
@@ -2074,6 +2082,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               })}
               // Through requestNavigate, so unsaved edits get the discard prompt.
               onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "quality")) : undefined}
+              experimentOn={bibleDataExperiment}
             />
           </div>
         )}

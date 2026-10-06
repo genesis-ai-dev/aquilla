@@ -1,3 +1,4 @@
+import { readFreeWeeklyAllowance } from './allowance'
 import { catalogSchema, priceSchema } from './catalog-schema'
 export { catalogSchema, priceSchema } from './catalog-schema'
 import type { BillingOffers } from '../../../../db/shared/billing-offers'
@@ -32,7 +33,7 @@ export async function readValidatedBillingCatalog(env: Env) {
         env, 'GET', `/prices/${encodeURIComponent(binding.priceId)}`,
       )))))
   }
-  const offers = presentBillingOffers(catalog, prices)
+  const offers = presentBillingOffers(catalog, prices, await readFreeWeeklyAllowance(env.AQUILLA_PG))
   return { catalog, prices, offers }
 }
 

@@ -13,7 +13,8 @@
  *   • light the same participant's words in the target column, through
  *     Bridge 2, when one of their source words is hovered;
  *   • read no alignment and tint nothing when Who's Who, or the person's
- *     highlights, are off.
+ *     highlights, are off, or unless this device has the Bible data
+ *     experiment on and a Bible is open (AQU-1685).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -140,11 +141,14 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     createdAt: "2026-01-01T00:00:00Z",
     files: [{ id: FILE_ID, name: "JHN", type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    // AQU-1685: this device switched on the Bible data experiment.
+    experimentalFlags: { bibleData: true },
     ...overrides,
   }
 }
 
-function renderTable(project: ProjectRecord, rows: CellRow[] = makeRows()) {
+/** `bibleOpen` is what ProjectWorkspace passes: true while the editor shows a scripture file. */
+function renderTable(project: ProjectRecord, rows: CellRow[] = makeRows(), bibleOpen = true) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: FILE_ID, username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(rows, { full: true, maxServerSeq: 1 })
@@ -169,6 +173,7 @@ function renderTable(project: ProjectRecord, rows: CellRow[] = makeRows()) {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           getTokenForFile={async () => "jwt"}
+          bibleOpen={bibleOpen}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -305,6 +310,21 @@ describe("off means off", () => {
     renderTable(makeProject({ bibleEnrichments: { "whos-who": false } }))
     await packLoaded(JHN_4_7)
     expect(alignmentReads()).toBe(0)
+    expect(allMentions()).toEqual([])
+  })
+
+  // AQU-1685: the experiment is device-local and off by default, and any
+  // other EditorTable mount passes no `bibleOpen`. Either way neither bridge
+  // runs: no stored alignment is read and no pack file is fetched.
+  it.each([
+    ["with the Bible data experiment off", { experimentalFlags: {} }, true],
+    ["when no Bible is open", {}, false],
+  ] as const)("reads no alignment, fetches nothing and tints nothing %s", async (_, overrides, bibleOpen) => {
+    renderTable(makeProject(overrides), makeRows(), bibleOpen)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(allMentions()).toEqual([])
   })
 

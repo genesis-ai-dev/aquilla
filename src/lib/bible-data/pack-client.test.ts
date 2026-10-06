@@ -23,6 +23,8 @@ import type { BkpManifest } from "./pack-types"
 import type { FileReference } from "@/lib/parsers/types"
 
 const SCRIPTURE: Pick<FileReference, "type">[] = [{ type: "usfm" }]
+/** The device-local Bible data experiment, switched on (src/lib/bible-data/experiment.ts). */
+const EXPERIMENT_ON = { bibleData: true }
 const ALL_BOOK_LAYERS = ["text", "structure", "voices", "people", "notes", "terms"]
 
 function manifest(version: string, books: Record<string, string[]> = { JHN: ALL_BOOK_LAYERS }): BkpManifest {
@@ -141,7 +143,7 @@ describe("loadEnabledLayers", () => {
       ),
     )
     const loaded = await loadEnabledLayers(
-      { files: SCRIPTURE, bibleEnrichments: { ...onlyVoices, voices: true } },
+      { experimentalFlags: EXPERIMENT_ON, files: SCRIPTURE, bibleEnrichments: { ...onlyVoices, voices: true } },
       "JHN",
     )
     // Voices needs the voices and people layers, and nothing else.
@@ -150,15 +152,26 @@ describe("loadEnabledLayers", () => {
   })
 
   it("loads every default layer for a scripture project that chose nothing", async () => {
-    const loaded = await loadEnabledLayers({ files: SCRIPTURE }, "JHN")
+    const loaded = await loadEnabledLayers({ experimentalFlags: EXPERIMENT_ON, files: SCRIPTURE }, "JHN")
     expect(Object.keys(loaded).sort()).toEqual(["notes", "people", "structure", "terms", "text", "voices"])
     expect(Object.values(loaded).every((result) => result?.ok)).toBe(true)
   })
 
   it("fetches nothing, not even the manifest, while Bible data is off", async () => {
-    expect(await loadEnabledLayers({ files: SCRIPTURE, bibleResourcesEnabled: false }, "JHN")).toEqual({})
+    expect(await loadEnabledLayers({ experimentalFlags: EXPERIMENT_ON, files: SCRIPTURE, bibleResourcesEnabled: false }, "JHN")).toEqual({})
     // Unset on a project without scripture files is off too.
-    expect(await loadEnabledLayers({ files: [{ type: "docx" }] }, "JHN")).toEqual({})
+    expect(await loadEnabledLayers({ experimentalFlags: EXPERIMENT_ON, files: [{ type: "docx" }] }, "JHN")).toEqual({})
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  // AQU-1685: the experiment is the outer gate. A project whose maintainers
+  // turned Bible data on must still cost a device that never opted in nothing:
+  // no request, not even the manifest.
+  it("fetches nothing while the Bible data experiment is off on this device", async () => {
+    expect(await loadEnabledLayers({ files: SCRIPTURE, bibleResourcesEnabled: true }, "JHN")).toEqual({})
+    expect(
+      await loadEnabledLayers({ experimentalFlags: { bibleData: false }, files: SCRIPTURE, bibleResourcesEnabled: true }, "JHN"),
+    ).toEqual({})
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
@@ -168,7 +181,7 @@ describe("typed failures", () => {
     server.offline = true
     expect(await loadManifest()).toEqual({ ok: false, reason: "offline" })
     expect(await loadLayer("voices", "JHN")).toEqual({ ok: false, reason: "offline" })
-    const loaded = await loadEnabledLayers({ files: SCRIPTURE }, "JHN")
+    const loaded = await loadEnabledLayers({ experimentalFlags: EXPERIMENT_ON, files: SCRIPTURE }, "JHN")
     expect(loaded.voices).toEqual({ ok: false, reason: "offline" })
   })
 

@@ -42,6 +42,8 @@ import { agent } from "./agent"
 import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
+import { smartEdits } from "./smartEdits"
+import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
 import { bibleAlignment } from "./bibleAlignment"
 import { bibleHelps } from "./bibleHelps"
@@ -73,6 +75,8 @@ export const NAMESPACES = [
   agentDraftReview,
   workspace,
   segmentation,
+  smartEdits,
+  harmonizer,
   bibleData,
   bibleAlignment,
   bibleHelps,

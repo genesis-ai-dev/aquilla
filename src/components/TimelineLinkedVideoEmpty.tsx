@@ -140,7 +140,9 @@ export function TimelineLinkedVideoEmpty({
   const showRecordingStep = recordingStep && Boolean(onAttachFile)
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-10" data-testid="linked-video-empty" data-placement={placement}>
+    // 30rem, not max-w-md (28rem): at 28rem "…download the video file from
+    // YouTube Studio." broke before "Studio" (Sam, Oct 5).
+    <div className="mx-auto w-full max-w-[30rem] px-4 py-10" data-testid="linked-video-empty" data-placement={placement}>
       <div
         className={cn(
           "flex flex-col items-center rounded-lg border-2 border-dashed p-6 text-center transition-colors",

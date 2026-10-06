@@ -144,7 +144,7 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
                   onChange={(e) => setMark(level, "open", e.target.value)}
                   disabled={disabled}
                   aria-label={t("bibleData.profile.quoteMarks.openAriaLabel", { level: levelName })}
-                  className="w-12 bg-background text-center"
+                  className="w-12 bg-background text-center text-lg md:text-lg"
                   maxLength={2}
                 />,
                 <Input
@@ -153,7 +153,7 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
                   onChange={(e) => setMark(level, "close", e.target.value)}
                   disabled={disabled}
                   aria-label={t("bibleData.profile.quoteMarks.closeAriaLabel", { level: levelName })}
-                  className="w-12 bg-background text-center"
+                  className="w-12 bg-background text-center text-lg md:text-lg"
                   maxLength={2}
                 />,
               ]

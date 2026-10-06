@@ -343,6 +343,36 @@ describe("chat /api/v1/chat/completions — budget enforcement", () => {
     // Must pass through (upstream mocked to 200), not 429.
     expect(res.status).toBe(200)
   })
+
+  // AQU-617: in log-only mode the counters can never reject a request, so
+  // they must not cost the translator a round trip — they ride waitUntil.
+  // They still have to count: the admin usage view and a later switch to
+  // enforce both read these rows, user and global alike.
+  it("log-only mode counts the request after the response, user and global both", async () => {
+    await seedUser(6, "frank")
+    const jwt = await jwtFor("frank")
+    mockUpstreamSuccess()
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      withEnvOverrides({ OPENROUTER_API_KEY: "test-key" }),
+      ctx as unknown as ExecutionContext,
+    )
+    expect(res.status).toBe(200)
+    expect(deferred.length).toBeGreaterThan(0)
+    await Promise.all(deferred)
+
+    const counts = await env.AQUILLA_PG
+      .prepare(`SELECT user_id, request_count FROM ai_usage_daily ORDER BY user_id`)
+      .all<{ user_id: number; request_count: number }>()
+    expect(counts.results).toEqual([
+      { user_id: 0, request_count: 1 },
+      { user_id: 6, request_count: 1 },
+    ])
+  })
 })
 
 // ── AQU-414 follow-up: chat spend org attribution ────────────────────────────

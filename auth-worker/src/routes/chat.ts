@@ -146,9 +146,12 @@ function afterResponse(
 ): void {
   const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
   const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
-  const task = work(db)
-    .catch((err: unknown) => console.error("[chat] post-response write failed", err))
-    .finally(() => shim?.close())
+  detach(c, work(db).finally(() => shim?.close()))
+}
+
+/** Keep a best-effort task alive past the response; failures are logged only. */
+function detach(c: Context<{ Bindings: Env; Variables: Variables }>, work: Promise<void>): void {
+  const task = work.catch((err: unknown) => console.error("[chat] post-response write failed", err))
   // Hono throws on executionCtx without one (vitest); fall back to detached.
   try {
     c.executionCtx.waitUntil(task)
@@ -214,7 +217,9 @@ chat.post(
     // fail, so the two can share a round trip.
     const [, guard] = await Promise.all([
       recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier),
-      runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env),
+      // Log-only budget counting is a single upsert issued now; the request
+      // shim drains in-flight queries before it closes, so it can ride along.
+      runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env, (work) => detach(c, work(c.env.AQUILLA_PG))),
     ])
     if (!guard.ok) {
       return c.json(guard.body, guard.status)

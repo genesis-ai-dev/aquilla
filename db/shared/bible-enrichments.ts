@@ -77,11 +77,13 @@ export const BIBLE_ENRICHMENTS: Readonly<Record<BibleEnrichmentId, BibleEnrichme
     license: 'CC BY-SA 4.0',
     sources: ['opentext', 'speaker-quotations', 'macula', 'acai'],
   },
+  // AQU-1689: the cast is per pericope, and pericopes are the structure
+  // layer's segments (OpenText), so Who's Who loads that layer too.
   'whos-who': {
-    layers: ['people', 'text'],
+    layers: ['people', 'text', 'structure'],
     default: true,
     license: 'CC BY-SA 4.0',
-    sources: ['acai', 'macula'],
+    sources: ['acai', 'macula', 'opentext'],
   },
   structure: {
     layers: ['structure'],

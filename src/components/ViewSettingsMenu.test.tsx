@@ -420,10 +420,48 @@ describe("ViewSettingsMenu — Bible data", () => {
     fireEvent.click(chips)
     fireEvent.click(within(section).getByRole("radio", { name: "English names" }))
 
-    expect(getBibleDataViewPrefs()).toEqual({ voiceChips: false, speechRails: true, labelMode: "english" })
+    // AQU-1689: the Who's Who options stay at their defaults.
+    const expected = {
+      voiceChips: false,
+      speechRails: true,
+      labelMode: "english",
+      whosWhoHighlights: "hover",
+      impliedSubjectHints: "names",
+    }
+    expect(getBibleDataViewPrefs()).toEqual(expected)
     // Survives a reload: stored on this device.
     resetBibleDataViewPrefsCacheForTests()
-    expect(getBibleDataViewPrefs()).toEqual({ voiceChips: false, speechRails: true, labelMode: "english" })
+    expect(getBibleDataViewPrefs()).toEqual(expected)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1689: Who's Who's options appear where the project has Who's Who on,
+  // and only its own: a project with Voices off shows no voice switches.
+  it("offers Who's Who highlights and implied-subject hints where the project has Who's Who on", () => {
+    renderViewSettings({ bibleDataWhosWhoEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).queryByRole("switch", { name: "Voice chips" })).toBeNull()
+
+    const highlights = within(section).getByRole("radiogroup", { name: "Who's Who highlights" })
+    const hints = within(section).getByRole("radiogroup", { name: "Implied-subject hints" })
+    expect(within(highlights).getByRole("radio", { name: "On hover or focus" }).getAttribute("aria-checked")).toBe("true")
+    expect(within(hints).getByRole("radio", { name: "Names only" }).getAttribute("aria-checked")).toBe("true")
+    // Names follow the same label chain as Voices.
+    expect(within(section).getByRole("radiogroup", { name: "Label language" })).toBeTruthy()
+
+    fireEvent.click(within(highlights).getByRole("radio", { name: "Always on" }))
+    fireEvent.click(within(hints).getByRole("radio", { name: "Off" }))
+
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+  })
+
+  it("has no Bible data section when the project shows neither Voices nor Who's Who", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
   })
 })

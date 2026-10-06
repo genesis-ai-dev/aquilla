@@ -25,6 +25,7 @@ import { checkSpanBible, newBibleMetrics, recordBible, type SpanBible } from "./
 import { repairExpectations, type RepairCell } from "./bible-repair"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
+import { encodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
@@ -276,7 +277,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     deps.examples.filter((e) => e.validated).length / EXAMPLES_TARGET,
     1,
   )
-  const accepted: { cellId: string; text: string; findings: string[] }[] = []
+  const accepted: { cellId: string; text: string; findings: string[]; values?: Record<string, string> }[] = []
   const ambiguityCount = briefDraft.ambiguityRegister.length
   let attemptPairs = work
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
@@ -456,6 +457,20 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       constraints: [...r.constraints, ...(bibleCheck.constraints.get(r.cellId) ?? [])],
     }))
     notes.push(`redrafting ${tally.rejected.length} rejected cell(s) with verifier constraints`)
+  }
+
+  // ── C1 (AQU-1701): Translation Questions on the FINAL drafts. After the
+  // attempts on purpose: a "no" is a finding for a person to review, never a
+  // redraft. Shadow answers are only recorded. ──
+  if (accepted.length > 0 && deps.bible?.checks) {
+    const comprehension = await deps.bible.checks.comprehension(accepted)
+    recordBible(bibleMetrics, [], comprehension)
+    for (const finding of comprehension.findings) {
+      const entry = accepted.find((c) => c.cellId === finding.cellId)
+      if (!entry) continue
+      if (!entry.findings.includes(finding.code)) entry.findings.push(finding.code)
+      entry.values = { ...entry.values, [finding.code]: encodeBibleParams(finding.params) }
+    }
   }
 
   // ── stage → report ──

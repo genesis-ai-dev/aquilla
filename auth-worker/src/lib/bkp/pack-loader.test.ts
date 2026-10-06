@@ -3,7 +3,7 @@
 // it must never read an old file for a new pack version.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { __resetBkpServerMemory, bkpBase, compactTextLayer, loadBookPack, DEFAULT_BKP_BASE } from "./pack-loader"
+import { __resetBkpServerMemory, bkpBase, compactTextLayer, impliedSubjectWords, loadBookPack, DEFAULT_BKP_BASE } from "./pack-loader"
 import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../../../db/shared/bible-checks/__fixtures__/pack-a"
 import type { ServerBkpLayerData } from "./pack-types"
 import { compileFileExpectations } from "../../../../db/shared/bible-checks/compile"
@@ -138,6 +138,47 @@ describe("loadBookPack", () => {
     expect(server.calls.filter((url) => !url.endsWith("/manifest.json"))).toEqual([])
   })
 
+  // AQU-1701: C1 asks the Translation Questions. The notes are most of the
+  // layer's bytes and nothing on the server reads them, so only the questions
+  // stay in memory — and only well-formed ones reach the check.
+  it("loads only the notes layer's Translation Questions, and only when asked", async () => {
+    const notes = {
+      book: "JHN",
+      notes: [{ id: "tn:1", ref: "JHN 4:7", words: [], text: "A long translation note." }],
+      questions: [
+        { id: "tq:172799", refs: ["JHN 4:7"], q: "Who came to Jacob’s well?", a: "A Samaritan woman came there to draw water." },
+        { id: "tq:bad", refs: [], q: "No verses?", a: "Malformed." },
+        { id: "tq:also-bad", refs: ["JHN 4:8"], q: "No answer?" },
+      ],
+    }
+    const server = serve(
+      packFiles({
+        "/manifest.json": () => json(manifest("1.2.0", ["text", "structure", "voices", "people", "notes"])),
+        "/notes/JHN.json": () => json(notes),
+      }),
+    )
+    stubFetch(server.handler)
+    const without = await loadBookPack(env, "JHN")
+    expect(without.ok && without.value.questions).toBeNull()
+    expect(server.calls.some((url) => url.includes("/notes/"))).toBe(false)
+
+    const loaded = await loadBookPack(env, "JHN", { questions: true })
+    expect(loaded.ok && loaded.value.questions).toEqual([notes.questions[0]])
+  })
+
+  it("leaves the questions out, and still loads the pack, when the notes layer fails", async () => {
+    stubFetch(
+      serve(
+        packFiles({
+          "/manifest.json": () => json(manifest("1.2.0", ["text", "structure", "voices", "people", "notes"])),
+          "/notes/JHN.json": () => new Response("busy", { status: 503 }),
+        }),
+      ).handler,
+    )
+    const result = await loadBookPack(env, "JHN", { questions: true })
+    expect(result.ok && result.value.questions).toBeNull()
+  })
+
   it("keeps parsed layers per pack version: the next wave reads memory, a new version refetches", async () => {
     let version = "1.0.0"
     const server = serve(packFiles({ "/manifest.json": () => json(manifest(version)) }))
@@ -182,6 +223,34 @@ describe("compactTextLayer", () => {
         computeCellFacts(expectation, { ...layers, text: full }).secondPerson,
       )
     }
+  })
+})
+
+// AQU-1701: the referent question (P13) names what the implied subject does
+// ("…the one who answered?"), so the compact layer must keep those verbs'
+// glosses — and only those verbs, or it grows back toward the full layer.
+describe("compactTextLayer keeps the verbs whose subject the pack resolves", () => {
+  const full = {
+    book: "JHN",
+    verses: { "JHN 1:42": ["n43001042001", "n43001042003", "n43001042005"] },
+    words: {
+      n43001042001: { text: "ἤγαγεν", lemma: "ἄγω", gloss: "He brought", english: "brought", after: " ", class: "verb", morph: "V-2AAI-3S", person: "third", number: "singular" },
+      n43001042003: { text: "πρὸς", lemma: "πρός", gloss: "to", after: " ", class: "prep", morph: "PREP" },
+      // The verse's last word: always kept, for S3.
+      n43001042005: { text: "Ἰησοῦν", lemma: "Ἰησοῦς", gloss: "Jesus", after: ".", class: "noun", type: "proper", morph: "N-ASM" },
+    },
+  } as unknown as ServerBkpLayerData["text"]
+  const people = {
+    book: "JHN",
+    entities: {},
+    mentions: { n43001042001: { entity: "person:Andrew", kind: "subject", src: "macula", hops: 1, conf: 0.97 } },
+  } as unknown as ServerBkpLayerData["people"]
+
+  it("keeps an implied subject's verb with its gloss, and drops it without the people layer", () => {
+    const kept = compactTextLayer(full, impliedSubjectWords(people))
+    expect(kept.words.n43001042001).toMatchObject({ english: "brought", gloss: "He brought", person: "third" })
+    expect(kept.words.n43001042003).toBeUndefined()
+    expect(compactTextLayer(full).words.n43001042001?.english).toBeUndefined()
   })
 })
 

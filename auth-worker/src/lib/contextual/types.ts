@@ -144,8 +144,10 @@ export interface SpanDraft {
   spanId: string
   sceneBriefId: string
   /** `findings` (categorical QA codes, findings.ts) are set on accepted cells
-   *  handed to stage(); drafts under construction carry none. */
-  cells: { cellId: string; text: string; findings?: string[] }[]
+   *  handed to stage(); drafts under construction carry none. AQU-1701:
+   *  `values` holds a finding's encoded evidence (bkp:C1: the Translation
+   *  Question and its answer), for the draft's verdicts. */
+  cells: { cellId: string; text: string; findings?: string[]; values?: Record<string, string> }[]
   exampleIds: string[]
   promptVersion: string
 }

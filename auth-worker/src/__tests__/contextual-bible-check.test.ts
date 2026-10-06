@@ -12,7 +12,7 @@ import app from "../index"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
 import { JHN4_PEOPLE, JHN4_TEXT } from "../../../db/shared/bible-facts/__fixtures__/jhn4-people"
 import { __resetBkpServerMemory } from "../lib/bkp/pack-loader"
-import { JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
+import { JHN4_QUESTIONS, JHN4_SOURCES } from "../lib/contextual/bible-test-helpers"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 
 const db = env.AQUILLA_PG
@@ -45,21 +45,37 @@ const PACK_FILES: Record<string, unknown> = {
   "/text/JHN.json": JHN4_TEXT,
 }
 
+/** AQU-1701: pack 1.2, which publishes the notes layer and its Translation Questions. */
+const PACK_FILES_WITH_NOTES: Record<string, unknown> = {
+  ...PACK_FILES,
+  "/manifest.json": {
+    ...(PACK_FILES["/manifest.json"] as Record<string, unknown>),
+    version: "1.2.0",
+    books: { JHN: { layers: ["text", "structure", "voices", "people", "notes"], bytes: {} } },
+  },
+  "/notes/JHN.json": { book: "JHN", notes: [], questions: JHN4_QUESTIONS },
+}
+
 let userSeq = 900
 let jevCalls = 0
+let files = PACK_FILES
+const jevQuestionKeys: string[][] = []
 
 beforeEach(() => {
   __resetBkpServerMemory()
   jevCalls = 0
+  files = PACK_FILES
+  jevQuestionKeys.length = 0
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.startsWith(PACK)) {
-      const file = PACK_FILES[url.slice(PACK.length)]
+      const file = files[url.slice(PACK.length)]
       return file ? json(file) : new Response("missing", { status: 404 })
     }
     if (url.endsWith("/alpha/decisions")) {
       jevCalls += 1
       const request = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }
+      jevQuestionKeys.push(Object.keys(request.questions))
       return json({ answers: Object.fromEntries(Object.keys(request.questions).map((k) => [k, { type: "noul", noul: 0.1 }])) })
     }
     throw new Error(`unexpected fetch: ${url}`)
@@ -153,6 +169,29 @@ describe("POST /contextual/bible-check", () => {
     expect(target?.value).toBe(ASIDE_INSIDE)
     const drafts = await db.prepare("SELECT COUNT(*)::int AS n FROM contextual_drafts WHERE project_id = ?").bind(p.id).first<{ n: number }>()
     expect(drafts?.n).toBe(0)
+  })
+
+  // AQU-1701: C1 makes check mode an automated community check. WHY: the
+  // Translation Questions on verses people already translated are exactly
+  // what a checker would ask; while C1 is in shadow its answers reach the
+  // maintainer's judgments and never the findings.
+  it("asks the Translation Questions whose verses are all translated: one call for the chapter, in shadow", async () => {
+    files = PACK_FILES_WITH_NOTES
+    const p = await seedProject(ON)
+    const body = (await (await check(p.id, p.maintainer)).json()) as {
+      cells: { cellId: string; findings: { code: string }[] }[]
+      judgments: { check: string; mode: string; outcome: string; tq?: string; cellId: string }[]
+      jevCalls: number
+    }
+    // The span-style call (negation), then C1's: 4:9 and 4:10 are translated; 4:7 and 4:8 are not, so their TQs wait.
+    expect(jevCalls).toBe(2)
+    expect(body.jevCalls).toBe(2)
+    expect(jevQuestionKeys[1]).toEqual(["q0", "q1"])
+    expect(body.judgments.filter((j) => j.check === "tq")).toEqual([
+      expect.objectContaining({ cellId: "c9", tq: "tq:172802", mode: "shadow", outcome: "fail" }),
+      expect.objectContaining({ cellId: "c10", tq: "tq:172803", mode: "shadow", outcome: "fail" }),
+    ])
+    expect(body.cells.flatMap((c) => c.findings.map((f) => f.code))).not.toContain("bkp:C1")
   })
 
   it("continues where the last call stopped", async () => {

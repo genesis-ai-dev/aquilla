@@ -138,11 +138,28 @@ function glossOf(word: TextWordInput): string | null {
 }
 
 /**
+ * Labels the pack takes from the gloss of a pronoun, a determiner or a
+ * number (τις → "anyone", ὅς → "which"). A question cannot name a participant
+ * by one ("Is it clear that the anyone is the one who …?"), so P13 asks about
+ * none of them; the shadow eval found them on about one implied subject in seven.
+ */
+const UNNAMEABLE: ReadonlySet<string> = new Set([
+  'all', 'another', 'any', 'anyone', 'certain', 'each', 'first', 'many', 'none', 'one', 'other', 'others', 'some',
+  'someone', 'such', 'that', 'these', 'this', 'those', 'three', 'two', 'what', 'whatever', 'which', 'who', 'whoever', 'whom',
+])
+
+function nameable(entity: PeopleEntityInput | undefined): boolean {
+  const label = entity?.labels.eng?.trim().toLowerCase()
+  return !!label && !UNNAMEABLE.has(label)
+}
+
+/**
  * P13: the implied subjects of third-person verbs that the cell never names,
  * when another active participant has the same gender and number. Active:
  * every participant the cell's source mentions, and the speakers and
  * addressees of its speeches (`voices`). One entry per participant, at its
- * first such verb; empty without the text layer, which gives the verb.
+ * first such verb; empty without the text layer, which gives the verb. A
+ * participant with no nameable label is never the subject asked about.
  */
 export function ambiguousSubjectsIn(
   mentions: readonly MentionEntry[],
@@ -160,6 +177,7 @@ export function ambiguousSubjectsIn(
   const out: AmbiguousSubject[] = []
   for (const [wordId, mention] of mentions) {
     if (mention.kind !== 'subject' || named.has(mention.entity) || out.some((s) => s.entity === mention.entity)) continue
+    if (!nameable(own(people.entities, mention.entity))) continue
     const word = own(text.words, wordId)
     const gloss = word?.person === 'third' ? glossOf(word) : null
     const key = lookAlikeKey(own(people.entities, mention.entity))

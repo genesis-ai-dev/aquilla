@@ -98,8 +98,12 @@ const PRONOUNS: Readonly<Record<string, { subject: string; object: string }>> = 
   many: { subject: "they", object: "them" },
 }
 
-/** After these words a name is a subject ("and Philip said"); after any other word, an object ("found Philip"). */
-const SUBJECT_AFTER = /\b(?:and|but|then|so|when|that|because|for|while|as|if)\s+$/iu
+/**
+ * After these words a name is a subject ("and Philip said", "did Isaiah
+ * prophesy"); after any other word, an object ("found Philip").
+ */
+const SUBJECT_AFTER =
+  /\b(?:and|but|then|so|when|that|because|for|while|as|if|did|does|do|is|was|were|are|has|had|have|will|would|shall|should|can|could|may|might|must)\s+$/iu
 
 /**
  * Every whole-word `name` replaced by the pronoun its place needs: "he found
@@ -119,12 +123,30 @@ export function nameToPronoun(text: string, name: string, kind: string): string 
 }
 
 /**
- * A wrong referent planted: the first subject pronoun of `kind` ("he") made a
- * look-alike's name ("Peter"). Null when the text has none.
+ * A wrong referent planted: a subject pronoun of `kind` ("he") made a
+ * look-alike's name ("Peter"). With `verb`, only the pronoun of that verb
+ * ("He brought", "he had brought"): another "he" in the verse may be someone
+ * else, and naming them would plant nothing. Null when there is none.
  */
-export function pronounToName(text: string, kind: string, name: string): string | null {
+export function pronounToName(text: string, kind: string, name: string, verb?: string): string | null {
   const forms = PRONOUNS[kind]
   if (!forms) return null
-  const pattern = new RegExp(`\\b${forms.subject}\\b`, "iu")
+  const pattern = verb
+    ? new RegExp(`\\b${forms.subject}\\b(?=\\s+(?:[\\p{L}’']+\\s+){0,2}?${escape(verb)}\\b)`, "iu")
+    : new RegExp(`\\b${forms.subject}\\b`, "iu")
   return pattern.test(text) ? text.replace(pattern, name) : null
+}
+
+/**
+ * The name stands in an apposition or a longer name ("John the Baptizer",
+ * "Daniel the prophet", "Judas Iscariot", "Simon Peter"): swapping it alone
+ * leaves them identified.
+ */
+export function nameInApposition(text: string, name: string): boolean {
+  const word = escape(name)
+  return (
+    new RegExp(`\\b${word},?\\s+the\\s+\\p{L}`, "u").test(text) ||
+    new RegExp(`\\b${word}\\s+\\p{Lu}`, "u").test(text) ||
+    new RegExp(`\\p{Lu}\\p{Ll}+\\s+${word}\\b`, "u").test(text)
+  )
 }

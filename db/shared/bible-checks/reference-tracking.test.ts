@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest'
 import { JHN_B_PEOPLE, JHN_B_SEGMENTS, JHN_B_STRUCTURE, JHN_B_TEXT_GLOSSED, JHN_B_VOICES } from './__fixtures__/pack-b'
 import { buildNameTable } from './agreed-names'
 import { compileFileExpectations } from './compile'
-import type { CellParticipants } from './participant-types'
+import type { CellParticipants, PeopleLayerInput } from './participant-types'
+import { ambiguousSubjectsIn, type MentionEntry } from './reference-tracking'
 import type { TextLayerInput } from './types'
 
 function participantsOf(ref: string, opts: { segments?: typeof JHN_B_SEGMENTS; text?: TextLayerInput | null } = {}): CellParticipants {
@@ -62,5 +63,33 @@ describe('P13: an implied subject that another active participant could be mista
 
   it('asks nothing without the text layer, which says the verb is third person and gives its gloss', () => {
     expect(participantsOf('JHN 1:42', { text: null }).ambiguousSubjects).toEqual([])
+  })
+})
+
+// WHY: the pack labels some participants with the gloss of a pronoun (τις →
+// "anyone"), and a question naming one is nonsense ("Is it clear in this
+// translation that the anyone is the one who be?"). JHN 9:22, as the pack has it.
+describe('P13: only a participant a question can name', () => {
+  const ANYONE = 'local:JHN:n43009022017'
+  const people = (label: string): PeopleLayerInput => ({
+    entities: {
+      [ANYONE]: { type: 'local-person', gender: 'masculine', labels: { eng: label } },
+      'person:Jesus.2': { type: 'person', gender: 'male', labels: { eng: 'Jesus' } },
+    },
+    mentions: {},
+  })
+  const text: TextLayerInput = {
+    verses: { 'JHN 9:22': ['n43009022017', 'n43009022018', 'n43009022022'] },
+    words: { n43009022022: { lemma: 'γίνομαι', english: 'be', class: 'verb', person: 'third', number: 'singular' } },
+  }
+  const mentions: MentionEntry[] = [
+    ['n43009022017', { entity: ANYONE, kind: 'pronoun', conf: 0.9 }],
+    ['n43009022018', { entity: 'person:Jesus.2', kind: 'pronoun', conf: 0.97 }],
+    ['n43009022022', { entity: ANYONE, kind: 'subject', conf: 0.8 }],
+  ]
+
+  it('asks nothing about "anyone", and would about "the man" in the same place', () => {
+    expect(ambiguousSubjectsIn(mentions, people('anyone'), text, [])).toEqual([])
+    expect(ambiguousSubjectsIn(mentions, people('man'), text, []).map((s) => s.entity)).toEqual([ANYONE])
   })
 })

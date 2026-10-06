@@ -7,7 +7,7 @@
 // returns null so the case is left out.
 
 import { describe, expect, it } from "vitest"
-import { dropNegation, ENGLISH_YOU, nameToPronoun, plantForm, pronounToName, removeQuestion, swapNames } from "./bible-mutations"
+import { dropNegation, ENGLISH_YOU, nameInApposition, nameToPronoun, plantForm, pronounToName, removeQuestion, swapNames } from "./bible-mutations"
 
 describe("planted errors", () => {
   it("drops every negator, or plants nothing when one would survive", () => {
@@ -30,13 +30,31 @@ describe("planted errors", () => {
       "On the next day, he was determined to go out into Galilee, and he found him. Jesus said to him, “Follow me.”",
     )
     expect(nameToPronoun("Philip found Nathanael, and said to him", "Philip", "m:one")).toBe("He found Nathanael, and said to him")
+    expect(nameToPronoun("He answered them, “Well did Isaiah prophesy of you hypocrites.”", "Isaiah", "m:one")).toBe(
+      "He answered them, “Well did he prophesy of you hypocrites.”",
+    )
     expect(nameToPronoun("He brought him to Jesus.", "Andrew", "m:one")).toBeNull()
+  })
+
+  it("knows a name in an apposition stays identified without it", () => {
+    expect(nameInApposition("They told him, “John the Baptizer, and others say Elijah.”", "John")).toBe(true)
+    expect(nameInApposition("which was spoken of through Daniel the prophet, standing in the holy place", "Daniel")).toBe(true)
+    expect(nameInApposition("and Judas Iscariot, who also betrayed him.", "Judas")).toBe(true)
+    expect(nameInApposition("Jesus went up into the temple and taught.", "Jesus")).toBe(false)
   })
 
   it("plants a look-alike's name where the pronoun stood, and swaps two names", () => {
     expect(pronounToName("He brought him to Jesus.", "m:one", "Peter")).toBe("Peter brought him to Jesus.")
     expect(pronounToName("Jesus said to her, “Go.”", "m:one", "Peter")).toBeNull()
     expect(swapNames("Peter turned and saw John following.", "Peter", "John")).toBe("John turned and saw Peter following.")
+  })
+
+  // MRK 8:9: the implied subject is the crowd ("were"), and the only "he" is Jesus, who did send them away.
+  it("with the verb, replaces only that verb's pronoun, never another participant's", () => {
+    expect(pronounToName("Those who had eaten were about four thousand. Then he sent them away.", "m:one", "Jesus", "were")).toBeNull()
+    expect(pronounToName("On the next day, he was determined to go out, and he found Philip.", "m:one", "Peter", "found")).toBe(
+      "On the next day, he was determined to go out, and Peter found Philip.",
+    )
   })
 
   it("plants a profile's form for every English 'you'", () => {

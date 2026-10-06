@@ -54,6 +54,11 @@ export function wordNumber(wordId: string): number {
   return Number.parseInt(wordId.slice(9, 12), 10)
 }
 
+/** The id of the word at `position` in the same verse as `wordId`. */
+export function siblingWordId(wordId: string, position: number): string {
+  return `${wordId.slice(0, 9)}${String(position).padStart(3, '0')}`
+}
+
 /** The verse ref a word belongs to, e.g. ("JHN", "n43004009008") → "JHN 4:9". */
 export function wordRef(book: string, wordId: string): string {
   return `${book} ${wordChapter(wordId)}:${wordVerse(wordId)}`

@@ -111,7 +111,7 @@ describe("the checks enrichment gates the rules themselves", () => {
 })
 
 describe("Rules → Built-in checks configures them like any built-in", () => {
-  it("adds the eight checks only when asked, with design-doc defaults (warning → major, info → minor)", () => {
+  it("adds the Bible data checks only when asked, with design-doc defaults (warning → major, info → minor)", () => {
     const rules = resolveBuiltinRules(undefined, { bibleChecks: true }).filter((r) => r.id.startsWith("builtin:bkp:"))
     expect(rules.map((r) => [r.id, r.severity, r.enabled])).toEqual([
       ["builtin:bkp:V1", "major", true],
@@ -122,6 +122,16 @@ describe("Rules → Built-in checks configures them like any built-in", () => {
       ["builtin:bkp:V8", "minor", true],
       ["builtin:bkp:V9", "minor", true],
       ["builtin:bkp:M1", "major", true],
+      // AQU-1697: pack A starts minor until it is measured on more than one
+      // translation; M3 is major because a dropped negator flips the meaning.
+      ["builtin:bkp:N1", "minor", true],
+      ["builtin:bkp:N2", "minor", true],
+      ["builtin:bkp:M3", "major", true],
+      ["builtin:bkp:S1", "minor", true],
+      ["builtin:bkp:S3", "minor", true],
+      ["builtin:bkp:S6", "minor", true],
+      ["builtin:bkp:S7", "minor", true],
+      ["builtin:bkp:S8", "minor", true],
     ])
   })
 

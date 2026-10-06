@@ -48,6 +48,7 @@ import { segmentation } from "../namespaces/segmentation"
 import { bibleData } from "../namespaces/bibleData"
 import { languageProfile } from "../namespaces/languageProfile"
 import { projectDecisions } from "../namespaces/projectDecisions"
+import { bibleChecks } from "../namespaces/bibleChecks"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -80,6 +81,7 @@ export const en = {
   ...bibleData.keys,
   ...languageProfile.keys,
   ...projectDecisions.keys,
+  ...bibleChecks.keys,
 } as const
 
 export type MessageKey = keyof typeof en

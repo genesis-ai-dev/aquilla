@@ -4,8 +4,9 @@
 // switch and severity (`algorithmicChecks`), but they run from pack facts:
 // `run` is never called for them. The rule engine sends them to
 // db/shared/bible-checks/evaluate.ts with the cell's compiled expectation
-// (src/lib/rules/bible-check-rules.ts). They exist only while the project's
-// Bible data checks enrichment is on (`resolveBuiltinRules`).
+// (src/lib/rules/bible-check-rules.ts); S1 and S8 need the whole file and run
+// in "Check file" only (db/shared/bible-checks/scans.ts). They exist only
+// while the project's Bible data checks enrichment is on (`resolveBuiltinRules`).
 //
 // i18n-exempt, as in builtin-registry.ts: `name`/`description` are the English
 // copy of the `bibleData.check.*` keys, and every renderer translates them
@@ -51,6 +52,46 @@ const COPY: Readonly<Record<BibleCheckId, { name: string; description: string }>
   "bkp:M1": {
     name: "Question kept",
     description: "Where the source asks a question, the translation has a question mark or a question marker.",
+  },
+  // AQU-1697: check pack A. Copy of the `bibleChecks.*` keys (M3's name is
+  // `agent.finding.bibleCheck.negation`).
+  "bkp:N1": {
+    name: "Number kept",
+    description:
+      "Where the source states a number, the translation has it too, as digits or as a number word from the Language profile.",
+  },
+  "bkp:N2": {
+    name: "Ordinal number kept",
+    description:
+      "Where the source says “the third day” or “the sixth hour”, a translation that writes numbers in digits has the same number.",
+  },
+  "bkp:M3": {
+    name: "Negation kept",
+    description:
+      "Where the source says “not” or “never”, the translation has one of the negative words from the Language profile.",
+  },
+  "bkp:S1": {
+    name: "Heading for each passage",
+    description: "Each passage starts with a section heading, and no heading stands inside a passage. Runs in Check file.",
+  },
+  "bkp:S3": {
+    name: "Sentence runs on",
+    description:
+      "Where the source sentence goes on into the next verse, the translation does not end its sentence at the end of the verse.",
+  },
+  "bkp:S6": {
+    name: "Verses the oldest manuscripts lack",
+    description:
+      "Verses such as Matthew 17:21, which the oldest manuscripts leave out, follow the Language profile: left out, in brackets or in a footnote.",
+  },
+  "bkp:S7": {
+    name: "Disputed passages",
+    description: "John 7:53–8:11 and Mark 16:9–20 follow the Language profile: left out, in brackets or with a footnote.",
+  },
+  "bkp:S8": {
+    name: "Verse numbering",
+    description:
+      "The file has a cell for each verse the Bible data has, and none it lacks, so its facts reach the right cells. Runs in Check file.",
   },
 }
 

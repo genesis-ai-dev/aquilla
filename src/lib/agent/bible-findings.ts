@@ -17,7 +17,7 @@ import type { RuleInfraction } from "@/lib/parsers/types"
 import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
 import type { DraftFinding } from "./draft-findings"
 
-/** Check names: the editor's built-in check names, and the three that only autopilot's Jev questions ask. */
+/** Check names: the editor's built-in check names, and the two that only autopilot's Jev questions ask (V13, P8). */
 const CHECK_NAME: Readonly<Record<string, MessageKey>> = {
   V1: "bibleData.check.v1.name",
   V2: "bibleData.check.v2.name",
@@ -27,6 +27,14 @@ const CHECK_NAME: Readonly<Record<string, MessageKey>> = {
   V8: "bibleData.check.v8.name",
   V9: "bibleData.check.v9.name",
   M1: "bibleData.check.m1.name",
+  // AQU-1697: check pack A. M3 is both a built-in check and a Jev question; one name.
+  N1: "bibleChecks.n1.name",
+  N2: "bibleChecks.n2.name",
+  S1: "bibleChecks.s1.name",
+  S3: "bibleChecks.s3.name",
+  S6: "bibleChecks.s6.name",
+  S7: "bibleChecks.s7.name",
+  S8: "bibleChecks.s8.name",
   V13: "agent.finding.bibleCheck.speaker",
   M3: "agent.finding.bibleCheck.negation",
   P8: "agent.finding.bibleCheck.youNumber",

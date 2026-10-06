@@ -41,6 +41,15 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:V8": "bibleData.check.v8.name",
   "bkp:V9": "bibleData.check.v9.name",
   "bkp:M1": "bibleData.check.m1.name",
+  "bkp:N1": "bibleChecks.n1.name",
+  "bkp:N2": "bibleChecks.n2.name",
+  // AQU-1697: the name autopilot already shows for this check.
+  "bkp:M3": "agent.finding.bibleCheck.negation",
+  "bkp:S1": "bibleChecks.s1.name",
+  "bkp:S3": "bibleChecks.s3.name",
+  "bkp:S6": "bibleChecks.s6.name",
+  "bkp:S7": "bibleChecks.s7.name",
+  "bkp:S8": "bibleChecks.s8.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -62,6 +71,14 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:V8": "bibleData.check.v8.description",
   "bkp:V9": "bibleData.check.v9.description",
   "bkp:M1": "bibleData.check.m1.description",
+  "bkp:N1": "bibleChecks.n1.description",
+  "bkp:N2": "bibleChecks.n2.description",
+  "bkp:M3": "bibleChecks.m3.description",
+  "bkp:S1": "bibleChecks.s1.description",
+  "bkp:S3": "bibleChecks.s3.description",
+  "bkp:S6": "bibleChecks.s6.description",
+  "bkp:S7": "bibleChecks.s7.description",
+  "bkp:S8": "bibleChecks.s8.description",
 }
 
 /**

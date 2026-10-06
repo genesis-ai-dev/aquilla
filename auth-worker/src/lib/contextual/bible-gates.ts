@@ -170,5 +170,30 @@ export function bibleConstraint(finding: BibleCheckFinding, facts: CellFacts | u
       return `Close the level-${level} quotation before the narrator's interruption and reopen it after.`
     case "self-projection-adds-level":
       return `Do not add a level-${level} quotation here: the speaker reports their own words without new quotation marks.`
+    // AQU-1697: check pack A. Only M3's "negation-missing" is a warning by
+    // default, so it is the one autopilot repairs; the rest stay advisory.
+    case "number-missing":
+      return `Keep the number ${finding.params.value ?? ""}: the source states it in this verse.`
+    case "ordinal-missing":
+      return `Keep the ordinal number ${finding.params.value ?? ""} (as in "the third day"): the source states it in this verse.`
+    case "negation-missing":
+      return 'Keep the negation: the source says "not" here, and without it the meaning is reversed.'
+    case "negation-fewer":
+      return `Keep every negation: the source negates ${finding.params.expected ?? ""} times in this verse.`
+    case "sentence-ends-early":
+      return "Do not end the sentence at the end of this verse: the source sentence goes on into the next verse."
+    case "variant-not-omitted":
+      return `Leave out ${finding.evidence.kind === "variant" ? finding.evidence.passage : "this verse"}: the project omits verses that the oldest manuscripts lack.`
+    case "variant-not-bracketed":
+      return `Put ${finding.evidence.kind === "variant" ? finding.evidence.passage : "this verse"} in square brackets, as the project does for verses some manuscripts lack.`
+    case "variant-no-footnote":
+      return `Add a footnote for ${finding.evidence.kind === "variant" ? finding.evidence.passage : "this verse"}, as the project does for verses some manuscripts lack.`
+    case "heading-missing":
+      return "Add a section heading before this passage."
+    case "heading-inside-pericope":
+      return "Remove this heading: it stands inside a passage."
+    case "verse-not-in-pack":
+    case "pack-verse-without-cell":
+      return `Check the verse numbering of ${finding.evidence.kind === "speech" ? finding.evidence.startRef : finding.evidence.refs.join(", ")}.`
   }
 }

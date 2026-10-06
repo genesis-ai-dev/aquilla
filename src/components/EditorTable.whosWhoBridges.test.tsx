@@ -233,9 +233,13 @@ describe("an English source, through the stored alignment", () => {
     renderTable(makeProject())
     await mentionsLoaded()
     fireEvent.pointerEnter(mentionWord(JHN_4_7, /^Jesus$/))
-    const lit = allMentions().filter((el) => el.dataset.mentionLit === "true")
-    expect(lit.length).toBeGreaterThan(3)
-    expect(new Set(lit.map((el) => el.dataset.mentionEntity))).toEqual(new Set([JESUS]))
+    // Wait for state, not time (AGENTS.md rule 10): on a busy machine the rows
+    // can still be settling when the pointer arrives.
+    await waitFor(() => {
+      const lit = allMentions().filter((el) => el.dataset.mentionLit === "true")
+      expect(lit.length).toBeGreaterThan(3)
+      expect(new Set(lit.map((el) => el.dataset.mentionEntity))).toEqual(new Set([JESUS]))
+    }, LOAD)
   })
 
   it("draws the words the alignment is unsure of as approximate, and says so", async () => {

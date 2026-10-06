@@ -91,6 +91,7 @@ import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
+import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -2033,6 +2034,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             canEdit={canEditShared}
             disabledTooltip={sharedDisabledTooltip ?? null}
+            patch={patchShared}
+          />
+        )}
+        {/* AQU-1691: the decision log, the team's answers to Autopilot's
+            questions. Only with the Bible data experiment on (AQU-1685): the
+            questions that record a decision are Bible data questions
+            (AQU-1690), so without the experiment the card has nothing to
+            show. Autopilot follows the stored decisions either way. */}
+        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
+          <ProjectDecisionsSection
+            value={sharedSettingsBlob?.projectFacts}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip ?? null}
+            username={session?.username ?? ""}
             patch={patchShared}
           />
         )}

@@ -25,6 +25,8 @@ const ENGLISH: LanguageProfile = {
     ],
     continuation: 'reopen-each-paragraph',
   },
+  // English marks a question with "?" only: the slot is saved empty (AQU-1691).
+  questionMarkers: {},
 }
 
 const cellsFor = (refs: string[]) => refs.map((ref) => ({ id: ref, globalReferences: [ref] }))
@@ -199,6 +201,43 @@ describe('conventions that are not errors', () => {
 
   it('apostrophes are not quotation marks', () => {
     expect(check('JHN 4:8', 'For the disciples’ errand they’d gone away into the city to buy food.')).toEqual([])
+  })
+})
+
+// AQU-1691: M1 waits for its own slot, the question markers, and accepts them
+// as well as a question mark. A language that asks with a particle or a word
+// ending would otherwise get a false "question lost" on every question.
+describe('M1 and the question markers slot', () => {
+  const statement = WEB['JHN 4:9'].replace('woman?”', 'woman.”')
+
+  it('stays dormant while question markers are unset, even with quotation marks set', () => {
+    expect(check('JHN 4:9', statement, { quoteMarks: ENGLISH.quoteMarks })).toEqual([])
+  })
+
+  it('runs on question markers alone; the quotation checks stay dormant without marks', () => {
+    // The quotation mark removed here would fire V2 if the quotation checks ran.
+    const findings = check('JHN 4:9', statement.replace('woman.”', 'woman.'), { questionMarkers: {} })
+    expect(codes(findings)).toEqual(['bkp:M1'])
+  })
+
+  it('accepts a particle in a script written without spaces (Mandarin 吗)', () => {
+    const profile: LanguageProfile = { questionMarkers: { particles: ['吗'] } }
+    expect(check('JHN 4:9', '你是犹太人，怎么向我这撒马利亚妇人要水喝吗。', profile)).toEqual([])
+    expect(codes(check('JHN 4:9', '你是犹太人，向我这撒马利亚妇人要水喝。', profile))).toEqual(['bkp:M1'])
+  })
+
+  it('accepts a particle only as a whole word in a spaced script', () => {
+    const profile: LanguageProfile = { questionMarkers: { particles: ['apakah', 'ka'] } }
+    expect(check('JHN 4:9', 'Apakah engkau, seorang Yahudi, minta minum kepadaku.', profile)).toEqual([])
+    // "ka" inside "kakak" is not the particle.
+    expect(codes(check('JHN 4:9', 'Kakak engkau minta minum kepadaku.', profile))).toEqual(['bkp:M1'])
+  })
+
+  it('accepts a suffix at the end of a word (Finnish -ko/-kö)', () => {
+    const profile: LanguageProfile = { questionMarkers: { suffix: ['ko', 'kö'] } }
+    expect(check('JHN 4:9', 'Pyydätkö sinä, juutalainen, minulta juotavaa.', profile)).toEqual([])
+    // The bare word "ko" is not a word ending.
+    expect(codes(check('JHN 4:9', 'Sinä pyydät minulta juotavaa ko.', profile))).toEqual(['bkp:M1'])
   })
 })
 

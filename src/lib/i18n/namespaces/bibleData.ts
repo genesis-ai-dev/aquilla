@@ -104,8 +104,10 @@ export const bibleData = defineNamespace({
     "bibleData.check.v9.description":
       "Words a speaker introduces with “I tell you that …” are part of that speech and need no extra quotation level.",
     "bibleData.check.m1.name": "Question kept",
-    "bibleData.check.m1.description": "Where the source asks a question, the translation has a question mark.",
+    "bibleData.check.m1.description":
+      "Where the source asks a question, the translation has a question mark or a question marker.",
     "bibleData.check.needs.quoteMarks": "Needs: quotation marks in Language profile",
+    "bibleData.check.needs.questionMarkers": "Needs: question markers in Language profile",
 
     // ── Bible data checks: one finding, explained (Issues tab, findings drawer) ──
     "bibleData.check.reason.openMissing":
@@ -125,7 +127,7 @@ export const bibleData = defineNamespace({
     "bibleData.check.reason.selfProjectionAddsLevel":
       "These words belong to the speaker's own speech (“I tell you that …”), so they need no extra quotation marks.",
     "bibleData.check.reason.questionMarkMissing":
-      "The source asks a question in this verse, but the translation has no question mark.",
+      "The source asks a question in this verse, but the translation has no question mark or question marker.",
     "bibleData.check.evidence.speech":
       "{dataset} speech {ref} words {from}–{to}; speaker from {sources} (confidence {confidence})",
     "bibleData.check.evidence.speechAcrossVerses":
@@ -460,6 +462,13 @@ export const bibleData = defineNamespace({
           "Shown under a check in Rules → Built-in checks while the check cannot run, " +
           "because the Language profile card has no quotation marks saved yet. " +
           "'Language profile' is the name of that settings card.",
+      },
+      "bibleData.check.needs.questionMarkers": {
+        description:
+          "Shown under the question check in Rules → Built-in checks while it cannot run, " +
+          "because the Language profile card has no question markers saved yet. Question " +
+          "markers are the words or word endings, besides a question mark, that make a " +
+          "sentence a question. 'Language profile' is the name of that settings card.",
       },
       "bibleData.check.reason.openMissing": {
         description:

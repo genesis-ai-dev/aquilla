@@ -248,6 +248,8 @@ const bareContext = {
   briefParameters: {},
   concepts: [],
   authoredRules: [],
+  projectFacts: [],
+  languageProfile: {},
 }
 
 describe("computeContextReadiness", () => {

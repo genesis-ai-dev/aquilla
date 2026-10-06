@@ -3,17 +3,59 @@
 //
 // Each fact is one optional SLOT. A check that needs an empty slot stays
 // dormant: it produces no findings, and its row in Rules → Built-in checks says
-// which slot it needs. AQU-1691 adds more slots (pronoun distinctions, question
-// markers, negators, number words, kin terms, divine-name policy); add each one
-// to `LANGUAGE_PROFILE_SLOTS`, `SLOT_PROBLEMS` and `readLanguageProfile`.
+// which slot it needs. AQU-1691 added the slots in ./language-profile-slots.ts
+// (question markers, pronouns, negators, number words, speech verbs, kin terms,
+// divine names, and the measures, textual-variant and heading policies). Add a
+// slot to `LanguageProfile` and `SLOT_PROBLEMS`; the reader, the filled-slot
+// set and the describe_command type follow from those two.
+//
+// Each slot validates on its own: the reader keeps every valid slot and drops
+// an invalid one, so one damaged slot never silences another slot's checks.
+// A writer merges over the STORED object, so a slot this version does not know
+// survives a save.
 //
 // Pure and dependency-free, with relative imports only and no DOM, so both
 // workers can import it: the settings-key registry validates agent writes with
-// `languageProfileProblem`, and autopilot (AQU-1690) reads the stored value with
-// `readLanguageProfile`.
+// `languageProfileProblem`, and autopilot reads the stored value with
+// `readLanguageProfile` (AQU-1691: auth-worker/src/lib/contextual/project-context.ts).
 //
 // Spec: aquilla-specs 04-features/bible-knowledge-layer.md (Language profile)
 // and the bible-wiki design doc §4.7.
+
+import {
+  SLOT_TYPE_NAMES,
+  divineNamesProblem,
+  headingsProblem,
+  isPlainObject,
+  kinTermsProblem,
+  measuresProblem,
+  negatorsProblem,
+  numberWordsProblem,
+  pronounsProblem,
+  questionMarkersProblem,
+  speechVerbsProblem,
+  textualVariantsProblem,
+  type DivineNamesProfile,
+  type HeadingPolicy,
+  type KinTermsProfile,
+  type MeasuresStrategy,
+  type NumberWordsProfile,
+  type PronounsProfile,
+  type QuestionMarkersProfile,
+  type TextualVariantPolicy,
+} from './language-profile-slots'
+
+export type {
+  DivineNamesProfile,
+  HeadingPolicy,
+  KinTermsProfile,
+  MeasuresStrategy,
+  NumberWordsProfile,
+  PronounsProfile,
+  QuestionMarkersProfile,
+  TextualVariantPolicy,
+} from './language-profile-slots'
+export { HEADING_POLICIES, MEASURES_STRATEGIES, TEXTUAL_VARIANT_POLICIES } from './language-profile-slots'
 
 /**
  * How a quotation that runs over several paragraphs marks each new paragraph:
@@ -43,19 +85,19 @@ export interface QuoteMarksProfile {
 
 export interface LanguageProfile {
   quoteMarks?: QuoteMarksProfile
+  questionMarkers?: QuestionMarkersProfile
+  pronouns?: PronounsProfile
+  negators?: string[]
+  numberWords?: NumberWordsProfile
+  speechVerbs?: string[]
+  kinTerms?: KinTermsProfile
+  divineNames?: DivineNamesProfile
+  measures?: MeasuresStrategy
+  textualVariants?: TextualVariantPolicy
+  headings?: HeadingPolicy
 }
 
-export const LANGUAGE_PROFILE_SLOTS = ['quoteMarks'] as const
-export type LanguageProfileSlot = (typeof LANGUAGE_PROFILE_SLOTS)[number]
-
-/** Shown by describe_command("PatchSettings") and in validation errors. */
-export const LANGUAGE_PROFILE_TYPE_NAME =
-  '{ quoteMarks?: { levels: { open: string, close: string }[] (1–3 levels, one character each), ' +
-  `continuation: ${QUOTE_CONTINUATION_STYLES.map((s) => `"${s}"`).join(' | ')} } }`
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+export type LanguageProfileSlot = keyof LanguageProfile
 
 /**
  * A quote mark is exactly one character that is not a letter, a digit or
@@ -95,17 +137,44 @@ function quoteMarksProblem(value: unknown): string | null {
 
 const SLOT_PROBLEMS: Readonly<Record<LanguageProfileSlot, (value: unknown) => string | null>> = {
   quoteMarks: quoteMarksProblem,
+  questionMarkers: questionMarkersProblem,
+  pronouns: pronounsProblem,
+  negators: negatorsProblem,
+  numberWords: numberWordsProblem,
+  speechVerbs: speechVerbsProblem,
+  kinTerms: kinTermsProblem,
+  divineNames: divineNamesProblem,
+  measures: measuresProblem,
+  textualVariants: textualVariantsProblem,
+  headings: headingsProblem,
 }
 
-function isSlot(key: string): key is LanguageProfileSlot {
-  return (LANGUAGE_PROFILE_SLOTS as readonly string[]).includes(key)
+/** Every slot, in the order the settings card and describe_command list them. */
+export const LANGUAGE_PROFILE_SLOTS = Object.keys(SLOT_PROBLEMS) as readonly LanguageProfileSlot[]
+
+export function isLanguageProfileSlot(key: string): key is LanguageProfileSlot {
+  return Object.prototype.hasOwnProperty.call(SLOT_PROBLEMS, key)
 }
+
+/** Null when `value` is a valid value for `slot`, else what is wrong with it. */
+export function languageProfileSlotProblem(slot: LanguageProfileSlot, value: unknown): string | null {
+  return SLOT_PROBLEMS[slot](value)
+}
+
+const QUOTE_MARKS_TYPE_NAME =
+  '{ levels: { open: string, close: string }[] (1–3 levels, one character each), ' +
+  `continuation: ${QUOTE_CONTINUATION_STYLES.map((s) => `"${s}"`).join(' | ')} }`
+
+/** Shown by describe_command("PatchSettings") and in validation errors. */
+export const LANGUAGE_PROFILE_TYPE_NAME = `{ ${LANGUAGE_PROFILE_SLOTS.map(
+  (slot) => `${slot}?: ${slot === 'quoteMarks' ? QUOTE_MARKS_TYPE_NAME : SLOT_TYPE_NAMES[slot]}`,
+).join(', ')} }`
 
 /** Null when `value` is a valid profile, else what is wrong with it. Unknown slots are rejected. */
 export function languageProfileProblem(value: unknown): string | null {
   if (!isPlainObject(value)) return 'languageProfile must be an object'
   for (const [key, slot] of Object.entries(value)) {
-    if (!isSlot(key)) return `languageProfile has an unknown slot "${key}"`
+    if (!isLanguageProfileSlot(key)) return `languageProfile has an unknown slot "${key}"`
     // An explicit undefined is the same as a missing slot.
     if (slot === undefined) continue
     const problem = SLOT_PROBLEMS[key](slot)
@@ -117,7 +186,8 @@ export function languageProfileProblem(value: unknown): string | null {
 /**
  * Read a stored `languageProfile` that may arrive as a JSON string (a TEXT
  * column) or as parsed JSON. Keeps each valid slot and drops an invalid one,
- * so a damaged slot leaves its checks dormant instead of noisy.
+ * so a damaged slot leaves its checks dormant instead of noisy. Unknown slots
+ * are left out: this is the reader, not a writer.
  */
 export function readLanguageProfile(raw: unknown): LanguageProfile {
   let value = raw
@@ -129,20 +199,21 @@ export function readLanguageProfile(raw: unknown): LanguageProfile {
     }
   }
   if (!isPlainObject(value)) return {}
-  const out: LanguageProfile = {}
-  if (value.quoteMarks !== undefined && quoteMarksProblem(value.quoteMarks) === null) {
-    const quoteMarks = value.quoteMarks as unknown as QuoteMarksProfile
-    out.quoteMarks = {
-      levels: quoteMarks.levels.map(({ open, close }) => ({ open, close })),
-      continuation: quoteMarks.continuation,
-    }
+  const out: Record<string, unknown> = {}
+  for (const slot of LANGUAGE_PROFILE_SLOTS) {
+    const slotValue = value[slot]
+    if (slotValue === undefined || SLOT_PROBLEMS[slot](slotValue) !== null) continue
+    // A validated slot is plain JSON, so a round trip copies it without aliasing the stored object.
+    out[slot] = JSON.parse(JSON.stringify(slotValue))
   }
-  return out
+  return out as LanguageProfile
 }
 
 /** The slots that are filled in. A check is dormant while any slot it needs is missing. */
 export function filledLanguageProfileSlots(profile: LanguageProfile | null | undefined): Set<LanguageProfileSlot> {
   const filled = new Set<LanguageProfileSlot>()
-  if (profile?.quoteMarks) filled.add('quoteMarks')
+  for (const slot of LANGUAGE_PROFILE_SLOTS) {
+    if (profile?.[slot] !== undefined) filled.add(slot)
+  }
   return filled
 }

@@ -45,6 +45,8 @@ import { segmentation } from "./segmentation"
 import { smartEdits } from "./smartEdits"
 import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
+import { languageProfile } from "./languageProfile"
+import { projectDecisions } from "./projectDecisions"
 
 export const NAMESPACES = [
   common,
@@ -76,4 +78,6 @@ export const NAMESPACES = [
   smartEdits,
   harmonizer,
   bibleData,
+  languageProfile,
+  projectDecisions,
 ] as const

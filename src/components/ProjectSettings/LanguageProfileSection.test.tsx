@@ -7,7 +7,7 @@
 // failed save instead of swallowing it.
 
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 import { LanguageProfileSection, type LanguageProfileSectionProps } from "./LanguageProfileSection"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
@@ -112,5 +112,73 @@ describe("LanguageProfileSection", () => {
   it("offers no defaults for a language neither table knows", () => {
     renderCard({ targetLanguage: "tpi" })
     expect(screen.queryByRole("button", { name: /Use defaults for/ })).toBeNull()
+  })
+})
+
+// AQU-1691: one collapsible row per further slot. WHY: most projects fill in
+// only a few, so the rows start closed and say only whether they are set; each
+// row saves its own slot merged over the stored profile, so neither the
+// quotation marks nor a slot this version does not know is ever wiped; and a
+// value the slot's validator rejects is refused, not stored.
+describe("LanguageProfileSection — the slot rows", () => {
+  const row = (slot: string) => screen.getByTestId(`profile-slot-${slot}`)
+  const open = (slot: string) => fireEvent.click(within(row(slot)).getByRole("button", { expanded: false }))
+  const save = (slot: string) => fireEvent.click(within(row(slot)).getByRole("button", { name: "Save" }))
+  const stored = {
+    quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "none" },
+    futureSlot: { kept: true },
+  } as unknown as LanguageProfile
+
+  it("starts every row closed and says only whether its slot is set", () => {
+    renderCard({ value: { measures: "convert" } })
+    expect(within(row("measures")).getByRole("button", { name: /^Measures/ })).toHaveAttribute("aria-expanded", "false")
+    expect(row("measures")).toHaveTextContent(/Set$/)
+    expect(row("negators")).toHaveTextContent("Not set")
+    expect(screen.queryByLabelText("Negative words")).toBeNull()
+  })
+
+  it("saves one slot over the stored profile, keeping the quotation marks and an unknown slot", async () => {
+    const props = renderCard({ value: stored })
+    open("negators")
+    fireEvent.change(screen.getByLabelText("Negative words"), { target: { value: "ne, pas" } })
+    save("negators")
+    await waitFor(() => expect(props.patch).toHaveBeenCalledTimes(1))
+    expect(props.patch).toHaveBeenCalledWith({
+      languageProfile: {
+        quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "none" },
+        futureSlot: { kept: true },
+        negators: ["ne", "pas"],
+      },
+    })
+    expect(await within(row("negators")).findByText("Saved.")).toBeInTheDocument()
+  })
+
+  it("saves question markers with both fields empty: a question mark only, which turns the question check on", async () => {
+    const props = renderCard()
+    open("questionMarkers")
+    save("questionMarkers")
+    await waitFor(() => expect(props.patch).toHaveBeenCalledWith({ languageProfile: { questionMarkers: {} } }))
+  })
+
+  it("clears only its own slot", async () => {
+    const props = renderCard({ value: { ...stored, measures: "convert" } as LanguageProfile })
+    open("measures")
+    fireEvent.click(within(row("measures")).getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(props.patch).toHaveBeenCalledWith({ languageProfile: stored }))
+  })
+
+  it("refuses a slot its validator rejects instead of storing it", () => {
+    const props = renderCard()
+    open("divineNames")
+    save("divineNames")
+    expect(props.patch).not.toHaveBeenCalled()
+    expect(within(row("divineNames")).getByRole("alert")).toHaveTextContent(/can't be saved/)
+  })
+
+  it("locks every row below the maintainer floor", () => {
+    renderCard({ canEdit: false })
+    open("speechVerbs")
+    expect(screen.getByLabelText("Speech verbs")).toBeDisabled()
+    expect(within(row("speechVerbs")).getByRole("button", { name: "Save" })).toBeDisabled()
   })
 })

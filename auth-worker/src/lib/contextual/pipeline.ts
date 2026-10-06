@@ -20,6 +20,9 @@ import {
   type Concept,
   type TranslationBriefParameters,
 } from "./project-context"
+import { projectDecisionLines } from "./project-decisions"
+import type { LanguageProfile } from "../../../../db/shared/language-profile"
+import type { ProjectFact } from "../../../../db/shared/project-facts"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
@@ -67,6 +70,9 @@ export interface RunSpanDeps {
   briefParameters?: TranslationBriefParameters
   /** Active key-term concepts for the project (scoped to the span in here). */
   concepts?: Concept[]
+  /** AQU-1691: the decision log (scoped to the span in here) and the Language profile. */
+  projectFacts?: ProjectFact[]
+  languageProfile?: LanguageProfile
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -264,6 +270,13 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const spanTerms = deps.concepts
     ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
     : []
+  // AQU-1691: same scoping for the project's decisions: a fact for ACT 16
+  // reaches a span in ACT 16 and no other.
+  const spanDecisions = projectDecisionLines(
+    deps.projectFacts ?? [],
+    deps.languageProfile ?? {},
+    inSpan.map((p) => p.canonicalRef),
+  )
 
   // The evidence the draft prompt carries, as the support check will see it.
   // Hoisted: it is the same on both attempts, and building it per attempt
@@ -286,6 +299,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       ...(deps.projectBriefL1 ? { projectBriefL1: deps.projectBriefL1 } : {}),
       ...(deps.briefParameters ? { briefParameters: deps.briefParameters } : {}),
       ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
+      ...(spanDecisions.length > 0 ? { decisions: spanDecisions } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
       ...(carriedConstraints.length > 0 ? { constraints: carriedConstraints } : {}),
       ...(deps.sourceLanguage ? { sourceLanguage: deps.sourceLanguage } : {}),

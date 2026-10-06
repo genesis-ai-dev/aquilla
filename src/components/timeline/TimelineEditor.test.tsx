@@ -4535,8 +4535,15 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     render(<TimelineEditor {...base} onRequestImportCaptions={vi.fn()} canImportCaptions={false}
       onRequestImportCharacters={() => {}} canImportCharacters />)
     fireEvent.click(screen.getByTestId("tl-sources-menu"))
-    expect(screen.getByRole("menuitem", { name: /Attach captions/ })).toHaveAttribute("data-disabled")
-    expect(screen.getByText("Enable track editing in Project Settings")).toBeTruthy()
+    const item = screen.getByRole("menuitem", { name: /Attach captions/ })
+    expect(item).toHaveAttribute("data-disabled")
+    // A short badge, like the other rows' "not imported"; the whole sentence
+    // squeezed the label onto two lines (Sam, Oct 5) and is the tooltip now.
+    expect(item).toHaveTextContent(/^Attach captionstrack editing off$/)
+    expect(screen.queryByText("Enable track editing in Project Settings")).toBeNull()
+    // The row is disabled, so the badge has to take the pointer itself for its
+    // tooltip to open.
+    expect(screen.getByTestId("tl-sources-track-editing-off").className).toMatch(/pointer-events-auto/)
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What

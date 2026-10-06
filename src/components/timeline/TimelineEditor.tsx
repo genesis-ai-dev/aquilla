@@ -2094,6 +2094,19 @@ export function TimelineEditor({
 
   const sourceMenuItems = useMemo<OverflowMenuItem[]>(() => {
     const items: OverflowMenuItem[] = []
+    // Why a track row is off, in the same short form as the other rows' badges
+    // ("linked", "not imported"), with the full instruction as its tooltip.
+    // The whole sentence used to sit here and squeezed "Attach captions" and
+    // "Align script" onto two lines each (Sam, Oct 5). A disabled row turns
+    // pointer events off, so the badge turns them back on to keep its tooltip.
+    const trackEditingOff = (
+      <AppTooltip content={t("importExport.captionTrack.enableTracks")} side="right">
+        <span className="pointer-events-auto whitespace-nowrap text-[11px] text-muted-foreground"
+          data-testid="tl-sources-track-editing-off">
+          {t("editor.timeline.badgeTrackEditingOff")}
+        </span>
+      </AppTooltip>
+    )
     if (onRequestLinkVideo) {
       items.push({
         id: "film",
@@ -2128,9 +2141,7 @@ export function TimelineEditor({
       items.push({
         id: "caption-track", label: t("importExport.captionTrack.attach"),
         icon: ClipboardCheck, disabled: !canImportCaptions,
-        badge: canImportCaptions ? undefined : <span className="text-[11px] text-muted-foreground">
-          {t("importExport.captionTrack.enableTracks")}
-        </span>,
+        badge: canImportCaptions ? undefined : trackEditingOff,
         onClick: onRequestImportCaptions,
       })
     }
@@ -2138,9 +2149,7 @@ export function TimelineEditor({
       items.push({
         id: "align-script", label: t("importExport.scriptAlignment.align"),
         icon: ClipboardCheck, disabled: !canAlignScript,
-        badge: canAlignScript ? undefined : <span className="text-[11px] text-muted-foreground">
-          {t("importExport.captionTrack.enableTracks")}
-        </span>,
+        badge: canAlignScript ? undefined : trackEditingOff,
         onClick: onRequestAlignScript,
       })
     }

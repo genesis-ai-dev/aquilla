@@ -298,7 +298,7 @@ export function inheritedKeysSql(filesSql: string): string {
 /**
  * AQU-1493: where `inheritedKeysSql` placed each line with no reference, as
  * last projected — one row per such source cell of a Scripture file, with the
- * walk's own columns (section_key, place_ref, depth). Migration 0130.
+ * walk's own columns (section_key, place_ref, depth). Migration 0145.
  *
  * STORED BECAUSE THE WALK IS NOT FREE AND ITS ANSWER RARELY MOVES. On a
  * whole-Bible Hello AO import (34k cells, 3,206 headings with no reference)

@@ -23,6 +23,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react"
+import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
@@ -7900,7 +7901,6 @@ function EditorRow({
                        any existing target text peeking through the dimmed
                        editor underneath. */
                     <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
-                      <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
                           ? t("editor.ai.lookingUpExamples")
@@ -7927,6 +7927,18 @@ function EditorRow({
                   onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
                 />
               )}
+              {/* AQU-1640: costly draft wait. The bar follows `isLoading` and
+                  does not hold the draft — the preview and the commit show as
+                  soon as they exist, and this only finishes the graphic. */}
+              <FillsTwiceIndicator
+                pending={isLoading}
+                label={
+                  loadingPhase === "searching"
+                    ? t("editor.ai.lookingUpExamples")
+                    : t("editor.ai.generatingTranslation")
+                }
+                className="absolute inset-x-2 bottom-1 z-10"
+              />
             </EditorTargetCellWell>
             </div>
             {hasInlineFootnotes && (

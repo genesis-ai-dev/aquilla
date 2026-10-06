@@ -129,7 +129,7 @@ import {
   restoreMayPark, stepPendingScroll,
   type PendingCellScroll, type PendingScrollAttempt,
 } from "./pending-cell-scroll"
-import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { laneTargetLanguages, resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
 import { importTimelineTextTrack } from "@/lib/import/timeline-text"
@@ -273,6 +273,7 @@ import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedL
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
+import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
@@ -494,12 +495,6 @@ const ImportDialog = lazy(() =>
 
 const ExportDialog = lazy(() =>
   import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
-)
-
-// File-scoped target import: populate the open file's target column from
-// USFM or a spreadsheet. Lazy — pulls in the XLSX parser.
-const FileTargetImportDialog = lazy(() =>
-  import("./FileTargetImportDialog").then((mod) => ({ default: mod.FileTargetImportDialog })),
 )
 
 // FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
@@ -1088,8 +1083,6 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
-  // File-scoped target import dialog ("Import target translations into this file").
-  const [fileImportOpen, setFileImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -1620,6 +1613,7 @@ export function ProjectWorkspace() {
     applyOptimisticCellTiming,
     loadProgress: cellLoadProgress,
     isLoading: cellsLoading,
+    isRefreshing: cellsRefreshing,
     isError: cellsError,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -2266,11 +2260,13 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (scopedLanes && scopedLanes.length > 0 && !scopedLanes.includes(activeLane)) setActiveLane(scopedLanes[0])
   }, [scopedLanes, activeLane, setActiveLane])
-  // AQU-1631: the file-target import's destination-language picker. The same
-  // lanes the editor's switcher offers (AQU-608: MAINTAINER+ over every lane,
-  // a lane-limited member over their own), labelled the same way — so the
-  // import names the destination the way the user just saw it named. Below two
-  // lanes there is nothing to choose and the picker hides itself.
+  // AQU-1631: the translation import's destination-language picker ("Fill
+  // which language", on the Import dialog's A translation screen since
+  // AQU-1365). The same lanes the editor's switcher offers (AQU-608:
+  // MAINTAINER+ over every lane, a lane-limited member over their own),
+  // labelled the same way — so the import names the destination the way the
+  // user just saw it named. Below two lanes there is nothing to choose and the
+  // picker hides itself.
   const fileImportLaneOptions = useMemo(() => {
     const switchable = canSwitchLanes(project?.syncRole?.level) ? availableLanes : scopedLanes
     if (!switchable || switchable.length < 2) return undefined
@@ -5057,9 +5053,7 @@ export function ProjectWorkspace() {
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
 
-  const { importSourceCells, fileTargetCells } = useImportCellRefs(
-    cellSummaries, importOpen, fileImportOpen,
-  )
+  const { importSourceCells, fileTargetCells } = useImportCellRefs(cellSummaries, importOpen)
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
   // retrieval (`branchingSearch`) and the batch completion's passage
@@ -9418,19 +9412,43 @@ export function ProjectWorkspace() {
   // `isAvailable` can never disagree and leave a live button that no-ops.
   // Fails open on a null role (local/unsynced project, no server floor).
   const canImportSource = canPerform("file.create", project?.syncRole?.level ?? null)
-  const importDenialReason = canImportSource
+  // AQU-1365: the Import dialog also brings in a translation of a file that is
+  // already here, which commits target cells (`target.cell.commit`,
+  // CONTRIBUTOR 400) and creates nothing. So the header button opens from
+  // Contributor up, with New source text greyed out below Project lead; the
+  // old three-dot target import had no gate at all, and Contributors must not
+  // lose it now that it lives here.
+  const canImportTranslation = canPerform("target.cell.commit", project?.syncRole?.level ?? null)
+  const sourceImportDenialReason = canImportSource
     ? null
     : denialMessage(t, ROLE.PROJECT_LEAD, project?.syncRole?.level ?? null)
+  // A Contributor in a project with no files could only reach a dialog with
+  // both choices greyed out, so the button says why instead (AQU-1365 review).
+  const importDenialReason = canImportSource
+    ? null
+    : !canImportTranslation
+      ? denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
+      : (project?.files.length ?? 0) === 0
+        ? t("importExport.intent.translation.noFilesLead")
+        : null
+  // AQU-1365: the files a translation can go into, in sidebar order, so the
+  // picker reads like the file list beside it.
+  const translationImportFiles = useMemo(
+    () => groupByCorpus(project?.files ?? []).flatMap((group) => group.files),
+    [project?.files],
+  )
 
   const openImportFlow = useCallback(() => {
     if (!project) return
-    // AQU-481: the single choke point for the source-import dialog. Every
-    // entry (header button, setup checklist step 1, "Import again" in the
-    // export dialog, the empty-state CTA) funnels through here, so a
-    // below-floor role cannot reach the type picker by any route — each of
-    // those callers also disables its own affordance, so this is the backstop
-    // rather than the explanation.
-    if (!canPerform("file.create", project.syncRole?.level ?? null)) return
+    // AQU-481: the single choke point for the Import dialog. Every entry
+    // (header button, setup checklist step 1, "Import again" in the export
+    // dialog, the empty-state CTA) funnels through here, so a below-floor role
+    // cannot reach the type picker by any route — each of those callers also
+    // disables its own affordance, so this is the backstop rather than the
+    // explanation. AQU-1365: Contributor is the floor now (a translation); the
+    // dialog itself greys out New source text below Project lead.
+    const level = project.syncRole?.level ?? null
+    if (!canPerform("file.create", level) && !canPerform("target.cell.commit", level)) return
     setImportOpen(true)
   }, [project])
 
@@ -9609,10 +9627,6 @@ export function ProjectWorkspace() {
           { getTokenForFile: getTokenForProjectFile },
         )
       })()
-    },
-    runImportIntoFile: () => {
-      if (!activeFileId) return
-      setFileImportOpen(true)
     },
     runTranscribeAll: () => {
       if (!activeFileId || !project) return
@@ -14138,6 +14152,8 @@ export function ProjectWorkspace() {
             setChecklistOpen(false)
             // AQU-481: through the guarded opener, not setImportOpen directly,
             // so step 1 cannot become a second ungated route to the dialog.
+            // Step 1 is a source import, so it stays at that floor (AQU-1365).
+            if (!canImportSource) return
             openImportFlow()
           }}
           onNavigate={(path) => {
@@ -14292,6 +14308,38 @@ export function ProjectWorkspace() {
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
           excludeFrontMatter={project.importExcludeFrontMatter}
+          sourceDisabledReason={sourceImportDenialReason}
+          translation={{
+            // AQU-1365: "A translation" — fills a file's target lane from an
+            // upload, through the same review the three-dot entry used to open.
+            // The cell store holds only the open file, so the dialog opens the
+            // destination itself (as a tab, like the file list does) and waits
+            // for its lines.
+            files: translationImportFiles,
+            activeFileId: activeFileId ?? null,
+            activeFileCells: fileTargetCells,
+            activeFileLoading: cellsLoading,
+            activeFileRefreshing: cellsRefreshing,
+            activeFileFailed: cellsError,
+            openFile: workspaceTabs.openFile,
+            retryActiveFile: retryCells,
+            applyOptimisticTargetEdits,
+            disabledReason: canImportTranslation
+              ? null
+              : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
+            languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
+            // One entry per lane, so the check can tell a file in this lane's
+            // language (offer the translation import) from one in another
+            // lane's (say so; the import only fills the open lane). The
+            // language comes from the lane's row, never its tag (AQU-1586).
+            targetLanguages: laneTargetLanguages(availableLanes, activeLane, project.targetLanguage, laneLabels, laneRows),
+            // AQU-1631: picking a language here moves the editor's lane too —
+            // the open file's lines then carry that lane's current
+            // translations and AD-2 event heads, and the import must commit
+            // against those, into that lane (the dialog's targetLang follows).
+            laneOptions: fileImportLaneOptions,
+            onLaneChange: setActiveLane,
+          }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs
             // AQU-1525's link action. Server floor is project_lead(500); a
@@ -14311,29 +14359,6 @@ export function ProjectWorkspace() {
             return outcome.kind === "ok"
           }} />
       </Suspense>
-      {activeFileId && (
-        <Suspense fallback={null}>
-          <FileTargetImportDialog
-            open={fileImportOpen}
-            onOpenChange={setFileImportOpen}
-            projectId={project.id}
-            username={currentUsername}
-            targetLang={activeLane}
-            // AQU-1631: picking a language here moves the editor's lane too —
-            // the cells below carry that lane's current translations and AD-2
-            // event heads, and the import must commit against those.
-            laneOptions={fileImportLaneOptions}
-            onTargetLangChange={setActiveLane}
-            laneCellsLoading={cellsLoading}
-            fileName={activeFile?.name ?? "this file"}
-            cells={fileTargetCells}
-            getToken={getTokenForFile}
-            applyOptimisticTargetEdits={applyOptimisticTargetEdits}
-            excludeFrontMatter={project.importExcludeFrontMatter}
-            onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
-          />
-        </Suspense>
-      )}
       {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog

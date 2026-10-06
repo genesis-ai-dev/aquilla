@@ -1,4 +1,4 @@
--- Migration 0130 (AQU-1493): where each line with no verse reference counts on
+-- Migration 0145 (AQU-1493): where each line with no verse reference counts on
 -- the plan, as last projected.
 --
 -- A line nobody gave a reference (one added in the editor, or a heading an

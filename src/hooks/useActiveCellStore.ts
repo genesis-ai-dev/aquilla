@@ -2674,6 +2674,9 @@ export interface UseActiveCellStoreResult {
   ) => void
   loadProgress: { loaded: number; total: number | null } | null
   isLoading: boolean
+  /** True while rows painted from the device cache are being brought up to
+   *  date (the `?since=` delta or a full stream after the paint). */
+  isRefreshing: boolean
   isError: boolean
 }
 
@@ -2701,6 +2704,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [store])
   const [loadProgress, setLoadProgress] = useState<UseActiveCellStoreResult["loadProgress"]>(null)
   const [isLoading, setIsLoading] = useState(false)
+  // True from a cache paint until the fetch that brings it up to date ends.
+  // `isLoading` stays false through it, since the editor is already usable.
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -2767,6 +2773,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       store.reset(pid, fid)
       setLoadProgress(null)
       setIsLoading(false)
+      setIsRefreshing(false)
       setIsError(false)
       return
     }
@@ -2812,6 +2819,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         fetchRetryAttemptsRef.current = 0
         setIsError(false)
         setIsLoading(false)
+        setIsRefreshing(false)
       } finally {
         if (generationRef.current === gen) inFlightRef.current = false
       }
@@ -2831,6 +2839,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (attempt >= 6) {
         setIsError(true)
         setIsLoading(false)
+        setIsRefreshing(false)
         return
       }
       const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
@@ -2854,11 +2863,15 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
         store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
+        // AQU-1365 review: the paint is a whole file but maybe a stale one;
+        // a reader that must not act on stale rows waits for this to clear.
+        setIsRefreshing(true)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
         store.setProjectEpoch(null)
         setIsLoading(true)
+        setIsRefreshing(false)
       }
     }
 
@@ -2895,6 +2908,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           }
           fetchRetryAttemptsRef.current = 0
           setIsLoading(false)
+          setIsRefreshing(false)
           return
         }
       }
@@ -2997,11 +3011,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       persistCellsCache(pid, fid, watermark ?? undefined, watermarkEpoch ?? undefined)
       fetchRetryAttemptsRef.current = 0
       setIsLoading(false)
+      setIsRefreshing(false)
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useActiveCellStore] fetch failed:", err)
       setIsError(true)
       setIsLoading(false)
+      setIsRefreshing(false)
       // Bounded retry chain (3 attempts, 2s/5s/10s). Previously a failed
       // delta/full fetch left the page on the cache paint with no retry. The
       // timer is fenced by generation and cleared by any newer doFetch, and
@@ -3283,7 +3299,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, loadProgress, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, loadProgress, isLoading, isRefreshing, isError }
 }
 
 /**

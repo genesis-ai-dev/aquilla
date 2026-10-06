@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
     // AQU-1493: `--unreferenced-lines` re-runs Scripture files whose stored
-    // line placements (`cell_plan_keys`, migration 0130) are not what the
+    // line placements (`cell_plan_keys`, migration 0145) are not what the
     // projection would place now. A line with no reference used to count in
     // the file and in no chapter or book; an added line now counts in the
     // chapter of the line above it (front matter at the top of the file), a
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     // afterwards none: safe to re-run. Combines with --missing-books (the dev
     // stack passes both at boot). It starts with WITH, hence the parentheses
     // in the UNION below.
-    // Production: apply migration 0130, deploy, then
+    // Production: apply migration 0145, deploy, then
     // `pnpm neon:backfill:progress:prod --unreferenced-lines` once (`:dev` for
     // the preview database).
     const unreferencedLines = process.argv.includes('--unreferenced-lines')

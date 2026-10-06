@@ -188,6 +188,12 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1679: files of THIS project that stand in for upstream files
+    -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
+    -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
+    -- mirror writes those upstream files' source onto the named files instead
+    -- of adding copies; `pending` are the ones whose lines are not matched yet.
+    source_link_adopt    TEXT,
     -- AQU-507: designated Project Manager (attribution, distinct from the
     -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
     -- so removing a user never orphans the row. (migration 0072)
@@ -599,6 +605,13 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-1679: the upstream cell this source row stands in for, when that is
+    -- not the row's own cell_id (migration 0140). Set by source.cell.mirror on
+    -- a file the project already had and chose to follow the link into
+    -- (projects.source_link_adopt) — the row keeps its own cell_id, so its
+    -- translations stay attached, and the mirror finds it through this. NULL
+    -- everywhere else, including ordinary mirrored rows.
+    upstream_cell_id  TEXT,
     -- AQU-538: target-language lane (migration 0054). '' = the file's single
     -- configured target language (every pre-lane row, and the default lane for
     -- projects that never add a second language — N=1 back-compat). Source-side
@@ -644,6 +657,16 @@ CREATE INDEX IF NOT EXISTS idx_cells_hidden
 CREATE INDEX IF NOT EXISTS idx_cells_tombstoned
   ON cells(project_id, file_id)
   WHERE tombstoned_at IS NOT NULL;
+
+-- Target cells still carrying an untouched machine draft (migration 0137).
+-- The org dashboard counts them per lane for callers behind the read wall
+-- (aiDraftedByLane in auth-worker/src/services/org-permissions.ts), and
+-- without this that count read every target cell of every project on the
+-- page. Few rows carry the flag at a time, so the index stays small. The
+-- predicate is spelled out literally in that query and must match it.
+CREATE INDEX IF NOT EXISTS idx_cells_ai_drafted
+  ON cells(project_id, file_id)
+  WHERE side = 'target' AND ai_drafted = 1;
 
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,
@@ -708,7 +731,7 @@ CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(pr
 CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
 -- AQU-1493: where each line with no verse reference counts on the plan, as last
--- projected (0130). Written ONLY by the full progress recompute's first
+-- projected (0145). Written ONLY by the full progress recompute's first
 -- statement (db/shared/plan-keys.ts `planKeysRefreshSql`), which every path
 -- that moves lines or changes a reference or type already runs; read by the
 -- incremental recompute, the chapter card, "Go to first ...", assignments.

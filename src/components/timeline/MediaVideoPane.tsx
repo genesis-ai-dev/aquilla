@@ -143,6 +143,10 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
+  /** A click on a YouTube picture: play or pause through Aquilla's transport,
+   *  exactly as Space and the playback bar's button do (the workspace hands
+   *  its timeline toggle). Absent means the picture takes no clicks of ours. */
+  onPictureClick?: () => void
   /** AQU-1119: collapse the video section to a rail. Absent means no button. */
   onCollapse?: () => void
   /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
@@ -167,6 +171,7 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
+  onPictureClick,
   onCollapse,
   onToggleFullscreen,
   isFullscreen,
@@ -1230,6 +1235,28 @@ export function MediaVideoPane({
           onPause={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
           onEnded={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
         />
+        {/* Sam, Oct 5: clicking YouTube's own play button (or anywhere on its
+             picture) started only the picture. With the uploaded recording
+             chosen, that picture is silent and follows the queue, so nothing
+             was heard and the playback bar did not know it was playing. A
+             clear layer now takes every click on a YouTube picture and hands
+             it to Aquilla's transport, the same toggle as Space and the bar's
+             button, so the chosen sound always plays. Sam accepted the cost:
+             YouTube's in-picture links (title, "Watch on YouTube") can no
+             longer be clicked. It is a pointer convenience only, so it is
+             hidden from assistive tech: the playback bar is the control.
+             Below the caption (which takes no pointer anyway), the
+             click-to-start overlay and the corner menus. A side effect worth
+             having: the picture now reports hover, so the corner controls
+             appear over it, not only over the black bars. */}
+        {youTube && onPictureClick && (
+          <div
+            aria-hidden
+            data-testid="video-pane-youtube-click-layer"
+            className="absolute inset-0 z-[5] cursor-pointer"
+            onClick={onPictureClick}
+          />
+        )}
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can
              never drift into a bar as the pane is resized. */}

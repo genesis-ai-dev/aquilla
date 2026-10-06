@@ -13706,6 +13706,9 @@ export function ProjectWorkspace() {
                       onVideoPlaying={setVideoClockPlaying}
                       onVideoDuration={setVideoDurationSec}
                       onChangeVideo={() => setLinkVideoOpen(true)}
+                      // Sam, Oct 5: a click on a YouTube picture is the
+                      // transport's Play/Pause, never YouTube's own.
+                      onPictureClick={handleTimelineTogglePlay}
                       sourceDirectionMode={fileMeta.sourceDirectionMode}
                       targetDirectionMode={fileMeta.targetDirectionMode}
                       sourceTextDirection={fileMeta.sourceTextDirection}

@@ -1061,6 +1061,26 @@ describe("a YouTube link", () => {
     expect(media.config?.referrerpolicy).toBe("strict-origin-when-cross-origin")
   })
 
+  // Sam, Oct 5: YouTube's own play button started only a silent picture when
+  // the uploaded recording was chosen. Clicks on the picture go to Aquilla's
+  // transport instead.
+  it("hands a click on the YouTube picture to Aquilla's transport", () => {
+    const onPictureClick = vi.fn()
+    renderPane({ src: YT, onPictureClick })
+    const layer = screen.getByTestId("video-pane-youtube-click-layer")
+    expect(layer).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(layer)
+    expect(onPictureClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("lays nothing over a plain video, or when no transport is handed in", () => {
+    const { unmount } = renderPane({ onPictureClick: vi.fn() })
+    expect(screen.queryByTestId("video-pane-youtube-click-layer")).toBeNull()
+    unmount()
+    renderPane({ src: YT })
+    expect(screen.queryByTestId("video-pane-youtube-click-layer")).toBeNull()
+  })
+
   it("still hears the element's media events", () => {
     const onVideoDuration = vi.fn()
     renderPane({ src: YT, onVideoDuration })

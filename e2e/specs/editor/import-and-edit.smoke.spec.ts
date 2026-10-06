@@ -52,7 +52,8 @@ test("YouTube picture imports without captions; its first captions become its ro
   await expect(alice.locator("[data-cell-id]")).toHaveCount(2)
   const promoted = await readSeededFileEvents(jwt, projectId, fileId)
   // The file became a subtitle file through a re-genesis that kept its video.
-  expect(promoted.filter(event => event.kind === "file.create").at(-1)?.payload)
+  // GET /events lists newest first, so the re-genesis is the FIRST file.create.
+  expect(promoted.find(event => event.kind === "file.create")?.payload)
     .toMatchObject({ fileType: "srt", kind: "srt",
       projectionMeta: expect.objectContaining({ coreMediaUrl: url }) })
   expect(promoted.filter(event => event.kind === "source.cell.create")).toHaveLength(2)

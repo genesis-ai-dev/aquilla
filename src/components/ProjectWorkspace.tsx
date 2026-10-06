@@ -322,6 +322,8 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
+import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
+import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -7025,6 +7027,10 @@ export function ProjectWorkspace() {
   const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
     projectId ? readVerseResourcesOpen(projectId) : false,
   )
+  // AQU-1689: the Who's Who panel (Bible data), same tracked ref, its own open state.
+  const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
+    projectId ? readWhosWhoOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -12568,6 +12574,9 @@ export function ProjectWorkspace() {
           bibleDataVoicesEnabled={
             !!project && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
           }
+          bibleDataWhosWhoEnabled={
+            !!project && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+          }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
           onHealthCalculationsChange={setHealthCalculationsEnabled}
@@ -12614,8 +12623,13 @@ export function ProjectWorkspace() {
         project.bibleResourcesEnabled,
         projectHasScriptureFiles(project.files),
       ),
+    // AQU-1689: Who's Who rides the same editor condition plus its own
+    // enrichment, which is off whenever Bible data is.
+    whosWhoAvailable:
+      !!project && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
     parallelBiblesOpen,
     verseResourcesOpen,
+    whosWhoOpen,
   })
 
   return (
@@ -13867,6 +13881,22 @@ export function ProjectWorkspace() {
                   }}
                 />
               )}
+              {/* AQU-1689: Who's Who, the passage's cast — open panel only;
+                  its "People" edge tab rides in asideEdge. */}
+              {rightRail.peoplePanel && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeFile?.sourceLanguage || project?.sourceLanguage}
+                  open
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
+                  }}
+                />
+              )}
               {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                   and a translation cell with a matching canonicalRef is focused. */}
               {tnSidebarVisible && (
@@ -14019,8 +14049,8 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          // AQU-461: two collapsed tabs can stack here — bibles and verse
-          // resources — each shown only while its own panel is closed.
+          // AQU-461: collapsed tabs stack here — bibles, verse resources and
+          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
           // AQU-1316: both flags come from `rightRail`, the same value `aside`
           // reads, so a tab can never sit beside its own open panel.
           if (!hasRightRailEdge(rightRail)) return null
@@ -14049,6 +14079,20 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {rightRail.peopleEdge && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeFile?.sourceLanguage || project?.sourceLanguage}
+                  open={false}
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}

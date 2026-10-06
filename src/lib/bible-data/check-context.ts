@@ -7,6 +7,7 @@
 import type { CellCheckContext } from "@/lib/rules/rule-engine"
 import { projectHasScriptureFiles, type FileReference, type ProjectRecord } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
+import { isBibleDataExperimentOn } from "./experiment"
 import { readLanguageProfile, type LanguageProfile } from "../../../db/shared/language-profile"
 import { compileFileExpectations, type CellRefsInput } from "../../../db/shared/bible-checks/compile"
 import { isBibleCheckDormant } from "../../../db/shared/bible-checks/evaluate"
@@ -19,7 +20,8 @@ import {
 
 /**
  * Whether a project's Bible data checks can run:
- *   off     — Bible data, or its Bible data checks enrichment, is off;
+ *   off     — the Bible data experiment is off on this device, or Bible data,
+ *             or its Bible data checks enrichment, is off;
  *   dormant — on, but every check waits for an empty Language-profile slot;
  *   on      — at least one check can run with this profile.
  */
@@ -29,13 +31,24 @@ export type BibleChecksGate =
   | { state: "on"; profile: LanguageProfile }
 
 /** What the gate reads from a project. A ProjectRecord fits. */
-export type BibleChecksProject = Pick<ProjectRecord, "bibleResourcesEnabled" | "bibleEnrichments" | "languageProfile"> & {
+export type BibleChecksProject = Pick<
+  ProjectRecord,
+  "bibleResourcesEnabled" | "bibleEnrichments" | "languageProfile" | "experimentalFlags"
+> & {
   files?: Pick<FileReference, "type" | "hasScriptureContent">[]
 }
 
-/** Is the project's Bible data checks enrichment on? (It needs Bible data on too.) */
+/**
+ * Is the project's Bible data checks enrichment on? (It needs Bible data on
+ * too.) AQU-1685: and only on a device with the Bible data experiment on, so
+ * with the experiment off no Bible data check is listed, run or counted.
+ */
 export function bibleChecksEnabled(project: BibleChecksProject | null | undefined): boolean {
-  return !!project && resolveBibleEnrichment(project, "checks", projectHasScriptureFiles(project.files))
+  return (
+    !!project &&
+    isBibleDataExperimentOn(project) &&
+    resolveBibleEnrichment(project, "checks", projectHasScriptureFiles(project.files))
+  )
 }
 
 /** The gate from the enrichment switch and the stored `languageProfile` value. */

@@ -3282,7 +3282,6 @@ export const my: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "ထိန်းသိမ်းသူများသာ ပစ်မှတ်ရက်ကို သတ်မှတ်နိုင်သည်။",
   "org.projectOverview.plan.completion": "ပြီးစီးမှု",
   "org.projectOverview.plan.markDone": "ပြီးစီးမှတ်ရန်",
-  "org.projectOverview.plan.markDoneHint": "ပြန်ဖျက်နိုင်။",
   "org.projectOverview.plan.markDoneAnyway": "မည်သို့ပင်ဖြစ်စေ မှတ်ရန်",
   "org.projectOverview.plan.unmarkDone": "မှတ်ချက်ဖြုတ်",
   "org.projectOverview.plan.notMarkedDone": "ပြီးစီးအဖြစ် မမှတ်ရသေး။",

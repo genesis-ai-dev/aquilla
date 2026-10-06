@@ -4,7 +4,7 @@ export const paidOffers = ['pro', 'max_5x', 'max_20x', 'team', 'team_20x'] as co
 
 
 export function presentBillingOffers(
-  catalog: PriceCatalog, prices: readonly StripePriceInput[],
+  catalog: PriceCatalog, prices: readonly StripePriceInput[], freeAllowance = 25,
 ): BillingOffers {
   const offers: BillingOffer[] = []
   for (const offer of paidOffers) {
@@ -12,7 +12,8 @@ export function presentBillingOffers(
       const quote = quoteOffer(catalog, prices, offer, interval)
       offers.push({
         offer, label: billingOfferLabels[offer], scope: offer.startsWith('team') ? 'team' : 'personal',
-        capacityLabel: offer === 'pro' ? '2× Free' : offer.endsWith('20x') ? '20× Pro' : '5× Pro',
+        capacityLabel: offer === 'pro' ? (freeAllowance > 0
+          ? `${Number((50 / freeAllowance).toFixed(2))}× Free` : 'Individual AI') : offer.endsWith('20x') ? '20× Pro' : '5× Pro',
         interval, currency: quote.currency, totalAmount: quote.totalAmount,
         monthlyEquivalent: quote.monthlyEquivalent,
       })

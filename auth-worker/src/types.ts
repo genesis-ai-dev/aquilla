@@ -182,6 +182,12 @@ export interface Env {
    *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
    *  code cannot settle unanswered. Unset = on. */
   JEV_BIBLE_QA?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -315,6 +321,10 @@ export interface Env {
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Live new-plan sales switch; turning it off preserves paid webhooks/portal. */
+  BILLING_WORKSPACE_CHECKOUT_ENABLED?: string
+  /** Production API and app host allowlist. Live keys never run locally. */
+  BILLING_LIVE_HOSTS?: string
   /** Comma-separated API and app hosts allowed to run sandbox billing when
    *  ENVIRONMENT=development (e.g. api.dev.aquilla.app,dev.aquilla.app). */
   BILLING_SANDBOX_HOSTS?: string

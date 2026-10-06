@@ -351,7 +351,12 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books"],
+    // AQU-1493: --unreferenced-lines catches Scripture files whose stored line
+    // placements (cell_plan_keys) predate where lines with no reference count
+    // now (added lines with the line above, headings with the verse below). It
+    // walks only files holding such a line, and selects nothing once the
+    // stored rows agree, so later boots pay a read and no rewrite.
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books", "--unreferenced-lines"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },

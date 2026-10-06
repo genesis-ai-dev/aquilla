@@ -62,6 +62,9 @@ vi.mock("@/lib/store/project-index", () => ({
   patchProject: vi.fn(async () => true),
   updateProject: vi.fn(async () => undefined),
 }))
+// The device-local Bible data experiment (AQU-1685) reads the project index
+// mocked above; these tests are about the panel's copy, with the experiment off.
+vi.mock("@/hooks/useBibleDataExperiment", () => ({ useBibleDataExperiment: () => false }))
 
 const overview: ContextualOverview = {
   available: true,

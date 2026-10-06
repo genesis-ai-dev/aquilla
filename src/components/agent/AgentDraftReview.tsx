@@ -27,6 +27,7 @@ import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { getOutboxRecords } from "@/lib/sync/outbox"
 import { DraftFindingChips } from "./DraftFindingChips"
 import { DraftReviewOverview } from "./DraftReviewOverview"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 import {
   acceptDraftReview,
   DraftReviewError,
@@ -59,6 +60,8 @@ export function AgentDraftReview(props: AgentDraftReviewProps) {
 
 function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, initialCellId }: AgentDraftReviewProps) {
   const t = useT()
+  // AQU-1685: Bible data findings are named only with the experiment on here.
+  const bibleData = useBibleDataExperiment(projectId)
   const lane = run.targetLang ?? ""
   const drafts = useContextualDrafts()
   const summary = useContextualDraftsSummary()
@@ -349,6 +352,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
           }))}
           selectedCellId={selectedId}
           disabled={busy}
+          bibleData={bibleData}
           onSelect={(cellId) => { setWriteError(null); setCursor(cellId) }}
         />
       ) : null}
@@ -398,7 +402,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
                   {reviewByDraft.get(selected.draftId)?.findings.length ? (
                     <div className="flex flex-col gap-1.5 rounded-md border border-border/60 p-2" data-testid="draft-review-comments">
                       <p className="text-xs font-medium">{t("agentDraftReview.comments")}</p>
-                      <DraftFindingChips review={reviewByDraft.get(selected.draftId)} evidence />
+                      <DraftFindingChips review={reviewByDraft.get(selected.draftId)} evidence bibleData={bibleData} />
                     </div>
                   ) : null}
                   <ContextualDraftCard

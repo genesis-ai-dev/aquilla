@@ -5,7 +5,8 @@
  *
  * AQU-1690: a Bible data finding (`bkp:`) names its check, and with
  * `evidence` the chips are followed by what it means and where the fact comes
- * from — the editor's own Bible data check messages.
+ * from — the editor's own Bible data check messages. Only with `bibleData`
+ * (AQU-1685).
  */
 
 import { Badge } from "@/components/ui/badge"
@@ -49,9 +50,22 @@ function BibleEvidence({ findings }: { findings: DraftFinding[] }) {
   )
 }
 
-export function DraftFindingChips({ review, evidence = false }: { review: DraftFindings | undefined; evidence?: boolean }) {
+export function DraftFindingChips({
+  review,
+  evidence = false,
+  bibleData = false,
+}: {
+  review: DraftFindings | undefined
+  evidence?: boolean
+  /** AQU-1685: this device has the Bible data experiment on (useBibleDataExperiment). */
+  bibleData?: boolean
+}) {
   const t = useT()
   if (!review || review.findings.length === 0) return null
+  // AQU-1685: a Bible data finding is named, with its evidence, only with the
+  // experiment on. Without it the draft keeps the triage the server gave it
+  // (so counts and "Approve clean" do not change), just not the Bible reason.
+  const shown = bibleData ? review.findings : review.findings.filter((finding) => finding.kind !== "bkp")
   const chips = (
     <span className="flex flex-wrap items-center gap-1" data-testid="draft-finding-chips">
       {review.triage && (
@@ -59,7 +73,7 @@ export function DraftFindingChips({ review, evidence = false }: { review: DraftF
           {t(review.triage === "human" ? "agent.finding.needsYou" : "agent.finding.advisory")}
         </Badge>
       )}
-      {review.findings.map((finding) => (
+      {shown.map((finding) => (
         <Badge key={finding.code} variant="secondary">{findingLabel(finding, t)}</Badge>
       ))}
     </span>
@@ -68,7 +82,7 @@ export function DraftFindingChips({ review, evidence = false }: { review: DraftF
   return (
     <span className="flex flex-col gap-1">
       {chips}
-      <BibleEvidence findings={review.findings} />
+      <BibleEvidence findings={shown} />
     </span>
   )
 }

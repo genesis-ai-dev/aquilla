@@ -75,6 +75,43 @@ describe("AutopilotProcessGraph", () => {
     expect(screen.getByRole("button", { name: "Not too specific" })).toBeInTheDocument()
   })
 
+  // AQU-1685: the Bible data steps belong to the Bible data experiment. A
+  // device without it draws the graph from before them; one with it, both steps.
+  it("draws the Bible facts and Bible checks steps only with the Bible data experiment on", () => {
+    render(<AutopilotProcessGraph run={run} activity={activity} />)
+    expect(screen.queryByRole("button", { name: "Bible facts" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Bible checks" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Situation" })).toBeInTheDocument()
+    cleanup()
+    render(<AutopilotProcessGraph run={run} activity={activity} bibleData />)
+    expect(screen.getByRole("button", { name: "Bible facts" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Bible checks" })).toBeInTheDocument()
+  })
+
+  // AQU-1685: a span outcome's "bible_data_*" reasons say the Bible data pack
+  // did not load. Like the rest of Bible data they show only with the experiment.
+  it("lists a span's Bible data reasons in inspect only with the Bible data experiment on", () => {
+    const outcome = {
+      ...activity.events[0],
+      id: "e3",
+      kind: "span_outcome",
+      status: "partial",
+      details: { reasons: ["target_already_filled", "bible_data_offline"] },
+      createdAt: "2026-08-16T10:01:30.000Z",
+    } as ContextualRunActivity["events"][number]
+    const withOutcome = { ...activity, events: [...activity.events, outcome] }
+    render(<AutopilotProcessGraph run={run} activity={withOutcome} />)
+    fireEvent.click(screen.getByRole("button", { name: "Situation" }))
+    let inspect = screen.getByTestId("autopilot-process-graph-inspect")
+    expect(inspect).toHaveTextContent("target_already_filled")
+    expect(inspect).not.toHaveTextContent("bible_data_offline")
+    cleanup()
+    render(<AutopilotProcessGraph run={run} activity={withOutcome} bibleData />)
+    fireEvent.click(screen.getByRole("button", { name: "Situation" }))
+    inspect = screen.getByTestId("autopilot-process-graph-inspect")
+    expect(inspect).toHaveTextContent("target_already_filled · bible_data_offline")
+  })
+
   it("opens structured inspect without replacing the graph", () => {
     render(<AutopilotProcessGraph run={run} activity={activity} />)
     fireEvent.click(screen.getByRole("button", { name: "Situation" }))

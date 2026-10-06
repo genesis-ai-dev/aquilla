@@ -148,6 +148,9 @@ export const READABLE_TABLES: Record<string, string> = {
   cell_word_morph: "SELECT * FROM cell_word_morph WHERE project_id = :project",
   assignments: "SELECT * FROM assignments WHERE project_id = :project",
   project_settings: "SELECT * FROM project_settings WHERE project_id = :project",
+  // The termbase since 2026-09-04 (the projection of term.* events); the
+  // `terminology` settings key it replaced is deleted on migration.
+  concepts: "SELECT * FROM concepts WHERE project_id = :project",
   project_members: "SELECT * FROM project_members WHERE project_id = :project",
   // The one readable table with no project_id column of its own (PK is
   // (assignment_id, file_id, cell_id)); scoped through the assignment that
@@ -490,7 +493,7 @@ export function guardSql(
   // touches no project data and is the L3 escape hatch ("the agent is never
   // stuck"). Any project table name in the query re-imposes the requirement.
   const PROJECT_TABLES =
-    /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|project_settings|project_members|users|agent_runs|chain_claims|project_seq_counters|scene_briefs|contextual_runs|contextual_steering|contextual_drafts|contextual_run_events|contextual_project_leases)\b/i
+    /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|project_settings|concepts|project_members|users|agent_runs|chain_claims|project_seq_counters|scene_briefs|contextual_runs|contextual_steering|contextual_drafts|contextual_run_events|contextual_project_leases)\b/i
   const catalogOnly = /\binformation_schema\s*\./i.test(masked) && !PROJECT_TABLES.test(masked)
   // Require :project in an actual equality against a project_id column, not
   // merely present anywhere in the text — `WHERE project_id <> :project` (or

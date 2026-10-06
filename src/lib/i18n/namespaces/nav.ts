@@ -344,6 +344,8 @@ export const nav = defineNamespace({
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
     "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
+    "nav.fileList.regroupHint": "Drop to move {name} into {group}.",
+    "nav.fileList.regroupStaysInGroup": "{name} is filed under {group} by its book code, so it cannot be moved out of it this way. Rename the group, or give the file a group of its own.",
     "nav.fileList.resetOrder": "Reset the order of {group}",
     "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
     "nav.fileList.resetOrderDescription": "The files in this group go back to the order Aquilla picks for them. Everyone on the project sees the change. Nothing else about the files is touched.",
@@ -1427,9 +1429,32 @@ export const nav = defineNamespace({
       "nav.fileList.reorderWrongGroup": {
         description:
           "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
-          "group than its own, which is refused (AQU-1569). \u201cMove to corpus\u2026\u201d " +
-          "names the separate menu action that does change a file's group \u2014 keep it " +
-          "worded identically to fileDetails.moveToCorpus in this locale.",
+          "group than its own on a surface that cannot move it there (AQU-1569; since " +
+          "AQU-1702 the editor sidebar CAN, so this is the fallback for a file list " +
+          "wired without the move handler). \u201cMove to corpus\u2026\u201d names the " +
+          "separate menu action that does change a file's group \u2014 keep it worded " +
+          "identically to fileDetails.moveToCorpus in this locale.",
+      },
+      "nav.fileList.regroupHint": {
+        description:
+          "Live-region message while a file is held over a DIFFERENT corpus group that " +
+          "will accept it (AQU-1702). Releasing moves the file into that group at the " +
+          "marked slot. {name} is the dragged file, {group} the group under the pointer.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group under the pointer, as its header reads.",
+        },
+      },
+      "nav.fileList.regroupStaysInGroup": {
+        description:
+          "Live-region message refusing a cross-group drop that could not be written " +
+          "(AQU-1702): the file is a Bible book, so with no group of its own Aquilla " +
+          "files it under its testament \u2014 dropping it on Ungrouped would appear to " +
+          "do nothing. {name} is the dragged file, {group} the group it stays in.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group the file is filed under regardless (its testament).",
+        },
       },
       "nav.fileList.resetOrder": {
         description:

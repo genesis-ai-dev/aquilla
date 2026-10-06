@@ -418,6 +418,15 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",

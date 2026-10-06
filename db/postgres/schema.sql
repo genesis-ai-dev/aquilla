@@ -2345,7 +2345,7 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
     FROM group_members gm
    WHERE gm.role_level IS NOT NULL;
 
--- Migration 0134 (AQU-1656): AI intervention audit trail. One row per cell per
+-- Migration 0146 (AQU-1656): AI intervention audit trail. One row per cell per
 -- model call; the prompt + raw output live in R2 at `trace_key`. `id` is also
 -- written into the committed draft's `ai_draft.interventionId`.
 CREATE TABLE IF NOT EXISTS ai_interventions (

@@ -377,17 +377,31 @@ export async function isRegisteredTargetLane(
   }
 }
 
-/** Concepts from termbases this project subscribes to, in priority order.
- *  An org that publishes one shared termbase expects it to bind everywhere. */
+/** Concepts from termbases this project subscribes to, in the order the
+ *  subscriptions list shows (priority, then age).
+ *  An org that publishes one shared termbase expects it to bind everywhere.
+ *
+ *  A subscription counts only while its termbase is published, not archived,
+ *  and in the subscriber's org. That is the rule `canReadTermbase` applies to
+ *  the editor's read (route #8), so the editor and autopilot apply the same
+ *  termbases (AQU-1721). Deleting a project cascades to none of the
+ *  subscription, settings or concept rows, so the join on `projects` is what
+ *  drops a deleted termbase. */
 async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
   try {
     const { results } = await db
       .prepare(
         `SELECT ps.settings
            FROM project_termbase_subscriptions s
+           JOIN projects sub ON sub.id = s.project_id
+           JOIN projects tb ON tb.id = s.termbase_project_id
            JOIN project_settings ps ON ps.project_id = s.termbase_project_id
           WHERE s.project_id = ?
-          ORDER BY s.priority ASC`,
+            AND s.termbase_project_id <> s.project_id
+            AND tb.org_published_termbase = TRUE
+            AND tb.archived_at IS NULL
+            AND tb.org_id = sub.org_id
+          ORDER BY s.priority ASC, s.created_at ASC`,
       )
       .bind(projectId)
       .all<{ settings: unknown }>()

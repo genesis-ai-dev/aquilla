@@ -1,6 +1,81 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-17. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-10-04. Tickets: AQU-1491 (workspace launch), AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+
+## Workspace checkout launch (AQU-1491) — 2026-10-04
+
+The app now opens Stripe from the server-reviewed workspace plan. Production
+sales remain off until an operator enables them. The sandbox-only rehearsal
+routes remain available; the app uses `/billing/workspace/checkout` and
+`/billing/workspace/portal` under `/api/v2/orgs/:orgId`.
+
+### Verified sandbox evidence
+
+A disposable local team completes hosted Checkout with Stripe's 4242 test card.
+Stripe delivers the signed checkout event and Aquilla displays Team, its paid
+period, measured usage, and Manage billing. The hosted portal shows the paid
+invoice and upgrades Team to Team 20× ($720/month). Stripe charges the prorated
+$119.99 test amount immediately. Aquilla changes capacity without moving the
+weekly usage anchor. Portal cancellation retains paid access through November 4,
+2026 and preserves that usage anchor. Early and concurrent invoice deliveries return a retryable
+500; replaying the actual Stripe events after activation/revision returns 200.
+The production webhook endpoint must retain Stripe's automatic retry delivery.
+
+Worker integration tests exercise production-shaped hosts, live-mode payloads,
+paid activation, cancellation, portal access after sales stop, mode mismatches,
+Free policy edits, org grants, and preserved spent/reserved usage. Browser smoke
+covers admin grant → Postgres → organization billing, reload, workspace scope,
+paid display, and unavailable prices. No production payment occurs in this work.
+
+### Minimum operator launch sequence
+
+1. Apply pending Postgres migrations, including
+   `0148_weekly_allowance_overrides.sql` and `0149_live_workspace_checkout.sql`,
+   before deploying this code. Historical attempts keep their sandbox identity.
+2. Load a **live** Stripe secret into your local environment and set
+   `STRIPE_ACCOUNT_ID` to the intended live account. Prepare its native catalog:
+
+   ```sh
+   pnpm exec tsx scripts/stripe-workspace-launch.ts --live
+   # If objects are missing, review the account and run the explicit write:
+   pnpm exec tsx scripts/stripe-workspace-launch.ts --live --apply
+   ```
+
+   Preparation validates the account, ten recurring prices, and two
+   scope-specific portal configurations. It creates missing catalog objects
+   only with `--apply`. Reruns reuse the same products, lookup keys, and portal
+   markers. It never edits existing prices, subscriptions, or enables sales.
+   Its JSON output contains public object identifiers, never the secret key.
+3. Install production worker secrets: `STRIPE_SECRET_KEY`,
+   `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_CATALOG` (the command's `catalog` JSON),
+   `STRIPE_PORTAL_PERSONAL_CONFIGURATION` and
+   `STRIPE_PORTAL_TEAM_CONFIGURATION` (the corresponding configuration IDs).
+   Register `https://api.aquilla.app/identity/billing/webhook` for the six
+   event types listed in the sandbox section. Use the signing secret for this
+   exact endpoint. Follow the guarded production deployment process.
+4. In **Admin → Platform → Billing**, set the Free weekly allowance and weekly
+   grants for existing enterprise organizations. Search an owner's username
+   to grant their personal workspace. Blank removes a grant; zero blocks AI
+   admission when enforcement is active. Grants preserve consumption and Stripe
+   state. Old enterprise word/credit grants do not imply weekly capacity.
+   Confirm every legacy/covered/unconfirmed workspace that needs weekly AI has
+   an explicit grant before turning on global enforcement.
+5. Enable `BILLING_WEEKLY_USAGE_ENFORCE=true` for weekly admission after the
+   provider price card and reconciliation sweep are ready. The admin view shows
+   whether enforcement is enabled. Until then, legacy guards still apply.
+6. Enable `BILLING_WORKSPACE_CHECKOUT_ENABLED=true` in the production profile
+   and deploy. `BILLING_LIVE_HOSTS` already lists `api.aquilla.app,aquilla.app`.
+   Live mode also requires production environment, HTTPS, a live key, and
+   allowlisted request/return hosts, and active weekly enforcement. Development
+   cannot process a live checkout.
+7. Make one live purchase in a disposable workspace, confirm its paid plan and
+   invoice, then cancel/refund that deliberate verification payment in Stripe.
+   This is the remaining human payment check; sandbox coverage is already run.
+
+Turning the sales switch off stops new checkout creation. It keeps existing
+subscription webhooks, portal management, and checkout reconciliation working.
+An abandoned session can be explicitly expired from the plan review. A completed
+payment remains pending until its signed webhook resolves it.
 
 ## Deployed sandbox on dev — 2026-09-17
 

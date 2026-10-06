@@ -116,7 +116,7 @@ describe("isBibleResourcesEnabled — AQU-460 derive-on-read matrix", () => {
     expect(await isBibleResourcesEnabled(env, p)).toBe(false)
   })
 
-  // Moving the read to a generated column (0141) must not change what counts
+  // Moving the read to a generated column (0150) must not change what counts
   // as an explicit choice: the gate always read the `->>` text, so a stored
   // string "false" is still an explicit OFF that beats the scripture default.
   it("a stored string 'false' is still an explicit OFF", async () => {
@@ -135,7 +135,7 @@ describe("isBibleResourcesEnabled — AQU-460 derive-on-read matrix", () => {
 // AQU-1686: the settings blob runs to several MB, and the project_settings
 // schema comment forbids parsing it inline on a read path. The gate runs on
 // every aquifer route and agent run, so it must answer from the generated
-// column (migration 0141) — while keeping the derive-on-read matrix above.
+// column (migration 0150) — while keeping the derive-on-read matrix above.
 describe("isBibleResourcesEnabled — reads the generated column", () => {
   function recordingEnv(): { env: typeof env; statements: string[] } {
     const statements: string[] = []

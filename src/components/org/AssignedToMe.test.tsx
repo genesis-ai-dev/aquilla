@@ -42,6 +42,11 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   ]),
 }))
 vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
+// AQU-1493: a section assignment reads its chapters' cells on the click.
+vi.mock("@/lib/sync/sync-token", () => ({
+  fetchSyncToken: vi.fn(async () => ({ token: "sync-token", expiresIn: 600 })),
+}))
+vi.mock("@/lib/progress/file-progress-resource", () => ({ getFileSectionProgress: vi.fn() }))
 
 // AQU-1173: record the `loading` the inbox hands the table on EVERY render.
 // The flake was a one-render window, not a lasting state, so it has to be
@@ -83,6 +88,8 @@ vi.mock("@/components/ui/data-table", async (importActual) => {
 
 import { getMyAssignmentsForOrg } from "@/lib/sync/assignments"
 const mockGetMy = vi.mocked(getMyAssignmentsForOrg)
+import { getFileSectionProgress } from "@/lib/progress/file-progress-resource"
+const mockSection = vi.mocked(getFileSectionProgress)
 
 beforeEach(() => {
   localStorage.clear()
@@ -231,6 +238,48 @@ describe("AssignedToMe", () => {
     // URL. The editor reads an absent lane param as "keep the lane last used",
     // which would open this default-lane assignment in the wrong language.
     fireEvent.click(screen.getByText("Mark scope"))
+    expect(navigate).toHaveBeenLastCalledWith("/project/pb/editor/file/f2?lane=")
+  })
+
+  // AQU-1493 (Sam, 2026-10-03): carol is assigned RUT 2, and her row opened
+  // the editor at the top of Ruth. A section assignment now opens on its first
+  // cell still needing work, by the board's own deep link (?cellId=, flashed).
+  it("opens a section assignment on its first cell still to translate", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "Ruth", fileId: "f1", fileName: "BSB", scopeKind: "chapters", scopeLabel: "RUT 2", targetLang: "de", laneId: "lane-de", deadline: null, note: null, cellsTotal: 25, cellsDone: 24, createdAt: 200 },
+    ])
+    mockSection.mockResolvedValue({
+      verses: [
+        { cellId: "h2", ref: "RUT 2:s1:1", filled: true, validated: true, structural: true },
+        { cellId: "x1", ref: "", filled: false, validated: false, unnumbered: true },
+        { cellId: "r21", ref: "RUT 2:1", filled: true, validated: true },
+      ],
+    } as never)
+    renderInbox()
+    await waitFor(() => expect(screen.getByText("RUT 2")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("RUT 2"))
+    await waitFor(() => expect(navigate).toHaveBeenCalled())
+    expect(mockSection).toHaveBeenCalledWith("pa", "f1", "RUT 2", expect.any(Function), "de")
+    expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?cellId=x1&lane=lane-de&flash=1")
+  })
+
+  it("opens a finished section assignment on its first cell, and falls back to the file when nothing reads", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "Ruth", fileId: "f1", fileName: "BSB", scopeKind: "chapters", scopeLabel: "Ruth \u00b7 RUT 3, RUT 2", targetLang: "", deadline: null, note: null, cellsTotal: 2, cellsDone: 2, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Jonah", fileId: "f2", fileName: "JON", scopeKind: "chapters", scopeLabel: "JON 2", targetLang: "", deadline: null, note: null, cellsTotal: 2, cellsDone: 2, createdAt: 100 },
+    ])
+    mockSection.mockImplementation(async (projectId, _fileId, key) => {
+      if (projectId === "pb") throw new Error("HTTP 500")
+      return { verses: [{ cellId: `${key}:1`, ref: `${key}:1`, filled: true, validated: true }] } as never
+    })
+    renderInbox()
+    await waitFor(() => expect(screen.getByText("JON 2")).toBeInTheDocument())
+    // Chapters in reading order, whatever order they were ticked in.
+    fireEvent.click(screen.getByText("Ruth \u00b7 RUT 3, RUT 2"))
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1))
+    expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?cellId=RUT%202%3A1&lane=&flash=1")
+    fireEvent.click(screen.getByText("JON 2"))
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(2))
     expect(navigate).toHaveBeenLastCalledWith("/project/pb/editor/file/f2?lane=")
   })
 

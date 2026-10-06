@@ -3282,7 +3282,6 @@ export const th: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "เฉพาะผู้ดูแลเท่านั้นที่ตั้งวันที่เป้าหมายได้",
   "org.projectOverview.plan.completion": "ความสำเร็จ",
   "org.projectOverview.plan.markDone": "ทำเครื่องหมายเสร็จ",
-  "org.projectOverview.plan.markDoneHint": "เลิกทำได้",
   "org.projectOverview.plan.markDoneAnyway": "ทำเครื่องหมายเสร็จอยู่ดี",
   "org.projectOverview.plan.unmarkDone": "ยกเลิกเครื่องหมาย",
   "org.projectOverview.plan.notMarkedDone": "ยังไม่ทำเครื่องหมายเสร็จ",

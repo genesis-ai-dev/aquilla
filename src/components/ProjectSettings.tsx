@@ -90,6 +90,7 @@ import { isAutopilotVisible } from "@/lib/features/flags"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
+import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -2015,6 +2016,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             canEdit={canEditShared}
             disabledTooltip={sharedDisabledTooltip ?? null}
+            patch={patchShared}
+          />
+        )}
+        {/* AQU-1691: the decision log, the team's answers to Autopilot's questions. */}
+        {sectionsToRender.some((s) => s.id === "section-languages") && (
+          <ProjectDecisionsSection
+            value={sharedSettingsBlob?.projectFacts}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip ?? null}
+            username={session?.username ?? ""}
             patch={patchShared}
           />
         )}

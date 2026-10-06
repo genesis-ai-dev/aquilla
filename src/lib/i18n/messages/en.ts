@@ -46,6 +46,8 @@ import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
 import { bibleData } from "../namespaces/bibleData"
+import { languageProfile } from "../namespaces/languageProfile"
+import { projectDecisions } from "../namespaces/projectDecisions"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -76,6 +78,8 @@ export const en = {
   ...workspace.keys,
   ...segmentation.keys,
   ...bibleData.keys,
+  ...languageProfile.keys,
+  ...projectDecisions.keys,
 } as const
 
 export type MessageKey = keyof typeof en

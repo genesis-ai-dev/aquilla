@@ -911,6 +911,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Bible text (Jesus, the narrator, a crowd). common.voices is the panel of " +
     "synthetic text-to-speech voices. People speaking and machine voices are " +
     "different words in most target languages.",
+  "languageProfile.notSet":
+    "AQU-1691: in the Language profile card it is both the status of a closed " +
+    "row (this fact about the language is not recorded) and the first choice in " +
+    "its yes/no lists (the question is not answered yet). " +
+    "onboarding.preferences.hint.notSet is a hint on a personal Preferences " +
+    "index row, and projectSettings.advancedLlm.notSet a lower-case fragment " +
+    "inside a template. An unanswered question about the target language is " +
+    "worded differently from an unset personal preference in many languages.",
   "bibleData.enrichment.terms.label":
     "AQU-1686: names the enrichment that marks biblical key terms (a term of art " +
     "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +

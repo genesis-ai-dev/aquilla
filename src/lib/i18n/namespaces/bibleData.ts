@@ -10,6 +10,11 @@ import { defineNamespace } from "./types"
  * The hints under the switch stay in `projectSettings.bible.*` either way.
  * Enrichment ids map to these keys through the typed tables in
  * src/lib/bible-data/enrichment-labels.ts.
+ *
+ * AQU-1688 adds `bibleData.check.*` (the Bible data checks: their rows in
+ * Rules → Built-in checks, and each finding's explanation and evidence, keyed
+ * from reason codes in src/lib/bible-data/check-messages.ts) and
+ * `bibleData.profile.*` (the "Language profile for checks" card).
  */
 export const bibleData = defineNamespace({
   keys: {
@@ -75,6 +80,91 @@ export const bibleData = defineNamespace({
     "bibleData.source.acai.short": "ACAI",
     "bibleData.source.unfoldingword.name": "unfoldingWord TN/TQ/TW",
     "bibleData.source.unfoldingword.short": "unfoldingWord",
+
+    // ── Bible data checks (AQU-1688): Rules → Built-in checks rows ──
+    "bibleData.check.v1.name": "Quotation opens",
+    "bibleData.check.v1.description":
+      "Where a speech starts in a verse, the translation has the opening quotation mark for its level.",
+    "bibleData.check.v2.name": "Quotation closes",
+    "bibleData.check.v2.description":
+      "Where a speech ends in a verse, the translation closes the quotation there, before any narration that follows.",
+    "bibleData.check.v3.name": "Quotation continues",
+    "bibleData.check.v3.description":
+      "Where a speech goes on into the next verse, the translation does not close the quotation early.",
+    "bibleData.check.v5.name": "Nested quotation marks",
+    "bibleData.check.v5.description":
+      "A quotation inside a quotation uses the marks the Language profile sets for its level.",
+    "bibleData.check.v7.name": "Quotation marks without speech",
+    "bibleData.check.v7.description":
+      "Flags quotation marks in a verse where nobody speaks. Short titles and scare quotes are allowed.",
+    "bibleData.check.v8.name": "Interrupted quotation",
+    "bibleData.check.v8.description":
+      "Where the narrator interrupts a speech, the quotation closes before the interruption and reopens after it.",
+    "bibleData.check.v9.name": "Speaker's own framing",
+    "bibleData.check.v9.description":
+      "Words a speaker introduces with “I tell you that …” are part of that speech and need no extra quotation level.",
+    "bibleData.check.m1.name": "Question kept",
+    "bibleData.check.m1.description": "Where the source asks a question, the translation has a question mark.",
+    "bibleData.check.needs.quoteMarks": "Needs: quotation marks in Language profile",
+
+    // ── Bible data checks: one finding, explained (Issues tab, findings drawer) ──
+    "bibleData.check.reason.openMissing":
+      "A speech starts in this verse, but the translation has no opening quotation mark for it (level {level}).",
+    "bibleData.check.reason.closeMissing":
+      "A speech ends in this verse, but the translation has no closing quotation mark for it (level {level}).",
+    "bibleData.check.reason.closeAfterAside":
+      "The quotation closes after the narration that follows it. Close it before that narration.",
+    "bibleData.check.reason.closeInContinuingSpeech":
+      "The speech goes on into the next verse, so the quotation should stay open here (level {level}).",
+    "bibleData.check.reason.wrongLevelMarks":
+      "A quotation inside a quotation (level {level}) uses the wrong marks. The Language profile sets {open} {close} for this level.",
+    "bibleData.check.reason.marksWithoutSpeech":
+      "Nobody speaks in this verse, but the translation has quotation marks.",
+    "bibleData.check.reason.interruptionNotMarked":
+      "The narrator interrupts this speech, so the quotation usually closes before the interruption and opens again after it.",
+    "bibleData.check.reason.selfProjectionAddsLevel":
+      "These words belong to the speaker's own speech (“I tell you that …”), so they need no extra quotation marks.",
+    "bibleData.check.reason.questionMarkMissing":
+      "The source asks a question in this verse, but the translation has no question mark.",
+    "bibleData.check.evidence.speech":
+      "{dataset} speech {ref} words {from}–{to}; speaker from {sources} (confidence {confidence})",
+    "bibleData.check.evidence.speechAcrossVerses":
+      "{dataset} speech {startRef} word {from} to {endRef} word {to}; speaker from {sources} (confidence {confidence})",
+    "bibleData.check.evidence.speechNoSpeaker": "{dataset} speech {ref} words {from}–{to}",
+    "bibleData.check.evidence.speechAcrossVersesNoSpeaker":
+      "{dataset} speech {startRef} word {from} to {endRef} word {to}",
+    "bibleData.check.evidence.noSpeech": "{dataset}: no speech in {refs}",
+    "bibleData.check.evidence.question": "{dataset}: {refs} asks a question",
+    "bibleData.check.evidence.approximate":
+      "Approximate: this verse is split across cells, so only facts about the whole verse are checked.",
+
+    // ── Language profile for checks (Settings → General → Languages) ──
+    "bibleData.profile.title": "Language profile for checks",
+    "bibleData.profile.description":
+      "Facts about your language that Bible data checks need. A check stays off until the facts it needs are filled in.",
+    "bibleData.profile.quoteMarks.label": "Quotation marks",
+    "bibleData.profile.quoteMarks.description":
+      "The marks your translation uses for a quotation, for a quotation inside it, and for one inside that.",
+    "bibleData.profile.quoteMarks.level1": "Quotation",
+    "bibleData.profile.quoteMarks.level2": "Inside a quotation",
+    "bibleData.profile.quoteMarks.level3": "Third level",
+    "bibleData.profile.quoteMarks.openAriaLabel": "Opening mark: {level}",
+    "bibleData.profile.quoteMarks.closeAriaLabel": "Closing mark: {level}",
+    "bibleData.profile.continuation.label": "A quotation over several paragraphs",
+    "bibleData.profile.continuation.reopenEachParagraph": "Repeat the opening mark at each new paragraph",
+    "bibleData.profile.continuation.continuationMark": "Start each new paragraph with the closing mark",
+    "bibleData.profile.continuation.none": "No mark at a new paragraph",
+    "bibleData.profile.useDefaults": "Use defaults for {language}",
+    "bibleData.profile.save": "Save quotation marks",
+    "bibleData.profile.clear": "Clear quotation marks",
+    "bibleData.profile.notSet": "Not set. The quotation checks stay off until you save the marks your translation uses.",
+    "bibleData.profile.saved": "Quotation marks saved.",
+    "bibleData.profile.invalid":
+      "Each mark is one punctuation character. The first level needs both marks; a deeper level needs both or neither.",
+    "bibleData.profile.error.conflict": "Someone else changed the project settings. Refresh, then save again.",
+    "bibleData.profile.error.offline": "You're offline. Reconnect to save the Language profile.",
+    "bibleData.profile.error.permission": "Only a maintainer can change the Language profile.",
+    "bibleData.profile.error.failed": "The Language profile could not be saved.",
   },
   context: {
     _context: {
@@ -84,7 +174,12 @@ export const bibleData = defineNamespace({
         "dialog that credits the open datasets the data comes from. Read by a " +
         "project maintainer deciding what translators see. Dataset and organization " +
         "names (Macula, Clear-Bible, OpenText, ACAI, BibleAquifer, unfoldingWord, " +
-        "bibletranslation.org) are proper names: keep them in Latin script, untranslated.",
+        "bibletranslation.org) are proper names: keep them in Latin script, untranslated. " +
+        "The bibleData.check.* keys are automatic checks that compare a translation " +
+        "with these Bible data (Rules → Built-in checks, and the findings shown on a " +
+        "cell). The bibleData.profile.* keys are the 'Language profile for checks' " +
+        "card, where a maintainer records facts about the target language, such as its " +
+        "quotation marks, that the checks need.",
     },
     keys: {
       "bibleData.experiment.label": {
@@ -284,6 +379,277 @@ export const bibleData = defineNamespace({
         description:
           "Short name of the unfoldingWord resources, used inside the source chip. " +
           "A proper name, written with a lowercase 'u'.",
+      },
+      "bibleData.check.v1.name": {
+        description:
+          "Name of an automatic check in Rules → Built-in checks, also the title of its " +
+          "finding on a cell. It checks that a quotation has its opening mark where " +
+          "someone starts speaking in a Bible verse.",
+      },
+      "bibleData.check.v1.description": {
+        description:
+          "One-sentence explanation under the check's name. 'Level' is how deeply the " +
+          "quotation is nested: a quotation, a quotation inside it, and so on.",
+      },
+      "bibleData.check.v2.name": {
+        description:
+          "Name of the check that a quotation is closed where the speaker stops, also " +
+          "the title of its finding.",
+      },
+      "bibleData.check.v2.description": {
+        description:
+          "One-sentence explanation under the check's name. 'Narration' is the " +
+          "narrator's text, e.g. an explanation after the quotation.",
+      },
+      "bibleData.check.v3.name": {
+        description:
+          "Name of the check that a quotation is not closed in a verse when the same " +
+          "person keeps speaking in the next verse.",
+      },
+      "bibleData.check.v3.description": {
+        description: "One-sentence explanation under the check's name.",
+      },
+      "bibleData.check.v5.name": {
+        description:
+          "Name of the check that a quotation inside another quotation uses its own " +
+          "marks (in English, ‘ ’ inside “ ”).",
+      },
+      "bibleData.check.v5.description": {
+        description:
+          "One-sentence explanation under the check's name. 'Language profile' is the " +
+          "name of a settings card that records facts about the target language.",
+      },
+      "bibleData.check.v7.name": {
+        description:
+          "Name of the check that flags quotation marks in a verse where nobody is " +
+          "speaking, only the narrator.",
+      },
+      "bibleData.check.v7.description": {
+        description:
+          "One-sentence explanation under the check's name. 'Scare quotes' are quotation " +
+          "marks around a word used in an unusual or ironic sense.",
+      },
+      "bibleData.check.v8.name": {
+        description:
+          "Name of the check for a speech that the narrator interrupts in the middle, " +
+          "as in: “Give me,” she said, “the head of John.”",
+      },
+      "bibleData.check.v8.description": {
+        description: "One-sentence explanation under the check's name.",
+      },
+      "bibleData.check.v9.name": {
+        description:
+          "Name of the check for words a speaker introduces himself, as in 'I tell you " +
+          "that …'. Those words are already inside the speaker's own quotation.",
+      },
+      "bibleData.check.v9.description": {
+        description:
+          "One-sentence explanation under the check's name. Translate the example " +
+          "'I tell you that …' naturally; keep the quotation marks around it.",
+      },
+      "bibleData.check.m1.name": {
+        description:
+          "Name of the check that a verse that asks a question in the original language " +
+          "still ends its question with a question mark in the translation.",
+      },
+      "bibleData.check.m1.description": {
+        description: "One-sentence explanation under the check's name.",
+      },
+      "bibleData.check.needs.quoteMarks": {
+        description:
+          "Shown under a check in Rules → Built-in checks while the check cannot run, " +
+          "because the Language profile card has no quotation marks saved yet. " +
+          "'Language profile' is the name of that settings card.",
+      },
+      "bibleData.check.reason.openMissing": {
+        description:
+          "Explains a finding on one verse: a quotation should open here but has no " +
+          "opening mark.",
+        placeholders: { level: "The quotation's nesting level as a number: 1 for a quotation, 2 for one inside it." },
+      },
+      "bibleData.check.reason.closeMissing": {
+        description:
+          "Explains a finding on one verse: a quotation should close here but has no " +
+          "closing mark.",
+        placeholders: { level: "The quotation's nesting level as a number: 1 for a quotation, 2 for one inside it." },
+      },
+      "bibleData.check.reason.closeAfterAside": {
+        description:
+          "Explains a finding: the closing quotation mark was put after the narrator's " +
+          "comment that follows the speech, so the comment is wrongly inside the quotation.",
+      },
+      "bibleData.check.reason.closeInContinuingSpeech": {
+        description:
+          "Explains a finding: the translation closes a quotation, but the same person " +
+          "keeps speaking in the next verse.",
+        placeholders: { level: "The quotation's nesting level as a number: 1 for a quotation, 2 for one inside it." },
+      },
+      "bibleData.check.reason.wrongLevelMarks": {
+        description: "Explains a finding: a quotation inside a quotation uses the wrong kind of marks.",
+        placeholders: {
+          level: "The nesting level as a number, 2 or 3.",
+          open: "The opening mark the project uses at that level, e.g. ‘. A symbol; never translated.",
+          close: "The closing mark the project uses at that level, e.g. ’. A symbol; never translated.",
+        },
+      },
+      "bibleData.check.reason.marksWithoutSpeech": {
+        description: "Explains a finding: the verse has quotation marks although only the narrator speaks.",
+      },
+      "bibleData.check.reason.interruptionNotMarked": {
+        description:
+          "Explains a finding: the narrator interrupts the speech in the middle ('she " +
+          "said'), but the translation quotes it as one piece.",
+      },
+      "bibleData.check.reason.selfProjectionAddsLevel": {
+        description:
+          "Explains a finding: the speaker introduces his own words ('I tell you that …'), " +
+          "and the translation wrongly puts them in a further quotation.",
+      },
+      "bibleData.check.reason.questionMarkMissing": {
+        description:
+          "Explains a finding: the verse asks a question in the original language, but " +
+          "the translation has no question mark.",
+      },
+      "bibleData.check.evidence.speech": {
+        description:
+          "Small evidence line under a finding: where the fact comes from. A 'speech' is " +
+          "one quotation in the source data. 'Words 8–18' counts words in the Greek verse.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'OpenText'. A proper name.",
+          ref: "The verse reference, e.g. 'JHN 4:9'. Never translated.",
+          from: "Number of the first Greek word of the speech in the verse.",
+          to: "Number of the last Greek word of the speech in the verse.",
+          sources: "The datasets that name the speaker, already joined as a list. Proper names.",
+          confidence: "How sure the data is about the speaker, already formatted as a percentage.",
+        },
+      },
+      "bibleData.check.evidence.speechAcrossVerses": {
+        description:
+          "Evidence line for a speech that runs over several verses: where it starts and " +
+          "where it ends.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'OpenText'. A proper name.",
+          startRef: "The verse where the speech starts, e.g. 'JHN 4:11'. Never translated.",
+          from: "Number of the speech's first Greek word in that verse.",
+          endRef: "The verse where the speech ends, e.g. 'JHN 4:12'. Never translated.",
+          to: "Number of the speech's last Greek word in that verse.",
+          sources: "The datasets that name the speaker, already joined as a list. Proper names.",
+          confidence: "How sure the data is about the speaker, already formatted as a percentage.",
+        },
+      },
+      "bibleData.check.evidence.speechNoSpeaker": {
+        description: "Evidence line for a speech whose speaker the data does not name.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'OpenText'. A proper name.",
+          ref: "The verse reference, e.g. 'JHN 4:9'. Never translated.",
+          from: "Number of the first Greek word of the speech in the verse.",
+          to: "Number of the last Greek word of the speech in the verse.",
+        },
+      },
+      "bibleData.check.evidence.speechAcrossVersesNoSpeaker": {
+        description: "Evidence line for a speech over several verses whose speaker the data does not name.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'OpenText'. A proper name.",
+          startRef: "The verse where the speech starts. Never translated.",
+          from: "Number of the speech's first Greek word in that verse.",
+          endRef: "The verse where the speech ends. Never translated.",
+          to: "Number of the speech's last Greek word in that verse.",
+        },
+      },
+      "bibleData.check.evidence.noSpeech": {
+        description: "Evidence line: the data finds nobody speaking in these verses.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'OpenText'. A proper name.",
+          refs: "One or more verse references, already joined as a list. Never translated.",
+        },
+      },
+      "bibleData.check.evidence.question": {
+        description: "Evidence line: the original-language text of these verses asks a question.",
+        placeholders: {
+          dataset: "A dataset name, e.g. 'Macula'. A proper name.",
+          refs: "One or more verse references, already joined as a list. Never translated.",
+        },
+      },
+      "bibleData.check.evidence.approximate": {
+        description:
+          "Added under the evidence line when one verse is split over several cells, so " +
+          "the check cannot know which cell holds which words.",
+      },
+      "bibleData.profile.title": {
+        description:
+          "Title of a settings card where a maintainer records facts about the target " +
+          "language that the automatic Bible data checks need.",
+      },
+      "bibleData.profile.description": {
+        description: "One-sentence explanation under the card's title.",
+      },
+      "bibleData.profile.quoteMarks.label": {
+        description: "Heading of the part of the card where the project's quotation marks are entered.",
+      },
+      "bibleData.profile.quoteMarks.description": {
+        description: "Explains the three rows of quotation marks below it, one per nesting level.",
+      },
+      "bibleData.profile.quoteMarks.level1": {
+        description: "Row label: the marks for an ordinary quotation (the first level).",
+      },
+      "bibleData.profile.quoteMarks.level2": {
+        description: "Row label: the marks for a quotation inside another quotation (the second level).",
+      },
+      "bibleData.profile.quoteMarks.level3": {
+        description: "Row label: the marks for a quotation inside a second-level one (the third level).",
+      },
+      "bibleData.profile.quoteMarks.openAriaLabel": {
+        description: "Accessible name of the text box for one level's opening quotation mark.",
+        placeholders: { level: "The row label, e.g. 'Inside a quotation'." },
+      },
+      "bibleData.profile.quoteMarks.closeAriaLabel": {
+        description: "Accessible name of the text box for one level's closing quotation mark.",
+        placeholders: { level: "The row label, e.g. 'Inside a quotation'." },
+      },
+      "bibleData.profile.continuation.label": {
+        description:
+          "Label of a choice: how the target language marks a quotation that goes on " +
+          "into a new paragraph.",
+      },
+      "bibleData.profile.continuation.reopenEachParagraph": {
+        description: "Choice: each new paragraph of the quotation starts again with the opening mark (English style).",
+      },
+      "bibleData.profile.continuation.continuationMark": {
+        description: "Choice: each new paragraph of the quotation starts with the closing mark (Spanish style: »).",
+      },
+      "bibleData.profile.continuation.none": {
+        description: "Choice: nothing marks the new paragraph of a quotation.",
+      },
+      "bibleData.profile.useDefaults": {
+        description: "Button that fills in the usual quotation marks for the project's target language.",
+        placeholders: { language: "The project's target language as stored, e.g. 'French' or 'fr'." },
+      },
+      "bibleData.profile.save": {
+        description: "Button that saves the quotation marks entered in the card.",
+      },
+      "bibleData.profile.clear": {
+        description: "Button that removes the saved quotation marks, which turns the quotation checks off.",
+      },
+      "bibleData.profile.notSet": {
+        description: "Shown while no quotation marks are saved.",
+      },
+      "bibleData.profile.saved": {
+        description: "Confirmation after the quotation marks are saved.",
+      },
+      "bibleData.profile.invalid": {
+        description: "Error shown when the quotation marks entered cannot be saved.",
+      },
+      "bibleData.profile.error.conflict": {
+        description: "Error: another person saved project settings first.",
+      },
+      "bibleData.profile.error.offline": {
+        description: "Error: the device is offline, so the card cannot save.",
+      },
+      "bibleData.profile.error.permission": {
+        description: "Error: the person's project role is too low to change this setting.",
+      },
+      "bibleData.profile.error.failed": {
+        description: "Error: saving failed for another reason.",
       },
     },
   },

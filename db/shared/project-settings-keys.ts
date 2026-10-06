@@ -20,6 +20,7 @@
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
 import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -40,6 +41,13 @@ export interface SettingsKeySpec {
    * each must hold a boolean. Absent means any plain object.
    */
   booleanFlags?: readonly string[]
+  /**
+   * AQU-1688: when `kind` is 'object', a structural check the value must also
+   * pass. Returns null when it is fine, else what is wrong.
+   */
+  problem?: (value: Record<string, unknown>) => string | null
+  /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
+  typeName?: string
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -48,6 +56,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
+  if (spec.typeName) return spec.typeName
   if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
   if (spec.kind === 'object' && spec.booleanFlags) {
     return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
@@ -67,6 +76,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
     case 'object': {
       if (!isPlainObject(value)) return false
+      if (spec.problem && spec.problem(value) !== null) return false
       const flags = spec.booleanFlags
       if (!flags) return true
       return Object.entries(value).every(
@@ -111,6 +121,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   rulePenalties: { kind: 'object' },
   algorithmicChecks: { kind: 'object' },
   terminology: { kind: 'object[]' },
+  // AQU-1688: facts about the target language that Bible data checks need
+  // (db/shared/language-profile.ts). A check whose slot is empty is dormant.
+  languageProfile: {
+    kind: 'object',
+    problem: (value) => languageProfileProblem(value),
+    typeName: LANGUAGE_PROFILE_TYPE_NAME,
+  },
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
   // only, see db/shared/policy-direction.ts; a loosening write resolves to
@@ -192,7 +209,9 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   }
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
-    return `settings key "${key}" expects ${settingsTypeName(spec)}`
+    // A structural problem names the field at fault, not only the expected type.
+    const detail = spec.problem && isPlainObject(value) ? spec.problem(value) : null
+    return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null
 }

@@ -9,6 +9,7 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { bibleChecksEnabled } from "@/lib/bible-data/check-context"
 import { rulesForLane } from "@/lib/rules/rule-engine"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
@@ -121,9 +122,12 @@ export function useRules(
     latestRulesRef.current = userRules
   }
 
+  // AQU-1688: the Bible data checks are rules only while the project's Bible
+  // data checks enrichment is on (which also needs Bible data itself on).
+  const bibleChecks = bibleChecksEnabled(project)
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks),
-    [algorithmicChecks],
+    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks }),
+    [algorithmicChecks, bibleChecks],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed

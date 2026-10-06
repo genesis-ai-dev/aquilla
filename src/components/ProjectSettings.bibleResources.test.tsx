@@ -341,3 +341,24 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
     expect(await screen.findByText("Living Memory pane")).toBeInTheDocument()
   })
 })
+
+describe("ProjectSettings — Language profile for checks (AQU-1688)", () => {
+  const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
+
+  // The card configures Bible data checks only. A device that never opted in
+  // to the Bible data experiment has no such checks, so it must not see the
+  // card, even for a scripture project with a stored profile.
+  it("is absent while this device has the Bible data experiment off", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentSettings = { languageProfile: { quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "none" } } }
+    renderSettings()
+    expect(screen.getByText("Languages")).toBeInTheDocument()
+    expect(screen.queryByText("Language profile for checks")).toBeNull()
+  })
+
+  it("is shown with the experiment on", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: { bibleData: true } })
+    renderSettings()
+    expect(screen.getByText("Language profile for checks")).toBeInTheDocument()
+  })
+})

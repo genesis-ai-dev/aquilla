@@ -355,6 +355,46 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(stored.bibleEnrichments).toEqual(value)
     expect(stored.targetLanguage).toBe('fr')
   })
+
+  // AQU-1688: agents fill in the Language profile here. A malformed slot
+  // stored here would leave every quotation check dormant (readers drop it)
+  // while the agent believes the checks are on, so it must fail at prepare.
+  it('languageProfile rejects an unknown slot or malformed quotation marks at prepare', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const malformed = [
+      { quoteMark: { levels: [{ open: '“', close: '”' }], continuation: 'none' } },
+      { quoteMarks: { levels: [{ open: '<<', close: '>>' }], continuation: 'none' } },
+      { quoteMarks: { levels: [{ open: '“', close: '”' }], continuation: 'sometimes' } },
+    ]
+    for (const value of malformed) {
+      const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'languageProfile', value }]))
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expect(JSON.stringify(body.error.details)).toContain('languageProfile')
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('languageProfile stores valid quotation marks at the maintainer floor and refuses a project lead', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const value = {
+      quoteMarks: { levels: [{ open: '«', close: '»' }, { open: '“', close: '”' }], continuation: 'continuation-mark' },
+    }
+    const { res: deniedRes, body: denied } = await prepare(env, lead.token, patchCmd([{ key: 'languageProfile', value }]))
+    expect(deniedRes.status).toBe(403)
+    expect(denied.error.code).toBe('permission_denied')
+
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'languageProfile', value }]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.languageProfile).toEqual(value)
+    expect(stored.targetLanguage).toBe('fr')
+  })
 })
 
 /** Overwrite the seeded blob in place (version stays 1) so a per-key case can

@@ -42,7 +42,12 @@ const DOUBLE_QUOTES: Record<string, DoubleQuoteMarks> = {
 
 /** The double quotes for a target language; English “ ” when unknown or unset. */
 export function doubleQuoteMarks(lang: string | undefined | null): DoubleQuoteMarks {
-  return DOUBLE_QUOTES[normalizeLanguageTag(lang)] ?? ENGLISH
+  return knownDoubleQuoteMarks(lang) ?? ENGLISH
+}
+
+/** AQU-1688: the table's own entry for a language, or null where `doubleQuoteMarks` falls back to English. */
+export function knownDoubleQuoteMarks(lang: string | undefined | null): DoubleQuoteMarks | null {
+  return DOUBLE_QUOTES[normalizeLanguageTag(lang)] ?? null
 }
 
 /** The Typography extension with every rule off except the four quote rules. */

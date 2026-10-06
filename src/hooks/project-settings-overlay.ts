@@ -79,6 +79,9 @@ export function overlaySettings(
   // AQU-1686: must reach the workspace, or the pack client loads layers for
   // enrichments the project switched off.
   assign("bibleEnrichments", settings.bibleEnrichments)
+  // AQU-1688: must reach the workspace, or Bible data checks stay dormant for
+  // a project that has set its quotation marks.
+  assign("languageProfile", settings.languageProfile)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

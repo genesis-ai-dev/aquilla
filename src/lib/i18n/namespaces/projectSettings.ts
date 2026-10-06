@@ -812,6 +812,14 @@ export const projectSettings = defineNamespace({
       "everything this project already holds, and later upstream edits keep " +
       "flowing through. Existing files, translations and validations are left as " +
       "they are. Detach later to stop following the upstream.",
+    // AQU-1679: the same promise when the lead has chosen to replace the source
+    // of a file they already have — "existing files are left as they are" is
+    // no longer true of those.
+    "projectSettings.linkSource.additiveNoteReplacing":
+      "The link is live: later upstream edits keep flowing through, including " +
+      "into the files whose source you are replacing. Your other files, and every " +
+      "translation and validation, are left as they are. Detach later to stop " +
+      "following the upstream.",
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
@@ -838,6 +846,51 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.fileClashBadge": "same name here",
     "projectSettings.linkSource.previewNoneSelected":
       "Pick at least one file to link.",
+    // ── AQU-1679: a file this project already has can follow the link itself,
+    // instead of gaining a second copy. Offered per same-named file, off by
+    // default, and shown with what it will do before anything is linked.
+    "projectSettings.linkSource.replaceOption":
+      "Replace the source in my existing {name} and keep its translations",
+    "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    "projectSettings.linkSource.replaceCompareFailed":
+      "Couldn't compare the two files. Turn this off and on to try again, or " +
+      "leave it off to add the file as a separate copy.",
+    "projectSettings.linkSource.replaceMatchSame": plural({
+      one: "{same} of {count} line is the same in both files.",
+      other: "{same} of {count} lines are the same in both files.",
+    }),
+    "projectSettings.linkSource.replaceMatchChanged": plural({
+      one:
+        "{count} line differs and will take the source project's text. Its " +
+        "translation will be flagged as source changed.",
+      other:
+        "{count} lines differ and will take the source project's text. Their " +
+        "translations will be flagged as source changed.",
+    }),
+    "projectSettings.linkSource.replaceMatchAdded": plural({
+      one: "{count} line only the source project has will be added to your file.",
+      other: "{count} lines only the source project has will be added to your file.",
+    }),
+    "projectSettings.linkSource.replaceMatchKept": plural({
+      one: "{count} line only your file has will stay as it is.",
+      other: "{count} lines only your file has will stay as they are.",
+    }),
+    "projectSettings.linkSource.replaceNoMatch": plural({
+      one:
+        "These two files are not the same material: {same} of {count} line matches. " +
+        "Turn this off to add the file as a separate copy.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines " +
+        "match. Turn this off to add the file as a separate copy.",
+    }),
+    "projectSettings.linkSource.replaceCount": plural({
+      one:
+        "{count} file you already have will take its source from this link and " +
+        "keep its translations.",
+      other:
+        "{count} files you already have will take their source from this link and " +
+        "keep their translations.",
+    }),
     "projectSettings.linkSource.scopeAllNote":
       "This link follows the whole project, so files the source project adds " +
       "later will arrive here too.",
@@ -2024,6 +2077,90 @@ export const projectSettings = defineNamespace({
           "Replaces notSyncedNote after \"Sync now\" worked but the source project is " +
           "empty, so there was nothing to copy. Reassuring, not an error: files will " +
           "appear once the source project has some.",
+      },
+      "projectSettings.linkSource.additiveNoteReplacing": {
+        description:
+          "Replaces additiveNote under the link confirm step once at least one " +
+          "existing file is set to have its source replaced. Same reassurance, minus " +
+          "the claim that existing files are untouched: the replaced files' source " +
+          "text changes and keeps following the upstream; translations and " +
+          "validations are still never touched.",
+      },
+      "projectSettings.linkSource.replaceOption": {
+        description:
+          "Checkbox under an upstream file in the link confirm step, shown when this " +
+          "project already has exactly one file of the same name. On: the link " +
+          "follows into that existing file \u2014 its source text is replaced by the " +
+          "source project's and its translations stay \u2014 instead of adding a second " +
+          "file of that name. Off by default.",
+        placeholders: {
+          name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceComparing": {
+        description:
+          "Shown under replaceOption right after it is turned on, while the server " +
+          "compares the project's file with the source project's file.",
+      },
+      "projectSettings.linkSource.replaceCompareFailed": {
+        description:
+          "Shown under replaceOption when the comparison could not be made. The link " +
+          "cannot be confirmed with the option on until a comparison succeeds; the " +
+          "sentence gives both ways out. No error code.",
+      },
+      "projectSettings.linkSource.replaceMatchSame": {
+        description:
+          "First line of the comparison under replaceOption: how many lines of text " +
+          "are word-for-word identical in the project's file and the source project's " +
+          "file. \"Lines\" are the file's translation units (verses, paragraphs).",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchChanged": {
+        description:
+          "Comparison line, shown only when above zero: lines that correspond but " +
+          "whose source text differs. They take the source project's text, and their " +
+          "existing translations get the app's \"source changed\" flag for review.",
+        placeholders: {
+          count: "How many lines will take the source project's text; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchAdded": {
+        description:
+          "Comparison line, shown only when above zero: lines the source project's " +
+          "file has and the project's file does not. They are added to the project's file.",
+        placeholders: {
+          count: "How many lines will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchKept": {
+        description:
+          "Comparison line, shown only when above zero: lines the project's file has " +
+          "and the source project's file does not. Nothing happens to them.",
+        placeholders: {
+          count: "How many lines only this project's file has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceNoMatch": {
+        description:
+          "Replaces the comparison when fewer than half of the lines are identical: " +
+          "the two files share a name but are not the same text, so the source cannot " +
+          "be replaced. The link stays unconfirmable until the option is turned off.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceCount": {
+        description:
+          "Summary sentence in the link confirm step, beside the count of files that " +
+          "will be added: how many existing files will follow the link in place " +
+          "(source replaced, translations kept) rather than gaining a second copy.",
+        placeholders: {
+          count: "How many existing files will follow the link; governs the plural form.",
+        },
       },
       "projectSettings.linkSource.clashWarningHeading": {
         description:

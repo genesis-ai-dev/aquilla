@@ -74,6 +74,18 @@
 // what this component sends — `fileIds` omitted vs. present — and the server
 // stores it verbatim (auth-worker routes/source-linking.ts).
 //
+// AQU-1679: adding alongside is still the default, but no longer the only
+// outcome. For an upstream file whose name matches exactly one file here, the
+// confirm step offers "replace the source in my existing file": the link then
+// follows INTO that file — it keeps its translations and takes the upstream's
+// source — and no second copy arrives (Matthew, 2026-10-05, reversing "do not
+// merge into the existing file" for the lead who asks for it). Turning it on
+// asks the server how the two files compare and shows the answer before
+// anything is linked; two files that are not the same material cannot be
+// confirmed that way. Only "Its Source" offers it: a chain link's source is the
+// upstream's translations, which a file imported on its own cannot line up
+// with.
+//
 // AQU-1544: saving the link and bringing the files in are two steps, and only
 // the first is the link request. When the server reports its seed did not run
 // the flow retries once itself; until this slice it then ignored whether that
@@ -83,19 +95,23 @@
 // saved, that the files have not arrived, and a "Try again" — and `onLinked`
 // does not fire until the files are actually in.
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
-import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
+import {
+  UpstreamFileChoiceList,
+  type ReplaceMatchState,
+} from "@/components/UpstreamFileChoiceList"
 import { LinkSeedFailedNotice } from "@/components/LinkSeedFailedNotice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { fetchLinkFileMatches } from "@/lib/sync/link-file-match"
 import {
   selectedClashNames,
   summarizeFileSelection,
@@ -193,6 +209,14 @@ export function LinkSourceFlow({
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   // Bumped by "Try again" so the effect re-runs for the same upstream.
   const [previewAttempt, setPreviewAttempt] = useState(0)
+  // AQU-1679: the upstream file ids set to replace the source of the project's
+  // own same-named file, and what the server said about each pair. Both are
+  // dropped with the selection — they describe one upstream's files.
+  const [replaceFileIds, setReplaceFileIds] = useState<Set<string>>(new Set())
+  const [replaceMatches, setReplaceMatches] = useState<Map<string, ReplaceMatchState>>(new Map())
+  // Which comparison is the current one per file: an answer that arrives after
+  // the option was turned off and on again must not overwrite the newer ask.
+  const replaceAsk = useRef(new Map<string, number>())
 
   // Never offer this project itself (the server 400s on a self-link), and
   // never an archived one.
@@ -225,6 +249,8 @@ export function LinkSourceFlow({
         if (cancelled) return
         setPreview(result)
         setSelectedFileIds(new Set(result.files.map((f) => f.id)))
+        setReplaceFileIds(new Set())
+        setReplaceMatches(new Map())
       })
       .catch(() => {
         // The message is a fixed sentence, not the server's: a count the user
@@ -242,6 +268,8 @@ export function LinkSourceFlow({
     setPreview(null)
     setPreviewFailed(false)
     setSelectedFileIds(new Set())
+    setReplaceFileIds(new Set())
+    setReplaceMatches(new Map())
     setError(null)
   }, [])
 
@@ -271,9 +299,58 @@ export function LinkSourceFlow({
   )
   // Only the clashes still coming: unchecking a clashing file removes it from
   // the warning, and with no checked clash left the warning is gone.
-  const clashNames = useMemo(
-    () => selectedClashNames(previewFiles, selectedFileIds),
-    [previewFiles, selectedFileIds],
+  //
+  // AQU-1679: nor a file that is replacing the project's own — that one does
+  // not arrive as a copy, so it cannot appear twice.
+  const replacing = useMemo(
+    () =>
+      previewFiles.filter(
+        (f) =>
+          consumes === "source" &&
+          f.clashFileId !== undefined &&
+          selectedFileIds.has(f.id) &&
+          replaceFileIds.has(f.id),
+      ),
+    [previewFiles, consumes, selectedFileIds, replaceFileIds],
+  )
+  const clashNames = useMemo(() => {
+    const replacingIds = new Set(replacing.map((f) => f.id))
+    return selectedClashNames(
+      previewFiles.filter((f) => !replacingIds.has(f.id)),
+      selectedFileIds,
+    )
+  }, [previewFiles, selectedFileIds, replacing])
+  // A replace the server has not cleared — still comparing, could not compare,
+  // or not the same material — holds the link back; the row says which.
+  const replaceUnresolved = replacing.some((f) => {
+    const state = replaceMatches.get(f.id)
+    return state?.status !== "ready" || !state.match.canReplace
+  })
+
+  const toggleReplace = useCallback(
+    (fileId: string, replace: boolean) => {
+      setReplaceFileIds((current) => {
+        const next = new Set(current)
+        if (replace) next.add(fileId)
+        else next.delete(fileId)
+        return next
+      })
+      const ask = (replaceAsk.current.get(fileId) ?? 0) + 1
+      replaceAsk.current.set(fileId, ask)
+      const ownFileId = previewFiles.find((f) => f.id === fileId)?.clashFileId
+      if (!replace || !ownFileId || !reviewing || !jwt) return
+      const settle = (state: ReplaceMatchState) => {
+        if (replaceAsk.current.get(fileId) !== ask) return
+        setReplaceMatches((current) => new Map(current).set(fileId, state))
+      }
+      settle({ status: "loading" })
+      void fetchLinkFileMatches(jwt, projectId, reviewing, [
+        { upstreamFileId: fileId, fileId: ownFileId },
+      ])
+        .then(([match]) => settle(match ? { status: "ready", match } : { status: "failed" }))
+        .catch(() => settle({ status: "failed" }))
+    },
+    [previewFiles, reviewing, jwt, projectId],
   )
 
   async function handleLink() {
@@ -284,7 +361,7 @@ export function LinkSourceFlow({
     if (!reviewing || !consumes || !jwt || linking) return
     // AQU-1559: guarded as well as disabled — the request must never be able to
     // save a link that follows nothing.
-    if (nothingSelected) return
+    if (nothingSelected || replaceUnresolved) return
     setLinking(true)
     setError(null)
     try {
@@ -300,6 +377,17 @@ export function LinkSourceFlow({
         ...(allFilesSelected || previewFiles.length === 0
           ? {}
           : { fileIds: [...selectedFileIds] }),
+        // AQU-1679: the files this project already has that follow the link
+        // instead of gaining a copy. Left off entirely when there are none, so
+        // the request is the one every link before this slice sent.
+        ...(replacing.length > 0
+          ? {
+              replaceFiles: replacing.map((f) => ({
+                upstreamFileId: f.id,
+                fileId: f.clashFileId as string,
+              })),
+            }
+          : {}),
       })
       // AQU-476/QA-BUG-1: the server seeds inside the same call; `false` means
       // that trigger did not run, so self-heal before the user sees an empty
@@ -313,6 +401,8 @@ export function LinkSourceFlow({
       setReviewing(null)
       setPreview(null)
       setSelectedFileIds(new Set())
+      setReplaceFileIds(new Set())
+      setReplaceMatches(new Map())
       if (!seeded) {
         // Parked for the page behind this flow too: an Import dialog dismissed
         // from here must not leave the workspace looking healthy.
@@ -411,16 +501,36 @@ export function LinkSourceFlow({
                   checked ? new Set(previewFiles.map((f) => f.id)) : new Set(),
                 )
               }
+              // AQU-1679: only the sibling case can follow into a file this
+              // project already has — see the header comment.
+              replace={
+                consumes === "source"
+                  ? { fileIds: replaceFileIds, onToggle: toggleReplace, matches: replaceMatches }
+                  : undefined
+              }
+              disabled={linking}
             />
-            <p className="text-sm" role={nothingSelected ? "alert" : undefined}>
-              {previewFiles.length === 0
-                ? t("projectSettings.linkSource.previewEmptyUpstream")
-                : nothingSelected
-                  ? t("projectSettings.linkSource.previewNoneSelected")
-                  : t("projectSettings.linkSource.previewCount", {
-                      count: selectedCount,
-                    })}
-            </p>
+            {/* AQU-1679: a file that replaces the project's own is not ADDED,
+                so it leaves the count and gets a sentence of its own. With
+                every checked file replacing one, nothing is added at all. */}
+            {(previewFiles.length === 0 ||
+              nothingSelected ||
+              selectedCount > replacing.length) && (
+              <p className="text-sm" role={nothingSelected ? "alert" : undefined}>
+                {previewFiles.length === 0
+                  ? t("projectSettings.linkSource.previewEmptyUpstream")
+                  : nothingSelected
+                    ? t("projectSettings.linkSource.previewNoneSelected")
+                    : t("projectSettings.linkSource.previewCount", {
+                        count: selectedCount - replacing.length,
+                      })}
+              </p>
+            )}
+            {replacing.length > 0 && (
+              <p className="text-sm">
+                {t("projectSettings.linkSource.replaceCount", { count: replacing.length })}
+              </p>
+            )}
             {/* AQU-1559: a whole-project link keeps picking up the upstream's
                 later files; a subset one does not. Said here because it is the
                 part of the outcome the checkboxes alone do not show. */}
@@ -479,7 +589,9 @@ export function LinkSourceFlow({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("projectSettings.linkSource.additiveNote")}
+          {replacing.length > 0
+            ? t("projectSettings.linkSource.additiveNoteReplacing")
+            : t("projectSettings.linkSource.additiveNote")}
         </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -490,7 +602,11 @@ export function LinkSourceFlow({
             size="sm"
             // AQU-1559: nothing checked, nothing to link — the sentence above
             // says so, and this is the control it refers to.
-            disabled={linking || !session || previewFailed || nothingSelected}
+            // AQU-1679: nor while a replace is still being compared, or has
+            // come back as not possible — the row under the file says which.
+            disabled={
+              linking || !session || previewFailed || nothingSelected || replaceUnresolved
+            }
             onClick={handleLink}
           >
             {linking

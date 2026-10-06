@@ -32,11 +32,9 @@ export interface VideoSoundSourcePickerProps {
   /** Held open across the corner's fade, like the language menu. */
   onOpenChange?(open: boolean): void
   /** "picture" (the default): dark glass over the video's corner. "lane": the
-   *  timeline's Source audio lane label, beside its mute button, in the
-   *  gutter's own light style (Sam, Oct 5). */
+   *  timeline's Source audio lane label, on its second line, in the gutter's
+   *  own light style (Sam, Oct 5). */
   variant?: "picture" | "lane"
-  /** The lane's rows shrink; the pill shrinks with them, like the speaker. */
-  compact?: boolean
 }
 
 export function VideoSoundSourcePicker({
@@ -45,7 +43,6 @@ export function VideoSoundSourcePicker({
   onChange,
   onOpenChange,
   variant = "picture",
-  compact = false,
 }: VideoSoundSourcePickerProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -75,9 +72,10 @@ export function VideoSoundSourcePicker({
           className={cn(
             variant === "lane"
               ? cn(
-                  "inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-md border border-border bg-background font-medium text-foreground/80",
+                  // 18px tall: under a 16px name with the 2px gap, that is the
+                  // 36px the shortest row with a sublabel line (40px) can hold.
+                  "inline-flex h-[18px] w-fit shrink-0 items-center gap-0.5 whitespace-nowrap rounded border border-border bg-background pl-1 pr-0.5 text-[10px] font-medium text-foreground/80",
                   "transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  compact ? "h-5 pl-1 pr-0.5 text-[10px]" : "h-6 pl-1.5 pr-1 text-[11px]",
                 )
               : cn(
                   "flex h-7 items-center gap-1 whitespace-nowrap rounded-md bg-black/55 pl-2 pr-1.5 text-xs font-medium text-white/80 backdrop-blur-sm",

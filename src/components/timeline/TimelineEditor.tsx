@@ -735,6 +735,7 @@ function LaneLabel({
   dot,
   hueVars,
   trailing,
+  subSlot,
   reorder,
   folder,
   indented,
@@ -747,6 +748,11 @@ function LaneLabel({
 }: {
   name: string
   sub: string
+  /** Drawn on the sublabel's line instead of `sub`, and gated the same way
+   *  (gone in short rows and in the collapsed strip). Sam, Oct 5: the Source
+   *  audio lane's "Sound: Video ▾" pill lives here, because on the name's line
+   *  beside the speaker it cut "Source audio" down to "Sour…". */
+  subSlot?: ReactNode
   dot: string
   /**
    * AQU-646 stage 7: the row's hue, as inherited custom properties.
@@ -1029,7 +1035,7 @@ function LaneLabel({
             MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
             strip, where even the NAME does not fit. */}
         {!collapsed && ownRowH >= MIN_LABEL_SUB_H_PX && (
-          <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
+          subSlot ?? <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
         )}
       </div>
       {/* ONE FLEX CHILD, NOT A FRAGMENT'S WORTH.
@@ -4422,20 +4428,24 @@ export function TimelineEditor({
                         ? trackDrag.target.groupId != null
                         : row.depth === 1
                     }
+                    // Sam, Oct 5: the playback-sound menu belongs on the Source
+                    // audio lane too. It takes the sublabel's line, under the
+                    // name and next to the speaker, so the name keeps its full
+                    // width; like the sublabel it is gone in short rows and in
+                    // the collapsed strip, where the video's corner pill (always
+                    // shown on such a file) is still there.
+                    subSlot={
+                      speaker === "source" && soundSource && !renaming ? (
+                        <VideoSoundSourcePicker
+                          variant="lane"
+                          value={soundSource.value}
+                          recordingName={soundSource.recordingName}
+                          onChange={soundSource.onChange}
+                        />
+                      ) : undefined
+                    }
                     trailing={
                       <>
-                        {/* Sam, Oct 5: the playback-sound menu belongs on the
-                            Source audio lane too, beside its mute button. Not
-                            in the collapsed strip, which keeps only glyphs. */}
-                        {speaker === "source" && soundSource && !gutterCollapsed && !renaming && (
-                          <VideoSoundSourcePicker
-                            variant="lane"
-                            compact={rowH < MIN_SPEAKER_FULL_H_PX}
-                            value={soundSource.value}
-                            recordingName={soundSource.recordingName}
-                            onChange={soundSource.onChange}
-                          />
-                        )}
                         {speaker
                           ? speakerToggle(
                               speaker,

@@ -715,9 +715,9 @@ describe("TimelineEditor", () => {
     expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
-  // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too,
-  // beside its mute button, when the workspace offers it.
-  it("puts the playback-sound pill beside the Source audio mute button when offered", async () => {
+  // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too, on
+  // the sublabel's line so the lane's name keeps its full width.
+  it("puts the playback-sound pill on the Source audio lane when offered", async () => {
     const onChange = vi.fn()
     const { rerender } = render(
       <TimelineEditor fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -731,9 +731,14 @@ describe("TimelineEditor", () => {
     )
     const pill = screen.getByTestId("tl-sound-source-picker")
     expect(pill).toHaveTextContent(/^Sound: Video$/)
-    // Beside the SOURCE row's speaker, not the target's.
-    expect(pill.parentElement).toContainElement(screen.getByTestId("tl-speaker-source"))
-    expect(pill.parentElement).not.toContainElement(screen.getByTestId("tl-speaker-target"))
+    // In the SOURCE row, with its speaker, not the target's...
+    let row: HTMLElement | null = pill.parentElement
+    while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
+    expect(row).not.toBeNull()
+    expect(row).not.toContainElement(screen.getByTestId("tl-speaker-target"))
+    // ...in place of the sublabel, so the name is untouched.
+    expect(row).toHaveTextContent("Source audio")
+    expect(row).not.toHaveTextContent("original speech")
     fireEvent.click(pill)
     fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
     expect(onChange).toHaveBeenCalledExactlyOnceWith("recording")

@@ -65,6 +65,7 @@ import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
 import {
@@ -84,6 +85,7 @@ import { parseTnTsv } from "./parsers/translation-notes"
 import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { reimportKeysFor } from "./import/reimport-keys"
 import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
@@ -227,7 +229,9 @@ export function matchEBibleToSourceCells(
     const currentText = cell.translated ?? ""
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
-    // string only when neither is available (rare legacy cells with no event id).
+    // string only when neither is available (rare legacy cells with no event id,
+    // or a lane whose cells have not finished loading). "" means "unchainable"
+    // and applyEBibleTargetImport refuses to apply such a cell (AQU-1669).
     const parentId = resolveTargetCommitParent({
       targetEventId: cell.targetEventId,
       sourceEventId: cell.sourceEventId,
@@ -297,7 +301,10 @@ export async function prepareEBibleTargetImport(
  * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
  *
  * parentId handling: each MatchedCell already carries the correct AD-2 parentId
- * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ * (targetEventId ?? sourceEventId), so commits are always properly chained. A
+ * selected cell that resolved to neither (parentId "") cannot be chained at
+ * all, and AQU-1669 is what dropping those quietly cost: this throws instead,
+ * so the caller can roll its optimistic patch back and show the failure.
  */
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
@@ -320,56 +327,53 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
+  // AQU-1669: a selected cell whose AD-2 parent never resolved (parentId "" —
+  // no targetEventId and no sourceEventId) used to be dropped right here, with
+  // the drop folded into `committedCount`. When that silently emptied the whole
+  // batch the caller still reported success: the artifact upload below was
+  // skipped (`groups.length > 0` was false), no commit was enqueued, and the
+  // dialog closed over an optimistic patch nobody ever undid — the translations
+  // sat in the editor looking saved and were gone on reopen, with no warning.
+  // A cell the user explicitly selected is never safe to drop quietly, so fail
+  // the whole apply loudly instead and let handleApply roll the patch back.
+  const unchainable = toCommit.filter((cell) => !cell.parentId)
+  if (unchainable.length > 0) {
+    throw new Error(
+      t("importExport.errors.unchainableTargetCells", {
+        count: unchainable.length,
+        total: toCommit.length,
+      }),
+    )
+  }
+
   const groups = [...byFile].map(([fileId, cells]) => ({
     fileId,
-    commits: cells
-      .filter((cell) => cell.parentId)
-      .map((cell) => ({
-        id: uuidv7(),
-        cellId: cell.cellId,
-        parentId: cell.parentId!,
-        value: cell.incomingText,
-      })),
+    commits: cells.map((cell) => ({
+      id: uuidv7(),
+      cellId: cell.cellId,
+      parentId: cell.parentId,
+      value: cell.incomingText,
+    })),
   })).filter((group) => group.commits.length > 0)
+  // Every selected cell is chainable by the guard above, so this is exactly the
+  // count the user approved — never a quietly reduced one (AQU-1669).
   const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
   // Preserve the exact target-side input before queuing any edits. One
   // immutable artifact can bind to several Aquilla files, and the active lane
   // is part of every binding so later audit/export never confuses languages.
+  //
+  // AQU-1365: the artifact routes sit at Project lead (500), but a target
+  // import only needs Contributor (400) for its commits, and the Import
+  // button now opens a translation import for Contributors. A role refusal
+  // (403) therefore skips the preserved copy and still imports the text;
+  // any other failure still stops the import before a commit is queued.
   const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
   if (sourceArtifact && groups.length > 0) {
-    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
-    const artifactId = uuidv7()
-    await uploadSourceOriginal({
-      projectId: ctx.projectId,
-      fileId: firstFileId,
-      artifactId,
-      bytes: sourceArtifact.bytes,
-      format: sourceArtifact.format,
-      artifactName: sourceArtifact.name,
-      bindingRole: "target",
-      targetLang: ctx.targetLang,
-      profileId: `builtin:target-${sourceArtifact.format}`,
-      profileVersion: "1",
-      fidelity: "preserved-only",
-      updateSourceSidecar: false,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-    for (const fileId of otherFileIds) {
-      await bindSourceArtifact({
-        projectId: ctx.projectId,
-        fileId,
-        artifactId,
-        memberPath: sourceArtifact.name,
-        profileId: `builtin:target-${sourceArtifact.format}`,
-        profileVersion: "1",
-        fidelity: "preserved-only",
-        bindingRole: "target",
-        targetLang: ctx.targetLang,
-        getToken: ctx.getToken,
-        signal: ctx.signal,
-      })
+    try {
+      await preserveTargetArtifact(sourceArtifact, groups.map((group) => group.fileId), ctx)
+    } catch (error) {
+      if (!isSourceUploadRoleRefusal(error)) throw error
     }
   }
 
@@ -388,6 +392,47 @@ export async function applyEBibleTargetImport(
 
   const skippedCount = matchResult.matched.length - committedCount
   return { committedCount, skippedCount }
+}
+
+/** Upload a target import's original once and bind it to every file it fills. */
+async function preserveTargetArtifact(
+  sourceArtifact: TargetImportArtifact,
+  fileIds: readonly string[],
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal" | "targetLang">,
+): Promise<void> {
+  const [firstFileId, ...otherFileIds] = fileIds
+  const artifactId = uuidv7()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: firstFileId,
+    artifactId,
+    bytes: sourceArtifact.bytes,
+    format: sourceArtifact.format,
+    artifactName: sourceArtifact.name,
+    bindingRole: "target",
+    targetLang: ctx.targetLang,
+    profileId: `builtin:target-${sourceArtifact.format}`,
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const fileId of otherFileIds) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId,
+      artifactId,
+      memberPath: sourceArtifact.name,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -1578,12 +1623,7 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const reimportKeys = [
-    result.bookCode?.trim().toUpperCase(),
-    result.name.trim().toLowerCase(),
-    result.originalName?.trim().toLowerCase(),
-  ].filter((key): key is string => Boolean(key))
-  const existingFileId = reimportKeys
+  const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
   const fileId = existingFileId ?? uuidv7()

@@ -30,7 +30,7 @@ paid display, and unavailable prices. No production payment occurs in this work.
 ### Minimum operator launch sequence
 
 1. Apply pending Postgres migrations, including
-   `0129_weekly_allowance_overrides.sql` and `0130_live_workspace_checkout.sql`,
+   `0148_weekly_allowance_overrides.sql` and `0149_live_workspace_checkout.sql`,
    before deploying this code. Historical attempts keep their sandbox identity.
 2. Load a **live** Stripe secret into your local environment and set
    `STRIPE_ACCOUNT_ID` to the intended live account. Prepare its native catalog:

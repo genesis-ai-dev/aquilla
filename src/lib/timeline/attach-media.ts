@@ -72,6 +72,7 @@ export async function attachMediaFileToTimeline(
           ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
           : {}),
         audioOrigin: "attach", // AQU-1572
+        surface: "timeline",
         author: ctx.author,
       })
       prevCellId = s.cellId
@@ -150,6 +151,7 @@ export async function attachMediaUrlToTimeline(
     slot: "recording",
     durationMs: Math.round(durationMs),
     audioOrigin: "attach", // AQU-1572
+    surface: "timeline",
     author: ctx.author,
   })
 

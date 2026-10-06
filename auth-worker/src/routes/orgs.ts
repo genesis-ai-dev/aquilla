@@ -16,6 +16,7 @@ import {
   createGroup,
   createOrgForUser,
   deleteGroup,
+  deleteOrganization,
   detachGroupProject,
   getEffectiveOrgRole,
   getMemberEffectiveAccess,
@@ -34,6 +35,7 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  summarizeVisiblePortfolios,
   findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
@@ -245,6 +247,32 @@ orgs.patch("/:orgId", zValidator("json", renameOrgBody), async (c) => {
   return c.json({ id: orgId, name })
 })
 
+/**
+ * DELETE /api/v2/orgs/:orgId — owner only (AQU-1108).
+ * Membership role, not getEffectiveOrgRole: a platform admin who is not an
+ * owner of this org cannot delete it.
+ */
+orgs.delete("/:orgId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT id FROM organizations WHERE id = ?",
+  ).bind(orgId).first<{ id: number }>()
+  if (!row) return c.json({ error: "not found" }, 404)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.OWNER) return c.json({ error: "org owner required" }, 403)
+  const result = await deleteOrganization(c.env, orgId)
+  if (!result.ok) {
+    return c.json({
+      error: "organization_has_projects",
+      projectCount: result.projectCount,
+      message: "This organization still has projects. Remove them before deleting the organization.",
+    }, 409)
+  }
+  return c.json({ removed: true })
+})
+
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
 orgs.get("/me", async (c) => {
   const user = c.get("user")
@@ -290,40 +318,70 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
-/** Cap on an explicit orgIds list. All-orgs omits orgIds and uses memberships. */
-export const PORTFOLIO_ORG_IDS_MAX = 500
+/** No length cap. Omitted orgIds resolves every membership (AQU-756). */
+const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
 const portfolioBatchBody = z.object({
-  orgIds: z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional(),
+  orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
+})
+
+const portfolioSummaryBody = z.object({
+  orgIds: portfolioOrgIdsField,
+})
+
+/**
+ * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
+ * for this org"). There is no org-count cap. Omitted orgIds means every
+ * membership. An empty array still means none. Platform admins may name
+ * orgs they are not members of; everyone else must belong to each explicit id.
+ */
+async function resolvePortfolioOrgIds(
+  env: Env,
+  user: AuthUser,
+  orgIds: number[] | undefined,
+): Promise<{ orgIds: number[]; isAdmin: boolean } | { error: "not an org member" }> {
+  const fromMemberships = orgIds == null
+  const uniqueOrgIds = fromMemberships
+    ? (await listUserOrgs(env, user)).map((org) => org.id)
+    : [...new Set(orgIds)]
+  const isAdmin = isPlatformAdminEmail(env, user.email)
+  if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
+    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+    const allowed = await env.AQUILLA_PG.prepare(
+      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
+    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
+      return { error: "not an org member" }
+    }
+  }
+  return { orgIds: uniqueOrgIds, isAdmin }
+}
+
+/** POST /api/v2/orgs/portfolio/summary — overview totals, not the project list. */
+orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async (c) => {
+  const user = c.get("user")
+  const scope = await resolvePortfolioOrgIds(c.env, user, c.req.valid("json").orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const summary = await summarizeVisiblePortfolios(
+    c.env,
+    scope.orgIds,
+    { userId: user.id, isAdmin: scope.isAdmin },
+  )
+  return c.json({ ...summary.totals, orgs: summary.orgs })
 })
 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
   const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
-  // AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
-  // for this org"). Omitted orgIds means every membership, so all-orgs does
-  // not have to POST the whole id list. An empty array still means none.
-  const fromMemberships = orgIds == null
-  const uniqueOrgIds = fromMemberships
-    ? (await listUserOrgs(c.env, user)).map((org) => org.id)
-    : [...new Set(orgIds)]
+  const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const { orgIds: uniqueOrgIds, isAdmin } = scope
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
-
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  if (!isAdmin && !fromMemberships) {
-    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await c.env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
-    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
-      return c.json({ error: "not an org member" }, 403)
-    }
-  }
 
   const q = (qRaw ?? "").trim().toLowerCase()
   const pickerMode = limitNum != null || cursorRaw != null || q !== ""
@@ -1227,8 +1285,16 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   )
     .bind(invite.org_id, user.id)
     .first<{ role_level: number }>()
+  // [Pen test 2026-10-06] Same-user re-redeem is idempotent-while-member only
+  // (mirrors AQU-347 for projects): a removed member's old link is dead and a
+  // demoted member's role is not restored.
+  if (invite.used_at && invite.used_by === user.id && !existing) {
+    return c.json({ error: "Invite already used" }, 410)
+  }
   const finalRole = existing
-    ? Math.max(existing.role_level, invite.role_level)
+    ? invite.used_at
+      ? existing.role_level
+      : Math.max(existing.role_level, invite.role_level)
     : invite.role_level
 
   try {

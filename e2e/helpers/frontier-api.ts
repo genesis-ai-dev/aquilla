@@ -199,7 +199,14 @@ export async function renameProjectLane(
 export async function linkProjectToSource(
   jwt: string,
   projectId: string,
-  args: { sourceProjectId: string; mode: "clone" | "live"; consumes?: "source" | "target"; gate?: "head" | "validated" },
+  args: {
+    sourceProjectId: string
+    mode: "clone" | "live"
+    consumes?: "source" | "target"
+    gate?: "head" | "validated"
+    /** AQU-1559: the UPSTREAM file ids to follow; omit for the whole project. */
+    fileIds?: string[]
+  },
 ): Promise<{ seeded: boolean }> {
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/link-source`,
@@ -213,6 +220,11 @@ export interface MergeSiblingResponse {
   merged?: number
   skipped?: Array<{ cellId: string; preview: string }>
   lane?: string
+  /** AQU-1602: the donor lane that was folded, and the host lane it became. */
+  donorLaneId?: string | null
+  hostLaneId?: string | null
+  /** AQU-1602: on a refused fold, the donor lanes to choose between. */
+  donorLanes?: Array<{ id: string; name: string }>
   actions?: { laneRegistered: boolean; donorArchived: boolean; donorPointerWritten: boolean }
   error?: string
 }
@@ -223,7 +235,14 @@ export interface MergeSiblingResponse {
 export async function mergeSiblingProject(
   jwt: string,
   hostProjectId: string,
-  args: { donorProjectId: string; lane: string },
+  args: {
+    donorProjectId: string
+    lane: string
+    /** AQU-1602: which of the donor's lanes to fold, by `lanes.id`. Omit it and
+     *  the fold takes the donor's single active lane; a donor with several is
+     *  refused with the candidates in `donorLanes`. */
+    donorLaneId?: string
+  },
 ): Promise<{ status: number; body: MergeSiblingResponse }> {
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(hostProjectId)}/merge-sibling`,

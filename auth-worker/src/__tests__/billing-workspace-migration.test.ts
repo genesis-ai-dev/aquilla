@@ -107,8 +107,8 @@ it('preserves sandbox history while allowing explicit live attempts and replayab
       INSERT INTO workspace_checkout_attempts (id) VALUES ('sandbox');
       CREATE TABLE org_billing (org_id bigint PRIMARY KEY, plan text, consumed bigint);
       INSERT INTO org_billing VALUES (1, 'enterprise', 123);`)
-    const weekly = readFileSync(new URL('../../../db/postgres/migrations/0129_weekly_allowance_overrides.sql', import.meta.url), 'utf8')
-    const live = readFileSync(new URL('../../../db/postgres/migrations/0130_live_workspace_checkout.sql', import.meta.url), 'utf8')
+    const weekly = readFileSync(new URL('../../../db/postgres/migrations/0148_weekly_allowance_overrides.sql', import.meta.url), 'utf8')
+    const live = readFileSync(new URL('../../../db/postgres/migrations/0149_live_workspace_checkout.sql', import.meta.url), 'utf8')
     await db.exec(weekly)
     await db.exec(live)
     await db.exec("INSERT INTO workspace_checkout_attempts VALUES ('live', false)")

@@ -1,15 +1,22 @@
 // AQU-538 slice 4: opt-in sibling-project merge fold (server side).
 //
-//   POST /api/v1/projects/:hostId/merge-sibling   { donorProjectId, lane }
+//   POST /api/v1/projects/:hostId/merge-sibling
+//     { donorProjectId, lane, donorLaneId? }
 //
 // The merge tool folds a legacy single-pair "sibling" project (the donor)
 // into a host project as one additional target-language LANE. It is the
-// front-door analogue of the mirror engine (link-sync.ts): it reads the
-// donor's DEFAULT-lane translations and re-emits them as `target.cell.commit
+// front-door analogue of the mirror engine (link-sync.ts): it reads ONE donor
+// lane's translations and re-emits them as `target.cell.commit
 // { targetLang: <lane> }` events on the HOST through the SAME event insert +
 // projection path a translator's first commit takes — so lane-qualified chain
 // slots (slice 1) let the new lane coexist beside the host's existing lanes
 // without competing for a chain slot.
+//
+// AQU-1602: that donor lane is chosen by `lanes.id` (`donorLaneId`), falling
+// back to the donor's single active lane. It used to be the former default
+// lane by tag and nothing else, so a donor whose one lane is not that lane
+// folded nothing while reporting success — see chooseDonorLane. The host lane
+// comes back as `hostLaneId` so callers can address it by id too.
 //
 // Match key: the shared `cell_id`. A donor cell whose id also exists on the
 // host's SOURCE side becomes a host lane commit chained on the host source
@@ -37,7 +44,17 @@ import { buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, t
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import type { EventPayloads } from './types'
-import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
+import {
+  ensureTargetLaneStmt,
+  listProjectLanes,
+  retryingLaneIdCollision,
+} from '../../../db/shared/lanes'
+import {
+  chooseDonorLane,
+  donorLaneRefusalMessage,
+  type ChooseDonorLaneRefusal,
+  type DonorLaneCandidate,
+} from '../../../src/lib/lanes/merge-donor-lane'
 
 const BATCH_LIMIT = 100
 const MERGE_AUTHOR = 'merge-sibling'
@@ -52,6 +69,28 @@ export interface MergeSiblingResult {
   merged: number
   skipped: MergeSkip[]
   lane: string
+  /** AQU-1602: the donor lane that was folded, by `lanes.id`. */
+  donorLaneId: string
+  /**
+   * AQU-1602: the host lane the rows landed in, by `lanes.id` — the record
+   * `ensureTargetLaneStmt` created, or the one an earlier run already made.
+   * Null only when there was nothing to fold, so no lane was created.
+   */
+  hostLaneId: string | null
+}
+
+/**
+ * AQU-1602: the donor lane could not be chosen, so nothing was written. The
+ * route turns this into a 400 with the candidates; it is never a 500.
+ */
+export class MergeSiblingRefusal extends Error {
+  constructor(
+    readonly reason: ChooseDonorLaneRefusal,
+    readonly candidates: DonorLaneCandidate[],
+  ) {
+    super(donorLaneRefusalMessage(reason, candidates))
+    this.name = 'MergeSiblingRefusal'
+  }
 }
 
 /**
@@ -91,22 +130,50 @@ interface HostSourceRow {
  */
 export async function mergeSibling(
   db: AquillaDb,
-  args: { hostProjectId: string; donorProjectId: string; lane: string },
+  args: {
+    hostProjectId: string
+    donorProjectId: string
+    lane: string
+    /**
+     * AQU-1602: the donor lane to fold, by `lanes.id`. Omitted picks the
+     * donor's single active lane; a donor with several is refused rather than
+     * guessed. See {@link chooseDonorLane}.
+     */
+    donorLaneId?: string | null
+  },
 ): Promise<MergeSiblingResult> {
   const { hostProjectId, donorProjectId, lane } = args
 
-  // Donor DEFAULT-lane target rows (side='target' AND target_lang='') — the
-  // translations being folded. Non-default donor lanes are out of scope for
-  // v1 (a legacy pair project only ever has the default lane).
+  // AQU-1602: which donor lane is being folded. The tool used to read the
+  // donor's `target_lang = ''` rows and only those, so a donor whose one lane
+  // is not the former default lane folded nothing while reporting success.
+  const donorLanes = (await listProjectLanes(db, donorProjectId))
+    .filter((row) => row.role === 'target')
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      legacyTag: row.legacyTag,
+      archivedAt: row.archivedAt,
+    }))
+  const chosen = chooseDonorLane({ lanes: donorLanes, donorLaneId: args.donorLaneId })
+  if (!chosen.ok) throw new MergeSiblingRefusal(chosen.reason, chosen.candidates)
+  const donorLane = chosen.lane
+
+  // The donor's target rows for that lane — the translations being folded.
+  //
+  // Matched on `lane_id`, which is row identity: `cells.lane_id` is NOT NULL
+  // (migration 0104) and part of the primary key (0114), so there is no legacy
+  // row for a tag fallback to rescue. Same key the assignment and
+  // last-change reads use (AQU-1609, readLaneLastChange).
   const donorRows =
     (
       await db
         .prepare(
           `SELECT file_id, cell_id, value, value_html, event_id
-           FROM cells
-           WHERE project_id = ? AND side = 'target' AND target_lang = ''`,
+             FROM cells
+            WHERE project_id = ? AND side = 'target' AND lane_id = ?`,
         )
-        .bind(donorProjectId)
+        .bind(donorProjectId, donorLane.id)
         .all<DonorTargetRow>()
     ).results ?? []
 
@@ -173,7 +240,15 @@ export async function mergeSibling(
   }
 
   if (eventRows.length === 0) {
-    return { merged: 0, skipped, lane }
+    // Nothing matched, so no lane was created — report the one an earlier run
+    // may have left, and null otherwise.
+    return {
+      merged: 0,
+      skipped,
+      lane,
+      donorLaneId: donorLane.id,
+      hostLaneId: await readHostLaneId(db, hostProjectId, lane),
+    }
   }
 
   // Allocate real server_seqs and commit through the front door (canonical
@@ -204,8 +279,13 @@ export async function mergeSibling(
   // The lane statement leads the FIRST batch, so the record and the first rows
   // that use it commit together: a fold that fails before writing anything
   // leaves no empty lane behind, and a re-run finds the record and reuses it.
-  allStmts.unshift(ensureTargetLaneStmt(db, hostProjectId, lane))
-  for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
+  // AQU-1606: that statement mints an id. A global collision rolls the batch
+  // back, so the same statements run again with a new id and nothing is written twice.
+  const lead = Math.min(BATCH_LIMIT - 1, allStmts.length)
+  await retryingLaneIdCollision(() =>
+    runFoldBatch(db, [ensureTargetLaneStmt(db, hostProjectId, lane), ...allStmts.slice(0, lead)]),
+  )
+  for (let i = lead; i < allStmts.length; i += BATCH_LIMIT) {
     await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))
   }
 
@@ -220,7 +300,35 @@ export async function mergeSibling(
     ])
   }
 
-  return { merged: eventRows.length, skipped, lane }
+  return {
+    merged: eventRows.length,
+    skipped,
+    lane,
+    donorLaneId: donorLane.id,
+    hostLaneId: await readHostLaneId(db, hostProjectId, lane),
+  }
+}
+
+/**
+ * AQU-1602: the host lane the fold writes into, by `lanes.id`.
+ *
+ * `ensureTargetLaneStmt` is an upsert that keeps an existing record, so the id
+ * it would have minted is not the lane's id on a re-run. Reading the row back
+ * by its tag gives the caller the lane it can address by id either way.
+ */
+async function readHostLaneId(
+  db: AquillaDb,
+  hostProjectId: string,
+  tag: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT id FROM lanes
+        WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+    )
+    .bind(hostProjectId, tag)
+    .first<{ id: string }>()
+  return row?.id ?? null
 }
 
 /**
@@ -285,14 +393,17 @@ export async function handleMergeSiblingRequest(
     return new Response('role >= project_lead (500) required', { status: 403 })
   }
 
-  let body: { donorProjectId?: unknown; lane?: unknown }
+  type MergeBody = { donorProjectId?: unknown; lane?: unknown; donorLaneId?: unknown }
+  let body: MergeBody
   try {
-    body = (await request.json()) as { donorProjectId?: unknown; lane?: unknown }
+    body = (await request.json()) as MergeBody
   } catch {
     return new Response('invalid JSON body', { status: 400 })
   }
   const donorProjectId = typeof body.donorProjectId === 'string' ? body.donorProjectId : ''
   const lane = typeof body.lane === 'string' ? body.lane.trim() : ''
+  // AQU-1602: optional — omitted means "the donor's single active lane".
+  const donorLaneId = typeof body.donorLaneId === 'string' ? body.donorLaneId.trim() : ''
   if (!donorProjectId) return new Response('donorProjectId required', { status: 400 })
   if (!lane) return new Response('lane required', { status: 400 })
   if (donorProjectId === hostId) return new Response('donor and host must differ', { status: 400 })
@@ -316,11 +427,33 @@ export async function handleMergeSiblingRequest(
     }
   }
 
-  const result = await mergeSibling(env.AQUILLA_PG, {
-    hostProjectId: hostId,
-    donorProjectId,
-    lane,
-  })
+  let result: MergeSiblingResult
+  try {
+    result = await mergeSibling(env.AQUILLA_PG, {
+      hostProjectId: hostId,
+      donorProjectId,
+      lane,
+      donorLaneId: donorLaneId || undefined,
+    })
+  } catch (err) {
+    // AQU-1602: an unchoosable donor lane is the caller's to resolve, not a
+    // server fault. Nothing was written, so the merge is safe to re-run with
+    // one of the lanes named here.
+    if (err instanceof MergeSiblingRefusal) {
+      return Response.json(
+        {
+          error: err.message,
+          reason: err.reason,
+          donorLanes: err.candidates.map((candidate) => ({
+            id: candidate.id,
+            name: candidate.name,
+          })),
+        },
+        { status: 400 },
+      )
+    }
+    throw err
+  }
 
   return Response.json({ hostId, ...result })
 }

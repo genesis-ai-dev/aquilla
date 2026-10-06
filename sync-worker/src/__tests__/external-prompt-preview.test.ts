@@ -638,4 +638,50 @@ describe("external prompt preview", () => {
       expect(res!.status).toBe(401)
     })
   })
+
+  // AQU-1586: `?targetLang=` carries a lane's `legacy_tag`, which is an EVENT
+  // KEY, not a language. `planNewTargetLane` sets that tag to the lane's opaque
+  // 8-hex id whenever the language string is already taken by a sibling or
+  // matches the project default — so passing it through as the target language
+  // asked the model to translate "into a3f09c1e". The language lives on the
+  // lane ROW, and the preview must report what the editor would really send.
+  describe("the target language comes from the lane row", () => {
+    beforeEach(async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "God saw the light" })
+    })
+
+    it("resolves a lane tagged with its own id to the lane's language", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('a3f09c1e', 'proj-a', 'target', 'Spanish (Mexico team)', 'es', 'a3f09c1e', 1)`,
+      )
+      const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=a3f09c1e")
+      expect(status).toBe(200)
+      expect(body.targetLang).toBe("a3f09c1e")
+      expect(body.targetLanguage).toBe("es")
+      // And the assembled prompt carries the language, not the key.
+      expect(body.messages[0].content).toContain("es")
+      expect(body.messages[0].content).not.toContain("a3f09c1e")
+    })
+
+    it("leaves a lane whose tag IS a language exactly as it was", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('frc00002', 'proj-a', 'target', 'French (Canada)', 'fra', 'fr-CA', 1)`,
+      )
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=fr-CA")
+      expect(body.targetLanguage).toBe("fr-CA")
+    })
+
+    it("falls back to the project target when no lane row carries the tag", async () => {
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
+      expect(body.targetLanguage).toBe("French")
+    })
+
+    it("still inherits the project target for the default lane", async () => {
+      const { body } = await preview(testDb, token, "cell-live")
+      expect(body.targetLang).toBe("")
+      expect(body.targetLanguage).toBe("French")
+    })
+  })
 })

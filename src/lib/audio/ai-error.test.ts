@@ -133,7 +133,7 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
 
   it("recognizes the authored Inworld-not-configured body", () => {
     const raw =
-      "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+      "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server, so a Gemini API key will not fix it."
     const result = categorizeAiError(raw)
     expect(result.category).toBe("hosted-tts-not-configured")
     expect(result.title).toBe("Inworld TTS isn't configured")

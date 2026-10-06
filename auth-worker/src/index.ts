@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   DELETE /api/v2/orgs/:orgId   (owner; 409 while any project row remains)
 //   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
@@ -87,6 +88,8 @@ import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
+import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -98,6 +101,7 @@ import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
+import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
@@ -115,6 +119,7 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
+import { pruneExpiredTraces } from "./lib/contextual/traces"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
@@ -128,6 +133,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 
 const app = new Hono<HonoEnv>()
 
@@ -199,11 +205,12 @@ app.use("*", async (c, next) => {
   try {
     await next()
   } catch (err) {
+    const path = redactLogPath(c.req.path)
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${path}`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.duration_ms": Date.now() - startedAt,
         "error.message": err instanceof Error ? err.message : String(err),
       }),
@@ -212,14 +219,18 @@ app.use("*", async (c, next) => {
   }
   const durationMs = Date.now() - startedAt
   if (durationMs >= SLOW_REQUEST_MS) {
+    // OPS-42: `redactLogPath`, not `c.req.path` — [slow-request] fires on
+    // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+    // access-link redeem that merely ran slowly would log a live token.
+    const path = redactLogPath(c.req.path)
     console.warn(
-      `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+      `[slow-request] ${c.req.method} ${path} took ${durationMs}ms (status ${c.res.status})`,
     )
     runInBackground(
       c,
-      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${path} (${durationMs}ms)`, {
         "http.method": c.req.method,
-        "http.path": c.req.path,
+        "http.path": path,
         "http.status": c.res.status,
         "http.duration_ms": durationMs,
       }),
@@ -296,6 +307,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 // file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
 // keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
 app.route("/api/v2/projects", agentMemoryRoutes)
+// AI intervention audit trail (AQU-1656): prompts, outputs and examples
+// behind each AI draft. Sibling router (routes/ai-interventions.ts).
+app.route("/api/v2/projects", aiInterventionRoutes)
 // Scene briefs (contextual translation pipeline §9). Sibling router — same
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)
@@ -393,6 +407,13 @@ app.route("/api/v1/ai/seams", aiSeamsRoutes)
 // route; answers who is in a passage, whether it opens a scene, whether it is
 // speech, and which passages it leans on.
 app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
+// Smart edits: suggestions distilled from the project's own human edits
+// (memory → Jev verify). Same session auth and per-user window as the seam
+// route; never fails its caller.
+app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+// Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
+// first). One batched Jev call per passage; never fails its caller.
+app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)
@@ -531,6 +552,8 @@ const scheduled = async (
     // revoked_tokens hygiene lives here now, off the request path (it used to
     // be a random 2%-of-logouts DELETE). Non-throwing.
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
+    // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
+    await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.

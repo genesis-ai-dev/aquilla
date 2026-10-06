@@ -104,6 +104,11 @@ export interface Env {
    *  email includes a "join the community" CTA; when absent the email simply
    *  omits it (no dead link). Plain config var, not a secret. */
   DISCORD_INVITE_URL?: string
+  /** Webhook URL of the private channel that receives in-app feedback
+   *  (services/discord-feedback.ts). Worker SECRET: anyone holding it can post
+   *  to the channel. When absent the route still accepts the report and answers
+   *  `delivered: false` (local/e2e). */
+  DISCORD_FEEDBACK_WEBHOOK_URL?: string
 
   ENVIRONMENT?: string
   /**
@@ -173,6 +178,12 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -232,6 +243,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them

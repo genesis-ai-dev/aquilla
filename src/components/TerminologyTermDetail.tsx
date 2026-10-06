@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
+import type { Concept, ConceptExternalIds, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
@@ -26,6 +26,7 @@ import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
 import { TermFormsSection } from "@/components/terminology/TermFormsSection"
+import { BibleEntityLinkSection } from "@/components/terminology/BibleEntityLinkSection"
 import { predictEquivalents, type PredictedEquivalent } from "@/lib/terminology/equivalents"
 import { matchesConcept } from "@/lib/terminology/match"
 import { deriveTermVerdict } from "@/lib/terminology/verdict"
@@ -359,6 +360,14 @@ export interface TerminologyTermDetailProps {
   onCaseSensitiveChange?: (conceptId: string, caseSensitive: boolean) => void | Promise<void>
   /** Offered when the project has no prefix/suffix inventory yet. */
   onSetUpAffixes?: () => void
+  /**
+   * AQU-1693: show the "Bible person, place or group" section. The caller sets
+   * it only while `isBibleEntityLinkAvailable(project)`; `defaultBook` is the
+   * book the picker lists first.
+   */
+  bibleLink?: { defaultBook?: string }
+  /** AQU-1693: link this concept to a Bible entity, or unlink it (`undefined`). */
+  onExternalIdsChange?: (conceptId: string, externalIds: ConceptExternalIds | undefined) => void | Promise<void>
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -382,6 +391,8 @@ export function TerminologyTermDetail({
   onMatchChange,
   onCaseSensitiveChange,
   onSetUpAffixes,
+  bibleLink,
+  onExternalIdsChange,
   occurrenceTotal,
   enforcedTotal,
   infringedTotal,
@@ -608,6 +619,14 @@ export function TerminologyTermDetail({
           onCaseSensitiveChange={onCaseSensitiveChange}
           onSetUpAffixes={onSetUpAffixes}
         />
+        {bibleLink && onExternalIdsChange && (
+          <BibleEntityLinkSection
+            concept={concept}
+            canEdit={canManageTermbase}
+            defaultBook={bibleLink.defaultBook}
+            onChange={onExternalIdsChange}
+          />
+        )}
       </div>
 
       {/* Managed renderings / predicted equivalents don't need the cell query. */}

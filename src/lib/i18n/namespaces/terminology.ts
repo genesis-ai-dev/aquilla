@@ -681,6 +681,19 @@ export const terminology = defineNamespace({
     "terminology.page.addFirstConceptButton": "Add first concept",
     "terminology.page.renderingsColumnHeader": "Renderings",
     "terminology.page.deleteConceptDialogTitle": "Delete concept",
+    // ── BibleEntityLinkSection.tsx (AQU-1693): the Bible person, place or
+    // group a concept names, on the term detail page ────────────────────────
+    "terminology.bibleLink.heading": "Bible person, place or group",
+    "terminology.bibleLink.link": "Link to a Bible person, place or group",
+    "terminology.bibleLink.linkedTo": "Linked to {name}",
+    "terminology.bibleLink.change": "Change",
+    "terminology.bibleLink.unlink": "Unlink",
+    "terminology.bibleLink.book": "Book",
+    "terminology.bibleLink.search": "Search names",
+    "terminology.bibleLink.suggested": "Suggested",
+    "terminology.bibleLink.empty": "No person, place or group in this book matches.",
+    "terminology.bibleLink.loadFailed": "Bible data did not load. Try again when you are online.",
+    "terminology.bibleLink.hint": "Voices and Who's Who use this entry's preferred rendering as the name.",
   },
   context: {
     _context: {
@@ -1523,6 +1536,52 @@ export const terminology = defineNamespace({
       },
       "terminology.page.renderingsColumnHeader": {
         description: "Column heading over the renderings column in the concepts table.",
+      },
+      "terminology.bibleLink.heading": {
+        description:
+          "Heading of the term detail section that links a terminology entry to a " +
+          "person, place or group in the Bible data (for example Jesus, Jerusalem, " +
+          "the Pharisees).",
+      },
+      "terminology.bibleLink.link": {
+        description:
+          "Button on the term detail page that opens a list of Bible people, places " +
+          "and groups to link this entry to.",
+      },
+      "terminology.bibleLink.linkedTo": {
+        description: "States which Bible person, place or group this entry is linked to.",
+        placeholders: { name: "The person's, place's or group's name, e.g. Jesus." },
+      },
+      "terminology.bibleLink.change": {
+        description: "Button that reopens the list to link this entry to a different person, place or group.",
+        maxLength: 20,
+      },
+      "terminology.bibleLink.unlink": {
+        description: "Button that removes the link between this entry and the Bible person, place or group.",
+        maxLength: 20,
+      },
+      "terminology.bibleLink.book": {
+        description: "Accessible name of the drop-down that picks which Bible book's people, places and groups to list.",
+      },
+      "terminology.bibleLink.search": {
+        description: "Placeholder and accessible name of the field that filters the list of names.",
+      },
+      "terminology.bibleLink.suggested": {
+        description:
+          "Small heading over the people, places or groups whose name matches this " +
+          "entry's source term, listed first.",
+      },
+      "terminology.bibleLink.empty": {
+        description: "Shown in place of the list when no person, place or group matches the filter.",
+      },
+      "terminology.bibleLink.loadFailed": {
+        description: "Shown in place of the list when the Bible data could not be downloaded.",
+      },
+      "terminology.bibleLink.hint": {
+        description:
+          "Help text under the section heading. Voices and Who's Who are names of Bible " +
+          "data features (who speaks in a verse; who a word refers to); translate them " +
+          "the way the rest of the app does.",
       },
       "terminology.page.deleteConceptDialogTitle": {
         description:

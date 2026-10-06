@@ -178,6 +178,9 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string

@@ -21,6 +21,12 @@
  * verses. S1 needs heading cells, which a verse-per-line corpus has none of.
  * Each check's reasons are counted apart, and --samples picks flags spread
  * evenly over the NT, not the first ones.
+ *
+ * AQU-1699: `--pack-b [--seed n]` runs check pack B instead (participants and
+ * cross-cell consistency): P1, P3, P5, P6 per verse and the P2 and X3 scans,
+ * with English `render.*` decisions for the 30 NT names the Greek uses most,
+ * then the mutation catch rates (Peter↔John, a dropped name) and synthetic
+ * "you" (P8) and "we" (P9) forms. See scripts/lib/bible-checks-eval-pack-b.ts.
  */
 
 import { existsSync, readFileSync } from "node:fs"
@@ -38,6 +44,7 @@ import {
 } from "../db/shared/bible-checks/types"
 import { ABSENT_VERSES } from "../db/shared/bible-checks/variants"
 import { TEXTUAL_VARIANT_POLICIES, type LanguageProfile, type TextualVariantPolicy } from "../db/shared/language-profile"
+import { runPackBEval } from "./lib/bible-checks-eval-pack-b"
 
 const ENGLISH: LanguageProfile = {
   quoteMarks: {
@@ -118,6 +125,24 @@ vrefLines.forEach((ref, i) => {
 
 const manifest = JSON.parse(readFileSync(join(packDir, "manifest.json"), "utf8")) as {
   books: Record<string, { layers: string[] }>
+}
+
+// AQU-1699: check pack B has its own report and mutation suite, over the NT.
+if (process.argv.includes("--pack-b")) {
+  const nt = new Set(
+    "MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV".split(" "),
+  )
+  runPackBEval({
+    packDir,
+    books: Object.entries(manifest.books)
+      .filter(([book, entry]) => nt.has(book) && ["voices", "people", "text"].every((layer) => entry.layers.includes(layer)))
+      .map(([book]) => book),
+    versesByBook,
+    english: ENGLISH,
+    samples,
+    seed: Number.parseInt(arg("seed") ?? "1699", 10),
+  })
+  process.exit(0)
 }
 const totals = new Map<BibleCheckId, number>(checks.map((id) => [id, 0]))
 const reasons = new Map<string, number>()

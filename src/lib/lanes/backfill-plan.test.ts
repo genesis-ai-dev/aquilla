@@ -66,7 +66,7 @@ describe('planLanesForProject', () => {
       legacyTag: '',
       // AQU-1592: `language` is the typed label ('' here) — the live writers
       // store only that. `name`/`langCode` stay on the plan for the one-off
-      // backfill daemon, which still writes the pre-0150 columns.
+      // backfill daemon, which still writes the pre-0152 columns.
       language: '',
       name: BLANK_LANE_PLACEHOLDER,
       langCode: null,

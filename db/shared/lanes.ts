@@ -23,7 +23,7 @@
 // src/lib/lanes/lane-display.ts), because a derived value captured at write
 // time keeps claiming the old language after the label is edited, which is
 // AQU-1585. Nothing can drift if nothing derived is stored. The one-off
-// backfill of rows that predate migration 0150 is AQU-1616's.
+// backfill of rows that predate migration 0152 is AQU-1616's.
 
 import {
   BLANK_LANE_PLACEHOLDER,
@@ -45,7 +45,7 @@ import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
 // on read. The upsert arm fills in a language that is still blank and retires a
-// stored PLACEHOLDER name (a derived value written before 0150) so the derived
+// stored PLACEHOLDER name (a derived value written before 0152) so the derived
 // display takes over — a name the user actually chose is never touched.
 const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
    VALUES (?, ?, 'source', ?, NULL, NULL, NULL, ?)
@@ -341,7 +341,7 @@ export interface ProjectLaneRecord {
   role: "source" | "target"
   /**
    * AQU-1592: the freeform language the user typed. Never derived. Null only
-   * on a row that predates migration 0150 — readers fall back to `name` via
+   * on a row that predates migration 0152 — readers fall back to `name` via
    * `laneLanguage` until the AQU-1616 backfill fills it.
    */
   language: string | null
@@ -437,7 +437,7 @@ export async function updateTargetLane(
   if (!current) return { status: "not_found" }
 
   // An untouched language keeps its stored value verbatim — including the NULL
-  // a row that predates migration 0150 carries, which `laneLanguage` resolves
+  // a row that predates migration 0152 carries, which `laneLanguage` resolves
   // from `name`. Writing '' over that NULL would lose the "not backfilled yet"
   // distinction the AQU-1616 backfill reads.
   const previousLanguage = laneLanguage(current)

@@ -18,7 +18,7 @@
  * label. Nothing can drift if nothing derived is stored — so the derivation
  * lives here, on the read path, and every reader goes through it.
  *
- * MIGRATION FALLBACK: rows that predate migration 0150 carry their label in
+ * MIGRATION FALLBACK: rows that predate migration 0152 carry their label in
  * `name` and a write-time-derived code in `langCode`, with `language` NULL.
  * `laneLanguage` therefore falls back to `name`, and a stored `langCode` is
  * honoured as an override. The batch backfill (AQU-1616) is what fills
@@ -32,7 +32,7 @@ import { BLANK_LANE_PLACEHOLDER, codeForLanguageLabel, SOURCE_LANE_PLACEHOLDER }
  * The identity fields of a lane row, as every representation of one carries
  * them (`ProjectLaneRecord`, `ProjectLaneView`, a raw SQL row mapped to camel
  * case). Every field is optional so a caller holding a partial row — or a row
- * from a server that predates 0150 — can still ask.
+ * from a server that predates 0152 — can still ask.
  */
 export interface LaneIdentity {
   role?: "source" | "target"
@@ -44,7 +44,7 @@ export interface LaneIdentity {
 /**
  * The language this lane translates into, as the user typed it.
  *
- * Falls back to the stored `name` for a row that predates 0150 (see MIGRATION
+ * Falls back to the stored `name` for a row that predates 0152 (see MIGRATION
  * FALLBACK above). Returns "" when the lane carries neither — a BLANK project
  * whose target language was never set.
  */

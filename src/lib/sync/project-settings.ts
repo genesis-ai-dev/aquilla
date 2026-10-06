@@ -443,7 +443,7 @@ export interface ProjectLaneView {
   role: "source" | "target"
   /**
    * AQU-1592: the freeform language the user typed, never derived. Null on a
-   * row that predates migration 0150, and absent from a server that predates
+   * row that predates migration 0152, and absent from a server that predates
    * it — read it through `laneLanguage` / `laneDisplayName`
    * (src/lib/lanes/lane-display.ts), which fall back to `name`.
    */

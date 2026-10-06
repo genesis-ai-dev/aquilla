@@ -1092,9 +1092,9 @@ export const editor = defineNamespace({
     "editor.timeline.badgeNotLinked": "not linked",
     "editor.timeline.badgeNotImported": "not imported",
     "editor.timeline.badgeImportedCount": "{count} imported",
-    // Sam, Oct 5: the Sources menu's track rows say why they're off in a
-    // badge this short; "Enable track editing in Project Settings" is its tooltip.
-    "editor.timeline.badgeTrackEditingOff": "track editing off",
+    // Sam, Oct 5: the Sources menu's track rows are just greyed out when track
+    // editing is off; this is what hovering one says.
+    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project Settings.",
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
@@ -2218,14 +2218,13 @@ export const editor = defineNamespace({
           count: "How many audio cues are imported on this file.",
         },
       },
-      "editor.timeline.badgeTrackEditingOff": {
+      "editor.timeline.trackEditingOffHint": {
         description:
-          "State badge on the Sources menu's 'Attach captions' and 'Align script' " +
-          "rows when they are unavailable because the project's track-editing " +
-          "setting ('Let maintainers add and edit timeline tracks') is off. Its " +
-          "tooltip says where to turn it on. Lower-case, no period, and short: it " +
-          "sits beside the row's label as a status, like 'not imported'.",
-        maxLength: 20,
+          "Tooltip on the Sources menu's greyed-out 'Attach captions' and 'Align " +
+          "script' rows. They are unavailable because the project's track-editing " +
+          "setting ('Let maintainers add and edit timeline tracks') is off, and only " +
+          "people who can turn it on see these rows. 'Project Settings' is the name " +
+          "of the settings page.",
       },
       "editor.timeline.noSpeechHere": {
         description:

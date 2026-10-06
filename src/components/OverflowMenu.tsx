@@ -2,7 +2,7 @@ import { useId, useState, type ComponentType, type ReactNode, type Ref } from "r
 import type { VariantProps } from "class-variance-authority"
 import { Info, MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
@@ -30,6 +30,13 @@ export interface OverflowMenuItem {
    * somewhere, but not as a paragraph inside the menu).
    */
   description?: string
+  /**
+   * Why a disabled item is disabled, shown when you hover it. The row stays
+   * clean, greyed out with no inline text (Sam, Oct 5: "track editing off"
+   * beside "Attach captions" was too many words for one row), and the reason
+   * reaches assistive tech as the item's description.
+   */
+  disabledReason?: string
   onClick?: () => void
   checked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -113,16 +120,36 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
   // The hint text lives in a visually hidden span and reaches the item through
   // aria-describedby, so the accessible NAME stays the bare label and the copy
   // lands in the DESCRIPTION. Sighted users get the same text from the icon.
+  const reason = (item: OverflowMenuItem) => (item.disabled ? item.disabledReason : undefined)
   const describedBy = (item: OverflowMenuItem) =>
-    item.description ? `${menuId}-${item.id}-description` : undefined
-  const body = (item: OverflowMenuItem) => (
-    <>
-      {item.icon && <item.icon className="h-4 w-4" />}
-      <span className="flex-1">{item.label}</span>
-      {item.description && <ItemHint id={describedBy(item)!} text={item.description} />}
-      {item.badge}
-    </>
-  )
+    item.description || reason(item) ? `${menuId}-${item.id}-description` : undefined
+  const body = (item: OverflowMenuItem) => {
+    const why = reason(item)
+    const main = (
+      <>
+        {item.icon && <item.icon className="h-4 w-4" />}
+        <span className="flex-1">{item.label}</span>
+      </>
+    )
+    return (
+      <>
+        {why ? (
+          <>
+            <span id={describedBy(item)} aria-hidden="true" className="sr-only">{why}</span>
+            {/* A disabled row takes no pointer events, so its content takes
+                them back for itself, or the reason could never be hovered. */}
+            <AppTooltip content={why} side="right">
+              <span className="pointer-events-auto flex flex-1 items-center gap-1.5" data-testid={item.testId && `${item.testId}-reason`}>
+                {main}
+              </span>
+            </AppTooltip>
+          </>
+        ) : main}
+        {item.description && <ItemHint id={describedBy(item)!} text={item.description} />}
+        {item.badge}
+      </>
+    )
+  }
   // DropdownMenuContent sizes itself to its anchor with a 192px floor. The
   // info icon and the check indicator share the row with the label, so a
   // panel that carries a hint gets a slightly wider floor to keep short labels

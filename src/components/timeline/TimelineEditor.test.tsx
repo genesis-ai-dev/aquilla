@@ -4535,18 +4535,15 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     render(<TimelineEditor {...base} onRequestImportCaptions={vi.fn()} canImportCaptions={false}
       onRequestImportCharacters={() => {}} canImportCharacters />)
     fireEvent.click(screen.getByTestId("tl-sources-menu"))
-    const item = screen.getByRole("menuitem", { name: /Attach captions/ })
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
     expect(item).toHaveAttribute("data-disabled")
-    // A short badge, like the other rows' "not imported"; the whole sentence
-    // squeezed the label onto two lines (Sam, Oct 5) and is the tooltip now.
-    expect(item).toHaveTextContent(/^Attach captionstrack editing off$/)
-    expect(screen.queryByText("Enable track editing in Project Settings")).toBeNull()
-    // The row is disabled, so the badge has to take the pointer itself for its
-    // tooltip to open.
-    expect(screen.getByTestId("tl-sources-track-editing-off").className).toMatch(/pointer-events-auto/)
-    // And the menu takes its content's width, so the badge can't squeeze the
-    // label onto two lines at the Sources button's width.
-    expect(screen.getByRole("menu").className).toMatch(/(^|\s)w-max(\s|$)/)
+    // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
+    // is the row's hover text and its accessible description.
+    expect(within(item).queryByText("track editing off")).toBeNull()
+    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
+    // The row is disabled, so its content has to take the pointer itself for
+    // the hover text to open.
+    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What

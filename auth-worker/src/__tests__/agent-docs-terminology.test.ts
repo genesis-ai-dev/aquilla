@@ -10,30 +10,11 @@ import { describe, it, expect } from "vitest"
 import { getCookbook } from "../lib/agent/docs"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { AliasMap } from "../lib/agent/compress"
+import { sqlStatements } from "./helpers/cookbook-sql"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const OTHER = "99999999-9999-4999-8999-999999999999"
 const vars: SqlVarContext = { projectId: PROJECT, userId: 42 }
-
-/** Each SQL statement in a cookbook: a line starting with SELECT plus the
- *  clause lines that follow it. */
-function sqlStatements(text: string): string[] {
-  const out: string[] = []
-  let current: string[] | null = null
-  for (const line of text.split("\n")) {
-    if (line.startsWith("SELECT")) {
-      if (current) out.push(current.join("\n"))
-      current = [line]
-    } else if (current && /^(FROM|WHERE|ORDER BY|GROUP BY|LIMIT)\b|^\s+\S/.test(line)) {
-      current.push(line)
-    } else if (current) {
-      out.push(current.join("\n"))
-      current = null
-    }
-  }
-  if (current) out.push(current.join("\n"))
-  return out
-}
 
 async function seedConcept(project: string, id: string, sourceTerm: string, opts: { status?: string; deletedAt?: number } = {}) {
   await env.AQUILLA_PG.prepare(

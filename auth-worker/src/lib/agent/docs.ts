@@ -156,8 +156,14 @@ states are distinct: ai_drafted (machine suggestion, unendorsed) → human-edite
 Never stage a validation on the user's behalf to "fix" this — see the emit note
 below; only the human's own review validates a cell.
 
-The project's validation threshold (how many validators a cell needs):
-SELECT COALESCE(settings::jsonb ->> 'validationCountThreshold', '1') AS threshold
+The project's validation thresholds. threshold is how many validators a cell's
+text needs (the validationCount setting); audio_threshold is how many a recorded
+take needs (validationCountAudio). Both read as 1 when unset and cap at 15, as
+the app does. No row means the project has no settings yet, so both are 1:
+SELECT GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count ~ '^[0-9]+$'
+         THEN validation_count::int END, 1))) AS threshold,
+       GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count_audio ~ '^[0-9]+$'
+         THEN validation_count_audio::int END, 1))) AS audio_threshold
 FROM project_settings WHERE project_id = :project
 
 Who has validated a cell:

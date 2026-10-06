@@ -11,6 +11,11 @@ import {
   type BkpTextLayer,
 } from "../pack-types"
 
+/** The raw files, for tests that serve them over a stubbed fetch. */
+export const MRK1_PEOPLE_JSON: string = peopleJson
+export const MRK1_TEXT_JSON: string = textJson
+export const MRK1_STRUCTURE_JSON: string = structureJson
+
 export function mrk1People(): BkpPeopleLayer {
   const layer = parseLayer("people", "MRK", JSON.parse(peopleJson))
   if (!layer) throw new Error("bkp-v1-MRK-1.people.json is not a people layer for MRK")

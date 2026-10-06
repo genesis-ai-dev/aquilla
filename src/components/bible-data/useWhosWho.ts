@@ -1,0 +1,145 @@
+// Who's Who in the editor (AQU-1689): the table-level half.
+//
+// EditorTable calls this (through useBibleData) once per render. It:
+//   • loads the pack's `people` layer for the open book, with `text` and,
+//     for Who's Who, `structure`, only while Who's Who or the Context tab
+//     (Original-language context) is on;
+//   • builds the people index once per (pack version, book);
+//   • names participants through the label chain;
+//   • turns "go to JHN 4:9" (a popover's next mention, the panel's first
+//     mention) into a scroll to the first cell of that verse.
+// Rows read the result through WhosWhoContext. Nothing here throws: an
+// unavailable pack means no tints, no Context tab, and an empty panel.
+
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import { peopleIndexFor, type PeopleIndex } from "@/lib/bible-data/people-index"
+import { cellVerses, firstVerseBook, type VoiceCellInput } from "@/lib/bible-data/voice-index"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
+import { onMentionJumpRequest } from "./bible-data-bus"
+import { createMentionHighlightStore } from "./mention-highlight-store"
+import { participantName } from "./people-text"
+import { usePeoplePack } from "./people-pack"
+import { useEntityLabels, type EntityLabeler } from "./useEntityLabels"
+import type { WhosWhoContextValue } from "./whos-who-context"
+
+export interface WhosWhoOptions {
+  project: ProjectRecord
+  /** The file's cells as verses, by position (see useVerseCells). */
+  cells: readonly VoiceCellInput[]
+  cellIds: readonly string[]
+  shared: ReadonlySet<BkpRef>
+  fileId: string | null
+  /** The project's Who's Who enrichment is on. */
+  whosWhoOn: boolean
+  /** The project's Original-language context enrichment (the Context tab) is on. */
+  contextOn: boolean
+  /** Scroll the editor to a cell. */
+  jumpToCell: (cellId: string) => void
+  showMentionsOf: (entity: BkpEntityId) => void
+}
+
+export interface WhosWho {
+  context: WhosWhoContextValue | null
+  index: PeopleIndex | null
+  nameOf: ((entityId: BkpEntityId) => string) | null
+}
+
+export function useWhosWho({
+  project,
+  cells,
+  cellIds,
+  shared,
+  fileId,
+  whosWhoOn,
+  contextOn,
+  jumpToCell,
+  showMentionsOf,
+}: WhosWhoOptions): WhosWho {
+  const t = useT()
+  const fmt = useFormat()
+  const prefs = useBibleDataViewPrefs()
+  const enabled = whosWhoOn || contextOn
+  const book = useMemo(() => (enabled ? firstVerseBook(cells) : null), [enabled, cells])
+  const pack = usePeoplePack(book, { structure: whosWhoOn, text: true })
+  const loaded = pack?.ok ? pack : null
+
+  const index = useMemo(
+    () => (loaded ? peopleIndexFor(loaded.version, loaded.people, loaded.structure, loaded.text) : null),
+    [loaded],
+  )
+  const labelFor: EntityLabeler | null = useEntityLabels(project, loaded ? loaded.people.entities : null)
+  const nameOf = useMemo(() => {
+    if (!index || !labelFor) return null
+    const unnamed = t("bibleData.whosWho.unknownParticipant")
+    return (entityId: BkpEntityId): string =>
+      participantName(entityId, index.entities, labelFor, (items) => fmt.list(items, { type: "conjunction" })) ?? unnamed
+  }, [index, labelFor, fmt, t])
+
+  const [store] = useState(createMentionHighlightStore)
+
+  // The first cell of each verse, in file order: where a jump to that verse lands.
+  const firstCellOfVerse = useMemo(() => {
+    const out = new Map<BkpRef, string>()
+    cells.forEach((cell, position) => {
+      for (const ref of cellVerses(cell)?.refs ?? []) {
+        if (!out.has(ref) && position < cellIds.length) out.set(ref, cellIds[position])
+      }
+    })
+    return out
+  }, [cells, cellIds])
+
+  const jumpTo = useCallback(
+    (ref: BkpRef, focus?: BkpEntityId) => {
+      const cellId = firstCellOfVerse.get(ref)
+      if (!cellId) return
+      if (focus) store.requestFocus({ cellId, entity: focus })
+      jumpToCell(cellId)
+    },
+    [firstCellOfVerse, jumpToCell, store],
+  )
+
+  // The Who's Who panel asks for jumps by verse.
+  useEffect(() => {
+    if (!fileId || !whosWhoOn) return
+    return onMentionJumpRequest(fileId, (ref) => jumpTo(ref))
+  }, [fileId, whosWhoOn, jumpTo])
+
+  const context = useMemo<WhosWhoContextValue | null>(
+    () =>
+      index && labelFor && nameOf
+        ? {
+            index,
+            text: loaded?.text ?? null,
+            labelFor,
+            nameOf,
+            store,
+            highlights: whosWhoOn ? prefs.whosWhoHighlights : "off",
+            hints: whosWhoOn ? prefs.impliedSubjectHints : "off",
+            contextTab: contextOn,
+            shared,
+            jumpTo,
+            showMentionsOf: whosWhoOn ? showMentionsOf : null,
+          }
+        : null,
+    [
+      index,
+      labelFor,
+      nameOf,
+      loaded,
+      store,
+      whosWhoOn,
+      contextOn,
+      prefs.whosWhoHighlights,
+      prefs.impliedSubjectHints,
+      shared,
+      jumpTo,
+      showMentionsOf,
+    ],
+  )
+
+  return { context, index: enabled ? index : null, nameOf }
+}

@@ -8,7 +8,7 @@
 // Hover opens the details popover, and so does keyboard focus: hover is never
 // the only way in. Focus stays on the chip, and Tab moves into the popover.
 
-import { Fragment, useId, useRef, useState } from "react"
+import { Fragment } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { BkpEntityId } from "@/lib/bible-data/pack-types"
 import type { Voice } from "@/lib/bible-data/voice-index"
@@ -17,6 +17,7 @@ import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
 import { VoiceDetails } from "./VoiceDetails"
 import type { CellVoiceView } from "./voices-context"
+import { useHoverFocusPopover } from "./use-hover-focus-popover"
 import { narratorKey } from "./voice-text"
 
 interface VoiceChipProps {
@@ -27,21 +28,10 @@ interface VoiceChipProps {
 export function VoiceChip({ view, className }: VoiceChipProps) {
   const t = useT()
   const fmt = useFormat()
-  const [open, setOpen] = useState(false)
-  // A click focuses the chip too; only keyboard focus should open it that way.
-  const pointerDownRef = useRef(false)
-  const openedByFocusRef = useRef(false)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const detailsId = useId()
+  // AQU-1689: the hover-or-focus behavior is shared with Who's Who's mention words.
+  const popover = useHoverFocusPopover()
   const { context, voices, chip } = view
   if (!chip) return null
-
-  /** True when `node` is inside this chip's own popover. */
-  const inOwnPopover = (node: EventTarget | null): boolean => {
-    if (!(node instanceof Node)) return false
-    const popup = document.getElementById(detailsId)?.closest('[data-slot="popover-content"]')
-    return popup?.contains(node) ?? false
-  }
 
   const nameOf = (entityId: BkpEntityId | undefined): string =>
     (entityId ? context.labelFor(entityId)?.label : undefined) ?? t("bibleData.voices.unknownSpeaker")
@@ -64,15 +54,8 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
   })
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        openedByFocusRef.current = false
-        setOpen(next)
-      }}
-    >
+    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
       <PopoverTrigger
-        ref={triggerRef}
         openOnHover
         delay={300}
         closeDelay={150}
@@ -85,24 +68,7 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
           "hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           className,
         )}
-        onPointerDown={() => {
-          pointerDownRef.current = true
-        }}
-        onFocus={() => {
-          if (!pointerDownRef.current) {
-            openedByFocusRef.current = true
-            setOpen(true)
-          }
-          pointerDownRef.current = false
-        }}
-        onBlur={(event) => {
-          // Opened by focus, so it closes when focus moves on, unless it
-          // moves into the popover itself.
-          if (openedByFocusRef.current && !inOwnPopover(event.relatedTarget)) {
-            openedByFocusRef.current = false
-            setOpen(false)
-          }
-        }}
+        {...popover.triggerProps}
       >
         {voices.approximate && (
           <span aria-hidden="true" className="me-0.5">
@@ -135,22 +101,8 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
         ))}
         {chip.more > 0 && <span className="ms-1">{t("bibleData.voices.more", { count: chip.more })}</span>}
       </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="start"
-        className="w-80"
-        // Opened by keyboard focus: keep focus on the chip (Tab moves in).
-        // Opened by a press: move focus in, as a menu would.
-        initialFocus={() => !openedByFocusRef.current}
-        onBlur={(event) => {
-          // Focus left the popover for somewhere other than its chip.
-          const next = event.relatedTarget
-          if (next instanceof Node && (event.currentTarget.contains(next) || triggerRef.current?.contains(next))) return
-          openedByFocusRef.current = false
-          setOpen(false)
-        }}
-      >
-        <VoiceDetails id={detailsId} view={view} nameOf={nameOf} />
+      <PopoverContent side="bottom" align="start" className="w-80" {...popover.contentProps}>
+        <VoiceDetails id={popover.contentId} view={view} nameOf={nameOf} />
       </PopoverContent>
     </Popover>
   )

@@ -12,6 +12,11 @@ import { defineNamespace, plural } from "./types"
  * speech rails and the "Show every line by …" filter in the editor) and
  * `bibleData.view.*` (View settings → Bible data). Pack enums map to these
  * keys through the typed tables in src/components/bible-data/voice-text.ts.
+ *
+ * AQU-1689 adds `bibleData.whosWho.*` (mention highlights, their popover, the
+ * cell filter and the Who's Who panel) and `bibleData.context.*` (the cell's
+ * Context tab). Pack enums map to them through the typed tables in
+ * src/components/bible-data/people-text.ts.
  */
 export const bibleData = defineNamespace({
   keys: {
@@ -124,11 +129,102 @@ export const bibleData = defineNamespace({
     "bibleData.view.labelLanguage.project": "Project names",
     "bibleData.view.labelLanguage.interface": "Interface language",
     "bibleData.view.labelLanguage.english": "English names",
+
+    // ── Who's Who (AQU-1689): mentions in the source text and their popover ──
+    "bibleData.whosWho.kind.explicit": "Named",
+    "bibleData.whosWho.kind.pronoun": "Pronoun",
+    "bibleData.whosWho.kind.subject": "Implied subject",
+    "bibleData.whosWho.pronoun.firstSingular": "I",
+    "bibleData.whosWho.pronoun.firstPlural": "we",
+    "bibleData.whosWho.pronoun.secondSingular": "you",
+    "bibleData.whosWho.pronoun.secondPlural": "you all",
+    "bibleData.whosWho.pronoun.thirdSingularMasculine": "he",
+    "bibleData.whosWho.pronoun.thirdSingularFeminine": "she",
+    "bibleData.whosWho.pronoun.thirdSingularNeuter": "it",
+    "bibleData.whosWho.pronoun.thirdPlural": "they",
+    "bibleData.whosWho.hint": "[{pronoun} = {name}]",
+    "bibleData.whosWho.hintNameOnly": "[{name}]",
+    "bibleData.whosWho.gender.male": "male",
+    "bibleData.whosWho.gender.female": "female",
+    "bibleData.whosWho.gender.masculine": "masculine (grammatical gender)",
+    "bibleData.whosWho.gender.feminine": "feminine (grammatical gender)",
+    "bibleData.whosWho.gender.neuter": "neuter (grammatical gender)",
+    "bibleData.whosWho.number.singular": "singular",
+    "bibleData.whosWho.number.plural": "plural",
+    "bibleData.whosWho.mentionAria": "{word}: {kind}, {name}",
+    "bibleData.whosWho.groupMembers": "A group: {members}",
+    "bibleData.whosWho.unknownParticipant": "Unnamed participant",
+    "bibleData.whosWho.firstMention": "First mention in this passage: {ref}",
+    "bibleData.whosWho.evidence": "{confidence} sure, from {sources}",
+    "bibleData.whosWho.hops": plural({
+      one: "Reached through {count} link",
+      other: "Reached through {count} links",
+    }),
+    "bibleData.whosWho.previousMention": "Previous mention",
+    "bibleData.whosWho.nextMention": "Next mention",
+    "bibleData.whosWho.previousMentionAria": "Previous mention of {name}",
+    "bibleData.whosWho.nextMentionAria": "Next mention of {name}",
+    "bibleData.whosWho.noEarlierMention": "No earlier mention",
+    "bibleData.whosWho.noLaterMention": "No later mention",
+    "bibleData.whosWho.showMentions": "Show cells that mention {name}",
+
+    // ── Who's Who: the cell filter ──
+    "bibleData.whosWho.filter.summary": plural({
+      one: "Showing {count} cell that mentions {name}",
+      other: "Showing {count} cells that mention {name}",
+    }),
+
+    // ── Who's Who: the right-rail panel ──
+    "bibleData.whosWho.panel.edgeTab": "People",
+    "bibleData.whosWho.panel.showAria": "Show Who's Who",
+    "bibleData.whosWho.panel.hideAria": "Hide Who's Who",
+    "bibleData.whosWho.panel.openTooltip": "Who's Who: the people in this passage",
+    "bibleData.whosWho.panel.resizeAria": "Resize the Who's Who panel",
+    "bibleData.whosWho.panel.scrollHint": "Scroll to a verse to see who is in its passage.",
+    "bibleData.whosWho.panel.unavailable.offline":
+      "Bible data for this book is not available offline yet. Try again when you are online.",
+    "bibleData.whosWho.panel.unavailable.notFound": "There is no Bible data for this book yet.",
+    "bibleData.whosWho.panel.unavailable.invalid": "The Bible data for this book could not be read.",
+    "bibleData.whosWho.panel.noPassage": "No passage data for {ref}.",
+    "bibleData.whosWho.panel.range": "{from}–{to}",
+    "bibleData.whosWho.panel.mentions": plural({
+      one: "{count} mention",
+      other: "{count} mentions",
+    }),
+    "bibleData.whosWho.panel.goToFirst": "First: {ref}",
+    "bibleData.whosWho.panel.goToFirstAria": "Go to the first mention of {name} in this passage, {ref}",
+    "bibleData.whosWho.panel.placesAndOthers": plural({
+      one: "{count} place or other reference",
+      other: "{count} places and other references",
+    }),
+    "bibleData.whosWho.panel.alignmentNote":
+      "Word highlights need an alignment between your source text and the Greek or Hebrew. The cast, the cell filter and the Context tab work without one.",
+    "bibleData.whosWho.flag.reintroducePronoun":
+      "Name them again: this passage first refers to them with a pronoun, at {ref}.",
+    "bibleData.whosWho.flag.reintroduceSubject":
+      "Name them again: this passage first refers to them only through a verb, at {ref}.",
+    "bibleData.whosWho.flag.ambiguity": "A pronoun at {ref} may be read as {others}.",
+
+    // ── The cell's Context tab (AQU-1689) ──
+    "bibleData.context.tab": "Context",
+    "bibleData.context.wordsHeading": "Original words",
+    "bibleData.context.refersToSrOnly": "{word} refers to {name}",
+    "bibleData.context.approximate":
+      "Approximate: this cell holds only part of its verse, so it shows the whole verse's words.",
+
+    // ── View settings → Bible data, Who's Who (AQU-1689) ──
+    "bibleData.view.off": "Off",
+    "bibleData.view.whosWhoHighlights": "Who's Who highlights",
+    "bibleData.view.whosWhoHighlights.hover": "On hover or focus",
+    "bibleData.view.whosWhoHighlights.always": "Always on",
+    "bibleData.view.impliedSubjectHints": "Implied-subject hints",
+    "bibleData.view.impliedSubjectHints.names": "Names only",
+    "bibleData.view.impliedSubjectHints.all": "All implied subjects",
   },
   context: {
     _context: {
       description:
-        "Bible data: open datasets about the Bible text. Two surfaces. (1) The 'Bible " +
+        "Bible data: open datasets about the Bible text. Three surfaces. (1) The 'Bible " +
         "data' card in project Settings → General: a list of optional Bible data " +
         "features ('enrichments') under the card's main switch, and a dialog that " +
         "credits the open datasets the data comes from. (2) In the translation editor, " +
@@ -136,6 +232,11 @@ export const bibleData = defineNamespace({
         "('Narrator · Jesus → Samaritan woman'), a popover with details, thin lines " +
         "('speech rails') at the edge of the verse that show where a quotation opens " +
         "and closes, and the matching personal options in the editor's View settings. " +
+        "(3) 'Who's Who': which person each Greek or Hebrew word refers to (a name, a " +
+        "pronoun, or a verb whose subject is implied), highlights and a popover on those " +
+        "words, a side panel listing the people in the current passage, and a 'Context' " +
+        "tab in the expanded cell. 'Passage' means a section of a Bible book, such as a " +
+        "story. " +
         "'Speaker' and 'voice' mean people speaking in the Bible text, never " +
         "text-to-speech voices. Dataset and organization names (Macula, Clear-Bible, " +
         "OpenText, ACAI, BibleAquifer, unfoldingWord, bibletranslation.org) are proper " +
@@ -559,6 +660,353 @@ export const bibleData = defineNamespace({
       },
       "bibleData.view.labelLanguage.english": {
         description: "Option under 'Label language': always use the English names.",
+      },
+      "bibleData.whosWho.kind.explicit": {
+        description:
+          "How a Greek or Hebrew word refers to a person in the Bible text, in the Who's " +
+          "Who popover: the word is the person's name or a noun for them ('Jesus', 'the " +
+          "woman').",
+      },
+      "bibleData.whosWho.kind.pronoun": {
+        description:
+          "How a Greek or Hebrew word refers to a person in the Bible text, in the Who's " +
+          "Who popover: the word is a pronoun ('him', 'her', 'me').",
+      },
+      "bibleData.whosWho.kind.subject": {
+        description:
+          "How a Greek or Hebrew word refers to a person in the Bible text, in the Who's " +
+          "Who popover: the word is a verb whose subject is the person, though the text " +
+          "does not name them ('[he] answered').",
+      },
+      "bibleData.whosWho.pronoun.firstSingular": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[I = Jesus]': the verb's " +
+          "subject is the one speaking. Use the plain subject pronoun of the interface " +
+          "language.",
+      },
+      "bibleData.whosWho.pronoun.firstPlural": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[we = Jesus, Peter]': the " +
+          "verb's subject is the speakers' group.",
+      },
+      "bibleData.whosWho.pronoun.secondSingular": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[you = Samaritan woman]': " +
+          "the verb's subject is ONE person being spoken to. Use the singular, plain form, " +
+          "not a polite form addressed to the app's user.",
+      },
+      "bibleData.whosWho.pronoun.secondPlural": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[you all = disciples]': the " +
+          "verb's subject is SEVERAL people being spoken to. Use your language's plural " +
+          "'you'.",
+      },
+      "bibleData.whosWho.pronoun.thirdSingularMasculine": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[he = Jesus]': the verb's " +
+          "subject is one male person, not named in the text.",
+      },
+      "bibleData.whosWho.pronoun.thirdSingularFeminine": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[she = Samaritan woman]': " +
+          "the verb's subject is one female person, not named in the text.",
+      },
+      "bibleData.whosWho.pronoun.thirdSingularNeuter": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[it = water]': the verb's " +
+          "subject is one thing (Greek neuter gender), not named in the text.",
+      },
+      "bibleData.whosWho.pronoun.thirdPlural": {
+        description:
+          "A pronoun inside a small hint before a Bible verb, '[they = disciples]': the " +
+          "verb's subject is a group, not named in the text.",
+      },
+      "bibleData.whosWho.hint": {
+        description:
+          "A small grey hint shown before a Greek or Hebrew verb whose subject the text " +
+          "does not name, e.g. '[he = Jesus]'. Keep the square brackets, or use your " +
+          "language's usual brackets for an editorial note.",
+        placeholders: {
+          pronoun: "A subject pronoun, e.g. 'he' or 'they' (translated separately).",
+          name: "The person's or group's name, e.g. 'Jesus' or 'Andrew, James and John'.",
+        },
+      },
+      "bibleData.whosWho.hintNameOnly": {
+        description:
+          "The same hint when no pronoun can be given (the verb is a participle or an " +
+          "infinitive): only the name, in square brackets, e.g. '[Jesus]'.",
+        placeholders: { name: "The person's or group's name, e.g. 'Jesus'." },
+      },
+      "bibleData.whosWho.gender.male": {
+        description: "A person's sex, from the ACAI dataset, in the Who's Who panel: male.",
+      },
+      "bibleData.whosWho.gender.female": {
+        description: "A person's sex, from the ACAI dataset, in the Who's Who panel: female.",
+      },
+      "bibleData.whosWho.gender.masculine": {
+        description:
+          "For an unnamed participant, the grammatical gender of the Greek or Hebrew word " +
+          "that first refers to them, in the Who's Who panel.",
+      },
+      "bibleData.whosWho.gender.feminine": {
+        description:
+          "For an unnamed participant, the grammatical gender of the Greek or Hebrew word " +
+          "that first refers to them, in the Who's Who panel.",
+      },
+      "bibleData.whosWho.gender.neuter": {
+        description:
+          "For an unnamed participant, the grammatical gender of the Greek or Hebrew word " +
+          "that first refers to them, in the Who's Who panel.",
+      },
+      "bibleData.whosWho.number.singular": {
+        description: "Grammatical number of a participant in the Who's Who panel: one person.",
+      },
+      "bibleData.whosWho.number.plural": {
+        description: "Grammatical number of a participant in the Who's Who panel: a group.",
+      },
+      "bibleData.whosWho.mentionAria": {
+        description:
+          "Screen-reader name of a Greek or Hebrew word in the source text that refers to " +
+          "a person. Read instead of the word alone.",
+        placeholders: {
+          word: "The Greek or Hebrew word, e.g. 'αὐτόν'.",
+          kind: "How it refers to them: 'Named', 'Pronoun' or 'Implied subject'.",
+          name: "The person's name, e.g. 'Jesus'.",
+        },
+      },
+      "bibleData.whosWho.groupMembers": {
+        description:
+          "Line in the Who's Who popover when a word refers to a group of people: who is " +
+          "in the group.",
+        placeholders: { members: "The members' names joined as a list, e.g. 'Andrew, James and Jesus'." },
+      },
+      "bibleData.whosWho.unknownParticipant": {
+        description:
+          "Shown in place of a name when the data refers to a person it has no name for.",
+      },
+      "bibleData.whosWho.firstMention": {
+        description:
+          "Line in the Who's Who popover: the verse where the current passage first " +
+          "refers to this person.",
+        placeholders: { ref: "A Bible reference, e.g. 'JHN 4:6'." },
+      },
+      "bibleData.whosWho.evidence": {
+        description:
+          "Line in the Who's Who popover: how sure the data is that the word refers to " +
+          "this person, and which datasets say so.",
+        placeholders: {
+          confidence: "A percentage, e.g. '97%'.",
+          sources: "Dataset names joined as a list, e.g. 'ACAI and Macula'.",
+        },
+      },
+      "bibleData.whosWho.hops": {
+        description:
+          "Line in the Who's Who popover and the Context tab: the data found the person " +
+          "by following a chain of words that refer to each other (e.g. 'him' → 'the one " +
+          "saying' → 'Jesus'). A longer chain is less certain.",
+        placeholders: { count: "How many steps the chain has, 2 or more." },
+      },
+      "bibleData.whosWho.previousMention": {
+        description:
+          "Button in the Who's Who popover: go to the previous verse that refers to the " +
+          "same person.",
+      },
+      "bibleData.whosWho.nextMention": {
+        description:
+          "Button in the Who's Who popover: go to the next verse that refers to the same " +
+          "person.",
+      },
+      "bibleData.whosWho.previousMentionAria": {
+        description: "Screen-reader name of the 'Previous mention' button.",
+        placeholders: { name: "The person's name, e.g. 'Jesus'." },
+      },
+      "bibleData.whosWho.nextMentionAria": {
+        description: "Screen-reader name of the 'Next mention' button.",
+        placeholders: { name: "The person's name, e.g. 'Jesus'." },
+      },
+      "bibleData.whosWho.noEarlierMention": {
+        description:
+          "Shown instead of the 'Previous mention' button when no earlier verse of the " +
+          "book refers to this person.",
+      },
+      "bibleData.whosWho.noLaterMention": {
+        description:
+          "Shown instead of the 'Next mention' button when no later verse of the book " +
+          "refers to this person.",
+      },
+      "bibleData.whosWho.showMentions": {
+        description:
+          "Button in the Who's Who popover and panel. It filters the editor to the cells " +
+          "(verses) that refer to this person.",
+        placeholders: { name: "The person's name, e.g. 'Jesus'." },
+      },
+      "bibleData.whosWho.filter.summary": {
+        description:
+          "Bar above the editor's list while it shows only the cells (verses) that refer " +
+          "to one person.",
+        placeholders: {
+          count: "How many cells are shown. A number.",
+          name: "The person's name, e.g. 'Jesus'.",
+        },
+      },
+      "bibleData.whosWho.panel.edgeTab": {
+        description:
+          "Short vertical label on the closed Who's Who panel at the right edge of the " +
+          "editor. 'People' means the people in the Bible passage, not the project's users.",
+        maxLength: 12,
+      },
+      "bibleData.whosWho.panel.showAria": {
+        description: "Screen-reader name of the closed panel's tab: opens the Who's Who panel.",
+      },
+      "bibleData.whosWho.panel.hideAria": {
+        description: "Screen-reader name of the close button in the Who's Who panel.",
+      },
+      "bibleData.whosWho.panel.openTooltip": {
+        description: "Tooltip on the closed Who's Who panel's tab.",
+      },
+      "bibleData.whosWho.panel.resizeAria": {
+        description: "Screen-reader name of the handle that changes the panel's width.",
+      },
+      "bibleData.whosWho.panel.scrollHint": {
+        description: "Shown in the Who's Who panel before the editor shows a Bible verse.",
+      },
+      "bibleData.whosWho.panel.unavailable.offline": {
+        description: "Shown in the Who's Who panel when the data could not be downloaded.",
+      },
+      "bibleData.whosWho.panel.unavailable.notFound": {
+        description:
+          "Shown in the Who's Who panel when the Bible data has nothing for this book " +
+          "(today it covers the New Testament).",
+      },
+      "bibleData.whosWho.panel.unavailable.invalid": {
+        description: "Shown in the Who's Who panel when the downloaded data is damaged.",
+      },
+      "bibleData.whosWho.panel.noPassage": {
+        description:
+          "Shown in the Who's Who panel when the data has no passage (section) for the " +
+          "verse the editor shows.",
+        placeholders: { ref: "A Bible reference, e.g. 'JHN 4:6'." },
+      },
+      "bibleData.whosWho.panel.range": {
+        description:
+          "The verses a passage covers, under its title in the Who's Who panel. Use your " +
+          "language's range mark.",
+        placeholders: {
+          from: "The first verse, e.g. 'JHN 4:1'.",
+          to: "The last verse, e.g. 'JHN 4:26'.",
+        },
+      },
+      "bibleData.whosWho.panel.mentions": {
+        description:
+          "In the Who's Who panel: how many words in the passage refer to this person " +
+          "(names, pronouns and verbs together).",
+        placeholders: { count: "A number." },
+      },
+      "bibleData.whosWho.panel.goToFirst": {
+        description:
+          "Small button in the Who's Who panel that scrolls the editor to the first verse " +
+          "of the passage that refers to this person.",
+        placeholders: { ref: "A Bible reference, e.g. 'JHN 4:7'." },
+      },
+      "bibleData.whosWho.panel.goToFirstAria": {
+        description: "Screen-reader name of the 'First: …' button in the Who's Who panel.",
+        placeholders: {
+          name: "The person's name, e.g. 'Jesus'.",
+          ref: "A Bible reference, e.g. 'JHN 4:7'.",
+        },
+      },
+      "bibleData.whosWho.panel.placesAndOthers": {
+        description:
+          "Heading of a collapsed list in the Who's Who panel: places, and other things " +
+          "the passage refers to that are not people.",
+        placeholders: { count: "How many are in the list. A number." },
+      },
+      "bibleData.whosWho.panel.alignmentNote": {
+        description:
+          "Quiet note in the Who's Who panel when the project's source text is not the " +
+          "Greek or Hebrew itself (e.g. an English Bible). 'Alignment' is a link between " +
+          "the words of two texts. The 'Context tab' is a tab in the expanded cell.",
+      },
+      "bibleData.whosWho.flag.reintroducePronoun": {
+        description:
+          "Note in the Who's Who panel: in this passage, the first word for this person " +
+          "is a pronoun ('he', 'his'), so a reader who starts here may not know who it " +
+          "is. The translator may want to use the name there.",
+        placeholders: { ref: "The verse, e.g. 'JHN 4:27'." },
+      },
+      "bibleData.whosWho.flag.reintroduceSubject": {
+        description:
+          "Note in the Who's Who panel: in this passage, the person is first referred to " +
+          "only by a verb's form ('[he] was teaching'), so a reader who starts here may " +
+          "not know who it is.",
+        placeholders: { ref: "The verse, e.g. 'MRK 1:21'." },
+      },
+      "bibleData.whosWho.flag.ambiguity": {
+        description:
+          "Note in the Who's Who panel: a pronoun for this person sits in a verse that " +
+          "also refers to another person of the same gender and number, so in some " +
+          "languages it could be read as that other person.",
+        placeholders: {
+          ref: "The verse, e.g. 'MRK 1:30'.",
+          others: "The other people's names joined as a list, e.g. 'Peter'.",
+        },
+      },
+      "bibleData.context.tab": {
+        description:
+          "Name of a tab in the expanded cell that shows the Greek or Hebrew words of the " +
+          "verse, their meanings and who each word refers to. Short.",
+        maxLength: 16,
+      },
+      "bibleData.context.wordsHeading": {
+        description:
+          "Heading in the Context tab over the verse's Greek or Hebrew words, each with " +
+          "its short meaning (gloss).",
+      },
+      "bibleData.context.refersToSrOnly": {
+        description:
+          "Screen-reader text in the Context tab for a Greek or Hebrew word that refers to " +
+          "a person. Sighted readers see an arrow instead.",
+        placeholders: {
+          word: "The Greek or Hebrew word, e.g. 'αὐτόν'.",
+          name: "The person's name, e.g. 'Jesus'.",
+        },
+      },
+      "bibleData.context.approximate": {
+        description:
+          "Note in the Context tab when the project splits one Bible verse across several " +
+          "cells: each part shows the whole verse's words.",
+      },
+      "bibleData.view.off": {
+        description:
+          "Option in the editor's View settings, under 'Bible data', for 'Who's Who " +
+          "highlights' and for 'Implied-subject hints': show none.",
+      },
+      "bibleData.view.whosWhoHighlights": {
+        description:
+          "Heading of a choice in the editor's View settings, under 'Bible data': when " +
+          "words in the source text that refer to the same person are highlighted.",
+      },
+      "bibleData.view.whosWhoHighlights.hover": {
+        description:
+          "Option under 'Who's Who highlights': highlight a person's words when the " +
+          "pointer is over one of them, or when one has keyboard focus.",
+      },
+      "bibleData.view.whosWhoHighlights.always": {
+        description: "Option under 'Who's Who highlights': highlight every person's words all the time.",
+      },
+      "bibleData.view.impliedSubjectHints": {
+        description:
+          "Heading of a choice in the editor's View settings, under 'Bible data': whether " +
+          "a small hint like '[he = Jesus]' is shown before verbs whose subject the text " +
+          "does not name.",
+      },
+      "bibleData.view.impliedSubjectHints.names": {
+        description:
+          "Option under 'Implied-subject hints': only when the subject is a named person " +
+          "or group (e.g. Jesus), not an unnamed one (e.g. 'a woman').",
+      },
+      "bibleData.view.impliedSubjectHints.all": {
+        description: "Option under 'Implied-subject hints': for every verb whose subject is implied.",
       },
     },
   },

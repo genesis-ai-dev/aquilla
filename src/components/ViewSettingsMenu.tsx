@@ -74,6 +74,8 @@ interface ViewSettingsMenuProps {
   targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** AQU-1687: the project has the Voices enrichment on, so the Bible data options apply. */
   bibleDataVoicesEnabled?: boolean
+  /** AQU-1689: the project has the Who's Who enrichment on, so its options apply. */
+  bibleDataWhosWhoEnabled?: boolean
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
@@ -117,6 +119,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
   bibleDataVoicesEnabled = false,
+  bibleDataWhosWhoEnabled = false,
   sourceFontSize,
   targetFontSize,
   sourceFontSizeExplicit = false,
@@ -416,12 +419,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             </>
           )}
 
-          {/* AQU-1687: personal options for the Voices enrichment, shown only
-              where the project has it on. Device settings, like low memory. */}
-          {bibleDataVoicesEnabled && (
+          {/* AQU-1687, AQU-1689: personal options for the Voices and Who's Who
+              enrichments, each shown only where the project has it on.
+              Device settings, like low memory. */}
+          {(bibleDataVoicesEnabled || bibleDataWhosWhoEnabled) && (
             <>
               <Separator />
-              <BibleDataViewSettings />
+              <BibleDataViewSettings voices={bibleDataVoicesEnabled} whosWho={bibleDataWhosWhoEnabled} />
             </>
           )}
 

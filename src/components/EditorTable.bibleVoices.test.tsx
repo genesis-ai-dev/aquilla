@@ -448,7 +448,7 @@ describe("label language", () => {
 })
 
 describe("off means off", () => {
-  it("shows no chips or rails and fetches nothing when the Voices enrichment is off", async () => {
+  it("shows no chips or rails and fetches no voices when the Voices enrichment is off", async () => {
     renderTable(makeProject({ bibleEnrichments: { voices: false } }))
     // Give a load the chance to happen, then check it did not.
     await act(async () => {
@@ -456,6 +456,18 @@ describe("off means off", () => {
     })
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
+    // AQU-1689: Who's Who and the Context tab are still on, and read their
+    // own layers; Voices' own file is never asked for.
+    expect(layerFetches()).not.toContain("/bkp/v1/voices/JHN.json")
+  })
+
+  it("fetches nothing when every enrichment the editor shows is off", async () => {
+    renderTable(
+      makeProject({ bibleEnrichments: { voices: false, "whos-who": false, "original-context": false } }),
+    )
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
     expect(layerFetches()).toEqual([])
   })
 

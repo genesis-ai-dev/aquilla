@@ -423,6 +423,47 @@ textarea,
   display: inline;
 }
 
+/* AQU-1689: Who's Who mention words in a Greek or Hebrew source. At rest a
+   dotted underline, so a mention can be found without hovering. Lit (its
+   participant is hovered or focused anywhere in view): the term marker's 12%
+   wash plus a solid underline. "Always" mode keeps every mention washed in
+   its participant's thread color. The underline style changes too, so the
+   state never rests on color alone. */
+.mention-mark {
+  --mention-color: var(--primary);
+  margin-inline: -0.08em;
+  padding-inline: 0.08em;
+  border-radius: 0.22em;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--mention-color) 55%, transparent);
+  text-underline-offset: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mention-mark[data-mention-tinted="true"],
+.mention-mark[data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-lit="true"] {
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--mention-color);
+}
+.mention-mark[data-thread-slot="1"] { --mention-color: var(--color-sky-600, oklch(0.588 0.158 241.966)); }
+.mention-mark[data-thread-slot="2"] { --mention-color: var(--color-rose-600, oklch(0.586 0.253 17.585)); }
+.mention-mark[data-thread-slot="3"] { --mention-color: var(--color-emerald-600, oklch(0.596 0.145 163.225)); }
+.mention-mark[data-thread-slot="4"] { --mention-color: var(--color-amber-600, oklch(0.666 0.179 58.318)); }
+.mention-mark[data-thread-slot="5"] { --mention-color: var(--color-violet-600, oklch(0.541 0.281 293.009)); }
+.mention-mark[data-thread-slot="6"] { --mention-color: var(--color-teal-600, oklch(0.6 0.118 184.704)); }
+
 .usfm-footnote-marker {
   position: relative;
   display: inline-flex;

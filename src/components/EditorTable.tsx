@@ -22,6 +22,7 @@ import {
   VolumeX,
   Eye,
   EyeOff,
+  BookOpenText,
 } from "lucide-react"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
@@ -223,11 +224,15 @@ import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import { BibleDataProvider } from "./bible-data/BibleDataProvider"
+import { CellContextTab } from "./bible-data/CellContextTab"
+import { MentionSourceText } from "./bible-data/MentionSourceText"
 import { SpeechRails } from "./bible-data/SpeechRails"
-import { useBibleVoices } from "./bible-data/useBibleVoices"
+import { useBibleData } from "./bible-data/useBibleData"
 import { VoiceChip } from "./bible-data/VoiceChip"
 import { VoiceFilterBanner } from "./bible-data/VoiceFilterBanner"
-import { BibleVoicesContext, useCellVoices } from "./bible-data/voices-context"
+import { useCellVoices } from "./bible-data/voices-context"
+import { useCellContext, useCellMentionWords } from "./bible-data/whos-who-context"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -1176,17 +1181,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
-  // AQU-1687: Bible voices (chips, rails, "Show every line by …"). Null
-  // context and no filter unless the project's Voices enrichment is on.
-  const bibleVoices = useBibleVoices({
+  // AQU-1687, AQU-1689: Bible data. Voices (chips, rails), Who's Who (mention
+  // tints, the Context tab) and the cell filter ("Show every line by …",
+  // "Show cells that mention …"). Nothing unless the project's enrichments
+  // are on. Mention jumps scroll through `bibleJumpRef`, set once the
+  // scrolling machinery below exists.
+  const bibleJumpRef = useRef<(cellId: string) => void>(() => {})
+  const jumpToBibleCell = useCallback((cellId: string) => bibleJumpRef.current(cellId), [])
+  const bibleData = useBibleData({
     project,
     cellStore,
     cellIds: fileCellIds,
     version: cellStoreVersion,
     fileId: audioFileId,
+    jumpToCell: jumpToBibleCell,
   })
-  const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleVoices
-  const voiceFilterActive = bibleVoices.filteredCellIds !== null
+  const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleData
+  const voiceFilterActive = bibleData.filteredCellIds !== null
   const splitByMilestone = useMilestoneSplit()
   const pendingJumpCellIdRef = useRef<string | null>(null)
   const milestoneNavigation = useMemo(() =>
@@ -1217,8 +1228,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [idmlMilestoneNavigation, milestoneNavigation])
   const displayCellIds = useMemo(() => {
     // AQU-1687: "Show every line by …" lists the speaker's lines across the
-    // whole file, so it outranks the milestone page.
-    if (bibleVoices.filteredCellIds) return bibleVoices.filteredCellIds
+    // whole file, so it outranks the milestone page (as does AQU-1689's
+    // "Show cells that mention …").
+    if (bibleData.filteredCellIds) return bibleData.filteredCellIds
     if (!splitByMilestone) return fileCellIds
     const selected = chapterNavigationSelection?.fileId === audioFileId
       ? chapterNavigationSelection
@@ -1232,7 +1244,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellIdsForMilestonePage(milestoneNavigation, key) ?? fileCellIds
   }, [
     audioFileId,
-    bibleVoices.filteredCellIds,
+    bibleData.filteredCellIds,
     chapterNavigationSelection,
     fileCellIds,
     milestoneNavigation,
@@ -1686,26 +1698,39 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // and neither turned the page. AQU-1244 and AQU-1245 converted the last four
   // callers to `scrollToCellId`; removing the entry is what stops a fifth from
   // reintroducing the bug.
+  const scrollToDisplayCell = useCallback((
+    cellId: string,
+    opts?: { flash?: boolean; follow?: "engage" | "release" },
+  ): boolean => {
+    // AQU-646 round 3: id-based scroll in DISPLAY space. The older
+    // index-based path resolved indexes via cellStore.findIndexByCellId —
+    // STORE order — but the list renders displayCellIds, which time-ordered
+    // files re-sort by timing, so those jumps could land on the wrong row.
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return revealCellPage(cellId)
+    clearChapterNavigationSelection()
+    // Default "release": a jump the user is INSPECTING (search, presence,
+    // findings) must not have playback yank the table back a beat later.
+    // Wire a (chip clicks) passes "engage" — that jump means "watch this".
+    programmaticListScroll(index, {
+      viewPosition: 0.5,
+      animated: false,
+      follow: opts?.follow ?? "release",
+    })
+    if (opts?.flash) flashCellDom(cellId)
+    return true
+  }, [clearChapterNavigationSelection, flashCellDom, programmaticListScroll, revealCellPage])
+
+  // AQU-1689: a Who's Who mention jump (previous/next mention, the panel's
+  // first mention) scrolls and flashes like a search hit.
+  useEffect(() => {
+    bibleJumpRef.current = (cellId) => {
+      scrollToDisplayCell(cellId, { flash: true })
+    }
+  }, [scrollToDisplayCell])
+
   useImperativeHandle(ref, () => ({
-    scrollToCellId(cellId, opts) {
-      // AQU-646 round 3: id-based scroll in DISPLAY space. The older
-      // index-based path resolved indexes via cellStore.findIndexByCellId —
-      // STORE order — but the list renders displayCellIds, which time-ordered
-      // files re-sort by timing, so those jumps could land on the wrong row.
-      const index = displayCellIdsRef.current.indexOf(cellId)
-      if (index < 0) return revealCellPage(cellId)
-      clearChapterNavigationSelection()
-      // Default "release": a jump the user is INSPECTING (search, presence,
-      // findings) must not have playback yank the table back a beat later.
-      // Wire a (chip clicks) passes "engage" — that jump means "watch this".
-      programmaticListScroll(index, {
-        viewPosition: 0.5,
-        animated: false,
-        follow: opts?.follow ?? "release",
-      })
-      if (opts?.flash) flashCellDom(cellId)
-      return true
-    },
+    scrollToCellId: scrollToDisplayCell,
     setMediaFollow(intent: "engage" | "release") {
       issueFollowCommand(intent)
     },
@@ -1740,7 +1765,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage, scrollToDisplayCell])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -3017,7 +3042,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
       {/* AQU-1687: outside the list conditional, so the way back stays on
           screen even when the filter leaves no rows. */}
-      {bibleVoices.filter && <VoiceFilterBanner filter={bibleVoices.filter} onClear={clearVoiceFilter} />}
+      {bibleData.filter && <VoiceFilterBanner filter={bibleData.filter} onClear={clearVoiceFilter} />}
       {displayCellIds.length > 0 ? (
         <div
           ref={listRootRef}
@@ -3036,7 +3061,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onFollowRest={handleFollowRest}
             />
           )}
-          <BibleVoicesContext.Provider value={bibleVoices.context}>
+          <BibleDataProvider data={bibleData}>
             <LegendList
               ref={listRef}
               refScrollView={setListScrollElement}
@@ -3056,7 +3081,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               style={{ flex: 1, minHeight: 0 }}
               contentContainerStyle={{ width: "100%" }}
             />
-          </BibleVoicesContext.Provider>
+          </BibleDataProvider>
         </div>
       ) : isTimeOrdered ? (
         // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
@@ -6550,6 +6575,11 @@ function EditorRow({
   // cell labels are shown, because dubbing projects already name their
   // speakers there. The chip has its own switch (View settings → Bible data).
   const cellVoices = useCellVoices(cell.group, cell.type)
+  // AQU-1689: Who's Who. The source's mention words, when its words are the
+  // pack's (a Greek or Hebrew source; null otherwise), and the Context tab.
+  const shownSourceText = displayedSourceText(cell, sourceDraft?.value)
+  const cellMentions = useCellMentionWords(cell.group, cell.type, shownSourceText)
+  const cellContext = useCellContext(cell.group, cell.type)
   const castHoldsSlot =
     ownCastName(cell) !== null ||
     Boolean(findVoice(project.ttsSettings, assignedCastVoiceId(project.ttsSettings, cell.id)))
@@ -7609,6 +7639,35 @@ function EditorRow({
                   termMatching={project.termMatching}
                 />
               </div>
+            ) : cellMentions ? (
+              // AQU-1689: a Greek or Hebrew source whose words are the pack's.
+              // Each word that refers to a participant is a Who's Who mention;
+              // the text between mentions renders as below.
+              <MentionSourceText
+                view={cellMentions}
+                cellId={cell.id}
+                text={shownSourceText}
+                renderSlice={(start, end, insideMention) =>
+                  insideMention ? (
+                    <HighlightedText
+                      text={shownSourceText.slice(start, end)}
+                      ranges={clipRangesToTextSlice(sourceRanges, start, end)}
+                    />
+                  ) : (
+                    <SourceWithTermLookup
+                      inline
+                      text={shownSourceText.slice(start, end)}
+                      highlights={highlights}
+                      ranges={clipRangesToTextSlice(sourceRanges, start, end)}
+                      showEvidence={examplesExpanded}
+                      onRangeClick={openInlineRule}
+                      concepts={terminologyConcepts}
+                      termMatching={project.termMatching}
+                      onViewConcept={onOpenTerminologyConcept}
+                    />
+                  )
+                }
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -7618,7 +7677,7 @@ function EditorRow({
                 // transcript is plain text, and letting `originalHtml` win
                 // there is what pinned the file title over the transcript once
                 // any source commit had landed.
-                text={displayedSourceText(cell, sourceDraft?.value)}
+                text={shownSourceText}
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
@@ -8480,6 +8539,16 @@ function EditorRow({
                 />
               ),
             },
+            // AQU-1689: the verse in the original language, who each word
+            // refers to, and its voices. Offered while the project's
+            // Original-language context enrichment is on and the pack has
+            // the verse's words.
+            ...(cellContext ? [{
+              value: "context",
+              icon: <BookOpenText className="h-3 w-3" />,
+              label: t("bibleData.context.tab"),
+              renderContent: () => <CellContextTab view={cellContext} cellRef={cell.group} cellType={cell.type} />,
+            }] : []),
             ...(showFootnotesInExpansion ? [{
               value: "footnotes",
               icon: <NotebookPen className="h-3 w-3" />,

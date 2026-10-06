@@ -926,4 +926,20 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "other in the story. agentWorkspace.conversation is the user's chat thread with " +
     "the AI agent. A dialogue between characters and a chat session are different " +
     "words in most target languages.",
+  "bibleData.whosWho.pronoun.secondSingular":
+    "AQU-1689: the grammatical pronoun for ONE person addressed in the Bible text, " +
+    "inside a hint '[you = Samaritan woman]'. agent.emptyState.introYou addresses " +
+    "the app's user. Languages with a polite form use it for the user and the plain " +
+    "singular here (French 'vous' vs 'tu'), so the two cannot share a translation.",
+  "bibleData.whosWho.panel.edgeTab":
+    "AQU-1689: the people in a Bible passage (Jesus, a Samaritan woman), on the " +
+    "Who's Who panel's tab. org.overviewLaneTable.peopleColumn counts the project's " +
+    "users. Characters in a story and members of a team are different words in " +
+    "many target languages (Indonesian 'tokoh' vs 'orang').",
+  "bibleData.context.tab":
+    "AQU-1689: the tab of an expanded Bible cell holding the verse's original-" +
+    "language context (Greek or Hebrew words, who they refer to). " +
+    "autopilot.inspector.context.title is the material an AI agent was given. " +
+    "Textual context and an AI's input are different words in several target " +
+    "languages.",
 }

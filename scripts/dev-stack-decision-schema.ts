@@ -1,9 +1,9 @@
-// AQU-1691 (migration 0142): bring a long-lived local contextual_decisions
+// AQU-1691 (migration 0151): bring a long-lived local contextual_decisions
 // table up to fact questions.
 //
 // The generic reconciler in dev-stack.ts adds the new columns (fact_key,
 // options, fact_scope) but never touches CHECK constraints or NOT NULL, so a
-// container created before 0142 would reject every 'bible-fact' question
+// container created before 0151 would reject every 'bible-fact' question
 // (readiness_item check) and every question without a file (file_id NOT
 // NULL). This repairs both, idempotently. Same pattern as
 // finalizeChangesetSchema in ./dev-stack-artifact-schema.ts.
@@ -29,7 +29,7 @@ export async function finalizeDecisionSchema(client: PgSchemaClient, run: RunSch
          ADD CONSTRAINT contextual_decisions_readiness_item_check
          CHECK (readiness_item IS NULL OR
                 readiness_item IN ('terminology','brief','examples','rules','languages','bible-fact'))`,
-      "widening contextual_decisions.readiness_item for fact questions (migration 0142)",
+      "widening contextual_decisions.readiness_item for fact questions (migration 0151)",
     )
     patched.push("widened contextual_decisions.readiness_item for bible-fact")
   }
@@ -41,7 +41,7 @@ export async function finalizeDecisionSchema(client: PgSchemaClient, run: RunSch
   if (fileId[0]?.is_nullable === "NO") {
     await run(
       "ALTER TABLE contextual_decisions ALTER COLUMN file_id DROP NOT NULL",
-      "making contextual_decisions.file_id nullable (migration 0142)",
+      "making contextual_decisions.file_id nullable (migration 0151)",
     )
     patched.push("made contextual_decisions.file_id nullable")
   }

@@ -151,5 +151,12 @@ describe("useBibleChecks", () => {
     expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
     const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS, BOOK))
     expect(await off.result.current.fileScan()).toBeNull()
+    // AQU-1685: nor without the Bible data experiment, or on a file that is
+    // not a Bible book: Check file then runs no Bible data scan at all.
+    const noExperiment = renderHook(() => useBibleChecks({ ...headingsOnly, experimentalFlags: {} }, CELLS, BOOK))
+    expect(await noExperiment.result.current.fileScan()).toBeNull()
+    const notABible = renderHook(() => useBibleChecks(headingsOnly, CELLS, { type: "md" }))
+    expect(await notABible.result.current.fileScan()).toBeNull()
+    expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
   })
 })

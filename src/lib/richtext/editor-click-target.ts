@@ -15,6 +15,7 @@
 /** What a click inside the editor resolved to, in precedence order. */
 export type EditorClickTarget =
   | { kind: "rule"; ruleId: string; element: HTMLElement }
+  | { kind: "smartEdit"; id: string; element: HTMLElement }
   | { kind: "term"; term: string; element: HTMLElement }
   | null
 
@@ -26,7 +27,7 @@ export type EditorClickTarget =
  */
 export function resolveEditorClickTarget(
   target: HTMLElement | null,
-  handlers: { rule: boolean; term: boolean },
+  handlers: { rule: boolean; term: boolean; smartEdit?: boolean },
 ): EditorClickTarget {
   if (!target) return null
 
@@ -35,6 +36,14 @@ export function resolveEditorClickTarget(
     if (blot) {
       return { kind: "rule", ruleId: blot.getAttribute("data-rule-id") ?? "", element: blot }
     }
+  }
+
+  // A smart-edit suggestion sits below a rule violation (a broken rule beats a
+  // stylistic suggestion) and above the read-only term lookup.
+  if (handlers.smartEdit) {
+    const blot = target.closest<HTMLElement>("[data-smart-edit-id]")
+    const id = blot?.getAttribute("data-smart-edit-id")
+    if (blot && id) return { kind: "smartEdit", id, element: blot }
   }
 
   if (handlers.term) {

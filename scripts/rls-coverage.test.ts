@@ -81,6 +81,7 @@ const UNCOVERED: Record<string, string> = {
   project_termbase_subscriptions: "granted to app_runtime, no policy yet",
 
   agent_memories: "never granted to app_runtime",
+  ai_interventions: "never granted to app_runtime",
   agent_read_audit: "never granted to app_runtime",
   agent_runs: "never granted to app_runtime",
   agent_sessions: "never granted to app_runtime",

@@ -13,7 +13,8 @@
  *   • key terms sit on the words that carry them, only while Key terms is on;
  *   • "αὐτόν → Jesus" says which word the chain went through;
  *   • the 1.3 MB notes layer is fetched only when Translation helps is on AND
- *     a Context tab opens, once per book;
+ *     a Context tab opens, once per book, and never without the Bible data
+ *     experiment and an open Bible (AQU-1685);
  *   • slice 3's deity form and disputed speech are used when they appear.
  */
 
@@ -163,11 +164,13 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     createdAt: "2026-01-01T00:00:00Z",
     files: [{ id: FILE_ID, name: "JHN", type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    experimentalFlags: { bibleData: true }, // AQU-1685: this device opted in.
     ...overrides,
   }
 }
 
-function renderTable(project: ProjectRecord) {
+/** `bibleOpen` is what ProjectWorkspace passes: true while the editor shows a scripture file. */
+function renderTable(project: ProjectRecord, bibleOpen = true) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: FILE_ID, username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(makeRows(), { full: true, maxServerSeq: 1 })
@@ -191,6 +194,7 @@ function renderTable(project: ProjectRecord) {
           cellLabelsEnabled
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          bibleOpen={bibleOpen}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -419,6 +423,21 @@ describe("when the notes layer loads", () => {
     expect(within(tab).queryByTestId("context-helps-loading")).toBeNull()
     expect(tab.querySelector("[data-notes]")).toBeNull()
     expect(fetchesOf("notes")).toBe(0)
+  })
+
+  // AQU-1685: the experiment is device-local and off by default, and any other
+  // EditorTable mount passes no `bibleOpen`. Either way there is no Context tab
+  // to open, and neither notes nor terms are ever fetched.
+  it.each([
+    ["with the Bible data experiment off", { experimentalFlags: {} }, true],
+    ["when no Bible is open", {}, false],
+  ] as const)("offers no Context tab and fetches nothing %s", async (_, overrides, bibleOpen) => {
+    renderTable(makeProject(overrides), bibleOpen)
+    await settle()
+    fireEvent.click(within(row(cellIdFor("4:9"))).getByRole("button", { name: "Open cell details" }))
+    await waitFor(() => expect(within(row(cellIdFor("4:9"))).getAllByRole("tab").length).toBeGreaterThan(0))
+    expect(within(row(cellIdFor("4:9"))).queryByRole("tab", { name: /Context/ })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

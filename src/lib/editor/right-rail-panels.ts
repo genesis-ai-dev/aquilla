@@ -31,7 +31,8 @@ export interface RightRailInputs {
   verseResourcesAvailable: boolean
   /**
    * AQU-1689: the project's Who's Who enrichment is on (it is off whenever
-   * Bible data is). Off, the panel and its edge tab are both gone.
+   * Bible data is) and this device has the Bible data experiment on
+   * (AQU-1685). Off, the panel and its edge tab are both gone.
    */
   whosWhoAvailable: boolean
   /** Persisted per-project open flag for Parallel Bibles. */

@@ -37,6 +37,7 @@ import {
   readPackRecord,
   writePackRecord,
 } from "./pack-store"
+import { isBibleDataExperimentOn } from "./experiment"
 import { mapLayerToProject } from "./versification"
 
 export const DEFAULT_BKP_BASE = "https://bibletranslation.org/bkp/v1"
@@ -186,6 +187,8 @@ export async function loadLayer<L extends BkpLayer>(layer: L, book: string): Pro
 /** What the loader reads from a project. A ProjectRecord fits. */
 export interface BibleDataProject extends BibleDataSettings {
   files?: Pick<FileReference, "type" | "hasScriptureContent">[]
+  /** Device-local experiment switches; Bible data loads only with `bibleData` on. */
+  experimentalFlags?: Record<string, boolean>
 }
 
 /** One result per layer the project's enabled enrichments need, in its versification. */
@@ -193,10 +196,11 @@ export type BkpEnabledLayers = { [L in BkpLayer]?: BkpResult<BkpLayerData[L]> }
 
 /**
  * The layers that `project`'s enabled enrichments need for `book`, and only
- * those. With Bible data off, or every enrichment off, nothing is fetched,
- * not even the manifest.
+ * those. With the Bible data experiment off on this device, Bible data off, or
+ * every enrichment off, nothing is fetched, not even the manifest.
  */
 export async function loadEnabledLayers(project: BibleDataProject, book: string): Promise<BkpEnabledLayers> {
+  if (!isBibleDataExperimentOn(project)) return {}
   const enabled = resolveBibleEnrichments(project, projectHasScriptureFiles(project.files))
   const entries = await Promise.all(
     layersForEnrichments(enabled).map(async (layer) => {

@@ -164,6 +164,52 @@ describe("executeRead", () => {
   })
 })
 
+// The QA-sweep playbook (docs-playbooks.ts) has the agent call
+// read({filter:'flagged'}) to find rule violations, then waive the false
+// positives. statusOf never produced "flagged", so that read always came back
+// empty and the sweep skipped every violation without saying so.
+describe("read filter:'flagged' — rule violations for the QA sweep", () => {
+  it("lists drafted cells that break an enabled rule, names the rule, and drops a waived one", async () => {
+    await seedWorld()
+    // c2 is an unreviewed AI draft: the work the sweep exists to check.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET ai_drafted = 1 WHERE project_id = ? AND cell_id = ? AND side = 'target'`,
+    )
+      .bind(PROJECT, cellId("c2"))
+      .run()
+    // Shaped like the SPA's TranslationRule (src/lib/parsers/types.ts).
+    const rules = [
+      { id: "rule-ensenaba", name: "Avoid enseñaba", scope: "project", enabled: true, check: { type: "target-forbids", targetPattern: "enseñaba" } },
+      // c1 breaks this one too, but a person validated c1: an endorsement
+      // outranks a lint flag, the same way it outranks stale.
+      { id: "rule-comenzo", name: "Avoid comenzó", scope: "project", enabled: true, check: { type: "target-forbids", targetPattern: "comenzó" } },
+      // c2 breaks this one too, but it is pinned to another lane (AQU-609).
+      { id: "rule-fr-only", name: "Avoid muchas", scope: "lane", lane: "fr", enabled: true, check: { type: "target-forbids", targetPattern: "muchas" } },
+    ]
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)`,
+    )
+      .bind(PROJECT, JSON.stringify({ rules }))
+      .run()
+
+    const flagged = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
+    expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    // The playbook's next step waives by rule id, so the row must name the rule.
+    expect(flagged.text).toContain("rule-ensenaba")
+    expect(flagged.text).not.toContain("rule-fr-only")
+
+    // A waiver is how the sweep clears a false positive, so it must drop the cell.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts)
+       VALUES (?, ?, ?, 'rule-ensenaba', 'correct in this context', 'alice', 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c2"))
+      .run()
+    const afterWaive = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
+    expect(afterWaive.data?.cells).toEqual([])
+  })
+})
+
 // AQU-846 — the agent drafted five verses into Mark while the user had Genesis
 // open, then the approval card never said where they were going. These pin the
 // resolution half: the open file wins, an explicitly named file still wins over

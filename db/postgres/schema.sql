@@ -1542,6 +1542,13 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- AQU-1611 expand step: the lane, not its language tag, is the row's
+    -- identity, so upserts arbitrate on this one. Equivalent to the tag-keyed
+    -- UNIQUE below (tag <-> lane is 1:1 within a project), which stays until a
+    -- later release drops target_lang — a column drop in this release would
+    -- break the still-live previous Workers between migrate and deploy.
+    CONSTRAINT artifact_bindings_lane_member_key
+      UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path),
     UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
     CONSTRAINT artifact_bindings_artifact_project_fkey
       FOREIGN KEY (artifact_id, project_id)

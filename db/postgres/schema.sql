@@ -307,14 +307,11 @@ CREATE TABLE project_settings (
     -- gate on every Bible request and agent run, and autopilot per run. NULL
     -- means no explicit choice, which the gate derives from scripture files
     -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
-    -- count too.
+    -- count too. Keep the expression on one line: the dev-stack schema
+    -- reconciler (scripts/dev-stack-schema-parser.ts) drops lines nested in a
+    -- column's parentheses, and a truncated ALTER breaks every local boot.
     bible_resources_enabled BOOLEAN
-      GENERATED ALWAYS AS (
-        CASE (settings::jsonb) ->> 'bibleResourcesEnabled'
-          WHEN 'true' THEN TRUE
-          WHEN 'false' THEN FALSE
-        END
-      ) STORED,
+      GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
     -- One boolean per Bible data enrichment; readers validate it
     -- (db/shared/bible-enrichments.ts readBibleEnrichments).
     bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED

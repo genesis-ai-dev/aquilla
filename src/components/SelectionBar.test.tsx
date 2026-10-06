@@ -1104,3 +1104,58 @@ describe("SelectionBar — Voice together failure", () => {
     vi.restoreAllMocks()
   })
 })
+
+// AQU-1722 — "Generate voice": the OTHER batch in the audio lens. One take per
+// selected line, all in one chosen voice, as opposed to "Voice together"'s one
+// shared clip. The two sit side by side, so these tests pin that both are
+// offered and that this one is gated on there being something to speak.
+describe("selection bar — generate voice (AQU-1722)", () => {
+  const generateButton = () => screen.getByRole("button", { name: /^Generate voice/i })
+  const translated = [
+    makeCell({ id: "cell-1", translated: "bonjour" }),
+    makeCell({ id: "cell-2", translated: "le monde" }),
+  ]
+
+  it("offers it alongside Voice together in the audio lens", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: vi.fn(),
+    })
+    expect(generateButton()).toBeEnabled()
+    expect(screen.getByRole("button", { name: /^Voice together/i })).toBeTruthy()
+    vi.restoreAllMocks()
+  })
+
+  it("is absent outside the audio lens", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated)
+    expect(screen.queryByRole("button", { name: /^Generate voice/i })).toBeNull()
+    vi.restoreAllMocks()
+  })
+
+  it("stays dark with nothing translated, and says what to do", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(
+      makeProject(ROLE.CONTRIBUTOR),
+      [makeCell({ id: "cell-1", translated: "" })],
+      [],
+      "",
+      { audioMode: true },
+    )
+    expect(generateButton()).toBeDisabled()
+    await expectTooltip(generateButton(), /Select at least one translated line/i)
+    vi.restoreAllMocks()
+  })
+
+  it("opens the generate-voice dialog, which prices the batch before it runs", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", { audioMode: true })
+
+    fireEvent.click(generateButton())
+
+    // "2 lines · about 3 words · about N cr" — the scope and cost up front.
+    expect(await screen.findByText(/2 lines · about 3 words/i)).toBeTruthy()
+    vi.restoreAllMocks()
+  })
+})

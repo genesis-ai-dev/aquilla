@@ -11,7 +11,7 @@
 // disabled until the audio-attachment + validate-via-events grammars land.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Languages, Sparkles, Wand2, X } from "lucide-react"
+import { AudioLines, Languages, Sparkles, Wand2, X } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -27,6 +27,7 @@ import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { canPerform } from "@/lib/sync/role-policy"
@@ -144,6 +145,9 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
+  // AQU-1722: the generate-voice dialog. It owns the voice choice, the
+  // skip/overwrite decision and the cost estimate; this bar only opens it.
+  const [voiceBatchOpen, setVoiceBatchOpen] = useState(false)
   const commitAudioValidation = useAudioValidationCommit(session?.jwt ?? null)
 
   useEffect(() => {
@@ -303,6 +307,34 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
     [selectedCells],
+  )
+
+  // AQU-1722: the selection with its audio merged in, so the generate-voice
+  // dialog can see which lines already carry a generated take. Cells come out
+  // of the store without attachments, so without this the skip/overwrite
+  // choice would never appear and every line would look un-voiced.
+  const selectedCellsWithAudio = useMemo(
+    () => (audioByCellId ? mergeCellsWithAudio(selectedCells, audioByCellId) : selectedCells),
+    [selectedCells, audioByCellId],
+  )
+
+  // AQU-1722: a line's name the way the reader sees it — its reference, else
+  // the table's # column, else nothing. The same rule the partial-validate
+  // hover uses, so one line is named identically wherever it is mentioned.
+  const nameCell = useCallback(
+    (cell: CellData): string => {
+      const ref = namedCellRef(cell)
+      if (ref) return ref
+      const rowNumbers = readAtVersion(cellStoreVersion, () =>
+        structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
+      // A file with imported numbers leaves its headings unnumbered, so those
+      // name nothing; a plain document numbers by position instead.
+      const number = rowNumbers.size > 0
+        ? rowNumbers.get(cell.id)
+        : (fileCellIds.indexOf(cell.id) + 1) || undefined
+      return number === undefined ? "" : t("audio.batchVoice.rowName", { number })
+    },
+    [cellStore, cellStoreVersion, fileCellIds, structureCache, t],
   )
   // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for
@@ -660,6 +692,33 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           </Button>
         </AppTooltip>
       )}
+      {/* AQU-1722: the other batch — one take PER line, all in one chosen
+          voice, rather than one shared clip. Sits beside "Voice together"
+          because the two are easy to confuse and the tooltips are where the
+          difference is stated. */}
+      {audioMode && (
+        <AppTooltip content={
+          voiceableCount === 0
+            ? t("audio.batchVoice.needTranslated")
+            : t("audio.batchVoice.tooltip", { count: voiceableCount })
+        }>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => setVoiceBatchOpen(true)}
+            disabled={isBusy || voiceableCount === 0}
+          >
+            <AudioLines className="me-1 h-3.5 w-3.5" />
+            {t("audio.batchVoice.title")}
+            {voiceableCount > 0 && (
+              <span className="ms-1 rounded-md bg-foreground/10 px-1.5 py-0.5 tabular-nums">
+                {voiceableCount}
+              </span>
+            )}
+          </Button>
+        </AppTooltip>
+      )}
       {!audioMode && (
         <>
       <AppTooltip content={
@@ -834,6 +893,17 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           <X className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
+      {voiceBatchOpen && (
+        <BatchVoiceDialog
+          project={project}
+          cells={selectedCellsWithAudio}
+          session={session}
+          username={username}
+          {...(activeLane ? { targetLang: activeLane } : {})}
+          nameCell={nameCell}
+          onClose={() => setVoiceBatchOpen(false)}
+        />
+      )}
     </div>
   )
 }

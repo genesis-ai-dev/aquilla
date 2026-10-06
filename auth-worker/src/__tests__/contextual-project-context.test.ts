@@ -15,9 +15,12 @@
 //   3. Readiness reports gaps honestly. A run with no context still produces
 //      confident output and still reports spans staged, so the checklist is
 //      the only thing that can tell a PM the run was premature.
+//   4. Key terms are read where the editor reads them: the `concepts` table
+//      (AQU-1710). The migration deletes the old settings key, so a loader
+//      that reads only the key gives autopilot an empty termbase.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import {
   loadProjectContext,
   lintTerminology,
@@ -44,6 +47,41 @@ async function seedSettings(projectId: string, settings: unknown) {
        ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
     )
     .bind(projectId, JSON.stringify(settings))
+    .run()
+}
+
+/** One row of the `concepts` projection, as `term.*` events leave it. */
+async function seedConcept(
+  projectId: string,
+  row: {
+    id: string
+    sourceTerm: string
+    renderings: { rendering: string; status: string }[]
+    status?: string
+    caseSensitive?: boolean
+    match?: unknown
+    createdAt?: number
+    deletedAt?: number
+  },
+) {
+  await db
+    .prepare(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status,
+                             case_sensitive, match_options, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      row.id,
+      projectId,
+      row.sourceTerm,
+      JSON.stringify(row.renderings),
+      row.status ?? "active",
+      row.caseSensitive ? 1 : 0,
+      row.match === undefined ? null : JSON.stringify(row.match),
+      row.createdAt ?? 1,
+      row.createdAt ?? 1,
+      row.deletedAt ?? null,
+    )
     .run()
 }
 
@@ -252,6 +290,107 @@ describe("loadProjectContext", () => {
 
     const ctx = await loadProjectContext(db, "proj-subscriber")
     expect(ctx.concepts.map((c) => c.id)).toContain("up1")
+  })
+
+  // AQU-1710: since 2026-09-04 term writes land in the `concepts` table, and
+  // the migration deletes the settings key once it has copied it. A loader
+  // that read only the key drafted every migrated project with no key terms.
+  it("reads a migrated project's key terms from the concepts table", async () => {
+    await seedSettings("proj-ctx-migrated", { sourceLanguage: "English", targetLanguage: "Spanish" })
+    await seedConcept("proj-ctx-migrated", {
+      id: "aqu1710-grace",
+      sourceTerm: "grace",
+      renderings: [
+        { rendering: "gracia", status: "preferred" },
+        { rendering: "suerte", status: "forbidden" },
+      ],
+    })
+    // Decisions in progress and deleted terms constrain nothing.
+    await seedConcept("proj-ctx-migrated", { id: "aqu1710-draft", sourceTerm: "covenant", renderings: [], status: "draft" })
+    await seedConcept("proj-ctx-migrated", {
+      id: "aqu1710-deleted",
+      sourceTerm: "faith",
+      renderings: [{ rendering: "fe", status: "preferred" }],
+      deletedAt: 2,
+    })
+
+    const ctx = await loadProjectContext(db, "proj-ctx-migrated")
+    expect(ctx.concepts.map((c) => c.id)).toEqual(["aqu1710-grace"])
+    // What loading them is for: autopilot's lint now raises the violations
+    // the editor marks on the same draft.
+    expect(lintTerminology(ctx.concepts, "by grace alone", "sólo por suerte").map((h) => h.ruleId)).toEqual([
+      "term:aqu1710-grace:approved",
+      "term:aqu1710-grace:forbidden:suerte",
+    ])
+  })
+
+  it("carries case sensitivity and validated match options the way the editor reads them", async () => {
+    await seedSettings("proj-ctx-options", {})
+    await seedConcept("proj-ctx-options", {
+      id: "aqu1710-lord",
+      sourceTerm: "LORD",
+      renderings: [{ rendering: "SEÑOR", status: "preferred" }],
+      caseSensitive: true,
+      // An unknown key is dropped rather than handed to the matcher.
+      match: { forms: ["LORD's"], excludedForms: ["lordship"], bogus: 1 },
+    })
+
+    const [lord] = (await loadProjectContext(db, "proj-ctx-options")).concepts
+    expect(lord.caseSensitive).toBe(true)
+    expect(lord.match).toEqual({ forms: ["LORD's"], excludedForms: ["lordship"] })
+  })
+
+  it("ignores a leftover settings blob once the table has live rows", async () => {
+    await seedSettings("proj-ctx-both", {
+      terminology: [
+        { id: "aqu1710-stale", sourceTerm: "grace", status: "active", renderings: [{ rendering: "favor", status: "preferred" }] },
+      ],
+    })
+    await seedConcept("proj-ctx-both", {
+      id: "aqu1710-live",
+      sourceTerm: "grace",
+      renderings: [{ rendering: "gracia", status: "preferred" }],
+    })
+
+    const ctx = await loadProjectContext(db, "proj-ctx-both")
+    expect(ctx.concepts.map((c) => c.id)).toEqual(["aqu1710-live"])
+  })
+
+  it("falls back to the settings blob while the table has no live rows, as the editor does", async () => {
+    await seedSettings("proj-ctx-unmigrated", {
+      terminology: [
+        { id: "aqu1710-blob", sourceTerm: "grace", status: "active", renderings: [{ rendering: "gracia", status: "preferred" }] },
+      ],
+    })
+    // A deleted row is not a live row, so it does not stop the fallback.
+    await seedConcept("proj-ctx-unmigrated", { id: "aqu1710-gone", sourceTerm: "faith", renderings: [], deletedAt: 2 })
+
+    const ctx = await loadProjectContext(db, "proj-ctx-unmigrated")
+    expect(ctx.concepts.map((c) => c.id)).toEqual(["aqu1710-blob"])
+  })
+
+  it("drafts without local key terms, and says so, when the concepts read fails", async () => {
+    await seedSettings("proj-ctx-concepts-down", {
+      sourceLanguage: "English",
+      terminology: [{ id: "aqu1710-blob-down", sourceTerm: "grace", status: "active", renderings: [] }],
+    })
+    const conceptsDown = {
+      prepare: (query: string) => {
+        if (query.includes("FROM concepts")) throw new Error("concepts unavailable")
+        return db.prepare(query)
+      },
+    }
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const ctx = await loadProjectContext(conceptsDown, "proj-ctx-concepts-down")
+      // The run still gets the rest of its context. The blob is not served in
+      // place of the table: the editor would not show it either.
+      expect(ctx.sourceLanguage).toBe("English")
+      expect(ctx.concepts).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("proj-ctx-concepts-down"), "concepts unavailable")
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

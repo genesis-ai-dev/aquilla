@@ -14,6 +14,7 @@ import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
 import { executeDraft } from "../lib/agent/tools/draft"
+import { migrateProjectConcepts } from "../../../sync-worker/src/events/migrate-concepts"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const FILE = "22222222-2222-4222-8222-222222222222"
@@ -661,6 +662,121 @@ describe("executeSearch", () => {
     expect(out.data?.hits?.[0]).toMatchObject({ side: "source", ref: "MRK 4:3" })
     const none = await executeSearch(env.AQUILLA_PG, { q: "sower", side: "target" }, toolCtx())
     expect(none.data?.hits).toHaveLength(0)
+  })
+})
+
+// AQU-1714: side "terms" read `settings.terminology.concepts`. No writer ever
+// produced that path (the legacy key held a bare Concept[]), and since
+// 2026-09-04 the termbase lives in the `concepts` table, whose migration
+// deletes the key. So the search never found a term, and the agent could tell
+// a user that the team had not decided a term it had decided.
+describe("executeSearch side: terms (AQU-1714)", () => {
+  const GRACE = "44444444-4444-4444-8444-000000000001"
+
+  async function termSnippets(q: string): Promise<string[]> {
+    const out = await executeSearch(env.AQUILLA_PG, { q, side: "terms" }, toolCtx())
+    expect(out.ok).toBe(true)
+    return out.data?.hits?.map((h) => h.snippet) ?? []
+  }
+
+  /** One `concepts` row, written the way the term.* projection writes it. */
+  async function seedConcept(row: {
+    id: string
+    term: string
+    rendering: string
+    status: string
+    createdAt: number
+    deletedAt?: number
+  }) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?)`,
+    )
+      .bind(
+        row.id,
+        PROJECT,
+        row.term,
+        JSON.stringify([{ rendering: row.rendering, status: "preferred" }]),
+        row.status,
+        row.createdAt,
+        row.createdAt,
+        row.deletedAt ?? null,
+      )
+      .run()
+  }
+
+  /** The legacy termbase: a bare Concept[] under the `terminology` key. */
+  async function seedLegacyTermbase(concepts: unknown[]) {
+    await env.AQUILLA_PG.prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ targetLanguage: "es", terminology: concepts }))
+      .run()
+  }
+
+  it("finds the same term before and after the concepts migration deletes the settings key", async () => {
+    await seedWorld()
+    await seedLegacyTermbase([
+      {
+        id: GRACE,
+        sourceTerm: "grace",
+        renderings: [
+          { rendering: "gracia", status: "preferred" },
+          { rendering: "suerte", status: "forbidden" },
+        ],
+        notes: "Unearned favour, never luck",
+        status: "active",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ])
+    const grace = "[active] grace → gracia (preferred), suerte (forbidden) — Unearned favour, never luck"
+
+    // Not migrated yet: the legacy array is the whole termbase, as in the editor.
+    expect(await termSnippets("grace")).toEqual([grace])
+
+    // The real migration copies the term into `concepts` and deletes the key.
+    await migrateProjectConcepts(env.AQUILLA_PG, PROJECT)
+    const row = await env.AQUILLA_PG.prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .bind(PROJECT)
+      .first<{ settings: string }>()
+    expect(JSON.parse(row?.settings ?? "{}")).not.toHaveProperty("terminology")
+
+    expect(await termSnippets("grace")).toEqual([grace])
+    expect(await termSnippets("GRACIA")).toEqual([grace]) // a rendering, in any case
+    expect(await termSnippets("favour")).toEqual([grace]) // the notes
+    // A rendering status is a label, not text the team wrote.
+    expect(await termSnippets("preferred")).toEqual([])
+  })
+
+  it("finds draft and deprecated terms, marked as not enforced, but never a deleted term", async () => {
+    await seedWorld()
+    await seedConcept({ id: "c-old", term: "old covenant", rendering: "antiguo pacto", status: "deprecated", createdAt: 1 })
+    await seedConcept({ id: "c-cov", term: "covenant", rendering: "pacto", status: "active", createdAt: 2 })
+    await seedConcept({ id: "c-new", term: "new covenant", rendering: "nuevo pacto", status: "draft", createdAt: 3 })
+    await seedConcept({ id: "c-meal", term: "covenant meal", rendering: "comida del pacto", status: "active", createdAt: 4, deletedAt: 5 })
+
+    expect(await termSnippets("covenant")).toEqual([
+      "[deprecated, not enforced] old covenant → antiguo pacto (preferred)",
+      "[active] covenant → pacto (preferred)",
+      "[draft, not enforced] new covenant → nuevo pacto (preferred)",
+    ])
+  })
+
+  it("ignores a leftover settings key once the table has live terms, so a deleted term stays deleted", async () => {
+    await seedWorld()
+    await seedConcept({ id: "c-grace", term: "grace", rendering: "gracia", status: "active", createdAt: 1 })
+    await seedConcept({ id: "c-mercy", term: "mercy", rendering: "misericordia", status: "active", createdAt: 2, deletedAt: 3 })
+    // For example, a migration that stopped before it deleted the key.
+    await seedLegacyTermbase([
+      {
+        id: "c-mercy",
+        sourceTerm: "mercy",
+        renderings: [{ rendering: "misericordia", status: "preferred" }],
+        status: "active",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ])
+
+    expect(await termSnippets("mercy")).toEqual([])
+    expect(await termSnippets("grace")).toEqual(["[active] grace → gracia (preferred)"])
   })
 })
 

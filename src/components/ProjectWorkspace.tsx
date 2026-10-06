@@ -100,7 +100,7 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -2408,6 +2408,12 @@ export function ProjectWorkspace() {
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
+  // AQU-1704: which subtitle imports have only ONE timing mode available, and
+  // so get no picker. Not "is a subtitle import" — that hid the control from
+  // audio-only dubbing projects, whose source is an SRT with no video and for
+  // which Free timing is the whole point. Read through the same predicate the
+  // resolver uses so the picker and the mode can never disagree.
+  const timingModeFixedByFootage = isVideoTimedSubtitleFile(activeFile)
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
     if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
@@ -3277,7 +3283,15 @@ export function ProjectWorkspace() {
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      if (url && resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst") {
+      // AQU-1704: skipped for a subtitle import, because linking footage there
+      // resolves the mode to Original timing on its own (isVideoTimedSubtitleFile)
+      // — there is nothing to decline, and prompting would promise a Free-timing
+      // state the resolver will not hand back.
+      if (
+        url &&
+        !isSubtitleImportFile(activeFile) &&
+        resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst"
+      ) {
         setPendingVideoUrl(url)
         return
       }
@@ -13533,7 +13547,7 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    hideTimingMode={isSubtitleFile}
+                    hideTimingMode={timingModeFixedByFootage}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns
                     // the header it portals into the table column's slot.
@@ -14417,6 +14431,7 @@ export function ProjectWorkspace() {
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
           excludeFrontMatter={project.importExcludeFrontMatter}
+          cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an

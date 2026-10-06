@@ -12,12 +12,16 @@
 // skopos parameters (register, literalness, key-term strategy, constraints,
 // quality bar) sat unused in the same settings blob.
 //
-// Everything here is read from ONE `project_settings` row. Terminology hits
-// reuse the client's compiled rule ids (`term:<conceptId>:…`), so a server-side
-// finding and the browser's violations inbox point at the same concept rather
-// than at two definitions that drift.
+// The brief and the rules are read from ONE `project_settings` row. The
+// project's own key terms come from the `concepts` table, where the editor
+// reads them (AQU-1710). Terminology hits reuse the client's compiled rule ids
+// (`term:<conceptId>:…`), so a server-side finding and the browser's
+// violations inbox point at the same concept rather than at two definitions
+// that drift.
 
 import { termToRegexSource, type LintHit, type LintRule } from "../agent/lint"
+import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
+import type { TermMatchOptions } from "../../../../src/lib/terminology/model"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -34,6 +38,10 @@ export interface Concept {
   renderings: TermRendering[]
   notes?: string
   status: "active" | "draft" | "deprecated"
+  /** Carried as the editor reads them (AQU-1710). The matching here does not
+   *  use them yet; aligning it with the editor is AQU-1711. */
+  caseSensitive?: boolean
+  match?: TermMatchOptions
 }
 
 export interface TranslationBriefParameters {
@@ -114,12 +122,15 @@ function parseConcepts(raw: unknown): Concept[] {
         renderings.push({ rendering: rr.rendering.trim(), status: rr.status })
       }
     }
+    const match = coerceMatchOptions(c.match)
     out.push({
       id: c.id,
       sourceTerm: c.sourceTerm,
       renderings,
       status: "active",
       ...(asString(c.notes) ? { notes: asString(c.notes) } : {}),
+      ...(c.caseSensitive === true ? { caseSensitive: true } : {}),
+      ...(match ? { match } : {}),
     })
   }
   return out
@@ -334,7 +345,7 @@ export async function loadProjectContext(
       : {}
 
   const concepts = [
-    ...parseConcepts(settings.terminology),
+    ...(await loadLocalConcepts(db, projectId, settings.terminology)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
 
@@ -375,6 +386,71 @@ export async function isRegisteredTargetLane(
   } catch {
     return false
   }
+}
+
+interface ConceptRow {
+  concept_id: string
+  source_term: string
+  renderings: unknown
+  notes: string | null
+  status: string
+  case_sensitive: number
+  match_options: unknown
+}
+
+/** A JSONB column can arrive parsed or as text, depending on the driver. */
+function jsonColumn(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The project's own concepts, read where the editor reads them (AQU-1710): the
+ * live rows of the `concepts` projection. `term.*` events have written there
+ * since 2026-09-04, and `migrateProjectConcepts` deletes the old `terminology`
+ * settings key once it has copied it, so reading only the key gave every
+ * migrated project an empty termbase. As in the editor's read route
+ * (sync-worker/src/events/concepts-read-route.ts), the key is a fallback only
+ * when the table has no live rows, so a leftover blob never adds to the table.
+ */
+async function loadLocalConcepts(db: SettingsDb, projectId: string, blob: unknown): Promise<Concept[]> {
+  let rows: ConceptRow[]
+  try {
+    const { results } = await db
+      .prepare(
+        `SELECT concept_id, source_term, renderings, notes, status, case_sensitive, match_options
+           FROM concepts
+          WHERE project_id = ? AND deleted_at IS NULL
+          ORDER BY created_at ASC`,
+      )
+      .bind(projectId)
+      .all<ConceptRow>()
+    rows = results
+  } catch (err) {
+    // Draft without terms rather than fail the run, but say so: a silently
+    // empty termbase is the failure this read exists to end.
+    console.warn(
+      `[contextual] concepts read failed for project ${projectId}; drafting without its key terms:`,
+      err instanceof Error ? err.message : err,
+    )
+    return []
+  }
+  if (rows.length === 0) return parseConcepts(blob)
+  return parseConcepts(
+    rows.map((r) => ({
+      id: r.concept_id,
+      sourceTerm: r.source_term,
+      renderings: jsonColumn(r.renderings),
+      notes: r.notes,
+      status: r.status,
+      caseSensitive: r.case_sensitive === 1,
+      match: jsonColumn(r.match_options),
+    })),
+  )
 }
 
 /** Concepts from termbases this project subscribes to, in the order the

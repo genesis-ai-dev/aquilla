@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   DEFAULT_BKP_BASE,
+  __bkpMemoryBooks,
   __resetBkpMemoryCache,
   loadEnabledLayers,
   loadLayer,
@@ -130,6 +131,26 @@ describe("version-keyed caching", () => {
     // The old version's file is gone from IndexedDB.
     expect(await __packRecordKeys()).not.toContain("1.0.0/voices/JHN")
     expect(await __packRecordKeys()).toContain("2.0.0/voices/JHN")
+  })
+})
+
+// AQU-1700: an OT book's layers are up to about 12 MB raw, several times that
+// once parsed. A session that reads book after book must hold only the open
+// one; IndexedDB answers when an earlier book is opened again.
+describe("memory", () => {
+  it("holds only the open book's layers, and reopens an earlier book from IndexedDB", async () => {
+    server.manifest = manifest("1.0.0", { JHN: ALL_BOOK_LAYERS, RUT: ALL_BOOK_LAYERS })
+    await loadLayer("text", "JHN")
+    await loadLayer("people", "JHN")
+    expect(__bkpMemoryBooks()).toEqual(["JHN"])
+
+    await loadLayer("text", "RUT")
+    expect(__bkpMemoryBooks()).toEqual(["RUT"])
+
+    fetchMock.mockClear()
+    expect((await loadLayer("text", "JHN")).ok).toBe(true)
+    expect(layerFetches()).toEqual([])
+    expect(__bkpMemoryBooks()).toEqual(["JHN"])
   })
 })
 

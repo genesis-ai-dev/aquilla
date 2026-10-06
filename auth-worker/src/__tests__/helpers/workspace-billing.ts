@@ -9,7 +9,14 @@ import { stripeCatalogResponse } from './stripe-catalog'
 import { testStripeCatalog as manifest } from './stripe-catalog'
 import type { BillingPlanReview } from '../../../../db/shared/billing-review'
 
-export function config(catalog = manifest): Env { return { ...env, WRANGLER_LOCAL: '1',
+export function config(catalog = manifest): Env {
+  if (catalog.bindings.every(b => b.live)) return { ...env, ENVIRONMENT: 'production',
+    WRANGLER_LOCAL: undefined, DEPLOYMENT_WORKER_NAME: 'aquilla-identity',
+    CF_VERSION_METADATA: { id: 'fixture', tag: 'aquilla-identity-production-fixture', timestamp: new Date().toISOString() },
+    BILLING_WORKSPACE_CHECKOUT_ENABLED: 'true', BILLING_WEEKLY_USAGE_ENFORCE: 'true',
+    BILLING_LIVE_HOSTS: 'api.aquilla.app,aquilla.app', STRIPE_SECRET_KEY: 'sk_live_fixture',
+    STRIPE_PRICE_CATALOG: JSON.stringify(catalog), BASE_URL: 'https://aquilla.app' }
+  return { ...env, WRANGLER_LOCAL: '1',
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL: 'true', STRIPE_SECRET_KEY: 'sk_test_fixture',
   STRIPE_PRICE_CATALOG: JSON.stringify(catalog), BASE_URL: 'http://127.0.0.1:5173' } }
 export async function setup(scope: 'personal' | 'team' = 'personal', catalog = manifest) {
@@ -32,10 +39,10 @@ export async function setup(scope: 'personal' | 'team' = 'personal', catalog = m
       const params = new URLSearchParams(String(init?.body))
       expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts WHERE resolved_at IS NULL').first()).toEqual({ n: 1 })
       requests.push({ key, body: params.toString() })
-      if (!sessions.has(key)) sessions.set(key, { id: `cs_test_${123 + sessions.size}`, mode: 'subscription',
-        status: 'open', livemode: false, client_reference_id: params.get('client_reference_id'),
+      if (!sessions.has(key)) sessions.set(key, { id: `cs_${catalog.bindings[0]!.live ? 'live' : 'test'}_${123 + sessions.size}`, mode: 'subscription',
+        status: 'open', livemode: catalog.bindings[0]!.live, client_reference_id: params.get('client_reference_id'),
         metadata: { checkoutAttemptId: params.get('metadata[checkoutAttemptId]') },
-        url: `https://checkout.stripe.com/c/pay/cs_test_${123 + sessions.size}` })
+        url: `https://checkout.stripe.com/c/pay/cs_${catalog.bindings[0]!.live ? 'live' : 'test'}_${123 + sessions.size}` })
       if (loseResponse) { loseResponse = false; throw new Error('Connection lost after Stripe created session') }
       return Response.json({ ...sessions.get(key), ...(invalidUrl ? { url: 'https://evil.test/collect' } : {}) })
     }
@@ -47,19 +54,19 @@ export async function setup(scope: 'personal' | 'team' = 'personal', catalog = m
     useInvalidUrl: () => { invalidUrl = true } }
 }
 export async function reviewed(offer = 'pro', interval = 'year', catalog = manifest) {
-  const response = await app.request('http://127.0.0.1/api/v2/orgs/1/billing/review', {
+  const response = await app.request(`${catalog.bindings[0]!.live ? 'https://api.aquilla.app' : 'http://127.0.0.1'}/api/v2/orgs/1/billing/review`, {
     method: 'POST', headers: authHeader(await jwtFor('alice')),
     body: JSON.stringify({ offer, interval, quantity: 1 }),
   }, config(catalog))
-  expect(response.status).toBe(200)
+  expect(response.status, await response.clone().text()).toBe(200)
   const review = await response.json() as BillingPlanReview
   if (!review.ready) throw new Error('Expected eligible review')
   return { offer: review.offer.offer, interval: review.offer.interval, quantity: 1,
     confirmedPriceVersion: review.priceVersion, confirmedTotalAmount: review.offer.totalAmount,
     confirmedCurrency: review.offer.currency }
 }
-export async function checkout(body: unknown, username = 'alice', settings = config(), origin = 'http://127.0.0.1') {
-  return app.request(`${origin}/api/v2/orgs/1/billing/checkout-rehearsal`, {
+export async function checkout(body: unknown, username = 'alice', settings = config(), origin = settings.ENVIRONMENT === 'production' ? 'https://api.aquilla.app' : 'http://127.0.0.1') {
+  return app.request(`${origin}/api/v2/orgs/1/billing/${settings.ENVIRONMENT === 'production' ? 'workspace/checkout' : 'checkout-rehearsal'}`, {
     method: 'POST', headers: authHeader(await jwtFor(username)), body: JSON.stringify(body),
   }, settings)
 }
@@ -77,15 +84,15 @@ export async function completedPayment(offer = 'pro', interval = 'year', catalog
       price: stripeCatalogResponse(`/v1/prices/${params.get(`line_items[${i}][price]`)}`, catalog) as StripePriceInput })
   }
   const total = items.reduce((sum, item) => sum + item.price.unit_amount! * item.quantity, 0)
-  const session = { id: 'cs_test_123', mode: 'subscription', status: 'complete',
-    payment_status: 'paid', livemode: false, client_reference_id: params.get('client_reference_id')!,
+  const session = { id: catalog.bindings[0]!.live ? 'cs_live_123' : 'cs_test_123', mode: 'subscription', status: 'complete',
+    payment_status: 'paid', livemode: catalog.bindings[0]!.live, client_reference_id: params.get('client_reference_id')!,
     metadata, subscription: 'sub_rehearsal', customer: 'cus_rehearsal',
     currency: 'usd', amount_subtotal: total, amount_total: total }
   const subscription = { id: session.subscription, customer: session.customer,
-    status: 'active', livemode: false, currency: 'usd', collection_method: 'charge_automatically',
+    status: 'active', livemode: catalog.bindings[0]!.live, currency: 'usd', collection_method: 'charge_automatically',
     cancel_at_period_end: false, cancel_at: null, schedule: null, pending_update: null, latest_invoice: 'in_current',
     metadata: { ...metadata }, items: { has_more: false, data: items } }
-  const invoice = { id: 'in_current', customer: session.customer, livemode: false,
+  const invoice = { id: 'in_current', customer: session.customer, livemode: catalog.bindings[0]!.live,
     status: 'paid', paid: true, attempt_count: 1, amount_due: total,
     amount_paid: total, amount_remaining: 0, currency: 'usd',
     parent: { subscription_details: { subscription: subscription.id } },
@@ -99,13 +106,13 @@ export async function completedPayment(offer = 'pro', interval = 'year', catalog
     if (new URL(url).pathname.startsWith('/v1/subscriptions/')) return Response.json(subscription)
     return stripe.fetch(url, init)
   })
-  const event = { id: 'evt_workspace_paid', type: 'checkout.session.completed', livemode: false,
+  const event = { id: 'evt_workspace_paid', type: 'checkout.session.completed', livemode: catalog.bindings[0]!.live,
     created: Math.floor(Date.now() / 1000) - 1, data: { object: structuredClone(session) } }
   const send = (settings: Env = { ...config(catalog), STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }, signed = true) => {
     const body = JSON.stringify(event)
     const t = Math.floor(Date.now() / 1000)
     const sig = createHmac('sha256', 'whsec_fixture').update(`${t}.${body}`).digest('hex')
-    return app.request('http://127.0.0.1/api/v2/billing/webhook', { method: 'POST', body,
+    return app.request(`${catalog.bindings[0]!.live ? 'https://api.aquilla.app' : 'http://127.0.0.1'}/api/v2/billing/webhook`, { method: 'POST', body,
       headers: signed ? { 'stripe-signature': `t=${t},v1=${sig}` } : {} }, settings)
   }
   return { stripe, session, subscription, invoice, event, send }

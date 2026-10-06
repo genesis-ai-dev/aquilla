@@ -236,10 +236,10 @@ export async function handleStaleSourceRequest(
   // 5. Inherited staleness (AQU-477 §6): the per-hop chain walk. Only
   // relevant for live-linked projects with at least one ancestor hop above
   // the immediate upstream — a direct (single-hop) link has nothing to
-  // inherit (its own staleCellIds query above already covers that case).
-  // Scoped to this file's cell ids (reuses whatever cell set the direct
-  // query already touched, via a plain file-scoped id read) so the walk
-  // never scans the whole project.
+  // inherit (its own staleCellIds query above already covers that case), and
+  // the walk returns nothing for one (AQU-1683). Scoped to this file and its
+  // cell ids (reuses whatever cell set the direct query already touched, via
+  // a plain file-scoped id read) so the walk never scans the whole project.
   let upstreamStaleCellIds: string[] = []
   let ancestorBehind = false
   if (upstreamProjectId && linkMode === "live") {
@@ -250,7 +250,7 @@ export async function handleStaleSourceRequest(
         .bind(projectId, fileId)
         .all<{ cell_id: string }>()
       const fileCellIds = (fileCellIdsRes.results ?? []).map((r) => r.cell_id)
-      const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileCellIds)
+      const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileId, fileCellIds)
       upstreamStaleCellIds = inherited.upstreamStaleCellIds
       ancestorBehind = inherited.ancestorBehind
     } catch (err) {

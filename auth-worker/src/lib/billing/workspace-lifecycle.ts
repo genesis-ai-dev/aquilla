@@ -1,3 +1,4 @@
+import { stripeLiveMode } from './environment'
 import { z } from 'zod'
 import { readValidatedBillingCatalog } from './catalog'
 import { quoteOffer } from './pricing-model'
@@ -28,13 +29,13 @@ export function subscriptionPaidThrough(items: z.infer<typeof paidPeriodItems>, 
   return new Date(first.current_period_end * 1000).toISOString()
 }
 const subscriptionSchema = z.object({
-  id: z.string(), customer: z.string(), livemode: z.literal(false),
+  id: z.string(), customer: z.string(), livemode: z.boolean(),
   status: z.enum(['active', 'past_due', 'unpaid', 'canceled']),
   cancel_at_period_end: z.boolean(), cancel_at: timestamp.nullable().optional(), latest_invoice: z.string().regex(/^in_[\w]+$/),
   items: paidPeriodItems,
 })
 const invoiceSchema = z.object({
-  id: z.string(), customer: z.string(), livemode: z.literal(false),
+  id: z.string(), customer: z.string(), livemode: z.boolean(),
   status: z.enum(['paid', 'open', 'uncollectible', 'void', 'draft']),
   paid: z.boolean().optional(), billing_reason: z.string().optional(), attempt_count: z.number().int().nonnegative(),
   amount_due: z.number().int().nonnegative(), amount_paid: z.number().int().nonnegative(),
@@ -57,7 +58,7 @@ const invoiceSchema = z.object({
 export async function reconcileWorkspaceLifecycle(env: Env, event: {
   id: string; type: string; created: number; livemode: boolean; account?: string
 }, object: Record<string, unknown>, now = new Date()) {
-  if (!workspaceLifecycleEvents.includes(event.type) || event.livemode !== false
+  if (!workspaceLifecycleEvents.includes(event.type) || event.livemode !== stripeLiveMode(env)
     || !Number.isSafeInteger(event.created) || event.created <= 0
     || event.created * 1000 > now.getTime()) throw new Error('Invalid lifecycle event')
   const parent = object.parent as { subscription_details?: { subscription?: unknown } } | undefined
@@ -79,13 +80,15 @@ export async function reconcileWorkspaceLifecycle(env: Env, event: {
     throw new Error('Workspace subscription account mismatch')
   }
   const sub = subscriptionSchema.parse(await stripeForm(env, 'GET', `/subscriptions/${id}`))
-  if (sub.id !== id || sub.customer !== stored.stripe_customer_id) {
+  if (sub.id !== id || sub.customer !== stored.stripe_customer_id
+    || sub.livemode !== event.livemode) {
     throw new Error('Subscription identity mismatch')
   }
   const currentPriceIds = sub.items.data.map(item => item.price.id).sort()
   const changed = JSON.stringify(currentPriceIds) !== JSON.stringify([...stored.price_ids].sort())
   const invoice = invoiceSchema.parse(await stripeForm(env, 'GET', `/invoices/${sub.latest_invoice}`))
   if (invoice.id !== sub.latest_invoice || invoice.customer !== sub.customer
+    || invoice.livemode !== event.livemode
     || invoice.parent.subscription_details.subscription !== id) {
     throw new Error('Subscription invoice identity mismatch')
   }

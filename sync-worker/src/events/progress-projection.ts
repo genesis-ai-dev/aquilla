@@ -9,8 +9,14 @@ import { liveSourceSql } from './tombstoned-cells-scope'
 // defined — the definition simply now lives where both workers can reach it.
 import {
   bookKeyExpr,
+  inheritedKeysSql,
+  PLAN_KEYS_TABLE,
+  planKeysJoinSql,
+  planKeysRefreshSql,
   sectionKeyExpr,
   TIMELINE_SECTION_MS,
+  unitBookKeyExpr,
+  unitSectionKeyExpr,
 } from '../../../db/shared/plan-keys'
 // AQU-490 moved the per-cell audio rollup out for the same reason, and with
 // more cause: auth-worker held two hand-copies of it, and this change altered
@@ -60,6 +66,74 @@ export const HAS_BOOKS_CTE_SQL = `SELECT EXISTS (
         WHERE b.project_id = ? AND b.file_id = ? AND b.side = 'source'
           AND COALESCE(b.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
      ) AS v`
+
+/**
+ * AQU-1493: where each line with no verse reference of its own is counted —
+ * a line added in the editor in the chapter of the line above it (front matter
+ * of the file's first book at the top), a heading in the chapter of the verse
+ * below it (see `inheritedKeysSql`). Read from `cell_plan_keys`, which the full
+ * recompute's first statement writes (`planKeysRefreshSql`); `paired` and
+ * friends join it as `ik`.
+ */
+const PLAN_KEYS_JOIN = (alias: string) => planKeysJoinSql(alias, 'ik')
+
+/** The section / book a source cell `alias` counts toward on the plan. */
+const UNIT_SECTION_KEY = (alias: string) => unitSectionKeyExpr(alias, 'ik')
+const UNIT_BOOK_KEY = (alias: string) => unitBookKeyExpr(alias, 'ik')
+
+/**
+ * AQU-1493: the files whose stored placements (`cell_plan_keys`) are not what
+ * the walk says now — `scripts/neon-backfill-progress.ts --unreferenced-lines`
+ * re-projects exactly these, which rewrites the placements and every progress
+ * row counted from them in one batch. Selects (project_id, id); binds nothing;
+ * starts with WITH, so a caller combining it with another query must
+ * parenthesise it.
+ *
+ * Compares the walk with the stored rows cell by cell rather than looking for
+ * a symptom in the progress rows, so it catches every stale shape alike:
+ * production before AQU-1493 (no rows at all, and lines counted in no
+ * chapter), rows from before the placements were stored (this PR's earlier
+ * builds), and any later change to the rule itself, since the walk is always
+ * the current code's. A file the backfill has just re-projected agrees by
+ * construction and is never selected again, so the dev stack can run it on
+ * every boot.
+ *
+ * Candidates are Scripture files (a book row, and a verse-shaped reference —
+ * the walk's own gate) holding at least one line with no reference. The
+ * DISTINCT comes first so those two probes run once per FILE: run per book row
+ * they scanned a 27-book New Testament 27 times to reject it.
+ */
+export const UNREFERENCED_LINES_STALE_FILES_SQL = `WITH candidates AS MATERIALIZED (
+             SELECT f.project_id, f.file_id
+               FROM (
+                 SELECT DISTINCT b.project_id, b.file_id
+                   FROM file_section_progress b
+                  WHERE b.scope = 'book' AND b.target_lang = ''
+               ) f
+              WHERE EXISTS (
+                  SELECT 1 FROM cells u
+                   WHERE u.project_id = f.project_id AND u.file_id = f.file_id AND u.side = 'source'
+                     AND TRIM(SPLIT_PART(COALESCE(u.canonical_ref, ''), ':', 1)) = ''
+                )
+                AND EXISTS (
+                  SELECT 1 FROM cells v
+                   WHERE v.project_id = f.project_id AND v.file_id = f.file_id AND v.side = 'source'
+                     AND COALESCE(v.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
+                )
+           ), walked AS (
+             ${inheritedKeysSql('SELECT project_id, file_id FROM candidates')}
+           ), stored AS (
+             SELECT k.project_id, k.file_id, k.cell_id, k.section_key, k.place_ref, k.depth
+               FROM ${PLAN_KEYS_TABLE} k
+               JOIN candidates c ON c.project_id = k.project_id AND c.file_id = k.file_id
+           )
+           SELECT DISTINCT COALESCE(w.project_id, st.project_id) AS project_id,
+                  COALESCE(w.file_id, st.file_id) AS id
+             FROM walked w
+             FULL JOIN stored st
+               ON st.project_id = w.project_id AND st.file_id = w.file_id AND st.cell_id = w.cell_id
+            WHERE (w.section_key, w.place_ref, w.depth)
+                  IS DISTINCT FROM (st.section_key, st.place_ref, st.depth)`
 
 /**
  * The per-cell audio facts each statement's `paired` CTE takes from the CTE
@@ -373,8 +447,9 @@ export function sectionsProgressRecomputeStmt(
   // AQU-1093: a touched cell dirties BOTH its chapter section and its book, so
   // the affected set carries each key and the two branches filter on their own.
   const affected = uniqueCellIds.length > 0
-    ? `SELECT DISTINCT ${sectionKeyExpr('src')} AS section_key, ${bookKeyExpr('src')} AS book_key
+    ? `SELECT DISTINCT ${UNIT_SECTION_KEY('src')} AS section_key, ${UNIT_BOOK_KEY('src')} AS book_key
            FROM cells src
+           ${PLAN_KEYS_JOIN('src')}
           WHERE src.project_id = ? AND src.file_id = ? AND src.side = 'source'
             AND src.cell_id IN (${uniqueCellIds.map(() => '?').join(', ')})`
     : ''
@@ -402,8 +477,8 @@ export function sectionsProgressRecomputeStmt(
        ${HAS_BOOKS_CTE_SQL}
      ), paired AS MATERIALIZED (
        SELECT lanes.lane_id AS lane_id, lanes.lane AS lane,
-              ${sectionKeyExpr('s')} AS section_key,
-              ${bookKeyExpr('s')} AS book_key,
+              ${UNIT_SECTION_KEY('s')} AS section_key,
+              ${UNIT_BOOK_KEY('s')} AS book_key,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket,
@@ -418,6 +493,7 @@ export function sectionsProgressRecomputeStmt(
           AND t.side = 'target'
           AND t.target_lang = lanes.join_tag
          LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
+         ${PLAN_KEYS_JOIN('s')}
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
@@ -529,6 +605,11 @@ export function fullProgressRecomputeStmts(
   updatedAt: number,
 ): AquillaStatement[] {
   return [
+    // AQU-1493: FIRST, where each line with no reference counts — the one
+    // place `cell_plan_keys` is written. Everything after it in this batch,
+    // and every incremental recompute and reader until the next full one,
+    // joins those rows instead of walking the anchor chain again.
+    db.prepare(planKeysRefreshSql()).bind(projectId, fileId, projectId, fileId),
     db.prepare(
       // AQU-538: per-lane. `lanes` enumerates the project's lanes (AQU-1599:
       // from the `lanes` table, source lane included) so each source cell is
@@ -547,8 +628,8 @@ export function fullProgressRecomputeStmts(
          ${HAS_BOOKS_CTE_SQL}
        ), paired AS MATERIALIZED (
          SELECT lanes.lane_id AS lane_id, lanes.lane AS lane,
-                ${sectionKeyExpr('s')} AS section_key,
-                ${bookKeyExpr('s')} AS book_key,
+                ${UNIT_SECTION_KEY('s')} AS section_key,
+                ${UNIT_BOOK_KEY('s')} AS book_key,
                 CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
                 CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
                 LEAST(
@@ -566,6 +647,7 @@ export function fullProgressRecomputeStmts(
             AND t.side = 'target'
             AND t.target_lang = lanes.join_tag
            LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
+           ${PLAN_KEYS_JOIN('s')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1424: see the note on the other paired CTEs — parked cells leave
             -- progress entirely, numerator and denominator together. So do cells the
@@ -719,11 +801,17 @@ export function fullProgressRecomputeStmts(
       // and any date or Done mark stored against the book became unreachable.
       // Compute the surviving keys once. The previous correlated CASE made
       // Postgres scan source cells again for every chapter/book/lane row.
+      //
+      // AQU-1493: by the keys the insert COUNTED each cell under, inherited
+      // ones included. A line with no reference can be the only visible cell
+      // left in its chapter (the verses around it parked), and the insert
+      // above has just written that chapter's row for it.
       `WITH source_keys AS MATERIALIZED (
-         SELECT DISTINCT ${sectionKeyExpr('source')} AS section_key,
-                ${bookKeyExpr('source')} AS book_key,
+         SELECT DISTINCT ${UNIT_SECTION_KEY('source')} AS section_key,
+                ${UNIT_BOOK_KEY('source')} AS book_key,
                 COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+' AS is_scripture
            FROM cells source
+           ${PLAN_KEYS_JOIN('source')}
           WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
             -- AQU-1424: a section whose every cell is now parked has no surviving key,
             -- so its progress row is deleted rather than left behind at a stale count

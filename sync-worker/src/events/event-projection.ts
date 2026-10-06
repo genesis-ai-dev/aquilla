@@ -32,6 +32,8 @@ import {
   audioLaneDualReadSql,
   audioLaneResolveBinds,
   audioLaneResolveSql,
+  backtranslationLaneMatchBinds,
+  backtranslationLaneMatchSql,
   laneIdResolveBinds,
   laneIdResolveSql,
 } from './lane-id-sql'
@@ -186,6 +188,20 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  * lane" is one more thing that can disagree.
  */
 export function laneOfAudioEvent(payload: unknown): string {
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' ? lang : ''
+}
+
+/**
+ * AQU-1589: the lane tag a `cell.backtranslation.set` event names.
+ *
+ * Its own function for the same reason as {@link laneOfAudioEvent}: a
+ * back-translation is not a cells row and takes no part in the AD-2 chain, so
+ * it stays out of {@link laneOfEvent}. Its `lane_id` is resolved from this tag
+ * — `legacy_tag`, never the lane's name. Absent or '' is the lane whose
+ * `legacy_tag` is ''.
+ */
+export function laneOfBacktranslationEvent(payload: unknown): string {
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   return typeof lang === 'string' ? lang : ''
 }
@@ -1285,8 +1301,10 @@ export function buildEventProjectionStmts(
             .bind(...dependentBinds, ...dependentGateBinds),
         )
       } else {
-        // A target delete removes ONE lane. Only that lane's validators go;
-        // the cell and every sibling lane stay exactly as they were.
+        // A target delete removes ONE lane. Only that lane's validators and
+        // back-translations go; the cell and every sibling lane stay.
+        // NULL lane_id is the pre-backfill default lane, so those rows go
+        // only when this delete addresses legacy_tag ''.
         stmts.push(
           db
             .prepare(
@@ -1294,6 +1312,19 @@ export function buildEventProjectionStmts(
                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
             )
             .bind(...dependentBinds, lane, ...dependentGateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_backtranslations
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${backtranslationLaneMatchSql()}${dependentGateAnd}`,
+            )
+            .bind(
+              ...dependentBinds,
+              ...backtranslationLaneMatchBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
         )
       }
 
@@ -1322,7 +1353,7 @@ export function buildEventProjectionStmts(
             'cell_backtranslations',
             'cell_word_morph',
           ]
-        : ['cells', 'files', 'cell_validators']
+        : ['cells', 'files', 'cell_validators', 'cell_backtranslations']
     }
 
     case 'source.cell.reorder':
@@ -2564,17 +2595,23 @@ case 'cell.audio.attach': {
       // cell_validators or endorsement_count. Upserts into cell_backtranslations,
       // keying the latest BT per (project_id, file_id, cell_id). Historical BTs
       // are queryable via the target_event_id key.
+      //
+      // AQU-1589: lane_id is the event's lane (laneOfBacktranslationEvent).
+      // Absent/'' resolves to legacy_tag ''. COALESCE so a later write that
+      // cannot see the lane does not wipe an id already stored.
       const p = event.payload as EventPayloads['cell.backtranslation.set']
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      const lane = laneOfBacktranslationEvent(p)
       stmts.push(
         db
           .prepare(
             `INSERT INTO cell_backtranslations (
               project_id, file_id, cell_id, target_event_id,
-              bt_text, bt_html, polished, author, event_id, server_seq, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              bt_text, bt_html, polished, author, event_id, server_seq, created_at,
+              lane_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')})
             ON CONFLICT(project_id, file_id, cell_id, target_event_id) DO UPDATE SET
               bt_text     = excluded.bt_text,
               bt_html     = excluded.bt_html,
@@ -2582,7 +2619,8 @@ case 'cell.audio.attach': {
               author      = excluded.author,
               event_id    = excluded.event_id,
               server_seq  = excluded.server_seq,
-              created_at  = excluded.created_at`,
+              created_at  = excluded.created_at,
+              lane_id     = COALESCE(excluded.lane_id, cell_backtranslations.lane_id)`,
           )
           .bind(
             event.projectId,
@@ -2596,6 +2634,7 @@ case 'cell.audio.attach': {
             event.id,
             event.serverSeq ?? null,
             event.serverTs,
+            ...laneIdResolveBinds('target', event.projectId, lane),
           ),
       )
       return ['cell_backtranslations']
@@ -2930,6 +2969,20 @@ case 'cell.audio.attach': {
       const hiddenProvided = typeof p.hidden === 'boolean'
       const hiddenAt = hiddenProvided && p.hidden ? event.serverTs : null
       const hiddenAtAssign = hiddenProvided ? 'hidden_at         = excluded.hidden_at,' : ''
+      // AQU-1679: on a file the project already had, the row keeps its own
+      // cell_id and stands in for a DIFFERENT upstream cell, which is recorded
+      // so the mirror can find the row again. Composed in, like `hidden_at`
+      // above, and only for such a mirror: an ordinary one never names the
+      // column, so a database that predates migration 0140 keeps mirroring.
+      const standsInFor = p.upstream.cellId !== event.cellId ? p.upstream.cellId : null
+      const upstreamCellCol = standsInFor ? ', upstream_cell_id' : ''
+      const upstreamCellVal = standsInFor ? ', ?' : ''
+      const upstreamCellAssign = standsInFor ? 'upstream_cell_id  = excluded.upstream_cell_id,' : ''
+      // The join itself is not subject to the monotonic guard — see `adopt` on
+      // the payload type.
+      const applyGuard = p.adopt === true
+        ? ''
+        : 'WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq'
       stmts.push(
         db
           .prepare(
@@ -2938,14 +2991,15 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at, hidden_at, lane_id
+              upstream_event_id, upstream_seq, tombstoned_at, hidden_at${upstreamCellCol}, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL, ?, ${laneIdResolveSql('source')}
+              ?, ?, NULL, ?${upstreamCellVal}, ${laneIdResolveSql('source')}
             )
             ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
               ${hiddenAtAssign}
+              ${upstreamCellAssign}
               value             = excluded.value,
               value_html        = excluded.value_html,
               type              = COALESCE(excluded.type, cells.type),
@@ -2967,7 +3021,7 @@ case 'cell.audio.attach': {
               upstream_seq      = excluded.upstream_seq,
               tombstoned_at     = NULL,
               lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
-            WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
+            ${applyGuard}`,
           )
           .bind(
             event.projectId,
@@ -2993,6 +3047,7 @@ case 'cell.audio.attach': {
             p.upstream.eventId,
             upstreamSeq,
             hiddenAt,
+            ...(standsInFor ? [standsInFor] : []),
             ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )

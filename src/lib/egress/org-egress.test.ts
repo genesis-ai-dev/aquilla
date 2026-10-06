@@ -11,6 +11,7 @@ import { SyncTokenError, type fetchSyncToken } from "@/lib/sync/sync-token"
 import type { fetchProjectSettings } from "@/lib/sync/project-settings"
 import { FakeZipWorker, zipWorkerFactory } from "./__fixtures__/fake-zip-worker"
 import { purgeEgressExportCache, readEgressCache } from "./export-cache"
+import { audioListingKey } from "./build-project-export"
 import type { buildProjectExport } from "./build-project-export"
 import { runOrgEgress, type RunOrgEgressDeps } from "./org-egress"
 import type {
@@ -452,7 +453,29 @@ describe("runOrgEgress — audio + settings freshness (files projection is blind
     )
     expect(fetchAudioAttachments).toHaveBeenCalledTimes(1)
     const deps = buildExport.mock.calls[0][2]
-    expect(deps.audioListings?.get("f1")).toEqual(listing("a1"))
+    // AQU-1591: under the per-(file, lane) key the builder memoizes on. Keyed by
+    // the file alone this was a silent miss — every listing fetched twice, and
+    // each lane handed whichever lane's takes happened to be pre-fetched.
+    expect(deps.audioListings?.get(audioListingKey("f1", ""))).toEqual(listing("a1"))
+  })
+
+  // AQU-1591: a take belongs to one lane, so a run exporting three lanes probes
+  // three listings per file — and the freshness digest then covers exactly the
+  // takes this run will write, rather than every lane's.
+  it("probes one listing per (file, lane) being exported", async () => {
+    const fetchAudioAttachments = vi.fn<
+      NonNullable<RunOrgEgressDeps["fetchAudioAttachments"]>
+    >(async () => listing("a1"))
+    const buildExport = makeBuildExport()
+    await runOrgEgress(
+      args({ options: { ...audioOptions, lanes: ["", "fr", "de"] } }),
+      makeDeps({ buildExport, fetchAudioAttachments }),
+    )
+    expect(fetchAudioAttachments.mock.calls.map((c) => c[3])).toEqual(["", "fr", "de"])
+    const deps = buildExport.mock.calls[0][2]
+    for (const lane of ["", "fr", "de"]) {
+      expect(deps.audioListings?.get(audioListingKey("f1", lane))).toEqual(listing("a1"))
+    }
   })
 
   it("bypasses the cache entirely (no read, no write) when a listing fetch fails, and says so", async () => {

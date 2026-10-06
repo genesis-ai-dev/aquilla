@@ -7,7 +7,7 @@
  *  1. `captureViewportScreenshot()` — one frame of what the user is looking at,
  *     as a downscaled JPEG.
  *  2. `submitFeedback()` — POST the message (+ that frame) to the identity
- *     worker's `/api/v2/feedback`, which forwards it to the team inbox.
+ *     worker's `/api/v2/feedback`, which posts it to the team's private Discord channel.
  *
  * WHY `getDisplayMedia` and not a DOM-rasteriser (html2canvas & co.): the bugs
  * people report are the ones a rasteriser reproduces worst — a mis-painted

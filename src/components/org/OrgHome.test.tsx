@@ -7,6 +7,7 @@ import { OrgOverview } from "./OrgOverview"
 import { OrgProjectsPage } from "./OrgProjectsPage"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
+import { summarizePortfoliosByOrg } from "@/lib/frontier/portfolio-metrics"
 
 function projectsRollupStat() {
   // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
@@ -102,6 +103,16 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
       projects: await getPortfolio(),
       activeLanguageCount: 7, // keep in step with ORG_ACTIVE_LANGUAGES
     })),
+    getPortfolioAggregates: vi.fn(async () => ({
+      projectCount: 0,
+      avgTranslatedPct: 0,
+      avgValidatedPct: 0,
+      avgAudioPct: 0,
+      stalledCount: 0,
+      overdueCount: 0,
+      attentionCount: 0,
+      orgs: [],
+    })),
     getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
       const list = await getPortfolio()
       const q = opts?.q?.trim().toLowerCase() ?? ""
@@ -178,6 +189,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
+  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
@@ -208,7 +220,7 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio, getOrgPortfolioSummary, getPortfolioPage, getPortfolios, getPortfoliosPage } =
+  const { getPortfolio, getOrgPortfolioSummary, getPortfolioPage, getPortfolios, getPortfoliosPage, getPortfolioAggregates } =
     await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
@@ -246,6 +258,15 @@ beforeEach(async () => {
     ]
   })
   vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+    const projects = await getPortfolio("jwt", 1)
+    const summary = summarizePortfoliosByOrg(
+      projects.map((project) => ({ ...project, orgId: 1 })),
+      [1],
+      Date.now(),
+    )
+    return { ...summary.totals, orgs: summary.orgs }
+  })
   vi.mocked(getOrgPortfolioSummary).mockImplementation(async () => ({
     projects: await getPortfolio("jwt", 1),
     activeLanguageCount: ORG_ACTIVE_LANGUAGES,
@@ -576,18 +597,18 @@ describe("OrgOverview / OrgProjects", () => {
         { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
       ])
 
-      const { getPortfolios } = await import("@/lib/frontier/portfolio")
-      const portfolioCallsBeforeRetry = vi.mocked(getPortfolios).mock.calls.length
+      const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+      const summaryCallsBeforeRetry = vi.mocked(getPortfolioAggregates).mock.calls.length
 
       fireEvent.click(within(card).getByRole("button", { name: /retry/i }))
 
       // Same mount: the dashboard replaces the error card.
       await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
       expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
-      // Retry re-issues the dependent portfolio fetch too, not just the orgs —
-      // the failure state resolves to real data rather than an empty dashboard.
+      // Retry re-issues the overview summary too, not just the orgs — the
+      // failure state resolves to real totals rather than an empty dashboard.
       await waitFor(() =>
-        expect(vi.mocked(getPortfolios).mock.calls.length).toBeGreaterThan(portfolioCallsBeforeRetry),
+        expect(vi.mocked(getPortfolioAggregates).mock.calls.length).toBeGreaterThan(summaryCallsBeforeRetry),
       )
     })
 
@@ -1036,8 +1057,19 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
   ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
+    const { getPortfolioAggregates, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
     vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+      const rows = (portfolios as Array<{ orgId: number; projects: PortfolioProject[] }>).flatMap(
+        ({ orgId, projects: list }) => list.map((project) => ({ ...project, orgId })),
+      )
+      const summary = summarizePortfoliosByOrg(
+        rows,
+        portfolios.map((portfolio) => portfolio.orgId),
+        Date.now(),
+      )
+      return { ...summary.totals, orgs: summary.orgs }
+    })
     vi.mocked(getPortfoliosPage).mockImplementation(async () => {
       const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
         ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
@@ -1138,6 +1170,10 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
     expect(avgTile).toBeTruthy()
     expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+    const { getPortfolioAggregates, getPortfolios } = await import("@/lib/frontier/portfolio")
+    expect(vi.mocked(getPortfolioAggregates)).toHaveBeenCalled()
+    // The project table is paged. Overview totals must not download every row.
+    expect(vi.mocked(getPortfolios)).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId("shared-filter-chip"))
     await waitFor(() => {

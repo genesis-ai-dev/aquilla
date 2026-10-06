@@ -13,6 +13,7 @@ import {
   planUnitStatus,
   textFileIds,
 } from "@/lib/plan/plan-status"
+import { progressPercent } from "./progress-percent"
 
 const HEADER = [
   "Unit",
@@ -54,7 +55,7 @@ function escapeCell(value: string): string {
 }
 
 function pct(part: number, whole: number): string {
-  return whole > 0 ? String(Math.round((part / whole) * 100)) : "0"
+  return String(progressPercent(part, whole))
 }
 
 function isoDate(ms: number | null): string {

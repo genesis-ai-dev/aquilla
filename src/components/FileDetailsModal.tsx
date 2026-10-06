@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -42,10 +43,11 @@ export function FileDetailsModal({
   const { t, locale } = useI18n()
   if (!file) return null
 
+  // AQU-1493: never 100 while a cell is outstanding.
   const translatedPct = progress && progress.total > 0
-    ? Math.round((progress.translated / progress.total) * 100) : null
+    ? progressPercent(progress.translated, progress.total) : null
   const validatedPct = progress && progress.total > 0
-    ? Math.round((progress.validated / progress.total) * 100) : null
+    ? progressPercent(progress.validated, progress.total) : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

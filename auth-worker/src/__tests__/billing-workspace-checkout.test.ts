@@ -33,7 +33,7 @@ it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
     expect(params.get('metadata[checkoutAttemptId]')).toBe(body.attemptId)
     expect(params.get('subscription_data[metadata][checkoutAttemptId]')).toBe(body.attemptId)
     expect(params.get('subscription_data[metadata][kind]')).toBe('workspace_plan_rehearsal')
-    expect(params.get('success_url')).toBe('http://127.0.0.1:5173/orgs/1/settings/billing?checkout=rehearsal')
+    expect(params.get('success_url')).toBe('http://127.0.0.1:5173/orgs/1/settings/billing?checkout=success')
     expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_plan_entitlements').first()).toEqual({ n: 0 })
   },
 )
@@ -125,7 +125,7 @@ it('runs sandbox checkout on an allowlisted development deployment and nowhere e
   const started = await checkout(input, 'alice', deployed, 'https://api.dev.aquilla.app')
   expect(started.status).toBe(200)
   expect(new URLSearchParams(stripe.requests[0]!.body).get('success_url'))
-    .toBe('https://dev.aquilla.app/orgs/1/settings/billing?checkout=rehearsal')
+    .toBe('https://dev.aquilla.app/orgs/1/settings/billing?checkout=success')
   // Production environment, an unlisted host, a live key, or an unlisted app
   // origin each fail closed even with the flag and allowlist set.
   for (const [settings, url] of [
@@ -617,4 +617,46 @@ it('does not clear a failed cancellation using an invoice for a different paid p
   lifecycleEvent(p, 'customer.subscription.deleted', 'evt_wrong_canceled_invoice')
   expect((await p.send()).status).toBe(500)
   expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('payment_failed')
+})
+
+// AQU-1491: production-shaped producer output passes through the signed webhook
+// and workspace consumer; no live Stripe account or charge is used in this test.
+it('activates a live-mode reviewed checkout and keeps renewal/portal processing after sales stop', async () => {
+  const { catalogSchema } = await import('../lib/billing/catalog-schema')
+  const { readWorkspaceEntitlement } = await import('../lib/billing/workspace')
+  const { reconcileWorkspaceLifecycle } = await import('../lib/billing/workspace-lifecycle')
+  const catalog = catalogSchema.parse({ ...manifest,
+    bindings: manifest.bindings.map(b => ({ ...b, live: true })) })
+  const f = await completedPayment('pro', 'month', catalog)
+  expect((await f.send()).status).toBe(200)
+  expect(await env.AQUILLA_PG.prepare('SELECT sandbox FROM workspace_checkout_attempts').first()).toEqual({ sandbox: false })
+  const initial = await readWorkspaceEntitlement(env.AQUILLA_PG, 1)
+  expect(initial).toMatchObject({ offer: 'pro', stripe_subscription_id: f.subscription.id })
+  expect((await f.send()).status).toBe(200)
+  const stopped = { ...config(catalog), BILLING_WORKSPACE_CHECKOUT_ENABLED: 'false', STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }
+  expect((await f.send(stopped)).status).toBe(200)
+  // Cancellation updates paid-through access while preserving the weekly anchor.
+  f.subscription.cancel_at_period_end = true
+  expect(await reconcileWorkspaceLifecycle(stopped, {
+    id: 'evt_live_cancel', type: 'customer.subscription.updated',
+    created: Math.floor(Date.now() / 1000) - 1, livemode: true,
+  }, f.subscription)).toBe(true)
+  expect((await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.usage_anchor).toBe(initial!.usage_anchor)
+  const workspace = await app.request('https://api.aquilla.app/api/v2/orgs/1/billing/workspace', {
+    headers: authHeader(await jwtFor('alice')),
+  }, stopped)
+  expect(workspace.status).toBe(200)
+  expect(await workspace.json()).toMatchObject({ checkoutEnabled: false,
+    entitlement: { offer: 'pro', access: { offer: 'pro' } } })
+  const purchase = await app.request('https://api.aquilla.app/api/v2/orgs/1/billing/workspace/checkout', {
+    method: 'POST', headers: authHeader(await jwtFor('alice')), body: '{}',
+  }, stopped)
+  expect(purchase.status).toBe(503)
+})
+
+it('rejects cross-mode Stripe objects even when their webhook signature is valid', async () => {
+  const f = await completedPayment()
+  f.event.livemode = true
+  expect((await f.send()).status).toBe(500)
+  expect(await env.AQUILLA_PG.prepare('SELECT org_id FROM workspace_plan_entitlements').first()).toBeNull()
 })

@@ -48,6 +48,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -403,7 +404,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(translatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(translatedPct(row.original))
             return (
               <div
                 data-testid="project-table-translated-value"
@@ -428,7 +429,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(validatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(validatedPct(row.original))
             return (
               <div
                 data-testid="project-table-validated-value"
@@ -453,7 +454,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[4.5rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(audioPct(row.original) * 100)
+            const pct = progressPercentOfFraction(audioPct(row.original))
             return (
               <div
                 data-testid="project-table-audio-value"

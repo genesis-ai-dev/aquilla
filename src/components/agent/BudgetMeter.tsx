@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { formatCredits } from "@/lib/credits"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentBudget } from "@/lib/agent/run-state"
+import { budgetPct } from "./budget-pct"
 
 export function BudgetMeter({ budget }: { budget: AgentBudget }) {
   const t = useT()
@@ -46,10 +47,7 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
     )
   }
 
-  const pct = budget.capCredits > 0 ? Math.min(100, (budget.spentCredits / budget.capCredits) * 100) : 0
-  // Percentage only (2026-08-31 review): raw "1 cr / 2,500 cr" reads as
-  // billing noise; the bar + a percent answers "how much runway is left".
-  const pctLabel = budget.spentCredits > 0 && pct < 1 ? "<1" : String(Math.round(pct))
+  const { pct, pctLabel } = budgetPct(budget)
   return (
     <div
       className="flex items-center gap-1.5 text-[10px] text-muted-foreground"

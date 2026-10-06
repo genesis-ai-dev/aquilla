@@ -4,7 +4,7 @@
 // titled popover so Inworld 503s never read as a missing Gemini key.
 
 export const HOSTED_TTS_NOT_CONFIGURED_BODY =
-  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server, so a Gemini API key will not fix it."
 
 export const HOSTED_TTS_FAILED_BODY =
   "Inworld TTS couldn't generate this line. This is not a Gemini key problem."

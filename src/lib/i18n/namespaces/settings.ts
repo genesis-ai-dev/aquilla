@@ -87,6 +87,17 @@ export const settings = defineNamespace({
     "settings.autoPropagateRepetitions.blocked":
       "Only org maintainers and owners can change this default.",
 
+    // ── BulkValidateAiDraftsSection (Sam, 2026-10-01) ──
+    "settings.bulkValidateAiDrafts.label": "Allow bulk validation of AI drafts",
+    "settings.bulkValidateAiDrafts.description":
+      "When on, \"Validate text\" on a selection and \"Batch validate text…\" " +
+      "also validate AI drafts that nobody has edited. When off, each untouched " +
+      "AI draft has to be opened and validated on its own. Applies to every " +
+      "project in the organization.",
+    "settings.bulkValidateAiDrafts.saveFailed": "Save failed",
+    "settings.bulkValidateAiDrafts.blocked":
+      "Only org maintainers and owners can change this setting.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
@@ -262,8 +273,20 @@ export const settings = defineNamespace({
 
     // ── OrgSettingsIdentity ──
     "settings.orgIdentity.nameDescription": "Shown across the organization.",
+    "settings.orgIdentity.deleteOrganization": "Delete organization",
+    "settings.orgIdentity.deleteRowDescription":
+      "Permanently delete this organization and everything that belongs only to it. Projects must be removed first.",
+    "settings.orgIdentity.deleteConfirmBody":
+      "This permanently deletes {name}, including its members, invites, and connections. This cannot be undone.",
+    "settings.orgIdentity.deleteBlockedProjects":
+      "This organization still has projects. Remove them before deleting the organization.",
+    "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
+    // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
+    // "Delete '{name}'?" → org.teamDetail.deleteConfirmTitle (identical text)
+    // "Deleting…" → org.teamDetail.deletingButton (identical text)
+    // "Confirm" → common.confirm, "Cancel" → common.cancel
 
     // ── OrgSettingsIndex ──
     // Rendered via <RichMessage> so the embedded <Link to="/preferences"> stays
@@ -364,6 +387,21 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.bulkValidateAiDrafts.label": {
+        description:
+          "Label of an organization setting (a switch, off by default). When on, " +
+          "the two bulk text-validation actions also sign off AI-generated " +
+          "translations that no person has edited yet; when off, such drafts " +
+          "must be validated one at a time. \"AI drafts\" = machine-drafted " +
+          "translations awaiting human review.",
+      },
+      "settings.bulkValidateAiDrafts.description": {
+        description:
+          "Help text under that switch. The two quoted names are the labels of " +
+          "the actions it affects (the selection bar's \"Validate text\" button " +
+          "and the file menu's \"Batch validate text…\" item) — use the same " +
+          "wording this catalog gives those labels.",
+      },
       "settings.localLlm.detectedOne": {
         description:
           "Confirmation shown under the Model field after \"Detect models\" finds exactly " +
@@ -416,6 +454,14 @@ export const settings = defineNamespace({
           link:
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
+        },
+      },
+      "settings.orgIdentity.deleteConfirmBody": {
+        description:
+          "Body of the confirm dialog that deletes an organization. Names the " +
+          "organization so the owner can see which workspace they are about to remove.",
+        placeholders: {
+          name: "The organization's name — not translated.",
         },
       },
       "settings.notifications.groupLabel": {

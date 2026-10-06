@@ -36,6 +36,7 @@
     "identity": {
       "directory": "auth-worker",
       "requiredSecrets": [
+        "DISCORD_FEEDBACK_WEBHOOK_URL",
         "OPENROUTER_API_KEY",
         "RESEND_API_KEY",
         "SECRET_KEY",

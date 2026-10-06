@@ -1,4 +1,4 @@
--- 0136_cell_backtranslations_lane_id.sql — AQU-1589
+-- 0144_cell_backtranslations_lane_id.sql — AQU-1589
 --
 -- Back-translations were one row-set per cell, so the newest reading in any
 -- lane was the reading every lane saw, and deleting one target lane removed

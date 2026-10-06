@@ -34,8 +34,12 @@ import {
  */
 const QUESTION_MARK = /[?¿;՞؟፧‽⁇-⁉⸮︖﹖？]/u
 
-/** In a cell with no speech, a quoted stretch this short is taken as a title or scare quotes, which V7 allows. */
-export const MAX_SCARE_QUOTE_WORDS = 3
+/**
+ * In a cell with no speech, a quoted stretch this short is taken as a title,
+ * a gloss or scare quotes, which V7 allows. Five words covers names such as
+ * “The place of a skull” (WEB, MAT 27:33).
+ */
+export const MAX_SCARE_QUOTE_WORDS = 5
 
 const WORD_CHAR = /[\p{L}\p{N}]/u
 

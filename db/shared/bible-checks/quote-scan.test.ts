@@ -42,6 +42,24 @@ describe('scanQuotes', () => {
     expect(summary('and more.”', ENGLISH, 1)).toEqual(['close:1/1'])
   })
 
+  it('reads a paragraph reopen inside a verse as a continuation (WEB, MAT 13:28)', () => {
+    // The parable goes on (level 1 open); a new paragraph starts mid-verse.
+    const web = '“He said to them, ‘An enemy has done this.’ “The servants asked him, ‘Do you want us to go?’'
+    expect(summary(web, ENGLISH, 1)).toEqual([
+      'continuation:1/1', 'open:2/2', 'close:2/2', 'continuation:1/1', 'open:2/2', 'close:2/2',
+    ])
+  })
+
+  it('reopens every open level in a run (“‘), but not after a comma, where “ is a new quotation', () => {
+    expect(summary('and so it ended. “‘And then', ENGLISH, 2)).toEqual(['continuation:1/1', 'continuation:2/2'])
+    expect(summary('who says to you, “Give', ENGLISH, 1)).toEqual(['open:2/1'])
+  })
+
+  it('does not reopen under the other conventions', () => {
+    // The lone ’ closes nothing, so it is read as an apostrophe; “ opens a level-2 quotation with level-1 marks.
+    expect(summary('this.’ “The servants', { ...ENGLISH, continuation: 'none' }, 1)).toEqual(['open:2/1'])
+  })
+
   it('reads a continuation-mark convention (Spanish » at a new paragraph) as a continuation, not a close', () => {
     const spanish: QuoteMarksProfile = {
       levels: [{ open: '«', close: '»' }, { open: '“', close: '”' }],

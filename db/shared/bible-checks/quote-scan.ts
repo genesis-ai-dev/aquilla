@@ -11,6 +11,13 @@
 //      quotation inside it;
 //   5. any other closing mark is a stray close.
 //
+// With the "reopen-each-paragraph" convention, a quotation that is still open
+// is reopened at each new paragraph, and a verse may hold a paragraph break
+// (WEB, MAT 13:28: "…this.’ “The servants…"). So after sentence-final
+// punctuation or a closing mark, the opening mark of an open quotation is a
+// continuation, not a new quotation. A run of them (“‘) reopens each open
+// level in turn. After a comma or colon it is still read as a new quotation.
+//
 // English uses ’ both to close a level-2 quotation and as an apostrophe, so a ’
 // (or ' or ʼ) between two letters is skipped, and one that closes nothing is
 // read as an apostrophe rather than a stray close.
@@ -56,6 +63,15 @@ export function markSetForDepth(depth: number, levelCount: number): number {
 const APOSTROPHE_LIKE = new Set(['’', "'", 'ʼ'])
 const WORD_CHAR = /[\p{L}\p{N}]/u
 const WHITESPACE = /\s/u
+/** Ends a sentence, so a paragraph may follow: . ! ? … and their full-width forms. */
+const SENTENCE_END = /[.!?…。！？]/u
+
+/** The last character before `index` that is not whitespace, or ''. */
+function charBeforeSkippingSpace(text: string, index: number): string {
+  let i = index
+  while (i > 0 && WHITESPACE.test(charBefore(text, i))) i -= charBefore(text, i).length
+  return charBefore(text, i)
+}
 
 function charAt(text: string, index: number): string {
   if (index < 0 || index >= text.length) return ''
@@ -115,6 +131,22 @@ export function scanQuotes(text: string, marks: QuoteMarksProfile, startDepth: n
   const tokens: QuoteToken[] = []
   const setWithOpen = (char: string) => levels.findIndex((pair) => pair.open === char) + 1
   const setWithClose = (char: string) => levels.findIndex((pair) => pair.close === char) + 1
+  const closeChars = new Set(levels.map((pair) => pair.close))
+  const reopens = marks.continuation === 'reopen-each-paragraph'
+  // Stack index of the level a run of paragraph reopens (“‘) expects next; -1 outside a run.
+  let reopenNext = -1
+
+  /** The stack index of the open quotation `char` reopens at a paragraph break here, or -1. */
+  const paragraphReopen = (char: string, start: number): number => {
+    const previous = tokens[tokens.length - 1]
+    if (reopenNext >= 0 && previous?.kind === 'continuation' && text.slice(previous.end, start).trim() === '') {
+      const next = stack[reopenNext]
+      return next && levels[next.set - 1].open === char ? reopenNext : -1
+    }
+    const before = charBeforeSkippingSpace(text, start)
+    if (!SENTENCE_END.test(before) && !closeChars.has(before)) return -1
+    return stack.findIndex((quote) => levels[quote.set - 1].open === char)
+  }
 
   let index = readContinuation(text, marks, startDepth, tokens)
   while (index < text.length) {
@@ -128,10 +160,20 @@ export function scanQuotes(text: string, marks: QuoteMarksProfile, startDepth: n
 
     const top = stack[stack.length - 1]
     if (top && levels[top.set - 1].close === char) {
+      reopenNext = -1
       stack.pop()
       tokens.push({ kind: 'close', depth: top.depth, set: top.set, start, end })
       continue
     }
+    if (reopens && stack.length > 0) {
+      const level = paragraphReopen(char, start)
+      if (level >= 0) {
+        tokens.push({ kind: 'continuation', depth: stack[level].depth, set: stack[level].set, start, end })
+        reopenNext = level + 1
+        continue
+      }
+    }
+    reopenNext = -1
     const depth = stack.length + 1
     const expectedSet = markSetForDepth(depth, levels.length)
     const openSet = levels[expectedSet - 1].open === char ? expectedSet : setWithOpen(char)

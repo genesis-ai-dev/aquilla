@@ -184,6 +184,17 @@ describe('conventions that are not errors', () => {
 
   it('scare quotes or a short title in a cell with no speech are allowed', () => {
     expect(check('JHN 4:8', 'For his disciples had gone away into the “city” to buy food.')).toEqual([])
+    // Up to five words, like WEB's “The place of a skull” (MAT 27:33).
+    expect(check('JHN 4:8', 'For his disciples had gone away into “the city of the Samaritans” to buy food.')).toEqual([])
+  })
+
+  it('a paragraph that starts mid-verse inside a speech reopens with “, and is not a nested quotation', () => {
+    // WEB puts paragraph breaks inside verses (MAT 13:28: “…this.’ “The servants…”).
+    const reopened =
+      '“You have heard that it was said to the ancient ones, ‘You shall not murder.’ “Whoever murders will be in danger of the judgment.'
+    expect(check('MAT 5:21', reopened)).toEqual([])
+    // After a comma the same mark is a nested quotation with the wrong marks.
+    expect(codes(check('MAT 5:21', reopened.replace('‘You shall not murder.’', '“You shall not murder,”')))).toContain('bkp:V5')
   })
 
   it('apostrophes are not quotation marks', () => {

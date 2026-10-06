@@ -18,7 +18,7 @@
 // cross-import — so the file-type set is duplicated here deliberately).
 //
 // AQU-1686: the explicit switches are read from project_settings' generated
-// columns (migration 0141), never from the settings blob, which runs to
+// columns (migration 0150), never from the settings blob, which runs to
 // several MB. `readBibleEnrichmentFlags` resolves the per-enrichment Bible
 // data switches with the same rules the SPA uses
 // (db/shared/bible-enrichments.ts), for server-side readers such as autopilot.

@@ -139,21 +139,22 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
 
 describe("laneTargetLanguages — the Import dialog's translation check (AQU-1365, AQU-1586)", () => {
   // The check compares an upload's declared language with each lane's. A lane
-  // tagged with its own opaque id must be compared by its row's language, or a
-  // Spanish upload never matches the second Spanish lane and a hex id is
-  // offered up as a language.
+  // tagged with its own opaque id must be compared by its row's typed language
+  // (AQU-1592), not its display name, its code, or that id — or a Spanish
+  // upload never matches the second Spanish lane and a hex id is offered up
+  // as a language.
   const rows = [
-    { id: "defa0001", role: "target" as const, name: "Spanish", langCode: "es", legacyTag: "" },
-    { id: "a3f09c1e", role: "target" as const, name: "Spanish (Mexico team)", langCode: "es", legacyTag: "a3f09c1e" },
-    { id: "frc00002", role: "target" as const, name: "French (Canada)", langCode: "fra", legacyTag: "fr-CA" },
-    { id: "b0b0b0b0", role: "target" as const, name: "", langCode: null, legacyTag: "b0b0b0b0" },
+    { id: "defa0001", role: "target" as const, language: "Spanish", name: "Spanish", langCode: "es", legacyTag: "" },
+    { id: "a3f09c1e", role: "target" as const, language: "Spanish", name: "Spanish (Mexico team)", langCode: "es", legacyTag: "a3f09c1e" },
+    { id: "frc00002", role: "target" as const, language: "fr-CA", name: "French (Canada)", langCode: "fra", legacyTag: "fr-CA" },
+    { id: "b0b0b0b0", role: "target" as const, language: null, name: "", langCode: null, legacyTag: "b0b0b0b0" },
   ]
   const labels = { "": "Spanish", a3f09c1e: "Spanish (Mexico team)", "fr-CA": "French (Canada)" }
 
   it("reads a lane's language from its row, never its id, and marks the open lane", () => {
     expect(laneTargetLanguages(["", "a3f09c1e", "fr-CA"], "a3f09c1e", "Spanish", labels, rows)).toEqual([
       { language: "Spanish", label: "Spanish", active: false },
-      { language: "es", label: "Spanish (Mexico team)", active: true },
+      { language: "Spanish", label: "Spanish (Mexico team)", active: true },
       { language: "fr-CA", label: "French (Canada)", active: false },
     ])
   })

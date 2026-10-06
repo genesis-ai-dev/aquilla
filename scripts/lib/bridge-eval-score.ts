@@ -9,7 +9,8 @@
 // link, so a link from a word the gold leaves unaligned (an article) is wrong.
 //
 // Classes are the ones Who's Who tints:
-//   pronoun      — personal pronouns (class pron, type personal);
+//   pronoun      — personal pronouns (class pron, type personal), and in Hebrew
+//                  (AQU-1700) the pronominal suffixes (type pronominal);
 //   subject-verb — verbs whose implied subject the pack names (mention kind "subject");
 //   proper       — proper nouns;
 //   mention      — every word the pack's people layer names.
@@ -42,7 +43,7 @@ export interface Scorer {
 
 export function classesOf(word: BkpWord, id: string, mentions: ReadonlyMap<string, string>): WordClass[] {
   const out: WordClass[] = ["all"]
-  if (word.class === "pron" && word.type === "personal") out.push("pronoun")
+  if (word.class === "pron" && (word.type === "personal" || word.type === "pronominal")) out.push("pronoun")
   if (mentions.get(id) === "subject") out.push("subject-verb")
   if (word.class === "noun" && word.type === "proper") out.push("proper")
   if (mentions.has(id)) out.push("mention")

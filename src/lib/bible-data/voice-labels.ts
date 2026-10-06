@@ -81,17 +81,30 @@ export function acaiLanguageFor(code: string | null | undefined): AcaiLabelLangu
 }
 
 /**
- * The script ACAI's Chinese (`cmn`) labels are written in. Measured on pack
- * 1.0.0: 294 labels use characters that only Traditional Chinese has (耶穌,
- * 聖靈, 馬利亞) and none use Simplified-only ones. So a Simplified interface
- * is the one that gets them in the other script, until the pack converts.
+ * Chinese in the pack (AQU-1700). Since pack 1.2.0 every label map (names,
+ * descriptions, key-term titles) is keyed by one scheme, ISO 639-3 plus a
+ * BCP 47 script subtag where a language has two written standards:
+ *   • `cmn` is Traditional characters: ACAI's labels (measured on pack 1.0.0:
+ *     294 use characters only Traditional Chinese has, 耶穌, 聖靈, 馬利亞, and
+ *     none Simplified-only ones) and Aquifer's `zht` titles;
+ *   • `cmn-Hans` is Simplified: Aquifer's `zhs`, which no source fills yet.
+ * So a Simplified interface reads `cmn-Hans` first, then the Traditional
+ * `cmn`, saying it is in the other script.
  */
-const ACAI_CHINESE_SCRIPT = "hant"
+const CHINESE_SIMPLIFIED_KEY = "cmn-Hans"
+
+/** One pack label key the interface reads. */
+export interface InterfaceLabelKey {
+  /** A pack label key: "fra", "cmn-Hans", "cmn". */
+  key: string
+  /** Text under this key is in the other script of the interface language (Chinese only). */
+  otherScript: boolean
+}
 
 export interface InterfaceLabelLanguage {
   language: AcaiLabelLanguage
-  /** ACAI's labels are in the other script of this language (Chinese only). */
-  otherScript: boolean
+  /** The pack keys to read, best first. */
+  keys: readonly InterfaceLabelKey[]
 }
 
 /**
@@ -102,7 +115,16 @@ export function acaiLanguageForLocale(locale: string): InterfaceLabelLanguage | 
   const language = acaiLanguageFor(locale)
   if (!language) return null
   const script = /-(hans|hant)\b/i.exec(locale)?.[1]?.toLowerCase()
-  return { language, otherScript: language === "cmn" && script !== undefined && script !== ACAI_CHINESE_SCRIPT }
+  if (language === "cmn" && script === "hans") {
+    return {
+      language,
+      keys: [
+        { key: CHINESE_SIMPLIFIED_KEY, otherScript: false },
+        { key: "cmn", otherScript: true },
+      ],
+    }
+  }
+  return { language, keys: [{ key: language, otherScript: false }] }
 }
 
 // ── Project names ───────────────────────────────────────────────────────────
@@ -206,10 +228,11 @@ export function resolveVoiceLabel(
   }
 
   const ui = options.mode === "english" ? null : options.interfaceLanguage
-  const uiName = ui ? entity.labels[ui.language] : undefined
-  if (ui && uiName) {
+  for (const { key, otherScript } of ui?.keys ?? []) {
+    const uiName = Object.hasOwn(entity.labels, key) ? entity.labels[key] : undefined
+    if (!uiName) continue
     if (generated) return { label: uiName, source: "generated" }
-    return ui.otherScript ? { label: uiName, source: "acai", otherScript: true } : { label: uiName, source: "acai" }
+    return otherScript ? { label: uiName, source: "acai", otherScript: true } : { label: uiName, source: "acai" }
   }
 
   const english = entity.labels.eng
@@ -221,8 +244,10 @@ export function resolveVoiceLabel(
 
 export interface LabelText {
   text: string
-  /** The pack's language code of `text`: the interface language, or "eng". */
+  /** The pack's language key of `text`: one of the interface language's keys, or "eng". */
   language: string
+  /** In the other script of the interface language: Traditional characters for a Simplified interface. */
+  otherScript?: true
 }
 
 /**
@@ -243,8 +268,10 @@ export function pickLabelText(
     return typeof value === "string" && value.trim() !== "" ? value : null
   }
   if (mode !== "english" && interfaceLanguage) {
-    const own = textIn(interfaceLanguage.language)
-    if (own) return { text: own, language: interfaceLanguage.language }
+    for (const { key, otherScript } of interfaceLanguage.keys) {
+      const own = textIn(key)
+      if (own) return otherScript ? { text: own, language: key, otherScript: true } : { text: own, language: key }
+    }
   }
   const english = textIn("eng")
   return english ? { text: english, language: "eng" } : null

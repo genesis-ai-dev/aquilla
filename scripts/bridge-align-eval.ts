@@ -31,6 +31,11 @@
 // --sweep MRK: tune the aligner's settings on another book (never the one reported).
 // --write-fixture: refresh src/lib/bible-data/__fixtures__/bridge-jhn4.json (BSB, JHN only).
 //
+// An OT book (AQU-1700, pack 1.2.0) reads data/eng/alignments/BSB/WLCM-BSB-manual.json
+// (Macula Hebrew morpheme ids) and data/eng/targets/BSB/ot_BSB.tsv instead, e.g.
+//   pnpm bridges:eval --data … --pack … --book RUT --text BSB
+// Its "pronoun" class includes the pronominal suffixes.
+//
 // The AQU-1694 numbers came from (pack 1.1.0, Node 22):
 //   pnpm bridges:eval --data … --pack … --book JHN --text BSB --compose YLT
 //   pnpm bridges:eval --data … --pack … --book JHN --text BSB --sweep MRK
@@ -64,6 +69,7 @@ import {
   loadPackText,
   loadTargetText,
   NT_BOOKS,
+  testamentOf,
   type GreekVerse,
   type TextVerse,
 } from "./lib/bridge-eval-data"
@@ -90,7 +96,10 @@ if (!args.data || !args.pack) {
 }
 
 const book = args.book
-const files = clearFiles(args.data, args.text)
+// AQU-1700: an OT book reads Clear's WLCM (Macula Hebrew) alignment and ot_<TEXT>.tsv.
+const testament = testamentOf(book)
+if (testament === "ot" && args.train === "nt") throw new Error("--train nt trains on the NT: use --train book for an OT book")
+const files = clearFiles(args.data, args.text, testament)
 const greekAll = loadPackText(args.pack, args.train === "nt" ? NT_BOOKS : [book])
 const textAll = loadTargetText(files.tsv)
 const gold = loadGold(files.alignment, book)
@@ -254,7 +263,7 @@ if (args.compose) {
   // Bridge 2 trains on the cells a project has translated, which may be few:
   // score it at several sizes, each time on the verses it was trained on
   // (in book order, like a translation in progress).
-  const finalFiles = clearFiles(args.data, args.compose)
+  const finalFiles = clearFiles(args.data, args.compose, testament)
   const finalText = loadTargetText(finalFiles.tsv)
   const finalGold = loadGold(finalFiles.alignment, book)
   const keys = evalKeys.filter((key) => finalText.has(key))

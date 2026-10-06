@@ -1,6 +1,7 @@
 // Who's Who panel (AQU-1689): the right rail's "People" panel.
 //
-// The cast of the passage (OpenText pericope) the editor is showing, from the
+// The cast of the passage (a pericope; in an OT book the pack gives none, the
+// chapter) the editor is showing, from the
 // Bible Knowledge Pack: who is in it, how often each is referred to, gender
 // and number, the first mention, previous/next mention from where the editor
 // is, and two flags a translator may want to act on (see people-index).
@@ -161,11 +162,17 @@ function WhosWhoPanel({
   } else {
     body = (
       <>
-        <div className="border-b px-3 py-2">
-          <p lang="en" dir="auto" className="text-sm font-medium" data-testid="whos-who-passage">
-            {pericope.title}
-          </p>
-          <p className="text-xs text-muted-foreground">
+        <div className="border-b px-3 py-2" data-passage-kind={pericope.kind}>
+          {/* A chapter (a book the pack gives no pericopes, AQU-1700) has no title: its range heads the cast. */}
+          {pericope.title && (
+            <p lang="en" dir="auto" className="text-sm font-medium" data-testid="whos-who-passage">
+              {pericope.title}
+            </p>
+          )}
+          <p
+            data-testid="whos-who-range"
+            className={pericope.title ? "text-xs text-muted-foreground" : "text-sm font-medium"}
+          >
             {t("bibleData.whosWho.panel.range", {
               from: fmt.isolate(pericope.fromRef),
               to: fmt.isolate(pericope.toRef),

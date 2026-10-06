@@ -103,7 +103,8 @@ export function buildVoiceIndex(layer: BkpVoicesLayer): VoiceIndex {
 
 // ── Memo: one index per (pack version, book) ────────────────────────────────
 
-const INDEX_CACHE_LIMIT = 8
+/** The open book's only (AQU-1700): an entry holds its layers, and an OT book's are several MB. */
+const INDEX_CACHE_LIMIT = 1
 const indexCache = new Map<string, { layer: BkpVoicesLayer; index: VoiceIndex }>()
 
 /**

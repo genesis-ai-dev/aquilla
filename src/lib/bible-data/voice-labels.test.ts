@@ -250,3 +250,52 @@ describe("pickLabelText", () => {
     expect(pickLabelText({ spa: "Samaria" }, "project", french)).toBeNull()
   })
 })
+
+// AQU-1700: pack 1.2.0 keys every label map by one scheme, where `cmn` is
+// Traditional Chinese (ACAI's names, Translation Words' `zht` titles) and
+// `cmn-Hans` Simplified (Aquifer's `zhs`, which no source fills yet). A
+// Simplified interface must read Simplified text when the pack has it, and
+// say so when it can only offer Traditional.
+describe("Chinese scripts (pack 1.2.0 label keys)", () => {
+  const simplified = acaiLanguageForLocale("zh-Hans")
+  const traditional = acaiLanguageForLocale("zh-Hant")
+  // Real pack data has no `cmn-Hans` yet: this is what a Simplified label will look like.
+  const jesusWithSimplified = { ...jesus, labels: { ...jesus.labels, "cmn-Hans": "耶稣" } }
+  // RUT 1:16 עָזְבֵךְ "forsake" carries tw:forsaken, whose only Chinese title is Traditional.
+  const forsaken = { eng: "Forsaken", cmn: "離棄" }
+
+  it("reads a Simplified interface's names from cmn-Hans first, as its own script", () => {
+    expect(
+      resolveVoiceLabel(JESUS, jesusWithSimplified, options({ mode: "interface", interfaceLanguage: simplified })),
+    ).toEqual({ label: "耶稣", source: "acai" })
+  })
+
+  it("never gives a Traditional interface the Simplified name", () => {
+    expect(
+      resolveVoiceLabel(JESUS, jesusWithSimplified, options({ mode: "interface", interfaceLanguage: traditional })),
+    ).toEqual({ label: "耶穌", source: "acai" })
+  })
+
+  it("picks a key term's Simplified title when there is one, else the Traditional one, flagged", () => {
+    expect(pickLabelText({ ...forsaken, "cmn-Hans": "离弃" }, "interface", simplified)).toEqual({
+      text: "离弃",
+      language: "cmn-Hans",
+    })
+    // Without it the title is still Chinese, so the chip can say "In Traditional characters".
+    expect(pickLabelText(forsaken, "interface", simplified)).toEqual({
+      text: "離棄",
+      language: "cmn",
+      otherScript: true,
+    })
+    // A Traditional interface reads `cmn` as its own script.
+    expect(pickLabelText(forsaken, "interface", traditional)).toEqual({ text: "離棄", language: "cmn" })
+  })
+
+  it("keeps English the fallback, and English-only mode English", () => {
+    expect(pickLabelText({ eng: "Forsaken" }, "interface", simplified)).toEqual({ text: "Forsaken", language: "eng" })
+    expect(pickLabelText({ ...forsaken, "cmn-Hans": "离弃" }, "english", simplified)).toEqual({
+      text: "Forsaken",
+      language: "eng",
+    })
+  })
+})

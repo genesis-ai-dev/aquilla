@@ -59,9 +59,14 @@ export function useEntityLabels(
 export interface PickedText {
   text: string
   lang: string
+  /** AQU-1700: Traditional characters in a Simplified Chinese interface. */
+  otherScript?: true
 }
 
 export type LabelTextPicker = (byLanguage: Readonly<Record<string, unknown>> | undefined) => PickedText | null
+
+/** The BCP 47 tag of a pack label key the interface's own tag does not cover: the pack's Chinese keys name their script. */
+const LANG_BY_LABEL_KEY: Readonly<Record<string, string>> = { eng: "en", cmn: "zh-Hant", "cmn-Hans": "zh-Hans" }
 
 /**
  * AQU-1695: descriptions, key-term titles and deity forms in the label
@@ -75,8 +80,10 @@ export function useLabelText(): LabelTextPicker {
     const ui = acaiLanguageForLocale(locale)
     return (byLanguage) => {
       const picked = pickLabelText(byLanguage, labelMode, ui)
-      // The only other language it can pick is the interface language.
-      return picked ? { text: picked.text, lang: picked.language === "eng" ? "en" : locale } : null
+      if (!picked) return null
+      // Otherwise it picked the interface language itself.
+      const lang = Object.hasOwn(LANG_BY_LABEL_KEY, picked.language) ? LANG_BY_LABEL_KEY[picked.language] : locale
+      return picked.otherScript ? { text: picked.text, lang, otherScript: true } : { text: picked.text, lang }
     }
   }, [labelMode, locale])
 }

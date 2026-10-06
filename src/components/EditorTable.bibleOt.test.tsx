@@ -114,6 +114,8 @@ function makeProject(book: string): ProjectRecord {
     createdAt: "2026-01-01T00:00:00Z",
     files: [{ id: `file-${book}`, name: book, type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    // AQU-1685: this device switched on the Bible data experiment.
+    experimentalFlags: { bibleData: true },
   }
 }
 
@@ -142,6 +144,8 @@ function renderBook(book: "RUT" | "PSA") {
           cellLabelsEnabled
           sourceTextDirection="rtl"
           targetTextDirection="ltr"
+          // AQU-1685: as ProjectWorkspace passes it, with a Bible book open.
+          bibleOpen
         />
       </EditorActionsProvider>
     </QueryClientProvider>,

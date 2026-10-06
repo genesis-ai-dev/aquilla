@@ -146,6 +146,8 @@ function renderVerse(c: Case) {
     createdAt: "2026-01-01T00:00:00Z",
     files: [{ id: fileId, name: c.book, type: "usfm" } as ProjectRecord["files"][number]],
     members: [],
+    // AQU-1685: this device switched on the Bible data experiment.
+    experimentalFlags: { bibleData: true },
   }
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId, username: "tester", requiredValidations: 1, auditStats: new Map() })
@@ -171,6 +173,8 @@ function renderVerse(c: Case) {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           getTokenForFile={async () => "jwt"}
+          // AQU-1685: as ProjectWorkspace passes it, with a Bible book open.
+          bibleOpen
         />
       </EditorActionsProvider>
     </QueryClientProvider>,

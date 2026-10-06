@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { useNavigate } from "react-router-dom"
 import { Building2 } from "lucide-react"
@@ -19,6 +19,11 @@ import { getPortfolio } from "@/lib/frontier/portfolio"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { progressPercent } from "@/lib/progress/progress-percent"
+import { getFileSectionProgress } from "@/lib/progress/file-progress-resource"
+import { fetchSyncToken } from "@/lib/sync/sync-token"
+import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
+import { assignmentSectionKeys, resolveAssignmentLandingCell } from "./assignment-landing"
 
 /**
  * The lane is always emitted, as an empty `?lane=` for a default-lane
@@ -30,14 +35,19 @@ function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
     ? `/project/${a.projectId}/editor/file/${encodeURIComponent(a.fileId)}`
     : `/project/${a.projectId}/editor`
-  const lane = a.laneId || a.targetLang
+  const lane = assignmentLane(a)
   return lane
     ? `${base}?lane=${encodeURIComponent(lane)}`
     : `${base}?lane=`
 }
 
+/** The lane param both links carry — see `assignmentHref`. */
+function assignmentLane(a: MyOrgAssignment): string {
+  return a.laneId || a.targetLang || ""
+}
+
 function progressPct(a: MyOrgAssignment): number {
-  return a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
+  return progressPercent(a.cellsDone, a.cellsTotal)
 }
 
 /**
@@ -133,6 +143,40 @@ export function AssignedToMe() {
     })()
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
+
+  // AQU-1493 (Sam, 2026-10-03): a SECTION assignment opens on its first cell
+  // still needing work — the deep link "Go to first untranslated" uses — not
+  // at the top of its file. See `assignment-landing.ts`. Anything that goes
+  // wrong on the way (no token, a failed read, a label it cannot parse) opens
+  // the file, as every click did before: a link that does nothing is worse
+  // than one that lands nearby. A whole-file assignment never reads anything.
+  //
+  // `opening` swallows a second click while the first is still reading, so a
+  // double-click cannot push two editor pages.
+  const opening = useRef(false)
+  const openAssignment = useCallback(async (a: MyOrgAssignment) => {
+    const fileId = a.fileId
+    if (!jwt || !fileId || assignmentSectionKeys(a).length === 0) {
+      navigate(assignmentHref(a))
+      return
+    }
+    if (opening.current) return
+    opening.current = true
+    try {
+      let token: Promise<string | null> | null = null
+      const getToken = () => (token ??= fetchSyncToken(jwt, a.projectId, fileId)
+        .then((r) => r.token)
+        .catch(() => null))
+      const cellId = await resolveAssignmentLandingCell(a, async (key) =>
+        (await getFileSectionProgress(a.projectId, fileId, key, getToken, a.targetLang ?? "")).verses,
+      ).catch(() => null)
+      navigate(cellId
+        ? editorCellHref(a.projectId, fileId, cellId, assignmentLane(a), true)
+        : assignmentHref(a))
+    } finally {
+      opening.current = false
+    }
+  }, [jwt, navigate])
 
   const columns = useMemo<ColumnDef<MyOrgAssignment>[]>(
     () => [
@@ -254,9 +298,7 @@ export function AssignedToMe() {
               loading={loading}
               loadingLabel={t("org.assignedToMe.loadingLabel")}
               getRowId={(a) => a.assignmentId}
-              onRowClick={(a) => {
-                navigate(assignmentHref(a))
-              }}
+              onRowClick={(a) => { void openAssignment(a) }}
               rowLink={{ columnId: "assignment", to: assignmentHref }}
               initialSorting={[{ id: "deadline", desc: false }]}
               searchPlaceholder="Search assignments…"

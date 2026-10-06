@@ -406,6 +406,19 @@ orgSettings.on(
       }
     }
 
+    // [Pen test 2026-10-06] Omission is a change too: the blob is replaced
+    // wholesale, so a Maintainer dropping a stored policy key would reset it to
+    // its default. Below owner, carry omitted keys over from the stored value.
+    if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const stored = existingForPolicyCheck.settings as Record<string, unknown>
+      for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+        if (body.settings[key] === undefined && stored[key] !== undefined) {
+          body.settings[key] = stored[key]
+        }
+      }
+    }
+
     // Validated but not gated: a mistyped value would read as "unset" and move
     // every percentage in the org with nothing on screen to explain it.
     const rawCountStructural = body.settings[COUNT_STRUCTURAL_KEY]

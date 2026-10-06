@@ -42,6 +42,7 @@ function renderSection(overrides: Partial<BibleDataSectionProps> = {}) {
     lockedTooltip: null,
     autopilotOn: true,
     onOpenBuiltinChecks: vi.fn(),
+    experimentOn: true,
     ...overrides,
   }
   renderWithTooltips(<BibleDataSection {...props} />)
@@ -54,6 +55,17 @@ const isOn = (el: HTMLElement) => el.getAttribute("aria-checked") === "true"
 const isDisabled = (el: HTMLElement) => el.getAttribute("aria-disabled") === "true"
 
 describe("BibleDataSection", () => {
+  // AQU-1685: a device that never opted in sees the card it had before the
+  // pack existed. Only the master switch, under its old name; no row, reason
+  // or Data sources link that would advertise an experiment.
+  it("is the old Bible resources card while the experiment is off", () => {
+    renderSection({ experimentOn: false, switchValue: false })
+    expect(screen.getByRole("switch", { name: "Enable Bible resources" })).toBeInTheDocument()
+    expect(screen.getAllByRole("switch")).toHaveLength(1)
+    expect(screen.queryByText(SWITCH_OFF_REASON)).toBeNull()
+    expect(screen.queryByRole("button", { name: english("bibleData.sources.open") })).toBeNull()
+  })
+
   it("renders one switch per enrichment with a source and license chip", () => {
     renderSection()
     expect(screen.getByRole("switch", { name: "Enable Bible data" })).toBeInTheDocument()

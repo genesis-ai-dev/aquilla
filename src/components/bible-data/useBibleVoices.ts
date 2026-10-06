@@ -2,8 +2,9 @@
 //
 // EditorTable calls this (through useBibleData, AQU-1689) once per render. It:
 //   • loads the pack's `voices` and `people` layers for the open book, only
-//     while the project's Voices enrichment is on and the person shows chips
-//     or rails (View settings → Bible data);
+//     while the Bible data experiment is on, a Bible is open (AQU-1685), the
+//     project's Voices enrichment is on and the person shows chips or rails
+//     (View settings → Bible data);
 //   • builds the index once per (pack version, book);
 //   • resolves names through the label chain (project names → interface
 //     language → English, as the person chose).
@@ -70,7 +71,10 @@ export interface BibleVoicesOptions {
   cells: readonly VoiceCellInput[]
   /** Verses that more than one cell of the file covers. */
   shared: ReadonlySet<BkpRef>
-  /** The project has Voices on and the person shows chips or rails. */
+  /**
+   * The Bible data experiment is on, a Bible is open (AQU-1685), the project
+   * has Voices on and the person shows chips or rails.
+   */
   enabled: boolean
   /** Filter the editor to the cells where `speaker` speaks. */
   showLinesBy: (speaker: BkpEntityId) => void

@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { mentionsEntity, type PeopleIndex } from "@/lib/bible-data/people-index"
 import {
   cellVerses,
@@ -33,6 +34,8 @@ import type { WhosWhoContextValue } from "./whos-who-context"
 
 export interface BibleDataOptions {
   project: ProjectRecord
+  /** A Bible is open (EditorTable's `bibleOpen`); false shows nothing and fetches nothing. */
+  bibleOpen: boolean
   cellStore: CellStore
   /** The file's cells, in document order. */
   cellIds: readonly string[]
@@ -89,10 +92,14 @@ export function filterCells(
   })
 }
 
-export function useBibleData({ project, cellStore, cellIds, version, fileId, jumpToCell }: BibleDataOptions): BibleData {
+export function useBibleData({ project, bibleOpen, cellStore, cellIds, version, fileId, jumpToCell }: BibleDataOptions): BibleData {
   const prefs = useBibleDataViewPrefs()
   const hasScripture = projectHasScriptureFiles(project.files)
-  const voicesWanted = resolveBibleEnrichment(project, "voices", hasScripture) && (prefs.voiceChips || prefs.speechRails)
+  // AQU-1685: only on a device with the Bible data experiment on, and only
+  // while a Bible is open. loadLayer does not check the experiment itself.
+  const shown = bibleOpen && isBibleDataExperimentOn(project)
+  const voicesWanted =
+    shown && resolveBibleEnrichment(project, "voices", hasScripture) && (prefs.voiceChips || prefs.speechRails)
   const whosWhoOn = resolveBibleEnrichment(project, "whos-who", hasScripture)
   const contextOn = resolveBibleEnrichment(project, "original-context", hasScripture)
 

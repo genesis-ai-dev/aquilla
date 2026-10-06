@@ -706,6 +706,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const lastModelFetchKeyRef = useRef<string | null>(null)
 
   const seededRef = useRef(false)
+  // Snapshot of the first seed. Late blob adoption compares against this, not
+  // against a baseline a save may already have replaced (AQU-1744).
+  const seedBaselineRef = useRef<Baseline | null>(null)
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
@@ -765,6 +768,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const b = buildBaseline(
       sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
     )
+    seedBaselineRef.current = b
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
@@ -781,19 +785,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   //
   // Once this page's own settings GET has resolved, rebuild the baseline
   // through the same overlay the rest of the app reads with, and adopt it for
-  // these keys. Once only, matching the "seed once" contract above. A field the
-  // user has already moved off the (stale) seed keeps their edit; the baseline
-  // still moves, so settling to the server value never reads as an edit.
-  // `hasFetched` fails closed (stays false on a failed GET), so a settings
-  // outage leaves the seeded values rather than blanking anything.
+  // these keys. Once only, matching the "seed once" contract above.
+  //
+  // Adoption is against the original seed, not the baseline in this closure.
+  // A field the user has already moved off that seed keeps their edit; the
+  // baseline still moves when it is still the seed, so settling an untouched
+  // field never reads as an edit. A successful save moves the saved keys off
+  // the seed on both sides. Comparing to the closed-over baseline instead
+  // treated that saved value as the thing to replace, so a GET that landed
+  // after the save snapped the draft and the baseline back to the stale blob
+  // (AQU-1744). `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the seeded values rather than blanking anything.
   const blobResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
     if (blobResyncedRef.current) return
+    const seed = seedBaselineRef.current
+    if (!seed) return
     blobResyncedRef.current = true
     if (!sharedSettingsBlob) return
     const hydrated = buildBaseline(overlaySettings(project, sharedSettingsBlob))
-    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
+    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
       sourceLanguage: setSourceLanguage,
@@ -819,13 +831,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     }
     setBaseline((prev) => {
       if (!prev) return prev
+      let moved = false
       const next = { ...prev }
-      for (const key of changed) adoptKey(next, hydrated, key)
-      return next
+      for (const key of changed) {
+        // A save may already have replaced this key. Leave it: `prev` can be
+        // the saved baseline even when this effect closed over the seed.
+        if (!sameSetting(prev[key], seed[key])) continue
+        adoptKey(next, hydrated, key)
+        moved = true
+      }
+      return moved ? next : prev
     })
     const adoptDraft = <K extends BlobBackedKey>(key: K) => {
       const setter = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
-      setter((prev) => (sameSetting(prev, baseline[key]) ? hydrated[key] : prev))
+      setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
@@ -1209,6 +1228,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // AQU-765: re-baseline (and reflect in the input) with the trimmed name
       // we actually persisted, so the canonical value doesn't read back dirty.
       if (trimmedName !== name) setName(trimmedName)
+      // Built from this callback's closure — the draft at click time, not a
+      // settings GET that resolved while the PATCH was in flight. That GET
+      // may already have moved untouched blob keys onto the baseline and the
+      // draft. Replacing the baseline wholesale would put those keys back to
+      // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
         sourceLanguage,
@@ -1252,7 +1276,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         smartQuotes,
         termMatching,
       }
-      setBaseline(newBaseline)
+      setBaseline((prev) => {
+        const next: Baseline = { ...newBaseline }
+        if (!prev) return next
+        for (const key of BLOB_BACKED_KEYS) {
+          if (sameSetting(newBaseline[key], baseline[key]) && !sameSetting(prev[key], newBaseline[key])) {
+            adoptKey(next, prev, key)
+          }
+        }
+        return next
+      })
       // Refresh `useProject` in the background so other components see the
       // updated IDB record. We don't await it — the form is already correct.
       refresh()

@@ -35,7 +35,7 @@ function nameOf(id: string | undefined): string {
   if (!id) return "(unknown)"
   const label = resolveVoiceLabel(id, people.entities[id], {
     mode: "interface",
-    interfaceLanguage: { language: "eng", otherScript: false },
+    interfaceLanguage: { language: "eng", keys: [{ key: "eng", otherScript: false }] },
     projectNames: { concepts: [], sourceLanguage: null, multiLane: false },
   })
   return label?.label ?? "(unknown)"

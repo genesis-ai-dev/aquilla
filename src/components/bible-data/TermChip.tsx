@@ -2,6 +2,10 @@
 // key term the word carries (Translation Words or an ACAI keyterm). Its
 // popover names the term and where it comes from; it opens on hover and on
 // keyboard focus, like the mention and voice popovers.
+//
+// AQU-1700: a Simplified Chinese interface reads a title's Simplified form
+// (`cmn-Hans`) first; with only the Traditional one (`cmn`), the popover says
+// so.
 
 import { BookMarked } from "lucide-react"
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
@@ -47,6 +51,11 @@ export function TermChip({ term: { id, term } }: { term: WordTerm }) {
           <PopoverTitle className="text-sm" lang={title.lang} dir="auto">
             {title.text}
           </PopoverTitle>
+          {title.otherScript && (
+            <p data-testid="term-other-script" className="text-muted-foreground">
+              {t("bibleHelps.terms.traditionalCharacters")}
+            </p>
+          )}
           {sourceKey && <p className="text-muted-foreground">{t(sourceKey)}</p>}
         </div>
       </PopoverContent>

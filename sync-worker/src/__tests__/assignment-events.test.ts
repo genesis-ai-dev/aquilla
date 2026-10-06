@@ -383,8 +383,9 @@ describe('assignment.create — chapter scope follows the board (AQU-1493)', () 
     )
     expect(ids).toEqual(['h1', 'h3', 'j11', 'j12', 'j31'])
     expect(total).toBe(5)
-    // events row, assignments row, ONE resolution for file-gen, cells_total.
-    expect(result.stmts).toHaveLength(4)
+    // events row, assignments row, one assignment_scopes row per chapter
+    // entry (AQU-1629), ONE resolution for file-gen, cells_total.
+    expect(result.stmts).toHaveLength(1 + 1 + 2 + 1 + 1)
   })
 
   it("gives each chapter exactly the cells the board counts in it", async () => {
@@ -424,7 +425,9 @@ describe('assignment.create — chapter scope follows the board (AQU-1493)', () 
       seededCells(),
     )
     expect(ids).toEqual(['e-1-1', 'g-1-1', 'g-1-2', 'g-2-1'])
-    expect(result.stmts).toHaveLength(5)
+    // events row, assignments row, three assignment_scopes rows (AQU-1629),
+    // ONE resolution per file, cells_total.
+    expect(result.stmts).toHaveLength(1 + 1 + 3 + 2 + 1)
   })
 })
 
@@ -480,5 +483,94 @@ describe('assignment role gate', () => {
     const res = await authorize(token, raw, SECRET)
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.status).toBe(403)
+  })
+})
+
+// AQU-1629: assignment.create records the RANGE as well as what it resolved to,
+// so the read side can re-resolve it against live `cells` and pick up a line
+// added to the chapter or file afterwards. A resolved snapshot can only ever
+// shrink (AQU-1068 drops a removed cell), never grow — which is why the range
+// has to be stored.
+describe('assignment.create — the scope is recorded (AQU-1629)', () => {
+  it("stores a whole-file scope as chapter ''", async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-book',
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }, { fileId: 'file-exo' }],
+      scopeLabel: 'Genesis, Exodus',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string; file_id: string; chapter: string }>(
+      'assignment_scopes',
+    )
+    expect(
+      scopes
+        .filter((s) => s.assignment_id === 'as-book')
+        .map((s) => `${s.file_id}/${s.chapter}`)
+        .sort(),
+    ).toEqual(['file-exo/', 'file-gen/'])
+  })
+
+  it('stores one row per assigned chapter', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-chap',
+      scopeKind: 'chapters',
+      scope: [
+        { fileId: 'file-gen', chapter: 'GEN 1' },
+        { fileId: 'file-gen', chapter: 'GEN 2' },
+      ],
+      scopeLabel: 'Genesis 1-2',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string; chapter: string }>('assignment_scopes')
+    expect(
+      scopes
+        .filter((s) => s.assignment_id === 'as-chap')
+        .map((s) => s.chapter)
+        .sort(),
+    ).toEqual(['GEN 1', 'GEN 2'])
+  })
+
+  it('stores nothing for an explicit line selection, which must not grow', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-pick',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-2'] }],
+      scopeLabel: '1 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string }>('assignment_scopes')
+    expect(scopes.filter((s) => s.assignment_id === 'as-pick')).toEqual([])
+    // The selection itself still landed, as before.
+    expect((await rows<{ assignment_id: string }>('assignment_cells')).length).toBe(1)
+  })
+
+  it('is idempotent — replaying the event rewrites no row', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const payload = {
+      assignmentId: 'as-replay',
+      scopeKind: 'chapters' as const,
+      scope: [{ fileId: 'file-gen', chapter: 'GEN 1' }],
+      scopeLabel: 'Genesis 1',
+      assigneeUserId: 42,
+    }
+    const authed = await authorizeAssignment('assignment.create', payload)
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    expect((await rows<{ assignment_id: string }>('assignment_scopes')).length).toBe(1)
   })
 })

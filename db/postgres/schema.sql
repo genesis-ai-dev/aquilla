@@ -1057,6 +1057,21 @@ CREATE TABLE assignment_cells (
     PRIMARY KEY (assignment_id, file_id, cell_id)
 );
 
+-- AQU-1629 (migration 0147): the RANGE an assignment was given, so a
+-- range-scoped assignment's membership can be re-resolved on every read
+-- instead of being frozen at creation. One row per (assignment, file,
+-- chapter); `chapter = ''` means the whole file. Written by assignment.create
+-- for 'books' and 'chapters' scopes only — an explicit line selection ('cells'
+-- scope, AQU-1628) writes none, because a selection is exactly the lines the
+-- manager picked and must not silently acquire new ones. Readers join
+-- `assignment_member_cells` below, never either table directly.
+CREATE TABLE IF NOT EXISTS assignment_scopes (
+    assignment_id TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    chapter       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (assignment_id, file_id, chapter)
+);
+
 CREATE TABLE diarization_jobs (
     id           TEXT PRIMARY KEY,
     project_id   TEXT NOT NULL,
@@ -1115,6 +1130,8 @@ CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 -- cells?" — that the plan inspector's per-unit read joins by. cell_id rides
 -- along because that join pairs straight onto `cells` on (file_id, cell_id).
 CREATE INDEX assignment_cells_by_file ON assignment_cells(file_id, cell_id);
+-- AQU-1629 (0147): the scope-side twin of the lookup above.
+CREATE INDEX IF NOT EXISTS idx_assignment_scopes_file ON assignment_scopes(file_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
 CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
@@ -2497,3 +2514,85 @@ CREATE TABLE IF NOT EXISTS ai_interventions (
 
 CREATE INDEX IF NOT EXISTS ai_interventions_cell_idx
   ON ai_interventions (project_id, cell_id, created_at DESC);
+
+-- AQU-1629 (migration 0147): an assignment's live cell membership — what every
+-- assignment reader joins instead of `assignment_cells`.
+--
+-- A range scope ('books' / 'chapters') is re-resolved against the live `cells`
+-- projection on every read — a chapter by the plan board's own chapter key
+-- (AQU-1493), the rule assignment.create resolves with — so a line added to an assigned file or chapter
+-- joins the assignment instead of leaving the assignee's progress reading done
+-- over a chapter that still has open work. An explicit line selection keeps the
+-- frozen list.
+--
+-- It carries the source cell's grouping columns (canonical_ref / start_ms /
+-- type, the inputs to db/shared/plan-keys.ts) so a reader that needs them joins
+-- `cells` once through the view instead of twice. Measured: that holds the
+-- progress counts at parity with reading `assignment_cells` directly and the
+-- plan inspector's two reads to about 2x with no sequential scan, where an
+-- id-only view cost 5x and one.
+CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
+  -- An explicit line selection ('cells' scope, AQU-1628), and any assignment
+  -- 0147's backfill could not reach: the frozen snapshot. Intersected with live
+  -- source cells HERE rather than in each reader, which is where AQU-1068 put
+  -- it — so a cell removed from the file still drops out, and no reader has to
+  -- remember to do it.
+  SELECT a.project_id, ac.assignment_id, c.file_id, c.cell_id,
+         c.canonical_ref, c.start_ms, c.type
+    FROM assignment_cells ac
+    JOIN assignments a ON a.assignment_id = ac.assignment_id
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                AND c.cell_id = ac.cell_id AND c.side = 'source'
+   WHERE NOT EXISTS (
+     SELECT 1 FROM assignment_scopes s WHERE s.assignment_id = ac.assignment_id
+   )
+  UNION ALL
+  -- A range scope ('books' / 'chapters'), resolved live on every read.
+  SELECT a.project_id, s.assignment_id, c.file_id, c.cell_id,
+         c.canonical_ref, c.start_ms, c.type
+    FROM assignment_scopes s
+    JOIN assignments a ON a.assignment_id = s.assignment_id
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = s.file_id
+                AND c.side = 'source'
+    -- AQU-1493: where a line with no reference is counted on the plan, as the
+    -- full progress recompute last stored it (cell_plan_keys, 0145). No row
+    -- for a referenced line, nor for an unreferenced one no recompute has
+    -- placed yet.
+    LEFT JOIN cell_plan_keys ik ON ik.project_id = c.project_id AND ik.file_id = c.file_id
+                               AND ik.cell_id = c.cell_id
+   WHERE (
+     s.chapter = ''
+     -- A chapter scope takes the cells the plan board counts in that chapter,
+     -- by the board's own key — the same rule assignment.create resolves the
+     -- snapshot with (AQU-1493), so a heading, or a line added with no
+     -- reference, is in the chapter the board shows it in rather than left
+     -- out. This is `unitSectionKeyExpr` from db/shared/plan-keys.ts written
+     -- out, and it must stay identical to it: a cell's chapter from its own
+     -- reference ("GEN 1" from "GEN 1:1"), else the stored placement, else
+     -- the key sectionKeyExpr gives it (a media cell's time bucket, or '').
+     -- Equality on the key keeps "GEN 1" out of "GEN 11" without a LIKE
+     -- anchor, and a line with no reference and no placement ('') matches no
+     -- chapter — it is still in a whole-file scope.
+     OR COALESCE(
+          NULLIF(TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1)), ''),
+          ik.section_key,
+          CASE
+            WHEN TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1)) <> ''
+              THEN TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1))
+            WHEN c.start_ms IS NOT NULL
+              THEN 't:' || LPAD(((c.start_ms / 300000) * 300000)::text, 12, '0')
+            ELSE ''
+          END
+        ) = s.chapter
+   )
+   -- Each cell appears once. A cell has exactly one chapter key, so two named
+   -- chapters cannot both match it, and the PK makes a (file, chapter) pair
+   -- unique — so the only way to double-count is a whole-file row sitting
+   -- beside a chapter row for the same file. The whole-file row wins; the
+   -- chapter rows it covers drop out. The write path never mixes the two, and
+   -- this keeps the view right if anything ever does.
+   AND (s.chapter = '' OR NOT EXISTS (
+     SELECT 1 FROM assignment_scopes w
+      WHERE w.assignment_id = s.assignment_id AND w.file_id = s.file_id
+        AND w.chapter = ''
+   ));

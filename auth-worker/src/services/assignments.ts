@@ -1,12 +1,12 @@
 // Read-side helpers for the assignment.* projection (Phase C, slice 1).
 //
 // Progress is DERIVED ON READ: an assignment's `cells_done` is the count of its
-// assignment_cells whose paired TARGET cell is validated. assignment_cells hold
-// the resolved SOURCE cells (file_id, cell_id); validation lands on the target
-// row at the same (project_id, file_id, cell_id) — they share cell_id (AD-2).
-// So the join is assignment_cells -> cells ON (file_id, cell_id) WHERE
-// side='target' AND validated=1. This keeps slice 1 off the hot cell.commit
-// path (no stored progress counter).
+// member cells whose paired TARGET cell is validated. Membership holds the
+// SOURCE cells (file_id, cell_id); validation lands on the target row at the
+// same (project_id, file_id, cell_id) — they share cell_id (AD-2). So the join
+// is membership -> cells ON (file_id, cell_id) WHERE side='target' AND
+// validated=1. This keeps slice 1 off the hot cell.commit path (no stored
+// progress counter).
 //
 // AQU-1068: the DENOMINATOR is now derived the same way, for the same reason
 // one level up. `assignments.cells_total` is a stored column stamped once at
@@ -20,6 +20,22 @@
 // The stored column stays — assignment-events.ts still stamps it and the
 // agent's SQL surface documents it — it is simply no longer what anybody
 // reads.
+//
+// AQU-1629: MEMBERSHIP itself is derived now, not just the two counts over it.
+// Joining the resolved snapshot `assignment_cells` to live `cells` can only
+// ever drop rows, so AQU-1068 fixed removals and left additions broken the
+// other way: a line added to an assigned chapter or file never joined the
+// assignment, and the assignee's progress could read done over a chapter that
+// still had open work. Every query below therefore joins the view
+// `assignment_member_cells` (migration 0147), which re-resolves a book or
+// chapter scope from `assignment_scopes` against live `cells` on each read —
+// a chapter by the plan board's own chapter key (AQU-1493), the rule
+// assignment.create resolves the snapshot with — and keeps the frozen list
+// only for an explicit line selection ('cells' scope, AQU-1628): a selection
+// is exactly the lines the manager picked and must not silently acquire new
+// ones. Nothing here reads `assignment_cells` directly;
+// that table is now the audit record of what the scope resolved to at
+// creation.
 
 import type { Env } from "../types"
 import {
@@ -70,10 +86,11 @@ const isStructuralSql = (alias: string) => `COALESCE(${alias}.type, '') IN ('hea
 const byStructuralPolicy = (counting: string, excluding: string) =>
   `(CASE WHEN ${EXCLUDES_STRUCTURAL_SQL} THEN ${excluding} ELSE ${counting} END)`
 
-/** The denominator: assigned cells that still EXIST, counted live. Mirrors
- *  CELLS_DONE_SUBQUERY's join without the validated predicate; `side =
- *  'source'` is what makes each assigned cell count exactly once, since
- *  assignment_cells resolved source rows.
+/** The denominator: assigned cells that still EXIST, counted live. The view is
+ *  already the live SOURCE membership — it does the `side = 'source'` join to
+ *  `cells` itself, which is also what makes each assigned cell count exactly
+ *  once (source rows are lane-independent, one per cell) — so there is nothing
+ *  left to join here.
  *
  *  AQU-1493: and without the headings, when the project does not count them.
  *  A chapter assignment takes the chapter's headings along (they count in the
@@ -82,16 +99,15 @@ const byStructuralPolicy = (counting: string, excluding: string) =>
  *  same person — which applies the policy — said "Nothing left". Applied when
  *  READING, not when the assignment is made, because the setting can change
  *  afterwards; that also squares whole-file assignments, which always held the
- *  headings. */
+ *  headings. The view carries the source row's `type`, so the filter reads it
+ *  off `ac` directly. */
 const cellsTotalSql = (structural: string) => `(
-  SELECT COUNT(*) FROM assignment_cells ac
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                 AND c.cell_id = ac.cell_id AND c.side = 'source'
+  SELECT COUNT(*) FROM assignment_member_cells ac
    WHERE ac.assignment_id = a.assignment_id${structural}
 )`
 const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
   cellsTotalSql(""),
-  cellsTotalSql(`\n     AND NOT ${isStructuralSql("c")}`),
+  cellsTotalSql(`\n     AND NOT ${isStructuralSql("ac")}`),
 )
 
 /**
@@ -119,25 +135,24 @@ const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
  * to one lane (AQU-538 §3.5), so its progress is only ever measured there.
  *
  * AQU-1493: with headings left out (see CELLS_TOTAL_SUBQUERY), the type is
- * read from each cell's SOURCE row, the only side that carries one.
+ * read from each cell's SOURCE row, the only side that carries one — which
+ * the view already carries as `ac.type`, so no second join to `cells`.
  */
 const CELLS_DONE_SUBQUERY = byStructuralPolicy(
   `(
-  SELECT COUNT(*) FROM assignment_cells ac
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+  SELECT COUNT(*) FROM assignment_member_cells ac
+    JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
 )`,
   `(
-  SELECT COUNT(*) FROM assignment_cells ac
-    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+  SELECT COUNT(*) FROM assignment_member_cells ac
+    JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
-    JOIN cells s ON s.project_id = a.project_id AND s.file_id = ac.file_id
-                 AND s.cell_id = ac.cell_id AND s.side = 'source'
    WHERE ac.assignment_id = a.assignment_id
-     AND NOT ${isStructuralSql("s")}
+     AND NOT ${isStructuralSql("ac")}
 )`,
 )
 
@@ -216,7 +231,7 @@ export async function getOrgAssignmentWorkload(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
-            (SELECT ac.file_id FROM assignment_cells ac
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
@@ -444,7 +459,7 @@ export async function getUnitAssignments(
   // with no reference is a person's share of the book (and chapter) it is
   // counted in — the line above it, or for a heading the verse below it —
   // here exactly as it is a cell of that book's bar above.
-  const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("c", "ik")}) = ?`
+  const sectionPredicate = sectionKey === "" ? "" : `AND (${unitBookKeyExpr("ac", "ik")}) = ?`
 
   const rows = await env.AQUILLA_PG.prepare(
     // The audio CTE is lifted from sync-worker's AUDIO_CTE_SQL, verbatim
@@ -497,7 +512,7 @@ export async function getUnitAssignments(
             -- still owes work in, and which chapters of the unit nobody holds.
             -- The aggregate the panel already showed is the sum over these,
             -- folded below, so no existing number moves.
-            ${unitSectionKeyExpr("c", "ik")} AS chapter_key,
+            ${unitSectionKeyExpr("ac", "ik")} AS chapter_key,
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
@@ -509,18 +524,19 @@ export async function getUnitAssignments(
             COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated,
             MAX(ln.name) AS lane_name
        FROM assignments a
-       JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
-       -- they are what assignment_cells resolved, they are lane-independent,
-       -- and a cell removed from the file drops out of the count instead of
-       -- stranding the assignment short of 100% forever (AQU-1068).
-       JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                   AND c.cell_id = ac.cell_id AND c.side = 'source'
+       -- they are what membership resolves to, they are lane-independent, and
+       -- a cell removed from the file drops out of the count instead of
+       -- stranding the assignment short of 100% forever (AQU-1068). The view
+       -- already IS that join, and carries the source row's grouping columns
+       -- (canonical_ref / start_ms / type), so ac is the source cell here —
+       -- joining cells again for them cost this read 5x in measurement.
+       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
        -- AQU-1609: the lane's identity, not its legacy tag. The caller
        -- resolved the lane id; a tag would re-introduce the string indirection
        -- that AQU-1611 retires.
-       LEFT JOIN cells t ON t.project_id = c.project_id AND t.file_id = c.file_id
-                        AND t.cell_id = c.cell_id AND t.side = 'target'
+       LEFT JOIN cells t ON t.project_id = ac.project_id AND t.file_id = ac.file_id
+                        AND t.cell_id = ac.cell_id AND t.side = 'target'
                         AND t.lane_id = ?
        -- AQU-1591: ...and in THIS unit's lane. The audio CTE returns one row
        -- per (cell, lane); joining on the cell alone would hand a unit every
@@ -533,22 +549,23 @@ export async function getUnitAssignments(
        -- matches itself. No row (an unknown id, or the '' an unresolvable tag
        -- becomes) is NULL, which equals nothing: the unit reads no audio
        -- rather than borrowing the default lane's, as its text join does.
-       LEFT JOIN audio au ON au.cell_id = c.cell_id
+       LEFT JOIN audio au ON au.cell_id = ac.cell_id
                          AND au.lane = (SELECT COALESCE(ul.legacy_tag, '') FROM lanes ul
                                          WHERE ul.project_id = a.project_id
                                            AND ul.id = ? AND ul.role = 'target')
        -- AQU-1493: where a line with no reference is counted (the chapter of
        -- the line above it, or a heading's verse below it), as the full
        -- progress recompute stored it, so the chapter breakdown matches the grid.
-       ${planKeysJoinSql("c", "ik")}
+       ${planKeysJoinSql("ac", "ik")}
        LEFT JOIN users u ON u.id = a.assignee_user_id
        LEFT JOIN lanes ln
          ON ln.project_id = a.project_id AND ln.id = a.lane_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND ac.file_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
-        -- The SOURCE alias, always. Target rows carry no type at all, so the
-        -- same predicate written against t would be NULL on every row.
+        -- The SOURCE alias, always — ac, now that the view carries the
+        -- source row's type. Target rows carry no type at all, so the same
+        -- predicate written against t would be NULL on every row.
         --
         -- COALESCE, and it is not defensive noise: a null type MEANS content,
         -- but SQL does not agree. \`NULL IN ('heading','paratext')\` is NULL, so
@@ -556,11 +573,11 @@ export async function getUnitAssignments(
         -- it drops a false one — every untyped cell in the unit would vanish
         -- the moment a team turned headings off, and the panel would go blank
         -- rather than wrong, which is worse to diagnose. A test pins this.
-        AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
+        AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
                a.target_lang, a.lane_id, a.deadline, a.created_at,
-               ${unitSectionKeyExpr("c", "ik")}
+               ${unitSectionKeyExpr("ac", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
@@ -725,7 +742,7 @@ async function fileIdsForAssignments(
   const placeholders = assignmentIds.map(() => "?").join(", ")
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
-       FROM assignment_cells ac
+       FROM assignment_member_cells ac
       WHERE ac.assignment_id IN (${placeholders})
       ORDER BY ac.assignment_id, ac.file_id`,
   )
@@ -743,7 +760,9 @@ async function fileIdsForAssignments(
  * scope the extent is re-derivable (the whole file, or the chapters named in
  * `scope_label`), while an explicit line set is not — the editor gutter cannot
  * tell which lines are the person's without being told. Keeping the call to
- * that scope means an inbox with no selection assignments pays nothing.
+ * that scope means an inbox with no selection assignments pays nothing. It
+ * reads membership rather than `assignment_cells` all the same, so a range
+ * scope reaching it would get today's lines and not a stale snapshot.
  *
  * Callers pass assignment ids they already selected, so this inherits their
  * authorization exactly — it never widens what the caller may see.
@@ -759,7 +778,7 @@ async function cellIdsForAssignments(
   const placeholders = assignmentIds.map(() => "?").join(", ")
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
-       FROM assignment_cells ac
+       FROM assignment_member_cells ac
       WHERE ac.assignment_id IN (${placeholders})
       ORDER BY ac.assignment_id, ac.cell_id`,
   )
@@ -788,9 +807,9 @@ export async function getMyAssignments(
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
-            (SELECT ac.file_id FROM assignment_cells ac
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_cells ac
+            (SELECT f.name FROM assignment_member_cells ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
@@ -873,7 +892,7 @@ export async function getAssignmentsGivenBy(
             a.target_lang AS target_lang,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
-            (SELECT ac.file_id FROM assignment_cells ac
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        LEFT JOIN users u ON u.id = a.assignee_user_id
@@ -932,9 +951,9 @@ export async function getMyAssignmentsAcrossOrg(
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
-            (SELECT ac.file_id FROM assignment_cells ac
+            (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_cells ac
+            (SELECT f.name FROM assignment_member_cells ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
@@ -1075,23 +1094,25 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
             usr.username        AS username,
             MAX(a.created_at)   AS latest
        FROM assignments a
-       JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
-       JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
-                   AND c.cell_id = ac.cell_id AND c.side = 'source'
+       -- ac IS the source cell: the view joins cells WHERE side = 'source'
+       -- itself and carries that row's grouping columns, so this read touches
+       -- cells once instead of twice (measured: twice cost it 5x and a
+       -- sequential scan).
+       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
        -- AQU-1493: a line with no reference counts toward the book it is
        -- counted in (unitBookKeyExpr: the line above it's, or for a heading the
        -- verse below it's), so its assignee belongs on that book's row. Read
        -- from the placements the full progress recompute stored: walking every
        -- assigned Bible on each board load cost tens of ms per file.
-       ${planKeysJoinSql("c", "ik")}
+       ${planKeysJoinSql("ac", "ik")}
        -- A file with book units has no '' unit and a file without has only
        -- the '' unit, so this OR is exact rather than lenient.
-       JOIN units u ON u.project_id = c.project_id AND u.file_id = c.file_id
-                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("c", "ik")})
+       JOIN units u ON u.project_id = ac.project_id AND u.file_id = ac.file_id
+                   AND (u.section_key = '' OR u.section_key = ${unitBookKeyExpr("ac", "ik")})
        LEFT JOIN users usr ON usr.id = a.assignee_user_id
        CROSS JOIN policy pol
       WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL
-        AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
+        AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
       GROUP BY u.file_id, u.section_key, a.assignee_user_id, usr.username
       ORDER BY u.file_id, u.section_key, latest DESC, a.assignee_user_id`,
   )

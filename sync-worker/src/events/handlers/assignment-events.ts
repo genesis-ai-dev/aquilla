@@ -15,6 +15,11 @@
 //                           so a person given "JON 2" gets the chapter's
 //                           headings and the lines already added in it,
 //                           exactly the cells the board counts in JON 2.
+//                           A book/chapter scope ALSO records the range itself
+//                           in assignment_scopes, so the read side can
+//                           re-resolve it by that same key and pick up lines
+//                           added later (AQU-1629) — a resolved snapshot can
+//                           only ever shrink, never grow.
 //   - assignment.reassign : UPDATE assignee_user_id.
 //   - assignment.unassign : set unassigned_at (soft close; row kept for audit).
 //
@@ -123,10 +128,12 @@ export function handleAssignmentEvent(
     //    into placeholders rather than bound as an array, which the shim does
     //    not promise to pass through.
     //
-    //    Resolution happens once, here: an assignment is a snapshot of what a
-    //    person was given, so a line added later does not join it, and
-    //    existing assignments are not rewritten. Rebuild skips assignment.*
-    //    events, so replay never re-resolves an old one under this rule.
+    //    Resolution into assignment_cells happens once, here, and existing
+    //    rows are never rewritten: they are the audit record of what the scope
+    //    covered when it was given. Rebuild skips assignment.* events, so
+    //    replay never re-resolves an old one under this rule. What a range
+    //    scope covers TODAY is re-derived on read instead, from the scope row
+    //    written below (AQU-1629), by this same chapter key.
     const chaptersByFile = new Map<string, Set<string>>()
     for (const entry of p.scope) {
       if (entry.cellIds) {
@@ -166,6 +173,34 @@ export function handleAssignmentEvent(
                ON CONFLICT DO NOTHING`,
             )
             .bind(p.assignmentId, event.projectId, entry.fileId),
+        )
+      }
+
+      // AQU-1629: record the RANGE, not only what it resolved to. The rows
+      // above are a snapshot of the cells that existed at this instant, and
+      // nothing re-resolved them, so a line added to the chapter or file
+      // afterwards never joined the assignment — the assignee's progress could
+      // read done over a chapter that still had open work. `assignment_scopes`
+      // lets the read side re-resolve the scope against live `cells` on every
+      // read (view `assignment_member_cells`, migration 0147), by the same
+      // plan-board chapter key the snapshot above was resolved with (AQU-1493).
+      //
+      // Deliberately NOT written for a 'cells' entry: an explicit selection is
+      // exactly the lines the manager picked, and must not silently acquire
+      // new ones. The branch is the same `entry.cellIds` test as above, so a
+      // scope kind and its entries can never disagree about which it is.
+      if (!entry.cellIds) {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO assignment_scopes (assignment_id, file_id, chapter)
+               VALUES (?, ?, ?)
+               ON CONFLICT DO NOTHING`,
+            )
+            // '' = the whole file (a 'books' scope); see the column comment. A
+            // chapter is trimmed exactly as the key it is matched against
+            // above — the view compares the two for equality.
+            .bind(p.assignmentId, entry.fileId, entry.chapter?.trim() ?? ''),
         )
       }
     }

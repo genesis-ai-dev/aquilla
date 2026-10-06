@@ -199,7 +199,14 @@ export async function renameProjectLane(
 export async function linkProjectToSource(
   jwt: string,
   projectId: string,
-  args: { sourceProjectId: string; mode: "clone" | "live"; consumes?: "source" | "target"; gate?: "head" | "validated" },
+  args: {
+    sourceProjectId: string
+    mode: "clone" | "live"
+    consumes?: "source" | "target"
+    gate?: "head" | "validated"
+    /** AQU-1559: the UPSTREAM file ids to follow; omit for the whole project. */
+    fileIds?: string[]
+  },
 ): Promise<{ seeded: boolean }> {
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/link-source`,

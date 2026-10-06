@@ -1,3 +1,4 @@
+import { BillingSettingsPage } from '../../helpers/page-objects/BillingSettings'
 import { test, expect } from "../../helpers/multi-user"
 
 /**
@@ -17,4 +18,15 @@ test("admin platform billing shows Field Plan catalog", async ({ alice }) => {
   await expect(alice.getByRole("heading", { name: /Plan catalog/i })).toBeVisible()
   await expect(alice.getByTestId("save-field-plan")).toBeVisible()
   await expect(alice.getByTestId("admin-billing-orgs")).toBeVisible()
+})
+
+test('admin weekly capacity persists and reaches the owning organization billing view', async ({ alice }) => {
+  const billing = new BillingSettingsPage(alice)
+  await billing.setWeeklyAllowance(alice.orgId, 1000)
+  await alice.reload()
+  await billing.openPlatformBilling(false)
+  await expect(alice.getByTestId(`weekly-allowance-${alice.orgId}`)).toHaveValue('1000')
+  await billing.openWorkspace(alice.orgId)
+  await expect(alice.getByTestId('billing-usage-percent')).toContainText('0%')
+  await expect(alice.getByTestId('billing-workspace')).toContainText('covered access')
 })

@@ -29,7 +29,7 @@ export interface ChainReplayEvent {
   /**
    * The parsed payload, or null when it is unreadable. Only three things are
    * read from it: `targetLang` and `laneId` (the lane, via the AQU-1612
-   * resolver) and, on a `source.cell.mirror`, `upstream.seq`.
+   * resolver) and, on a `source.cell.mirror`, `upstream.seq` and `adopt`.
    */
   payload: unknown
 }
@@ -74,10 +74,14 @@ export class ChainHeadReplay {
       if (event.kind.endsWith('.delete')) this.headAt.delete(key)
       else this.headAt.set(key, event.id)
     } else if (event.kind === 'source.cell.mirror') {
-      const seq = (event.payload as { upstream?: { seq?: unknown } } | null)?.upstream?.seq
+      const mirror = event.payload as { adopt?: unknown; upstream?: { seq?: unknown } } | null
+      const seq = mirror?.upstream?.seq
       const key = headKey(event, this.lanes)
       const last = this.mirrorSeqAt.get(key)
-      if (typeof seq === 'number' && (last === undefined || seq > last)) {
+      // AQU-1679: a mirror that joins an existing cell to its upstream applies
+      // whatever seq the row held — the projection's own rule (see `adopt` on
+      // the payload type).
+      if (typeof seq === 'number' && (last === undefined || seq > last || mirror?.adopt === true)) {
         this.mirrorSeqAt.set(key, seq)
         this.headAt.set(key, event.id)
       }

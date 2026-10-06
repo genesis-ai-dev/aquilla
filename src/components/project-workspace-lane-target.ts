@@ -53,3 +53,35 @@ export function resolveActiveTargetLanguage(
   const fromRow = lanes && lanes.length > 0 ? laneLanguageForTag("", lanes) : null
   return fromRow || projectTargetLanguage || undefined
 }
+
+/** One target lane as the Import dialog's "Is this a translation?" check sees
+ *  it (`TranslationTargetLanguage` in ImportDialog). */
+export interface LaneTargetLanguage {
+  language: string
+  label: string | null
+  active: boolean
+}
+
+/**
+ * AQU-1365: every lane's target language, for telling a translation upload
+ * from a source one, and which of them is the open lane (the one a translation
+ * import fills).
+ *
+ * The language follows the same rule as the editor's (AQU-1586): from the
+ * lane ROW, never the tag, which can be the lane's opaque id. The default lane
+ * is the project's target language. A lane whose row records no language is
+ * left out rather than given the project's, so it can't pass for the default
+ * lane's language.
+ */
+export function laneTargetLanguages(
+  lanes: readonly string[],
+  activeLane: string,
+  projectTargetLanguage: string | null | undefined,
+  laneLabels: Readonly<Record<string, string>>,
+  rows?: readonly LaneLanguageRow[] | null,
+): LaneTargetLanguage[] {
+  return lanes.flatMap((lane) => {
+    const language = lane === "" ? projectTargetLanguage?.trim() : laneLanguageForTag(lane, rows)
+    return language ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }] : []
+  })
+}

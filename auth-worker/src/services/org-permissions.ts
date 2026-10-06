@@ -1,10 +1,16 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
-import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
+import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
-import { inCountedFileSql, countedFileSql, notHiddenFileSql } from "../../../db/shared/counted-files"
+import {
+  inCountedFileSql,
+  inCountedFileSetSql,
+  uncountedFilesCteSql,
+  countedFileSql,
+  notHiddenFileSql,
+} from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
@@ -21,6 +27,12 @@ import {
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
 import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
+import {
+  emptyPortfolioAggregate,
+  summarizePortfoliosByOrg,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "../../../src/lib/frontier/portfolio-metrics"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -111,6 +123,87 @@ export async function renameOrg(env: Env, orgId: number, name: string): Promise<
   await env.AQUILLA_PG.prepare(
     "UPDATE organizations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(name, orgId).run()
+}
+
+export type DeleteOrganizationResult =
+  | { ok: true }
+  | { ok: false; reason: "has_projects"; projectCount: number }
+
+/**
+ * Hard-delete an organization and the rows that belong only to it.
+ *
+ * AQU-1108 decisions, taken from the ticket's acceptance tests:
+ * - Any project row (including archived) blocks the delete. There is no
+ *   hard-delete for projects, so cascading them would orphan or destroy
+ *   translation data. `projects.org_id` is never left pointing at a missing org.
+ * - Members, teams, invites, org-scoped PATs, device grants, integrations,
+ *   billing, and usage rows are removed in the same transaction.
+ * - The personal workspace may be deleted. `GET /orgs/me` and an empty
+ *   `listUserOrgs` lazily create a fresh one.
+ *
+ * Caller authorization stays in the route: membership role >= owner, with no
+ * platform-admin elevation.
+ */
+export async function deleteOrganization(
+  env: Env,
+  orgId: number,
+): Promise<DeleteOrganizationResult> {
+  const db = env.AQUILLA_PG
+  if (!db.transaction) throw new Error("Deleting an organization requires Postgres transactions")
+  return db.transaction(async (tx) => {
+    const counted = await tx.prepare(
+      "SELECT COUNT(*) AS n FROM projects WHERE org_id = ?",
+    ).bind(orgId).first<{ n: number | string }>()
+    const projectCount = Number(counted?.n ?? 0)
+    if (projectCount > 0) return { ok: false, reason: "has_projects", projectCount }
+
+    const orgText = String(orgId)
+    // Child tables first. Some of these FKs cascade and some do not; deleting
+    // explicitly keeps the same result on a database whose FKs were omitted.
+    const byOrgId = [
+      "DELETE FROM workspace_plan_change_reviews WHERE org_id = ?",
+      "DELETE FROM workspace_subscription_state WHERE org_id = ?",
+      "DELETE FROM workspace_usage_requests WHERE org_id = ?",
+      "DELETE FROM workspace_checkout_attempts WHERE org_id = ?",
+      "DELETE FROM workspace_plan_entitlements WHERE org_id = ?",
+      "DELETE FROM billing_price_cohorts WHERE org_id = ?",
+      "DELETE FROM org_billing_events WHERE org_id = ?",
+      "DELETE FROM org_word_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_credit_usage_daily WHERE org_id = ?",
+      "DELETE FROM tts_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_billing WHERE org_id = ?",
+      "DELETE FROM rule_applicability WHERE rule_id IN (SELECT id FROM style_rules WHERE org_id = ?)",
+      "DELETE FROM style_rules WHERE org_id = ?",
+      "DELETE FROM knowledge_docs WHERE org_id = ?",
+      "DELETE FROM org_invites WHERE org_id = ?",
+      "DELETE FROM org_settings WHERE org_id = ?",
+      "DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM group_project_grants WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM groups WHERE org_id = ?",
+      "DELETE FROM org_members WHERE org_id = ?",
+    ]
+    for (const sql of byOrgId) {
+      await tx.prepare(sql).bind(orgId).run()
+    }
+    const byOrgText = [
+      `DELETE FROM integration_item_links WHERE link_id IN (
+         SELECT l.id FROM integration_links l
+         JOIN integration_connections c ON c.id = l.connection_id
+         WHERE c.org_id = ?
+       )`,
+      `DELETE FROM integration_links WHERE connection_id IN (
+         SELECT id FROM integration_connections WHERE org_id = ?
+       )`,
+      "DELETE FROM integration_connections WHERE org_id = ?",
+      "DELETE FROM api_credentials WHERE org_id = ?",
+      "DELETE FROM agent_authorizations WHERE org_id = ?",
+    ]
+    for (const sql of byOrgText) {
+      await tx.prepare(sql).bind(orgText).run()
+    }
+    await tx.prepare("DELETE FROM organizations WHERE id = ?").bind(orgId).run()
+    return { ok: true }
+  })
 }
 
 export interface UserOrgSummary {
@@ -1600,6 +1693,32 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * until someone opts out) that CTE is empty and the join costs nothing. The
  * previous shape of this query, three correlated subqueries over ~300k rows,
  * is what caused the 15s dashboard timeout; this must not walk back into it.
+ *
+ * It did walk back into it once (2026-10-05), and both halves of how are now
+ * closed by construction rather than left to the planner:
+ *
+ *   * "Costs nothing" was only true while Postgres happened to hash the
+ *     excluding projects first and skip `cells` on finding none. `cells` was
+ *     joined TO `policy`, so nothing required that order, and one more
+ *     predicate on the join (AQU-1626's counted-files probe) flipped it to a
+ *     merge join that read all of `cells` — 2.2M pages — before discovering
+ *     there was nothing to match. `structural_cells` therefore names its
+ *     projects up front, as an array the executor has in hand before it
+ *     touches `cells`: empty array, no read; otherwise an index lookup per
+ *     excluding project.
+ *   * The counted-files rule is applied against `uncounted_files`, one small
+ *     set built once for the page's projects, never as a probe per audio row
+ *     (see `inCountedFileSetSql`). That probe ran ~140k times here.
+ *
+ * Measured on the dev database for an 8-org, 433-project caller, same rows
+ * either way: 6-9s warm and 74s cold before, 0.7s after.
+ *
+ * What this does NOT make free is a scope where many projects really do
+ * exclude headings. The array bounds the read to those projects' source cells
+ * (about 1.3s per million cells; 5s with a 198-project org simulated as opted
+ * out), which beats reading the whole table but is not nothing. If orgs start
+ * opting out at that scale the answer is a partial index on structural source
+ * cells, not another join shape.
  */
 const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
@@ -1619,16 +1738,21 @@ const portfolioCtes = (orgPredicate: string) => `
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
-     ), structural_cells AS (
+     ), ${uncountedFilesCteSql('SELECT project_id FROM policy')},
+     structural_cells AS (
        -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
        -- and has to describe the same files the totals above now do. A heading
        -- inside a hidden or deleted file is no longer in the numerator, so
        -- subtracting it would push a project's count below its real one.
+       --
+       -- The project filter is an ARRAY on purpose, not a join to policy: see
+       -- the note above portfolioCtes. Do not turn it back into a join.
        SELECT DISTINCT c.project_id, c.file_id, c.cell_id
          FROM cells c
-         JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
-        WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
-          AND ${inCountedFileSql('c')}
+        WHERE c.project_id = ANY(ARRAY(
+                SELECT pol.project_id FROM policy pol WHERE pol.excluded))
+          AND c.side = 'source' AND c.type IN ('heading', 'paratext')
+          AND ${inCountedFileSetSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1663,7 +1787,7 @@ const portfolioCtes = (orgPredicate: string) => `
           -- not coverage of the work. The recorded-milliseconds sum takes the
           -- same filter: a tombstoned file's hours are not hours the project
           -- has banked.
-          AND ${inCountedFileSql('a')}
+          AND ${inCountedFileSetSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
@@ -1695,6 +1819,32 @@ export type PortfolioPageOpts = {
  * caller is about to see. Skipped entirely when the wall does not restrict
  * anyone on the page. Structural cells drop out only when the project excludes
  * them, matching the portfolio's own text totals.
+ *
+ * This is the one statement on the dashboard that has to look at `cells`
+ * itself: `files.ai_drafted_count` is per file, and the wall needs the count
+ * per lane. Two things keep that from being a read of the whole table, which
+ * is what it was (2.28M pages on dev: 4.4s warm, 75s cold, for a caller with
+ * 155 projects below the wall).
+ *
+ *   * `cells` is driven by an ARRAY of the page's project ids, not joined to
+ *     `pol` and left to the planner. Joined, Postgres used an index for 52
+ *     projects and a parallel seq scan of `cells` for 155, and then threw
+ *     away every row but 132. An array is in the executor's hands
+ *     before the scan starts and is costed as a handful of lookups, so the
+ *     plan cannot flip back however long the list gets. Same reasoning as
+ *     `structural_cells` above; do not turn it back into a join.
+ *   * `idx_cells_ai_drafted` (migration 0137) holds only the rows this
+ *     statement wants: target cells still carrying an untouched machine
+ *     draft, keyed by project. With it the read is those rows and nothing
+ *     else. Without it the array still bounds the read to the listed
+ *     projects' target cells through `idx_cells_lane_last_edit`, which for
+ *     the same caller is 255k pages instead of 2.28M: 1.0s when they are
+ *     cached and 23-29s when they are not. So the statement is correct
+ *     either side of the migration, but it is the index that makes it fast.
+ *
+ * The counted-files rule takes its set form for the reason given on
+ * `inCountedFileSetSql`: this filters rows across many projects, and the
+ * per-row probe reads a project's whole file list each time it runs.
  */
 async function aiDraftedByLane(
   env: Env,
@@ -1711,18 +1861,22 @@ async function aiDraftedByLane(
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.id IN (${placeholders})
-     )
+     ), ${uncountedFilesCteSql('SELECT project_id FROM pol')}
      SELECT c.project_id AS project_id,
             COALESCE(c.target_lang, '') AS target_lang,
             COUNT(*)::int AS n
        FROM cells c
        JOIN pol ON pol.project_id = c.project_id
-      WHERE c.side = 'target' AND c.ai_drafted = 1
+      WHERE c.project_id = ANY(ARRAY(SELECT project_id FROM pol))
+        -- These two literals are idx_cells_ai_drafted's predicate. Postgres
+        -- uses a partial index only when the query implies its WHERE, so
+        -- they have to stay literals and stay in step with the index.
+        AND c.side = 'target' AND c.ai_drafted = 1
         -- AQU-1626: the client divides this by the portfolio's total_cells, so
         -- it has to be scoped to the same files that total now counts. A
         -- caption track machine-drafted on import would otherwise push the
         -- share past 100% against a denominator that no longer includes it.
-        AND ${inCountedFileSql('c')}
+        AND ${inCountedFileSetSql('c')}
         AND NOT (
           pol.excluded AND EXISTS (
             SELECT 1 FROM cells src
@@ -1770,18 +1924,23 @@ async function visiblePortfolioText(
     (orgRoles.results ?? []).map((row) => [Number(row.org_id), Number(row.role_level)]),
   )
 
-  // resolveProjectRole reads user.id and user.email. Platform admins are
-  // already handled by viewer.isAdmin, so an empty email cannot match the
-  // allowlist and widen this caller.
+  // Role resolution reads user.id and user.email. Platform admins are already
+  // handled by viewer.isAdmin, so an empty email cannot match the allowlist
+  // and widen this caller.
   const user = { id: viewer.userId, email: "" } as AuthUser
-  const restricted: PortfolioDbRow[] = []
-  await Promise.all(rows.map(async (row) => {
-    if ((orgLevel.get(Number(row.org_id)) ?? 0) >= READ_WALL_MAINTAINER) return
-    if (Number(row.created_by) === viewer.userId) return
-    const role = await resolveProjectRole(env, user, row.id)
-    if (role != null && role.level >= READ_WALL_MAINTAINER) return
-    restricted.push(row)
-  }))
+  // One set-based resolve for the page. This used to be resolveProjectRole per
+  // row: four statements a project, seven under ACCESS_GRANTS_RESOLVER=shadow,
+  // which came to 1,085 for one dev caller's 155 projects below the wall.
+  const unsettled = rows.filter(
+    (row) =>
+      (orgLevel.get(Number(row.org_id)) ?? 0) < READ_WALL_MAINTAINER &&
+      Number(row.created_by) !== viewer.userId,
+  )
+  const roles = await resolveProjectRoles(env, user, unsettled.map((row) => row.id))
+  const restricted = unsettled.filter((row) => {
+    const role = roles.get(row.id)
+    return !(role != null && role.level >= READ_WALL_MAINTAINER)
+  })
   if (restricted.length === 0) return null
 
   const projectIds = restricted.map((row) => row.id)
@@ -1793,7 +1952,7 @@ async function visiblePortfolioText(
 
   const overrides = new Map<string, VisiblePortfolioText>()
   for (const row of restricted) {
-    const role = await resolveProjectRole(env, user, row.id)
+    const role = roles.get(row.id)
     const visible = visibleLaneTags({
       enabled: true,
       role: role?.level ?? 0,
@@ -1982,6 +2141,29 @@ export async function getOrgPortfolios(
 ): Promise<OrgPortfolioRow[]> {
   const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
   return projects
+}
+
+/**
+ * Overview totals for the same visible projects `getOrgPortfolios` would
+ * return. The client dashboard no longer needs that full payload to paint
+ * translated/validated averages and stalled, overdue, and attention counts.
+ *
+ * This does not change the portfolio SQL. Query-plan work on that rollup is
+ * separate (the cells-scan follow-up). Values stay the unweighted per-project
+ * mean, under the same visibility predicate and lane-activity rules.
+ */
+export async function summarizeVisiblePortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<{ totals: PortfolioAggregate; orgs: OrgPortfolioAggregate[] }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) {
+    return { totals: emptyPortfolioAggregate(), orgs: [] }
+  }
+  const { projects } = await listOrgPortfolioPage(env, uniqueOrgIds, viewer, null, now)
+  return summarizePortfoliosByOrg(projects, uniqueOrgIds, now)
 }
 
 export interface ProjectAccessBreakdown {

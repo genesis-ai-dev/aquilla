@@ -128,6 +128,7 @@ function parseSettings(raw: string): PlatformSettings {
   if (fp && typeof fp === "object" && !Array.isArray(fp)) {
     const f = fp as Record<string, unknown>
     const fieldPlan: FieldPlanSettings = {}
+    if (typeof f.freeWeeklyAllowance === "number") fieldPlan.freeWeeklyAllowance = f.freeWeeklyAllowance
     if (typeof f.priceCents === "number") fieldPlan.priceCents = f.priceCents
     if (typeof f.includedWords === "number") fieldPlan.includedWords = f.includedWords
     if (typeof f.addonWords === "number") fieldPlan.addonWords = f.addonWords

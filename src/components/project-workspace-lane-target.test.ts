@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
+import { laneTargetLanguages, resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { planNewTargetLane } from "@/lib/lanes/lane-create"
 
 describe("resolveActiveTargetLanguage (AQU-602)", () => {
@@ -134,5 +134,38 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
         resolveActiveTargetLanguage(plan.legacyTag, null, "Spanish", [{ ...row, language: "Yoruba (Oyo)" }]),
       ).toBe("Yoruba (Oyo)")
     }
+  })
+})
+
+describe("laneTargetLanguages — the Import dialog's translation check (AQU-1365, AQU-1586)", () => {
+  // The check compares an upload's declared language with each lane's. A lane
+  // tagged with its own opaque id must be compared by its row's language, or a
+  // Spanish upload never matches the second Spanish lane and a hex id is
+  // offered up as a language.
+  const rows = [
+    { id: "defa0001", role: "target" as const, name: "Spanish", langCode: "es", legacyTag: "" },
+    { id: "a3f09c1e", role: "target" as const, name: "Spanish (Mexico team)", langCode: "es", legacyTag: "a3f09c1e" },
+    { id: "frc00002", role: "target" as const, name: "French (Canada)", langCode: "fra", legacyTag: "fr-CA" },
+    { id: "b0b0b0b0", role: "target" as const, name: "", langCode: null, legacyTag: "b0b0b0b0" },
+  ]
+  const labels = { "": "Spanish", a3f09c1e: "Spanish (Mexico team)", "fr-CA": "French (Canada)" }
+
+  it("reads a lane's language from its row, never its id, and marks the open lane", () => {
+    expect(laneTargetLanguages(["", "a3f09c1e", "fr-CA"], "a3f09c1e", "Spanish", labels, rows)).toEqual([
+      { language: "Spanish", label: "Spanish", active: false },
+      { language: "es", label: "Spanish (Mexico team)", active: true },
+      { language: "fr-CA", label: "French (Canada)", active: false },
+    ])
+  })
+
+  it("leaves out a lane whose row records no language, and a default lane with no project target", () => {
+    expect(laneTargetLanguages(["", "b0b0b0b0"], "", "", {}, rows)).toEqual([])
+  })
+
+  it("falls back to the tag only when there are no rows at all", () => {
+    expect(laneTargetLanguages(["", "tt"], "tt", "Siberian Tatar", {})).toEqual([
+      { language: "Siberian Tatar", label: null, active: false },
+      { language: "tt", label: null, active: true },
+    ])
   })
 })

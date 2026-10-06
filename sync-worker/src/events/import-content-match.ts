@@ -62,56 +62,13 @@ export function normalizeForMatch(value: string): string {
 /**
  * Put existing source cells back into document order.
  *
- * The projection stores the order as an anchor chain (`anchorCellId` points at
- * the preceding cell; the first cell anchors on null), and the re-import route
+ * The projection stores the order as an anchor chain, and the re-import route
  * reads the `cells` rows without an ORDER BY, so row order carries no meaning.
  * Context matching is entirely about neighbours, so the chain has to be walked
- * before anything else happens.
- *
- * Defensive about drift: a chain that forks, cycles, or leaves cells
- * unreachable still yields every input cell exactly once — unreachable cells
- * are appended in input order rather than dropped.
+ * before anything else happens. The walk itself is shared with the link flow's
+ * file matching (AQU-1679), which needs the same order for the same reason.
  */
-export function orderSourceCellsByAnchor<T extends { cellId: string; anchorCellId?: string | null }>(
-  cells: readonly T[],
-): T[] {
-  const present = new Set(cells.map((cell) => cell.cellId))
-  const followers = new Map<string, T[]>()
-  const heads: T[] = []
-  for (const cell of cells) {
-    const anchor = cell.anchorCellId
-    if (!anchor || !present.has(anchor) || anchor === cell.cellId) {
-      heads.push(cell)
-      continue
-    }
-    const bucket = followers.get(anchor)
-    if (bucket) bucket.push(cell)
-    else followers.set(anchor, [cell])
-  }
-
-  const ordered: T[] = []
-  const visited = new Set<string>()
-  const walk = (start: T): void => {
-    let current: T | undefined = start
-    while (current && !visited.has(current.cellId)) {
-      visited.add(current.cellId)
-      ordered.push(current)
-      const next: T[] = followers.get(current.cellId) ?? []
-      // A fork is drift, not a chain: take the first follower and let the rest
-      // be picked up as their own runs below.
-      current = next[0]
-      for (const sibling of next.slice(1)) heads.push(sibling)
-    }
-  }
-  for (let i = 0; i < heads.length; i++) walk(heads[i])
-  for (const cell of cells) {
-    if (!visited.has(cell.cellId)) {
-      visited.add(cell.cellId)
-      ordered.push(cell)
-    }
-  }
-  return ordered
-}
+export { orderCellsByAnchor as orderSourceCellsByAnchor } from '../../../db/shared/link-file-match'
 
 interface Normalized {
   cellId: string

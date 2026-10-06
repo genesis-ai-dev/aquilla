@@ -10,8 +10,9 @@
 // the verse (or verses, for a bridge) and every word's normalized form must be
 // the Macula word's. One mismatch and the cell gets no tints at all, never
 // tints on the wrong words. A gateway-language source (an English or
-// Indonesian Bible) never matches; word tints there need an alignment
-// (AQU-1694), and until then the verse-level features still work.
+// Indonesian Bible) never matches; its word tints come through the stored
+// word alignment instead (Bridge 1: source-alignment.ts, AQU-1694), and
+// without one the verse-level features still work.
 //
 // Pure. Spec: 04-features/bible-knowledge-layer.md, Edge cases ("The source
 // text is not Greek or Hebrew").

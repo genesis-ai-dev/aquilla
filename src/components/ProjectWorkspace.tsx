@@ -13889,6 +13889,7 @@ export function ProjectWorkspace() {
                   fileId={activeFile?.id ?? null}
                   trackedRef={trackedCellRef}
                   sourceLanguage={activeFile?.sourceLanguage || project?.sourceLanguage}
+                  getTokenForFile={getTokenForFile}
                   open
                   onToggle={() => {
                     const next = !whosWhoOpen

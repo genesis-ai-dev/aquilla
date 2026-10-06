@@ -232,7 +232,7 @@ import { useBibleData } from "./bible-data/useBibleData"
 import { VoiceChip } from "./bible-data/VoiceChip"
 import { VoiceFilterBanner } from "./bible-data/VoiceFilterBanner"
 import { useCellVoices } from "./bible-data/voices-context"
-import { useCellContext, useCellMentionWords } from "./bible-data/whos-who-context"
+import { useCellContext, useCellMentionWords, useCellTargetTints } from "./bible-data/whos-who-context"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
@@ -1195,6 +1195,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     version: cellStoreVersion,
     fileId: audioFileId,
     jumpToCell: jumpToBibleCell,
+    getTokenForFile,
   })
   const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleData
   const voiceFilterActive = bibleData.filteredCellIds !== null
@@ -6578,7 +6579,9 @@ function EditorRow({
   // AQU-1689: Who's Who. The source's mention words, when its words are the
   // pack's (a Greek or Hebrew source; null otherwise), and the Context tab.
   const shownSourceText = displayedSourceText(cell, sourceDraft?.value)
-  const cellMentions = useCellMentionWords(cell.group, cell.type, shownSourceText)
+  const cellMentions = useCellMentionWords(cell.id, cell.group, cell.type, shownSourceText)
+  // AQU-1694: the same participants on the target, through the word bridges.
+  useCellTargetTints(targetReadContentRef, !isEditorActive, cell.id, cell.group, cell.type, shownSourceText, visibleTranslated ?? "")
   const cellContext = useCellContext(cell.group, cell.type)
   const castHoldsSlot =
     ownCastName(cell) !== null ||

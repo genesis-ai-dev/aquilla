@@ -43,6 +43,7 @@ import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
 import { bibleData } from "./bibleData"
+import { bibleAlignment } from "./bibleAlignment"
 
 export const NAMESPACES = [
   common,
@@ -72,4 +73,5 @@ export const NAMESPACES = [
   workspace,
   segmentation,
   bibleData,
+  bibleAlignment,
 ] as const

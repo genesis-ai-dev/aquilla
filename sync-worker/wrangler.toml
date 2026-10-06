@@ -128,6 +128,22 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   Paste the Portal key as-is (the worker prefixes `Basic `). Never put this
 #   in VITE_* or the SPA. See docs/INWORLD-TTS.md.
 
+# Smart Placement (AQU-1166): run the Worker near its backend (Hyperdrive→Neon)
+# instead of at the requester's edge PoP. This worker is the DB-heavy one — the
+# event log write path and every projection read go through Hyperdrive — so
+# co-locating with Postgres cuts the round trip on each of them. auth-worker has
+# carried the same block since it was the DB-heavy surface.
+#
+# Placement only affects `fetch` handlers. The per-project `ProjectSync` Durable
+# Object is placed by Cloudflare independently of this setting and holds no
+# Postgres/R2 state, so presence/focus-lock traffic is not what this tunes — the
+# HTTP event and read routes are.
+#
+# NOTE: like observability, [placement] is NOT inherited by env blocks — keep the
+# env-block copies below in sync.
+[placement]
+mode = "smart"
+
 [observability]
 enabled = true
 
@@ -147,6 +163,10 @@ routes = ["api.aquilla.app/sync/*"]
 
 [env.production.build]
 command = "bash ../scripts/verify-deploy-branch.sh release"
+
+# See top-level [placement] — keep env blocks in sync (they don't inherit it).
+[env.production.placement]
+mode = "smart"
 
 # Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
 # named envs, and `versions deploy` syncs the resolved value. It is declared per
@@ -224,6 +244,10 @@ name = "EMAIL"
 name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
+
+# See top-level [placement] — keep env blocks in sync (they don't inherit it).
+[env.development.placement]
+mode = "smart"
 
 # See [env.production.observability] — declared per env so a top-level edit
 # can't change what dev logs.

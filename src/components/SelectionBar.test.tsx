@@ -26,7 +26,7 @@ import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 // tests care that the batch-validate event FIRES, which is precisely what the
 // surface could not previously prove.
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
+  default: { capture: vi.fn(), captureException: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
 }))
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
@@ -112,7 +112,9 @@ function makeRows(cells: CellData[]): CellRow[] {
         anchorCellId,
         eventId: `${cell.id}-target`,
         sourceEventId: `${cell.id}-source`,
-        lastEditor: "alice",
+        // The viewer, unless a test says otherwise. Inert while the project
+        // allows self-validation (the default); AQU-1571 tests switch it off.
+        lastEditor: cell.lastEditor !== undefined ? cell.lastEditor : "alice",
         lastEditAt: 2,
         validated: false,
         aiDrafted: cell.aiDrafted ?? false,
@@ -324,14 +326,35 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
-  it("disables with the AI-draft reason for an untouched machine draft", async () => {
+  // AQU-1703 regression guard (bounce of AQU-1503). Machine-drafted text that
+  // nobody has retyped used to disable this button with "untouched AI drafts
+  // require individual review". A reviewer's whole job is signing off work they
+  // did not type, so the button offers all five and validates all five.
+  it("offers and validates machine-drafted cells the caller never edited", async () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const ids = ["d1", "d2", "d3", "d4", "d5"]
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(ids))
+    const drafts = ids.map((id) => makeCell({ id, translated: `auto ${id}`, aiDrafted: true, lastEditor: "other" }))
+
+    renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
+    const btn = validateButton()
+    expect(btn).toBeEnabled()
+    expect(btn).toHaveTextContent(/Validate text\s*5/)
+    await expectTooltip(btn, "Validate 5 cells")
+    fireEvent.click(btn)
+    expect(emitCellValidate).toHaveBeenCalledTimes(5)
+    vi.restoreAllMocks()
+  })
+
+  it("keeps the already-mine guard on a machine-drafted cell", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
-    renderBar(makeProject(ROLE.CONTRIBUTOR), [
-      makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true }),
-    ])
+    renderBar(
+      makeProject(ROLE.CONTRIBUTOR),
+      [makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true, activeValidators: ["alice"] })],
+    )
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "Nothing eligible — untouched AI drafts require individual review")
+    await expectTooltip(btn, "All selected cells are already validated by you")
     vi.restoreAllMocks()
   })
 
@@ -426,9 +449,9 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
 /**
  * AQU-1503 — the bulk validate must SAY what it did, including what it left
  * alone. The old loop reported exactly one class of skip ("already
- * validated"); an untouched AI draft, an out-of-scope cell or an unsaved edit
- * dropped out of the count with nothing said, so a user who selected five
- * cells and watched two change had no way to learn why.
+ * validated"); an out-of-scope cell or an unsaved edit dropped out of the
+ * count with nothing said, so a user who selected five cells and watched two
+ * change had no way to learn why.
  */
 describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", () => {
   function renderFor(cells: CellData[], myScopes: MemberScope[] = []) {
@@ -441,12 +464,11 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.mocked(emitCellValidate).mockClear()
     const added = vi.spyOn(toast, "add")
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
-      new Set(["ok-1", "ok-2", "draft", "empty", "mine"]),
+      new Set(["ok-1", "ok-2", "empty", "mine"]),
     )
     renderFor([
       makeCell({ id: "ok-1", translated: "bonjour" }),
       makeCell({ id: "ok-2", translated: "salut" }),
-      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
       makeCell({ id: "empty", translated: "" }),
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
@@ -455,10 +477,56 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
-    expect(description).toMatch(/untouched AI draft/i)
+    // Both classes, not just the "already validated" one the old loop named.
     expect(description).toMatch(/still needs? a translation/i)
     expect(description).toMatch(/already validated/i)
     added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  // Sam, 2026-10-03: a badge of 3 on ten selected lines explained the other
+  // seven only in the toast after the click.
+  it("says on hover which lines a partial run signs off and why it leaves the rest", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
+      new Set(["ok-1", "ok-2", "mine", "empty"]),
+    )
+    renderFor([
+      makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
+      makeCell({ id: "ok-2", context: "B5", translated: "salut" }),
+      makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
+      makeCell({ id: "empty", context: "B8", translated: "" }),
+    ])
+    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    await expectTooltip(btn, "Validate 2 of 4 selected cells: B4 and B5")
+    await expectTooltip(btn, /2 will be skipped — .*still needs? a translation.*already validated/i)
+    vi.restoreAllMocks()
+  })
+
+  it("shortens a long list of lines", async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `ok-${i + 1}`)
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...ids, "mine"]))
+    renderFor([
+      ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
+      makeCell({ id: "mine", context: "D1", translated: "deja", activeValidators: ["alice"] }),
+    ])
+    await expectTooltip(
+      screen.getByRole("button", { name: /^Validate text/i }),
+      "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more",
+    )
+    vi.restoreAllMocks()
+  })
+
+  it("names the lines by row number when one has no reference", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "mine"]))
+    renderFor([
+      makeCell({ id: "ok-1", context: "B4", translated: "bonjour" }),
+      makeCell({ id: "ok-2", context: "", group: "", translated: "salut" }),
+      makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
+    ])
+    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    // …so they go by the table's # column instead: their place in the file.
+    await expectTooltip(btn, "Validate 2 of 3 selected cells: rows 1 and 2")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("B4")
     vi.restoreAllMocks()
   })
 
@@ -481,10 +549,10 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.mocked(emitCellValidate).mockClear()
     const captured = vi.mocked(posthog.capture)
     captured.mockClear()
-    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "draft"]))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "mine"]))
     renderFor([
       makeCell({ id: "ok-1", translated: "bonjour" }),
-      makeCell({ id: "draft", translated: "auto", aiDrafted: true }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
@@ -496,8 +564,70 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       source: "selection",
       outcome: "partial",
       validated_count: 1,
-      skipped_ai_draft: 1,
+      skipped_already_mine: 1,
     })
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-1572 — a bulk action reports one event PER LINE, and the bar reports
+ * none of its own. Every `cell validated` / `cell unvalidated` comes out of
+ * the emit for that line (cell-telemetry.ts, at the emit seam; one emit is one
+ * event, pinned by events-emit.telemetry.test.ts). The emits are mocked here,
+ * so any capture of those names would be the bar counting a second time.
+ */
+describe("SelectionBar — validation telemetry (AQU-1572)", () => {
+  const events = (name: string) => vi.mocked(posthog.capture).mock.calls.filter(([n]) => n === name)
+
+  it("validates each eligible line through one emit and reports nothing itself", async () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2", "mine"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+      makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
+    ], [], "fr", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => [input.cellId, input.surface, input.auto]))
+      .toEqual([["ok-1", "selection", undefined], ["ok-2", "selection", undefined]])
+    await Promise.resolve()
+    expect(events("cell validated")).toHaveLength(0)
+    vi.restoreAllMocks()
+  })
+
+  it("removes each of my validations through one emit and reports nothing itself", async () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellUnvalidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /Remove my text validations/i }))
+
+    expect(emitCellUnvalidate).toHaveBeenCalledTimes(1)
+    expect(emitCellUnvalidate).toHaveBeenCalledWith(expect.objectContaining({ surface: "selection" }))
+    await Promise.resolve()
+    expect(events("cell unvalidated")).toHaveLength(0)
+    vi.restoreAllMocks()
+  })
+
+  it("votes each take through one emit and reports nothing itself", async () => {
+    vi.mocked(posthog.capture).mockClear()
+    vi.mocked(emitCellAudioValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^validate audio/i }))
+
+    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    expect(emitCellAudioValidate).toHaveBeenCalledWith(expect.objectContaining({ surface: "selection" }))
+    expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
   })
 })
@@ -705,6 +835,272 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
     fireEvent.click(translateButton())
 
     expect(completeBatch).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+})
+
+// AQU-1572: a write that never queued is not counted — the emit captures only
+// after its enqueue resolves (pinned in events-emit.telemetry.test.ts). What is
+// left for the bar is that the failure is logged instead of escaping as an
+// unhandled rejection, since its loop does not await each write.
+describe("SelectionBar — a write that never queued", () => {
+  it("is logged, not left as an unhandled rejection", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.mocked(emitCellValidate)
+      .mockImplementationOnce(() => Promise.resolve("ok"))
+      .mockImplementationOnce(() => Promise.reject(new Error("idb full")))
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1", "ok-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "ok-1", translated: "bonjour" }),
+      makeCell({ id: "ok-2", translated: "salut" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)))
+    warn.mockRestore()
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-1571 — the server refuses a text vote on the caller's own latest change
+ * when the project switched "Allow self-validation" off, and any vote from a
+ * reader the project's minimum role or named-validator list excludes. Both
+ * used to come back as a red "failed" banner after a bulk run; the bar now
+ * leaves those lines alone and says so.
+ */
+describe("SelectionBar — the project's text validation rules (AQU-1571)", () => {
+  const strict = (level: number = ROLE.CONTRIBUTOR, over: Partial<ProjectRecord> = {}) =>
+    ({ ...makeProject(level), allowSelfValidation: false, ...over })
+  const validateButton = () => screen.getByRole("button", { name: /^Validate text/i })
+
+  it("counts and validates only the lines somebody else changed last", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    const added = vi.spyOn(toast, "add")
+    const captured = vi.mocked(posthog.capture)
+    captured.mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs", "own-1", "own-2"]))
+    renderBar(strict(), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "own-2", translated: "coucou", lastEditor: "alice" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+
+    expect(validateButton()).toHaveTextContent(/1$/)
+    fireEvent.click(validateButton())
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "theirs" }))
+    const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
+    expect(description).toContain("2 have your latest change, so someone else must validate them")
+    const batch = captured.mock.calls.find(([name]) => name === BATCH_VALIDATE_ATTEMPTED)
+    expect(batch?.[1]).toMatchObject({ outcome: "partial", validated_count: 1, skipped_own_edit: 2 })
+    added.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it("disables Validate with the own-change reason when every line is the reader's", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1", "own-2"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "own-2", translated: "coucou", lastEditor: "alice" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    vi.restoreAllMocks()
+  })
+
+  // A machine-drafted line the reader themselves last committed: the reason is
+  // the self-validation rule, which is the one the reader can act on.
+  it("names the own change for the reader's own machine-drafted line", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft"]))
+    renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" })])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    vi.restoreAllMocks()
+  })
+
+  it("validates the reader's own lines when the project allows it", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1"]))
+    renderBar(strict(ROLE.CONTRIBUTOR, { allowSelfValidation: true }), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+    ], [], "", { onValidationCommitted: vi.fn() })
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("never treats a line with no known editor as the reader's", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["old"]))
+    renderBar(strict(), [makeCell({ id: "old", translated: "salut", lastEditor: null })], [], "", {
+      onValidationCommitted: vi.fn(),
+    })
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("tells a reader below the project's minimum role that their role cannot validate here", async () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs"]))
+    renderBar(strict(ROLE.CONTRIBUTOR, { validationRoleFloor: "project_lead" }), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
+    fireEvent.click(validateButton())
+    expect(emitCellValidate).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  // Their role is fine; a role change would not help, so the reason must not
+  // name it.
+  it("tells a reader left off the named-validator list that the project names who validates", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["theirs"]))
+    renderBar(strict(ROLE.PROJECT_LEAD, { validationNamedUsers: ["bob"] }), [
+      makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Only the people this project names can validate text.")
+    vi.restoreAllMocks()
+  })
+
+  // AQU-1703: a mixed selection of the reader's own line and a colleague's
+  // machine-drafted one. The colleague's line is ordinary review work, so the
+  // button offers it; only the reader's own is held back. This used to refuse
+  // the whole selection as "untouched AI drafts require individual review".
+  it("offers another person's machine-drafted line beside the reader's own", async () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft", "their-draft"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" }),
+      makeCell({ id: "their-draft", translated: "auto 2", aiDrafted: true, lastEditor: "bob" }),
+    ])
+    const btn = validateButton()
+    expect(btn).toBeEnabled()
+    await expectTooltip(btn, "Validate 1 of 2 selected cells")
+    fireEvent.click(btn)
+    expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["their-draft"])
+    vi.restoreAllMocks()
+  })
+
+  it("says only some lines are the reader's when the rest have no translation", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-1", "empty"]))
+    renderBar(strict(), [
+      makeCell({ id: "own-1", translated: "salut", lastEditor: "alice" }),
+      makeCell({ id: "empty", translated: "", lastEditor: null }),
+    ])
+    expect(validateButton()).toBeDisabled()
+    await expectTooltip(validateButton(), "Some selected cells have your latest change, so someone else must validate them")
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * "Voice together" used to fail as an unhandled rejection with nothing on
+ * screen: the workspace handler rethrows and the bar only had try/finally.
+ * Vitest fails the run on an unhandled rejection, so these tests passing is
+ * itself the proof that the bar now catches it.
+ */
+describe("SelectionBar — Voice together failure", () => {
+  const voiceButton = () => screen.getByRole("button", { name: /^Voice together/i })
+  const translated = [
+    makeCell({ id: "cell-1", translated: "bonjour" }),
+    makeCell({ id: "cell-2", translated: "le monde" }),
+  ]
+
+  it("says what went wrong, reports it, and lets the reader try again", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    vi.mocked(posthog.captureException).mockClear()
+    const failure = new Error("Request failed (503): upstream unavailable")
+    const onVoiceTogether = vi.fn(() => Promise.reject(failure))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", { audioMode: true, onVoiceTogether })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      // The categoriser's plain words, never the raw "Request failed (503)".
+      description: expect.stringMatching(/server error/i),
+    })))
+    expect(posthog.captureException).toHaveBeenCalledWith(failure, {
+      surface: "voice-together",
+      project_id: "proj-1",
+    })
+    // Back to idle: the button works again and a second try reaches the handler.
+    await vi.waitFor(() => expect(voiceButton()).toBeEnabled())
+    fireEvent.click(voiceButton())
+    await vi.waitFor(() => expect(onVoiceTogether).toHaveBeenCalledTimes(2))
+    vi.restoreAllMocks()
+  })
+
+  // The pre-flight refusals in combined-voice.ts (signed out, too few lines,
+  // lines too long) happen before any row shows an error badge, so this toast
+  // is the only thing the reader sees. Those messages are already plain.
+  it("shows a pre-flight refusal in its own words", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error("Selected lines are too long to voice together")),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description: "Selected lines are too long to voice together",
+    })))
+    vi.restoreAllMocks()
+  })
+
+  // Walk 10-02: a two-line run read "This line uses Inworld TTS…", the
+  // single line's badge text. The notice speaks of the lines it voiced.
+  it("speaks of these lines, not one line, when a voice engine is the reason", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error("voice/tts failed (503): TTS not configured")),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description:
+        "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
+    })))
+    const description = (added.mock.calls.at(-1)?.[0] as { description?: string }).description ?? ""
+    expect(description).not.toMatch(/this line/i)
+    expect(description).not.toContain("—")
+    vi.restoreAllMocks()
+  })
+
+  // A toast has no "technical detail" disclosure, so a body that points at
+  // one gives way to its heading.
+  it("never points a toast reader at a technical detail it does not have", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    const added = vi.spyOn(toast, "add")
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", {
+      audioMode: true,
+      onVoiceTogether: () => Promise.reject(new Error('Request failed (400): {"error":"bad"}')),
+    })
+
+    fireEvent.click(voiceButton())
+
+    await vi.waitFor(() => expect(added).toHaveBeenCalledWith(expect.objectContaining({
+      type: "error",
+      title: "Couldn't voice these lines together",
+      description: "The AI provider rejected this request",
+    })))
     vi.restoreAllMocks()
   })
 })

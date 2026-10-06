@@ -18,13 +18,15 @@
 
 import { externalError } from './errors'
 import { AUTH_HINT } from './discovery-route'
+import { CHATGPT_TOOLS, CHATGPT_INSTRUCTIONS } from './mcp-chatgpt-tools'
+import { callChatGptTool } from './mcp-chatgpt'
 import { MCP_TOOLS } from './mcp-tools'
 import { callTool, UNKNOWN_TOOL } from './mcp-handlers'
 import { matchUiOnly, uiOnlyHint } from './ui-only'
 import { MCP_SERVER_INSTRUCTIONS } from './mcp-instructions'
-import { mcpWwwAuthenticate, publicBaseFrom } from './mcp-oauth-metadata'
+import { mcpWwwAuthenticate, publicBaseFrom, mcpResourceUrl } from './mcp-oauth-metadata'
 import type { ExternalEnv } from './types'
-import { validateApiCredential } from '../../../db/shared/api-credentials'
+import { validateApiCredential, McpDelegatedRequest } from '../../../db/shared/api-credentials'
 
 const MCP_PATH = '/api/v1/external/mcp'
 /** Discovery root, quoted in uiOnly hints so an agent can read the full list. */
@@ -106,7 +108,7 @@ export async function handleExternalMcpRequest(
       mcpWwwAuthenticate(publicBase),
     )
   }
-  const cred = await validateApiCredential(env.AQUILLA_PG, token, request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredential(env.AQUILLA_PG, token, request.headers.get('CF-Connecting-IP'), mcpResourceUrl(publicBase))
   if (!cred) {
     return unauthorized(
       externalError(
@@ -120,6 +122,9 @@ export async function handleExternalMcpRequest(
       }),
     )
   }
+
+  const chatGpt = cred.oauthResource !== undefined
+  env = { ...env, mcpRequest: (input, init) => new McpDelegatedRequest(mcpResourceUrl(publicBase), input, init) }
 
   let message: JsonRpcRequest
   try {
@@ -153,7 +158,7 @@ export async function handleExternalMcpRequest(
         serverInfo: { name: 'aquilla', title: 'Aquilla', version: '0.2.0' },
         // Cross-tool workflow guidance. ChatGPT, Claude and Codex read this
         // alongside the tool descriptions (see mcp-instructions.ts).
-        instructions: MCP_SERVER_INSTRUCTIONS,
+        instructions: chatGpt ? CHATGPT_INSTRUCTIONS : MCP_SERVER_INSTRUCTIONS,
       })
     }
 
@@ -161,7 +166,7 @@ export async function handleExternalMcpRequest(
       return rpcResult(id, {})
 
     case 'tools/list':
-      return rpcResult(id, { tools: MCP_TOOLS })
+      return rpcResult(id, { tools: chatGpt ? CHATGPT_TOOLS : MCP_TOOLS })
 
     case 'tools/call': {
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown }
@@ -172,7 +177,7 @@ export async function handleExternalMcpRequest(
         typeof params.arguments === 'object' && params.arguments !== null
           ? (params.arguments as Record<string, unknown>)
           : {}
-      const result = await callTool(params.name, args, env, cred, token, ctx)
+      const result = await (chatGpt ? callChatGptTool : callTool)(params.name, args, env, cred, token, ctx)
       if (result === UNKNOWN_TOOL) {
         // AQU-1178: an invented tool name is often a probe at a deliberately
         // browser-only surface (mint_credential, delete_project, approve_...).

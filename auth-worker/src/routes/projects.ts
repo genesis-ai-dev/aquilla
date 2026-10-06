@@ -89,6 +89,7 @@ import {
   MAX_INVITE_SCOPE_LANES,
   MAX_LANE_VALUE_LENGTH,
   parseScopeLanes,
+  resolveInviteLaneScopes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import {
@@ -1887,7 +1888,21 @@ projects.post(
 
     // AQU-528: persist lane scopes so accept can auto-grant them. null when
     // the invite is unscoped (omitted/empty scopeLanes).
-    const scopeLanesJson = serializeScopeLanes(scopeLanes)
+    // AQU-1607: stored as lane ids. A legacy tag naming exactly one of this
+    // project's lanes is converted; one naming two lanes, or none, is refused
+    // here rather than minting a link that grants the wrong lane or no lane.
+    const laneScopes = await resolveInviteLaneScopes(c.env, [projectId], scopeLanes ?? [])
+    if (!laneScopes.ok) {
+      return c.json(
+        {
+          error: "scopeLanes must each name one lane of this project",
+          ...(laneScopes.ambiguous.length > 0 ? { ambiguous: laneScopes.ambiguous } : {}),
+          ...(laneScopes.unmatched.length > 0 ? { unmatched: laneScopes.unmatched } : {}),
+        },
+        400,
+      )
+    }
+    const scopeLanesJson = serializeScopeLanes(laneScopes.laneIds)
 
     try {
       await c.env.AQUILLA_PG.prepare(
@@ -2156,8 +2171,12 @@ projects.post(
       return c.json({ error: "Invite already used", code: "used" }, 410)
     }
 
+    // [Pen test 2026-10-06] A same-user re-click must not restore a role the
+    // owner has since lowered: only a first redemption may raise the role.
     const finalRole = existing
-      ? Math.max(existing.role_level, invite.role_level)
+      ? invite.used_at
+        ? existing.role_level
+        : Math.max(existing.role_level, invite.role_level)
       : invite.role_level
 
     try {

@@ -50,3 +50,40 @@ export function scoreBoundaries(
   const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall)
   return { precision, recall, f1, hits }
 }
+
+/**
+ * The same matching in the TIME domain, for media boundaries (AQU-1388).
+ *
+ * A separate function rather than a tolerance argument on `scoreBoundaries`:
+ * that one walks every integer offset up to the tolerance, which is the right
+ * shape for +-1 cell and the wrong shape for +-10 000 ms. The SEMANTICS are
+ * deliberately identical — greedy, one-to-one, nearest first — so a time F1 and
+ * a cell F1 in the same report mean the same thing.
+ */
+export function scoreBoundaryTimes(
+  predictedMs: readonly number[],
+  truthMs: readonly number[],
+  toleranceMs: number,
+): BoundaryScore {
+  const unclaimed = [...truthMs].sort((left, right) => left - right)
+  let hits = 0
+  for (const boundary of [...predictedMs].sort((left, right) => left - right)) {
+    let nearest = -1
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (let index = 0; index < unclaimed.length; index += 1) {
+      const distance = Math.abs(unclaimed[index] - boundary)
+      if (distance < nearestDistance) {
+        nearest = index
+        nearestDistance = distance
+      }
+    }
+    if (nearest >= 0 && nearestDistance <= toleranceMs) {
+      unclaimed.splice(nearest, 1)
+      hits += 1
+    }
+  }
+  const precision = predictedMs.length === 0 ? 0 : hits / predictedMs.length
+  const recall = truthMs.length === 0 ? 0 : hits / truthMs.length
+  const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall)
+  return { precision, recall, f1, hits }
+}

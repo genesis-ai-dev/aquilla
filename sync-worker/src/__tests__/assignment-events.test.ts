@@ -2,8 +2,10 @@
 //
 // 1. assignment.create (books)    : inserts the assignments row + resolves ALL
 //    source cells in the assigned file into assignment_cells; cells_total set.
-// 2. assignment.create (chapters) : resolves only the cells whose canonical_ref
-//    matches the chapter (LIKE 'GEN 1:%'), excluding other chapters / books.
+// 2. assignment.create (chapters) : resolves the cells the plan board counts in
+//    the chapter (AQU-1493): its verses, its headings (which count with the
+//    verse below them) and lines added in it (with the line above them),
+//    excluding other chapters / books; one statement per file.
 // 3. assignment.reassign          : updates assignee_user_id.
 // 4. assignment.unassign          : sets unassigned_at (soft close; row kept).
 // 5. Role gate                    : a reviewer (300) token is rejected — the
@@ -11,6 +13,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { handleAssignmentEvent } from '../events/handlers/assignment-events'
+import { fullProgressRecomputeStmts } from '../events/progress-projection'
 import { authorize } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
 import { type CellRow } from './helpers/in-memory-db'
@@ -128,6 +131,68 @@ describe('assignment.create — book scope', () => {
   })
 })
 
+describe('assignment.create — cells scope (AQU-1628)', () => {
+  it('resolves exactly the named source cells, not the whole file', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-sel',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-2', 'g-2-1'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    const result = handleAssignmentEvent(db, authed, 2000, 1)
+    await db.batch(result.stmts)
+
+    const t = await snapshot()
+    const cells = t.assignment_cells.filter((c) => c.assignment_id === 'as-sel')
+    // g-1-1 is in the file but was NOT selected; the file-exo cell and the
+    // same-cell target row are excluded as in every other scope.
+    expect(cells.map((c) => c.cell_id).sort()).toEqual(['g-1-2', 'g-2-1'])
+    const row = t.assignments.find((a) => a.assignment_id === 'as-sel')
+    expect(row!.scope_kind).toBe('cells')
+    expect(row!.cells_total).toBe(2)
+  })
+
+  it('counts only the ids that still exist, so cells_total matches what was assigned', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-gone',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-1', 'deleted-since'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const t = await snapshot()
+    expect(
+      t.assignment_cells.filter((c) => c.assignment_id === 'as-gone').map((c) => c.cell_id),
+    ).toEqual(['g-1-1'])
+    expect(t.assignments.find((a) => a.assignment_id === 'as-gone')!.cells_total).toBe(1)
+  })
+
+  it('ignores a cell id from another file, since the entry names its own file', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-xfile',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-1', 'e-1-1'] }],
+      scopeLabel: '2 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const t = await snapshot()
+    expect(
+      t.assignment_cells.filter((c) => c.assignment_id === 'as-xfile').map((c) => c.cell_id),
+    ).toEqual(['g-1-1'])
+  })
+})
+
 describe('assignment.create — lane (AQU-538 §3.5)', () => {
   it('writes targetLang to assignments.target_lang', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })
@@ -236,6 +301,136 @@ describe('assignment.create — chapter scope', () => {
   })
 })
 
+// AQU-1493: Jonah 1-3 as the editor orders it (each line anchored on the one
+// above), the way a helloao import lands: a heading with no reference opens
+// every chapter, and one line was added by hand under JON 2:1.
+function jonahChain(): CellRow[] {
+  const lines: Array<{ id: string; ref?: string; type?: string }> = [
+    { id: 'h1', type: 'heading' }, // "Jonah Flees from the LORD" -> JON 1
+    { id: 'j11', ref: 'JON 1:1' },
+    { id: 'j12', ref: 'JON 1:2' },
+    { id: 'h2', type: 'heading' }, // "Jonah's Prayer" -> JON 2
+    { id: 'j21', ref: 'JON 2:1' },
+    { id: 'x1' }, // added in the editor -> the line above: JON 2
+    { id: 'j22', ref: 'JON 2:2' },
+    { id: 'h3', type: 'heading' }, // "Jonah Goes to Nineveh" -> JON 3
+    { id: 'j31', ref: 'JON 3:1' },
+  ]
+  return lines.map((l, i) => ({
+    project_id: 'proj-1',
+    file_id: 'file-gen',
+    cell_id: l.id,
+    side: 'source',
+    target_lang: '',
+    canonical_ref: l.ref ?? null,
+    type: l.type ?? null,
+    anchor_cell_id: i === 0 ? null : lines[i - 1].id,
+    value: `source ${l.id}`,
+    event_id: `ev-${l.id}`,
+    last_editor: 'importer',
+    last_edit_at: 1,
+    validated: 0,
+    word_count: 1,
+  })) as unknown as CellRow[]
+}
+
+async function assignedCells(scope: Array<{ fileId: string; chapter?: string }>, cells: CellRow[]) {
+  const { db, snapshot } = await makeTestDb({ cells })
+  // Every file is projected before anyone can assign from it, and the full
+  // recompute is what stores where each line with no reference counts
+  // (`cell_plan_keys`), which the resolution reads.
+  for (const fileId of new Set(cells.map((c) => c.file_id))) {
+    for (const stmt of fullProgressRecomputeStmts(db, 'proj-1', fileId, 1)) await stmt.run()
+  }
+  const authed = await authorizeAssignment('assignment.create', {
+    assignmentId: 'as-ch',
+    scopeKind: 'chapters',
+    scope,
+    scopeLabel: 'Jonah',
+    assigneeUserId: 42,
+  })
+  const result = handleAssignmentEvent(db, authed, 3000, 6)
+  await db.batch(result.stmts)
+  const t = await snapshot()
+  return {
+    result,
+    ids: t.assignment_cells.filter((c) => c.assignment_id === 'as-ch').map((c) => c.cell_id).sort(),
+    total: t.assignments.find((a) => a.assignment_id === 'as-ch')!.cells_total,
+  }
+}
+
+describe('assignment.create — chapter scope follows the board (AQU-1493)', () => {
+  it("gives the chapter's opening heading and the line added in it, not the next chapter's heading", async () => {
+    const { ids, total } = await assignedCells([{ fileId: 'file-gen', chapter: 'JON 2' }], jonahChain())
+    // h2 opens JON 2 (the verse below it); x1 sits under 2:1 (the line above).
+    // h3, right after 2:2, opens JON 3 and is not Carol's.
+    expect(ids).toEqual(['h2', 'j21', 'j22', 'x1'])
+    expect(total).toBe(4)
+  })
+
+  it("gives the first chapter the heading at the top of the file", async () => {
+    const { ids } = await assignedCells([{ fileId: 'file-gen', chapter: 'JON 1' }], jonahChain())
+    expect(ids).toEqual(['h1', 'j11', 'j12'])
+  })
+
+  it('resolves several chapters of one file in a single statement', async () => {
+    const { result, ids, total } = await assignedCells(
+      [
+        { fileId: 'file-gen', chapter: 'JON 1' },
+        { fileId: 'file-gen', chapter: 'JON 3' },
+      ],
+      jonahChain(),
+    )
+    expect(ids).toEqual(['h1', 'h3', 'j11', 'j12', 'j31'])
+    expect(total).toBe(5)
+    // events row, assignments row, one assignment_scopes row per chapter
+    // entry (AQU-1629), ONE resolution for file-gen, cells_total.
+    expect(result.stmts).toHaveLength(1 + 1 + 2 + 1 + 1)
+  })
+
+  it("gives each chapter exactly the cells the board counts in it", async () => {
+    const { db } = await makeTestDb({ cells: jonahChain() })
+    for (const stmt of fullProgressRecomputeStmts(db, 'proj-1', 'file-gen', 1)) await stmt.run()
+    const board = await db
+      .prepare(
+        `SELECT section_key, total_count FROM file_section_progress
+          WHERE project_id = 'proj-1' AND file_id = 'file-gen' AND scope = 'section' AND target_lang = ''
+          ORDER BY section_key`,
+      )
+      .all<{ section_key: string; total_count: number }>()
+    const rows = board.results ?? []
+    expect(rows.map((r) => r.section_key)).toEqual(['JON 1', 'JON 2', 'JON 3'])
+    for (const r of rows) {
+      const { total } = await assignedCells([{ fileId: 'file-gen', chapter: r.section_key }], jonahChain())
+      expect([r.section_key, total]).toEqual([r.section_key, r.total_count])
+    }
+  })
+
+  it('keeps "GEN 1" out of "GEN 11"', async () => {
+    const base = seededCells()[0]
+    const { ids } = await assignedCells([{ fileId: 'file-gen', chapter: 'GEN 1' }], [
+      ...seededCells(),
+      { ...base, cell_id: 'g-11-1', canonical_ref: 'GEN 11:1' },
+    ] as CellRow[])
+    expect(ids).toEqual(['g-1-1', 'g-1-2'])
+  })
+
+  it('resolves chapters of two files with one statement each', async () => {
+    const { result, ids } = await assignedCells(
+      [
+        { fileId: 'file-gen', chapter: 'GEN 2' },
+        { fileId: 'file-exo', chapter: 'EXO 1' },
+        { fileId: 'file-gen', chapter: 'GEN 1' },
+      ],
+      seededCells(),
+    )
+    expect(ids).toEqual(['e-1-1', 'g-1-1', 'g-1-2', 'g-2-1'])
+    // events row, assignments row, three assignment_scopes rows (AQU-1629),
+    // ONE resolution per file, cells_total.
+    expect(result.stmts).toHaveLength(1 + 1 + 3 + 2 + 1)
+  })
+})
+
 describe('assignment.reassign', () => {
   it('updates assignee_user_id', async () => {
     const { db, snapshot } = await makeTestDb({ assignments: [seededAssignment({ assignment_id: 'as-3', assignee_user_id: 1 })] })
@@ -288,5 +483,94 @@ describe('assignment role gate', () => {
     const res = await authorize(token, raw, SECRET)
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.status).toBe(403)
+  })
+})
+
+// AQU-1629: assignment.create records the RANGE as well as what it resolved to,
+// so the read side can re-resolve it against live `cells` and pick up a line
+// added to the chapter or file afterwards. A resolved snapshot can only ever
+// shrink (AQU-1068 drops a removed cell), never grow — which is why the range
+// has to be stored.
+describe('assignment.create — the scope is recorded (AQU-1629)', () => {
+  it("stores a whole-file scope as chapter ''", async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-book',
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }, { fileId: 'file-exo' }],
+      scopeLabel: 'Genesis, Exodus',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string; file_id: string; chapter: string }>(
+      'assignment_scopes',
+    )
+    expect(
+      scopes
+        .filter((s) => s.assignment_id === 'as-book')
+        .map((s) => `${s.file_id}/${s.chapter}`)
+        .sort(),
+    ).toEqual(['file-exo/', 'file-gen/'])
+  })
+
+  it('stores one row per assigned chapter', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-chap',
+      scopeKind: 'chapters',
+      scope: [
+        { fileId: 'file-gen', chapter: 'GEN 1' },
+        { fileId: 'file-gen', chapter: 'GEN 2' },
+      ],
+      scopeLabel: 'Genesis 1-2',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string; chapter: string }>('assignment_scopes')
+    expect(
+      scopes
+        .filter((s) => s.assignment_id === 'as-chap')
+        .map((s) => s.chapter)
+        .sort(),
+    ).toEqual(['GEN 1', 'GEN 2'])
+  })
+
+  it('stores nothing for an explicit line selection, which must not grow', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-pick',
+      scopeKind: 'cells',
+      scope: [{ fileId: 'file-gen', cellIds: ['g-1-2'] }],
+      scopeLabel: '1 verse(s)',
+      assigneeUserId: 42,
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    const scopes = await rows<{ assignment_id: string }>('assignment_scopes')
+    expect(scopes.filter((s) => s.assignment_id === 'as-pick')).toEqual([])
+    // The selection itself still landed, as before.
+    expect((await rows<{ assignment_id: string }>('assignment_cells')).length).toBe(1)
+  })
+
+  it('is idempotent — replaying the event rewrites no row', async () => {
+    const { db, rows } = await makeTestDb({ cells: seededCells() })
+    const payload = {
+      assignmentId: 'as-replay',
+      scopeKind: 'chapters' as const,
+      scope: [{ fileId: 'file-gen', chapter: 'GEN 1' }],
+      scopeLabel: 'Genesis 1',
+      assigneeUserId: 42,
+    }
+    const authed = await authorizeAssignment('assignment.create', payload)
+
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+    await db.batch(handleAssignmentEvent(db, authed, 2000, 1).stmts)
+
+    expect((await rows<{ assignment_id: string }>('assignment_scopes')).length).toBe(1)
   })
 })

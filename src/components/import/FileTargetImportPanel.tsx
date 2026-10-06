@@ -3,6 +3,10 @@
  * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
  * Target-only — source cells are never created or modified.
  *
+ * Opened from the Import dialog's "A translation" path (AQU-1365), which picks
+ * the destination file, opens it, and hands the dropped file over as
+ * `initialFile` so this panel starts at step 2.
+ *
  * Flow:
  *   1. User drops/picks a file
  *   2. USFM → refs are intrinsic, straight to review (match by canonical ref)
@@ -23,11 +27,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs } from "@/components/ui/tabs"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatCount, formatNumber } from "@/lib/i18n/format"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { cn } from "@/lib/utils"
 import {
   matchTargetRowsByRef,
@@ -36,11 +41,12 @@ import {
   subtitleToTargetRowsWithReport,
   CUE_TARGET_EXTENSIONS,
   vttToTargetRowsWithReport,
+  type ChapterSpan,
   type ContestOverrides,
   type FileTargetCellRef,
   type FileTargetMatchedCell,
   type FileTargetMatchResult,
-  type TargetOrphanReason,
+  type TargetOrphan,
   type TargetRow,
 } from "@/lib/import-file-target"
 import {
@@ -49,13 +55,28 @@ import {
   type SpreadsheetSheet,
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
+import { targetSheetRows } from "@/lib/import/target-sheet-rows"
+import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
+import { FileTargetLanePicker } from "./FileTargetLanePicker"
+import type { LaneComboboxOption } from "@/components/LaneCombobox"
 
 export interface FileTargetImportPanelProps {
   projectId: string
   username: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** AQU-1631: lanes this import may be sent to, in registry order. Fewer than
+   *  two (or absent) hides the picker — there is nothing to choose. */
+  laneOptions?: readonly LaneComboboxOption[]
+  /** Switches the destination lane. The host points this at the editor's own
+   *  lane setter: the review step's current translations, conflict ticks and
+   *  AD-2 commit parents all come from the OPEN lane's cells, so the chosen
+   *  lane and the loaded cells must be the same one. */
+  onTargetLangChange?: (lane: string) => void
+  /** True while the chosen lane's cells are still loading — the file picker
+   *  waits, so a match never runs against the previous lane's event heads. */
+  laneCellsLoading?: boolean
   /** Display name of the open file — shown so the user knows the import scope. */
   fileName: string
   /** The open file's cells, in display order. */
@@ -77,6 +98,17 @@ export interface FileTargetImportPanelProps {
    *  source import dialog does, so a wrong file is one click from the file
    *  picker instead of Cancel and the menu again. */
   onBackChange?: (back: FileTargetPanelBack | null) => void
+  /** AQU-1365: a file already chosen by the host. Read once on mount, so the
+   *  drop step is skipped. */
+  initialFile?: File
+  /** AQU-1365: where Back from the first step after the drop leads, when the
+   *  host chose the file. Replaces the panel's own return to its drop step. */
+  onBackToFileChoice?: () => void
+  /** AQU-1365: the project file holding `bookCode`, when exactly one does.
+   *  With `onUseFile`, a file meant for another book offers to go there. */
+  fileForBook?: (bookCode: string) => { id: string; name: string } | undefined
+  /** AQU-1365: re-run this same upload against another file. */
+  onUseFile?: (fileId: string) => void
 }
 
 export interface FileTargetPanelBack {
@@ -109,6 +141,37 @@ function sourceArtifactFormat(fileName: string) {
   if (ext === "xlsx") return "xlsx" as const
   if (ext === "tsv") return "tsv" as const
   return "csv" as const
+}
+
+/** What one incoming row is called on the review screen: a subtitle file's
+ *  cues, a USFM file's verses, a spreadsheet's rows (AQU-1375). */
+type RowKind = "cue" | "verse" | "row"
+
+function incomingRowKind(fileName: string): RowKind {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (VTT_EXTENSIONS.has(ext) || CUE_TARGET_EXTENSIONS.has(ext)) return "cue"
+  if (USFM_EXTENSIONS.has(ext)) return "verse"
+  return "row"
+}
+
+/** The books and chapters a file covers, the way the review names them:
+ *  "Exodus 1", "Genesis 1–50", "Exodus 1 and Leviticus 2". More than three
+ *  books are cut short with an ellipsis — the point is which file this is. */
+function formatChapterSpans(spans: ChapterSpan[], locale: string): string {
+  const named = spans.slice(0, 3).map(({ bookCode, firstChapter, lastChapter }) =>
+    `${getBookName(bookCode) ?? bookCode} ${firstChapter === lastChapter ? firstChapter : `${firstChapter}–${lastChapter}`}`)
+  const list = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(named)
+  return spans.length > 3 ? `${list}…` : list
+}
+
+/** A row's label on the review screen: its own reference or timecode, or —
+ *  when it has none — its place in the file, "Row 3" or "Cue 3" in the
+ *  reader's language (AQU-1375). A USFM verse always has a reference. */
+function rowLabel(t: TFunction, locale: string, kind: RowKind, ref: string, rowIndex: number | undefined): string {
+  if (ref || rowIndex === undefined) return ref
+  return t(kind === "cue" ? "importExport.review.cueNumber" : "importExport.review.rowNumber", {
+    number: formatNumber(rowIndex + 1, locale),
+  })
 }
 
 /** A whole-file shift, for the review's tickbox: "2 seconds" under a minute,
@@ -205,6 +268,7 @@ function LazyDetails({ summary, children }: { summary: string; children: () => R
 /** One pairing in the review list. Memoised: ticking one row re-renders only it. */
 const ReviewRow = memo(function ReviewRow({
   m,
+  kind,
   checked,
   onToggle,
   expanded,
@@ -214,6 +278,7 @@ const ReviewRow = memo(function ReviewRow({
   onSwapSameTiming,
 }: {
   m: FileTargetMatchedCell
+  kind: RowKind
   checked: boolean
   onToggle: (cellId: string) => void
   expanded: boolean
@@ -223,7 +288,7 @@ const ReviewRow = memo(function ReviewRow({
   onSwap: (cellId: string, rival: Rival) => void
   onSwapSameTiming: (cellId: string) => void
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   // The label wraps only the tickbox and the text. The pills sit beside it,
   // outside it: a button inside a <label> can tick the row on click in some
   // environments (jsdom does, even with preventDefault).
@@ -243,7 +308,12 @@ const ReviewRow = memo(function ReviewRow({
           />
           <div className="flex-1 min-w-0">
             <p className="font-mono text-[10px] text-muted-foreground">
-              {m.ref}
+              {rowLabel(t, locale, kind, m.ref, m.rowIndex)}
+              {m.writtenAs && (
+                <span className="ms-1.5 text-muted-foreground/70">
+                  {t("importExport.review.rowWrittenAs", { ref: m.writtenAs })}
+                </span>
+              )}
               {m.alreadyThere && (
                 <span className="ms-1.5 font-sans">{t("importExport.review.rowAlreadyThere")}</span>
               )}
@@ -255,6 +325,11 @@ const ReviewRow = memo(function ReviewRow({
               {m.cellRef && <span className="font-mono">{m.cellRef} </span>}
               {m.sourceText}
             </p>
+            {m.flag === "sourceDiffers" && (
+              <p className="truncate text-[10px] text-amber-600">
+                {t("importExport.review.rowIncomingSource", { text: m.incomingSource ?? "" })}
+              </p>
+            )}
             <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
             {m.hasConflict && (
               <p className="truncate text-[10px] text-amber-600">
@@ -266,7 +341,7 @@ const ReviewRow = memo(function ReviewRow({
         {/* Everything to check about a row sits in its corner. "Contested"
             opens the comparison below; a timing pill means only the line's
             own timing is kept. */}
-        {(rivals || m.flag === "sharedTiming" || m.cellRef) && (
+        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.cellRef) && (
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             {rivals && (
               <Badge
@@ -297,6 +372,11 @@ const ReviewRow = memo(function ReviewRow({
             {m.cellRef && (
               <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
             )}
+            {m.flag === "sourceDiffers" && (
+              <Badge className={AMBER_PILL} title={t("importExport.review.rowSourceDiffers")}>
+                {t("importExport.review.rowSourceDiffersPill")}
+              </Badge>
+            )}
           </div>
         )}
       </div>
@@ -308,7 +388,9 @@ const ReviewRow = memo(function ReviewRow({
           {rivals.map((rival) => (
             <div key={rival.rowIndex} data-rival={rival.rowIndex} className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-[10px] text-muted-foreground">{rival.ref}</p>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {rowLabel(t, locale, kind, rival.ref, rival.rowIndex)}
+                </p>
                 <p className="truncate text-xs text-foreground/80">{rival.text}</p>
                 <p className="truncate text-[10px] text-muted-foreground/80">
                   {rival.onLine
@@ -341,6 +423,7 @@ const REVIEW_ROW_ESTIMATE_PX = 64
 
 interface ReviewRowListProps {
   matched: FileTargetMatchedCell[]
+  kind: RowKind
   selected: Set<string>
   onToggle: (cellId: string) => void
   expanded: Set<string>
@@ -366,10 +449,11 @@ function ReviewRowList(props: ReviewRowListProps) {
 }
 
 /** One row, with the list's shared props resolved for it. */
-function ReviewRowFor({ m, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
+function ReviewRowFor({ m, kind, selected, onToggle, expanded, onToggleExpanded, rivals, onSwap, onSwapSameTiming }: ReviewRowListProps & { m: FileTargetMatchedCell }) {
   return (
     <ReviewRow
       m={m}
+      kind={kind}
       checked={selected.has(m.cellId)}
       onToggle={onToggle}
       expanded={expanded.has(m.cellId)}
@@ -427,6 +511,9 @@ export function FileTargetImportPanel({
   projectId,
   username,
   targetLang,
+  laneOptions,
+  onTargetLangChange,
+  laneCellsLoading = false,
   fileName,
   cells,
   getToken,
@@ -436,6 +523,10 @@ export function FileTargetImportPanel({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
   onBackChange,
+  initialFile,
+  onBackToFileChoice,
+  fileForBook,
+  onUseFile,
 }: FileTargetImportPanelProps) {
   const { t, locale } = useI18n()
   const [step, setStep] = useState<PanelStep>("file")
@@ -474,24 +565,34 @@ export function FileTargetImportPanel({
       onBackChange(null)
       return
     }
-    const toFilePicker = {
-      label: t("importExport.dialog.backToFileSelection"),
-      onBack: () => {
-        matchRun.current++
-        setRematching(null)
-        setMatchResult(null)
-        setSelectedCellIds(new Set())
-        setSheets([])
-        setSelectedSheet(null)
-        setSourceFile(null)
-        setSubtitleRows(null)
-        setExpandedRows(new Set())
-        setOverrides(NO_OVERRIDES)
-        setOnlyToCheck(false)
-        setError(null)
-        setStep("file")
-      },
-    }
+    const toFilePicker = onBackToFileChoice
+      ? {
+          // The host chose the file (AQU-1365), so going back means choosing
+          // again there, not this panel's own drop step.
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            onBackToFileChoice()
+          },
+        }
+      : {
+          label: t("importExport.dialog.backToFileSelection"),
+          onBack: () => {
+            matchRun.current++
+            setRematching(null)
+            setMatchResult(null)
+            setSelectedCellIds(new Set())
+            setSheets([])
+            setSelectedSheet(null)
+            setSourceFile(null)
+            setSubtitleRows(null)
+            setExpandedRows(new Set())
+            setOverrides(NO_OVERRIDES)
+            setOnlyToCheck(false)
+            setError(null)
+            setStep("file")
+          },
+        }
     const back =
       step === "review" && selectedSheet
         ? {
@@ -501,6 +602,9 @@ export function FileTargetImportPanel({
               setRematching(null)
               setMatchResult(null)
               setSelectedCellIds(new Set())
+              setSubtitleRows(null)
+              setExpandedRows(new Set())
+              setOverrides(NO_OVERRIDES)
               setError(null)
               setStep("mapping")
             },
@@ -516,7 +620,7 @@ export function FileTargetImportPanel({
             }
           : toFilePicker
     onBackChange({ ...back, disabled: applying })
-  }, [step, selectedSheet, sheets.length, applying, onBackChange, t])
+  }, [step, selectedSheet, sheets.length, applying, onBackChange, onBackToFileChoice, t])
 
   const showReview = useCallback((
     result: FileTargetMatchResult,
@@ -528,15 +632,15 @@ export function FileTargetImportPanel({
     setMatchedByOrder(byOrder)
     // Pre-select only rows that are safe to take as they stand. Overwriting an
     // existing translation needs an explicit tick; so does a contested row
-    // (AQU-1360); and a row whose text the line already holds has nothing to
-    // import at all.
+    // (AQU-1360) and a row whose source differs from its line's (AQU-1375);
+    // and a row whose text the line already holds has nothing to import at all.
     setSelectedCellIds(new Set(
       keepTicks
         ? result.matched.filter((m) => keepTicks.has(m.cellId) && !m.alreadyThere).map((m) => m.cellId)
         : result.matched
           // A same-timing pair whose cues all found a line is a heads-up, not
           // a decision: ticked, with its pill and a Swap (Sam, 09-23).
-          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && !m.sharedTimingUnpaired)
+          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && !m.sharedTimingUnpaired)
           .map((m) => m.cellId),
     ))
     setStep("review")
@@ -678,14 +782,34 @@ export function FileTargetImportPanel({
     }
   }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
 
+  // AQU-1365: the host's file is read once. The ref, not the effect's deps,
+  // makes it once: StrictMode re-runs mount effects, and a later `cells`
+  // change re-creates handleFile.
+  const initialFileRead = useRef(false)
+  // While it is read, the matching skeleton stands in for the drop step, which
+  // the person never asked to see.
+  const [readingInitialFile, setReadingInitialFile] = useState(Boolean(initialFile))
+  useEffect(() => {
+    if (!initialFile || initialFileRead.current) return
+    initialFileRead.current = true
+    void handleFile(initialFile).then(() => setReadingInitialFile(false))
+  }, [initialFile, handleFile])
+
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
     const dataRows = hasHeader ? selectedSheet.rows.slice(1) : selectedSheet.rows
-    // Keep empty rows in place — order matching needs every row to hold its slot.
-    const rows: TargetRow[] = dataRows.map((r) => ({
-      ref: mapping.labelCol !== null ? (r[mapping.labelCol] ?? "").trim() || undefined : undefined,
-      text: (r[mapping.targetCol!] ?? "").trim(),
-    }))
+    const { rows, timed } = targetSheetRows(dataRows, mapping)
+    // Start and end columns put a subtitle spreadsheet through the timing
+    // matcher (AQU-1375), shift tickbox and swaps included, as a subtitle file
+    // would go. A reference column still wins unless the open file's lines
+    // are timed too: a verse sheet carrying audio timings keeps matching by
+    // verse on a file of untimed verses.
+    const linesTimed = cells.length > 0 && cells.every((c) => c.startMs !== undefined && c.endMs !== undefined)
+    if (timed && (mapping.labelCol === null || linesTimed)) {
+      setSubtitleRows({ rows, skippedCues: 0 })
+      showReview(matchTargetRowsByOrder(rows, cells), true)
+      return
+    }
     const byOrder = mapping.labelCol === null
     showReview(
       byOrder ? matchTargetRowsByOrder(rows, cells) : matchTargetRowsByRef(rows, cells),
@@ -735,6 +859,24 @@ export function FileTargetImportPanel({
     }
   }
 
+  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
+  if (step === "matching" || (step === "file" && readingInitialFile)) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
+        <div className="shrink-0">
+          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
+          <Skeleton className="mt-1.5 h-3 w-48" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+          <SkeletonRows />
+        </div>
+        <div className="flex shrink-0 justify-end">
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Step: file selection ────────────────────────────────────────────────────
   if (step === "file") {
     return (
@@ -745,24 +887,50 @@ export function FileTargetImportPanel({
             {t("importExport.fileTarget.description")}
           </p>
         </div>
+        {/* AQU-1631: the destination language is a choice, not whatever the
+            editor had open. Picked before the file so a wrong lane costs a
+            click rather than an import; see FileTargetLanePicker for why the
+            choice moves the editor's lane with it. */}
+        {laneOptions && onTargetLangChange && (
+          <FileTargetLanePicker
+            options={laneOptions}
+            value={targetLang ?? ""}
+            onValueChange={(lane) => {
+              if (lane === (targetLang ?? "")) return
+              setError(null)
+              onTargetLangChange(lane)
+            }}
+            loading={laneCellsLoading}
+          />
+        )}
         <div
           className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted p-8 gap-3"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault()
+            // The chosen lane's cells are what the incoming rows match
+            // against; until they land a drop would align to the lane the
+            // user just switched away from.
+            if (laneCellsLoading) return
             const file = e.dataTransfer.files[0]
             if (file) handleFile(file)
           }}
         >
           <p className="text-sm text-muted-foreground">{t("importExport.fileTarget.dropZoneHint")}</p>
           <label>
-            <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors",
+                laneCellsLoading ? "pointer-events-none opacity-50" : "hover:bg-accent",
+              )}
+            >
               {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt,.srt,.sbv"
+              accept={FILE_TARGET_ACCEPT}
               className="sr-only"
+              disabled={laneCellsLoading}
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) handleFile(file)
@@ -822,35 +990,30 @@ export function FileTargetImportPanel({
     )
   }
 
-  // ── Step: matching (skeleton while a dropped file is matched) ──────────────
-  if (step === "matching") {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col gap-3 py-2" aria-busy="true">
-        <div className="shrink-0">
-          <p className="text-sm font-medium" role="status">{t("importExport.review.matching")}</p>
-          <Skeleton className="mt-1.5 h-3 w-48" />
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
-          <SkeletonRows />
-        </div>
-        <div className="flex shrink-0 justify-end">
-          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
-        </div>
-      </div>
-    )
-  }
-
   // ── Step: review matches ────────────────────────────────────────────────────
   if (step === "review" && matchResult) {
-    const { matched, orphans, uncovered, timebase, looseFit, skippedCues = 0 } = matchResult
+    const { matched, orphans, uncovered, timebase, looseFit, elsewhere, skippedCues = 0 } = matchResult
+    // AQU-1365: a file for one other book that exactly one project file
+    // holds can go there instead. The import follows the file the person
+    // chose and never moves by itself, so it is offered, not done.
+    const elsewhereBooks = elsewhere ? [...new Set(elsewhere.incoming.map((span) => span.bookCode))] : []
+    const otherFile = elsewhereBooks.length === 1 && onUseFile ? fileForBook?.(elsewhereBooks[0]) : undefined
+    const switchTo = otherFile && otherFile.id !== cells[0]?.fileId ? otherFile : undefined
     const conflicts = matched.filter((m) => m.hasConflict)
     const alreadyThere = matched.filter((m) => m.alreadyThere)
     // "To check": the rows left unticked for a reason a person has to settle —
-    // a contest, a shared timing, or text that would be replaced. Membership
-    // follows the flag, not the tick, so a row never vanishes while being
-    // worked on. "Timing differs" alone is not a reason: the pairing still
-    // holds, and on a shifted file every row has it.
-    const toCheck = matched.filter((m) => m.flag === "contested" || m.flag === "sharedTiming" || m.hasConflict)
+    // a contest, a shared timing, a source that differs, or text that would be
+    // replaced. Membership follows the flag, not the tick, so a row never
+    // vanishes while being worked on. "Timing differs" alone is not a reason:
+    // the pairing still holds, and on a shifted file every row has it.
+    const toCheck = matched.filter(
+      (m) => m.flag === "contested" || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.hasConflict,
+    )
+    // The counts above the list split the pairings the same way (AQU-1375):
+    // "matched" are the ones that need no decision, then those to check, then
+    // conflicts — which are to check too, but already have a count of their
+    // own. "5 matched" over an Import button saying 4 read as a dropped row.
+    const flaggedToCheck = toCheck.length - conflicts.length
     const filtering = onlyToCheck && toCheck.length > 0
     const shown = filtering ? toCheck : matched
     // Select all acts on the rows shown; rows already there have nothing to import.
@@ -859,18 +1022,35 @@ export function FileTargetImportPanel({
       shownSelectable.length > 0 && shownSelectable.every((m) => selectedCellIds.has(m.cellId))
     const brokenTimecodes = orphans.filter((o) => o.reason === "backwardsTimecode").length
     const unplaced = orphans.length - brokenTimecodes
-    // AQU-1143: a ref-less match that aligned by cue timecode is not the
-    // fragile top-to-bottom pairing this warns about — don't send the user off
-    // to eyeball 500 rows for a drift that cannot have happened.
-    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
-    const reasonLabel = (reason: TargetOrphanReason | undefined) =>
-      reason === "backwardsTimecode"
-        ? t("importExport.review.reasonBackwardsTimecode")
-        : reason === "lostItsLine"
-          ? t("importExport.review.reasonLostItsLine")
-          : reason === "noLineInReach"
-            ? t("importExport.review.reasonNoLineInReach")
-            : null
+    // AQU-1143: a ref-less match that aligned by cue timecode (or, AQU-1375,
+    // by source text) is not the fragile top-to-bottom pairing this warns
+    // about — don't send the user off to eyeball 500 rows for a drift that
+    // cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy === "order"
+    const reasonLabel = (orphan: TargetOrphan): string | null => {
+      switch (orphan.reason) {
+        case "backwardsTimecode": return t("importExport.review.reasonBackwardsTimecode")
+        case "lostItsLine": return t("importExport.review.reasonLostItsLine")
+        case "noLineInReach": return t("importExport.review.reasonNoLineInReach")
+        case "noReference": return t("importExport.review.reasonNoReference")
+        case "refNotInFile": return t("importExport.review.reasonRefNotInFile")
+        case "refRepeated": return t("importExport.review.reasonRefRepeated")
+        case "sourceNotInFile": return t("importExport.review.reasonSourceNotInFile")
+        case "bridgeOverSeparateLines":
+          return orphan.verses ? t("importExport.review.reasonBridgeOverSeparateLines", orphan.verses) : null
+        case "partOfBridgedLine":
+          return orphan.verses ? t("importExport.review.reasonPartOfBridgedLine", orphan.verses) : null
+        default: return null
+      }
+    }
+    const rowKind = sourceFile ? incomingRowKind(sourceFile.name) : "row"
+    const unmatchedListTitle = t(
+      rowKind === "cue"
+        ? "importExport.review.unmatchedListTitle"
+        : rowKind === "verse"
+          ? "importExport.review.unmatchedVersesListTitle"
+          : "importExport.review.unmatchedRowsListTitle",
+    )
     // A whole-file shift is offered as a tickbox (ticked when the matcher
     // applied it), its label folding in any frame-rate change that comes with
     // it; the frame-rate note stands alone only for a stretch without a shift.
@@ -977,21 +1157,83 @@ export function FileTargetImportPanel({
               and uncovered counts used to share the grey of "8 matched", so a
               file that mostly failed looked exactly like a perfect one. */}
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length, locale) })}</span>
+            <span>{t("importExport.review.matchedCount", { count: formatCount(matched.length - toCheck.length, locale) })}</span>
             {alreadyThere.length > 0 && <span>{t("importExport.review.alreadyThereCount", { count: formatCount(alreadyThere.length, locale) })}</span>}
+            {flaggedToCheck > 0 && <span className="text-amber-600">{t("importExport.review.toCheckCount", { count: formatCount(flaggedToCheck, locale) })}</span>}
             {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: formatCount(conflicts.length, locale) })}</span>}
-            {unplaced > 0 && <span className="text-amber-600">{t("importExport.review.unmatchedRowCount", { count: formatCount(unplaced, locale) })}</span>}
+            {unplaced > 0 && (
+              <span className="text-amber-600">
+                {t(
+                  rowKind === "cue"
+                    ? "importExport.review.unmatchedCueCount"
+                    : rowKind === "verse"
+                      ? "importExport.review.unmatchedVerseCount"
+                      : "importExport.review.unmatchedRowCount",
+                  { count: formatCount(unplaced, locale) },
+                )}
+              </span>
+            )}
             {brokenTimecodes > 0 && <span className="text-amber-600">{t("importExport.review.brokenTimecodeCount", { count: formatCount(brokenTimecodes, locale) })}</span>}
             {uncovered.length > 0 && <span className="text-amber-600">{t("importExport.review.uncoveredCellCount", { count: formatCount(uncovered.length, locale) })}</span>}
             {skippedCues > 0 && <span className="text-amber-600">{t("importExport.review.skippedCueCount", { count: formatCount(skippedCues, locale) })}</span>}
           </div>
           {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
-              {t("importExport.review.orderMatchWarning")}
+              {t(
+                matchResult.untimed === "lines"
+                  ? rowKind === "cue"
+                    ? "importExport.review.orderMatchLinesUntimedCues"
+                    : "importExport.review.orderMatchLinesUntimedRows"
+                  : matchResult.untimed === "rows"
+                    ? "importExport.review.orderMatchRowsUntimed"
+                    : "importExport.review.orderMatchWarning",
+              )}
+            </p>
+          )}
+          {matchResult.alignedBy === "source" && (
+            <p className="mt-1.5 text-xs text-muted-foreground">{t("importExport.review.sourceAligned")}</p>
+          )}
+          {/* AQU-1375: on an order match, unequal counts are the likeliest
+              sign that every row after some point is one line off. */}
+          {showOrderMatchWarning && matchResult.countMismatch && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {t(rowKind === "cue" ? "importExport.review.countMismatchCues" : "importExport.review.countMismatchRows", {
+                rows: formatCount(matchResult.countMismatch.rows, locale),
+                lines: formatCount(matchResult.countMismatch.lines, locale),
+              })}
             </p>
           )}
           {looseFit && (
             <p className="mt-1.5 text-xs text-amber-600">{t("importExport.review.looseFitWarning")}</p>
+          )}
+          {/* AQU-1375: a file for another book or chapter used to say only
+              "0 matched". */}
+          {elsewhere && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {elsewhere.file.length > 0
+                ? t("importExport.review.elsewhere", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                    file: formatChapterSpans(elsewhere.file, locale),
+                  })
+                : t("importExport.review.elsewhereNoReferences", {
+                    incoming: formatChapterSpans(elsewhere.incoming, locale),
+                  })}
+              {switchTo && onUseFile && (
+                <>
+                  {" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    disabled={applying}
+                    onClick={() => onUseFile(switchTo.id)}
+                  >
+                    {t("importExport.review.useOtherFile", { fileName: switchTo.name })}
+                  </Button>
+                </>
+              )}
+            </p>
           )}
           {offsetLabel && subtitleRows && (
             <label className="mt-1.5 flex items-start gap-2 text-xs text-muted-foreground">
@@ -1008,15 +1250,15 @@ export function FileTargetImportPanel({
           {timebaseNote && <p className="mt-1.5 text-xs text-muted-foreground">{timebaseNote}</p>}
 
           {orphans.length > 0 && (
-            <LazyDetails summary={`${t("importExport.review.unmatchedListTitle")} (${formatCount(orphans.length, locale)})`}>
+            <LazyDetails summary={`${unmatchedListTitle} (${formatCount(orphans.length, locale)})`}>
               {() => (
                 <ul className="mt-1 max-h-32 divide-y overflow-y-auto rounded-md border">
                   {orphans.map((o, i) => (
-                    <li key={`${o.ref}-${i}`} className="px-3 py-1.5">
+                    <li key={`${o.rowIndex}-${i}`} className="px-3 py-1.5">
                       <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                        {o.ref}
-                        {reasonLabel(o.reason) && (
-                          <span className="font-sans text-amber-600">{reasonLabel(o.reason)}</span>
+                        {rowLabel(t, locale, rowKind, o.ref, o.rowIndex)}
+                        {reasonLabel(o) && (
+                          <span className="font-sans text-amber-600">{reasonLabel(o)}</span>
                         )}
                       </p>
                       <p className="truncate text-foreground/80">{o.text}</p>
@@ -1065,6 +1307,7 @@ export function FileTargetImportPanel({
         ) : (
           <ReviewRowList
             matched={shown}
+            kind={rowKind}
             selected={selectedCellIds}
             onToggle={toggleCell}
             expanded={expandedRows}

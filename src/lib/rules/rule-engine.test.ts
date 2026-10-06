@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -427,5 +428,16 @@ describe("ruleLaneScope", () => {
         expect(ruleLaneScope(r, lane) !== "other").toBe(applied.has(r.id))
       }
     }
+  })
+})
+
+// AQU-1705: the editor's half of the shared verdict table. auth-worker's
+// agent-lint.test.ts runs the same rows through the agent's lintDraft, so the
+// model is told about exactly the violations the person sees.
+describe("checkRulesForCell — verdicts the agent's lint must match", () => {
+  it.each(RULE_LINT_PARITY_CASES)("$name", ({ ruleId, check, source, target, flagged }) => {
+    const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
+    const infractions = checkRulesForCell(cell, "f1", [makeRule({ id: ruleId, check })])
+    expect(infractions.map((i) => i.ruleId)).toEqual(flagged ? [ruleId] : [])
   })
 })

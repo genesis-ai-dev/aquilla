@@ -11,6 +11,11 @@
 //       An empty array clears all scopes (unscoped = today's behavior).
 //       Scoping a user whose effective role is >= 500 is rejected with 400 —
 //       leads/maintainers/owners must stay unscoped.
+//       AQU-1607: a 'lane' value is a `lanes.id`. A legacy tag that names
+//       exactly one of the project's target lanes is converted to that id on
+//       the way in, so an older client still sending `''` for the default
+//       lane keeps working; a tag that names two lanes (same language, two
+//       lanes) or none is refused rather than guessed.
 //
 // Registered in index.ts under the /api/v2/projects prefix. The scopes table
 // (project_member_scopes) is loaded at sync-token mint time into the token's
@@ -22,6 +27,8 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
+import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -99,6 +106,30 @@ async function loadScopes(
 }
 
 /**
+ * AQU-1607: display names for the lanes the returned scopes name. A lane
+ * scope is a lane id, which is no use on a screen — the members matrix shows
+ * a chip per scope and would otherwise print the id. Only lanes the response
+ * already names are included, so this reveals nothing the caller was not
+ * about to be told.
+ */
+async function laneNamesForScopes(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  scopes: readonly MemberScope[],
+): Promise<Record<string, string> | undefined> {
+  const laneValues = new Set(scopes.filter((s) => s.kind === "lane").map((s) => s.value))
+  if (laneValues.size === 0) return undefined
+  const lanes = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const names: Record<string, string> = {}
+  for (const lane of lanes) {
+    if (!laneValues.has(lane.id)) continue
+    const label = lane.name.trim() || (lane.legacyTag ?? "").trim()
+    if (label !== "") names[lane.id] = label
+  }
+  return Object.keys(names).length > 0 ? names : undefined
+}
+
+/**
  * GET /api/v2/projects/:projectId/members/:userId/scopes
  *
  * Own scopes: viewer (100+). Others' scopes: project_lead (500+).
@@ -125,12 +156,17 @@ memberScopes.get(
     }
 
     const scopes = await loadScopes(c.env, projectId, targetUserId)
+    const laneNames = await laneNamesForScopes(c.env, projectId, scopes)
     // A member asking about THEMSELVES also learns whether the org lets
     // lane-limited members assign work — see loadLaneAssignmentAllowed.
     if (rawUserId === "me") {
-      return c.json({ scopes, allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId) })
+      return c.json({
+        scopes,
+        ...(laneNames ? { laneNames } : {}),
+        allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId),
+      })
     }
-    return c.json({ scopes })
+    return c.json({ scopes, ...(laneNames ? { laneNames } : {}) })
   },
 )
 
@@ -197,6 +233,40 @@ memberScopes.put(
       }
     }
 
+    // AQU-1607: lane scopes are stored as lane ids. Convert before writing so
+    // a scope names ONE lane even when two lanes share a language, and so no
+    // new `''` row is ever created. A value that names zero or two lanes is
+    // refused with the values named — the caller picks, we never guess.
+    const laneValues = scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+    let laneIds: string[] = []
+    if (laneValues.length > 0) {
+      const lanes = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
+      // A project with no lane rows yet has nothing to resolve against:
+      // store what the caller sent, as this did before lane ids. The
+      // AQU-1616 backfill converts those rows with the rest.
+      const converted: LaneScopeConversion =
+        lanes.length === 0
+          ? { laneIds: laneValues, rejected: [] }
+          : laneScopeIdsForStorage(laneValues, lanes)
+      if (converted.rejected.length > 0) {
+        const ambiguous = converted.rejected.filter((r) => r.reason === "ambiguous").map((r) => r.value)
+        const unmatched = converted.rejected.filter((r) => r.reason === "unmatched").map((r) => r.value)
+        return c.json(
+          {
+            error: "lane scopes must name one lane of this project",
+            ...(ambiguous.length > 0 ? { ambiguous } : {}),
+            ...(unmatched.length > 0 ? { unmatched } : {}),
+          },
+          400,
+        )
+      }
+      laneIds = converted.laneIds
+    }
+    const storedScopes: MemberScope[] = [
+      ...laneIds.map((value): MemberScope => ({ kind: "lane", value })),
+      ...scopes.filter((s) => s.kind === "file"),
+    ]
+
     // Replace-set: clear then re-insert. The scopes table has no other writers
     // for this (project, user), so a delete-then-insert pair is atomic enough
     // for the single-writer D1/Postgres model.
@@ -210,7 +280,7 @@ memberScopes.put(
     // send them; collapse so the insert loop doesn't error mid-batch.
     const seen = new Set<string>()
     const now = Date.now()
-    for (const s of scopes) {
+    for (const s of storedScopes) {
       const key = `${s.kind}\u0000${s.value}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -223,7 +293,8 @@ memberScopes.put(
     }
 
     const saved = await loadScopes(c.env, projectId, targetUserId)
-    return c.json({ scopes: saved })
+    const savedLaneNames = await laneNamesForScopes(c.env, projectId, saved)
+    return c.json({ scopes: saved, ...(savedLaneNames ? { laneNames: savedLaneNames } : {}) })
   },
 )
 

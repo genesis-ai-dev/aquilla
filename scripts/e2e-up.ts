@@ -595,6 +595,8 @@ async function main(): Promise<void> {
     // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
     // OPENROUTER_* point the agent/chat loops at the scripted mock above.
     // SYNC_WORKER_URL/ENVIRONMENT let identity reach the isolated sync worker.
+    // MCP_OAUTH_PINNED_CLIENTS: chatgpt.com 403s workerd's fetch of its client
+    // metadata document (AQU-1641), so the OAuth consent spec uses this copy.
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
@@ -612,6 +614,11 @@ async function main(): Promise<void> {
       "--var", "GITLAB_ADMIN_TOKEN:e2e-gitlab-admin",
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
       "--var", "ENVIRONMENT:development",
+      "--var", `MCP_OAUTH_PINNED_CLIENTS:${JSON.stringify([{
+        client_id: "https://chatgpt.com/oauth/client.json",
+        client_name: "ChatGPT",
+        redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+      }])}`,
     ],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,

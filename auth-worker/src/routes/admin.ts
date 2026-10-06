@@ -35,6 +35,7 @@ import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../uti
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { countedFileSql } from "../../../db/shared/counted-files"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -367,7 +368,7 @@ admin.get("/overview", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/orgs — every org with owner + member/project/language counts. */
+/** GET /api/v2/admin/orgs — every org with owner + member/project/lane counts. */
 admin.get("/orgs", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT o.id, o.name, o.created_at,
@@ -387,7 +388,7 @@ admin.get("/orgs", async (c) => {
   }>()
   // AQU-1071: the billing band was only legible one org at a time, on the
   // Billing tab. One grouped query gives the whole tenants list its active
-  // language count — deliberately not a per-row subquery, which would add a
+  // target-lane count — deliberately not a per-row subquery, which would add a
   // query per org to a cross-tenant table.
   const { byOrg } = await countTargetLanesByOrg(
     c.env.AQUILLA_PG,
@@ -520,7 +521,12 @@ admin.get("/projects", async (c) => {
        FROM projects p
        LEFT JOIN organizations o ON o.id = p.org_id
        LEFT JOIN users u ON u.id = p.created_by
-       LEFT JOIN files f ON f.project_id = p.id
+       -- AQU-1626: deleted files and hidden companions (cue sheets, caption
+       -- tracks) are not this project's work, so they stay out of the admin
+       -- rollup exactly as they stay out of the org dashboard's. In the JOIN,
+       -- not the WHERE: this is a LEFT join and a project whose only file is
+       -- hidden must still appear, at zero.
+       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
       GROUP BY p.id, o.name, u.username
       ORDER BY p.created_at DESC`,
   ).all<{

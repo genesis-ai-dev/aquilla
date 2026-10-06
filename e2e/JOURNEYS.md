@@ -20,7 +20,7 @@ not a micro-spec farm.
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
-| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
+| Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; OAuth is MCP-bound while device tokens retain REST access; revocation blocks access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
 | Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
@@ -55,7 +55,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -154,6 +154,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Merge duplicate concepts: survivor keeps the union of renderings, the merged-away concept is gone for a second member and after reload (AQU-1337; dialog rules + role gate covered in RTL) | `e2e/specs/terminology/merge-duplicates.spec.ts` |
 | Repetition auto-propagation: typing a translation into a repeated segment (validated by the edit itself) fills the file's other identical-source rows once the cell is left; filled rows stay unvalidated; the projection and a cold reload agree (AQU-1484 — not smoke: a regression leaves rows unfilled, it loses nothing. The settle-on-leave timing, the mid-typing hold and the self-validation-off gate are covered in RTL, `EditorTable.repetitionTrigger.test.tsx`; the per-cell chain/pin planning in `repetition-propagation.test.ts`) | `e2e/specs/validation/repetition-propagation.spec.ts` |
 | Sibling merge: a linked sibling's translations fold into the host as a real lane (a lane record, the switcher shows it, rename works) through the identity → sync call on the real schema (AQU-1550 — not smoke: no UI yet, and a failed merge leaves the donor live. The lane record, its position, re-runs and the no-orphan-on-failure rule are covered in the worker suite, `merge-sibling-lane-record.test.ts`; the fold token's claims and the duplicate-name refusal in auth-worker's `merge-sibling.test.ts`) | `e2e/specs/projects/merge-sibling.spec.ts` |
+| Link replacing an existing file: linking an established project from Settings → Source & sync with "Replace the source in my existing file" keeps ONE file with the same cells and its translation on its line, and a later upstream source edit reaches that same cell; the same option from "Choose files" on an existing link adds the file into the project's own copy (AQU-1679 — full-suite, not smoke: the option is off by default, so a regression strands nobody who did not choose it. The line pairing is pinned in `db/shared/link-file-match.test.ts`; the join, later edits/deletes, added and kept lines, the windowed first sync and the fall-back to a separate copy in `sync-worker/src/__tests__/link-sync-adopt-existing-file.test.ts`; the match route, the link and add-files requests' refusals and detach in auth-worker's `source-linking-replace-files.test.ts`; the confirm step's states in `LinkSourceSection.test.tsx` and the dialog's in `ChooseLinkedFilesDialog.test.tsx`) | `e2e/specs/projects/link-replace-existing-file.spec.ts` |
 | Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
@@ -166,6 +167,13 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
+
+- Costly model waits show a shared fills-twice bar (editor AI draft, and
+  suggest-rules-from-edits). The draft or the suggestions appear as soon as
+  the call returns; the bar then finishes in about 200ms, and reduced motion
+  stays a static mark. Covered in RTL (`fills-twice-indicator.test.tsx`,
+  and the editor row assertion in `EditorTable.editorActions.test.tsx`).
+  The sparkle still filling a cell stays `e2e/specs/ai/completion.smoke.spec.ts`.
 
 - Unified Agent conversation/document/knowledge navigation and same-task
   re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
@@ -313,6 +321,24 @@ UI chrome that used to be one smoke file per click is covered under
   re-read when a frame said files moved (`ProjectWorkspace.pushedLinkSync.test.ts`).
   Not smoke: a missed push loses nothing — the lazy pull on the next file open is the
   floor — and the walk needs two projects, a link and a second socket.
+- A ONE-TIME COPY of another project's source — the Cloned shape at Create New Project,
+  and the snapshot a detach freezes — bringing in exactly the files it shows (AQU-1608) is
+  auth-worker-tested against real Postgres in
+  `auth-worker/src/__tests__/source-linking-deleted-file-cells.test.ts`. Both flows are one
+  function, `snapshotSourceCells`, which copied file rows through `snapshotSourceFiles`
+  (live files only) and then every source cell in the upstream, so a file the upstream had
+  moved to Recently deleted contributed lines keyed to a file row the new project does not
+  have. Pinned there for all four shapes: the whole-project copy, a subset copy, a followed
+  file deleted upstream after the link was made (the detach half), and an upstream with
+  nothing deleted. No smoke, and this is the reason rather than the usual one — the walk is
+  cheap, but what went wrong is INVISIBLE on the surface a walk would check: the file list
+  was always right, and the stray rows showed only through project-wide search
+  (`scoped-search.ts` matches `cells` on `project_id` alone) and the health rollup's
+  `DISTINCT file_id`. A browser walk that asserted the file list would have passed on the
+  broken code; what the copy must hold is that its files and its lines are one set, which is
+  a server-state assertion. The manual walk is still worth running once per release and is
+  on this issue's QA checklist; it needs a three-file upstream with a phrase unique to the
+  deleted file, which no standing fixture provides.
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests
@@ -351,6 +377,16 @@ UI chrome that used to be one smoke file per click is covered under
   is an empty state in a single component, nothing is lost if it breaks, and the
   picture-only import journey it follows is already walked by
   `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
+- AQU-1702 file sidebar cross-group drag: dropping a file on another corpus group
+  moves it there (group marker + slot in the new group, as one call), the group under
+  the pointer shows the ring and the insertion line, and the one drop the sidebar
+  cannot express — a Bible book sent to Ungrouped, which the book-code fallback would
+  pull straight back — says why and writes nothing. "Move to corpus…" is the same
+  move without a drag. Covered in RTL (`ExpandableFileList.reorder.test.tsx`), with
+  the rule in `lib/sidebar/file-regroup.test.ts` and the numbers in
+  `lib/sidebar/file-sort-index.test.ts`. No smoke, same reasoning as AQU-1569: it is
+  sidebar chrome in one component, and the events it writes (`file.corpus.set`,
+  `file.reorder`) are already exercised by the worker projection tests.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),

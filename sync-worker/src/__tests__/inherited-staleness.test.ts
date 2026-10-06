@@ -330,12 +330,22 @@ describe("inherited staleness — cycle safety", () => {
 describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
   it("edits on lane A do not flag a downstream that follows lane B", async () => {
     const t = await makeTestDb()
+    const root = "proj-1644-root"
     const upstream = "proj-1644-up"
     const downstream = "proj-1644-down"
     const file = "file-1644"
     const cell = "cell-1644"
     try {
-      await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Upstream', 1)`, [upstream])
+      // AQU-1683: a file linked straight to a project with no live link of its
+      // own inherits nothing. The upstream follows a root so the walk runs,
+      // and the lane filter is what keeps lane A's edit off this downstream.
+      await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Root', 1)`, [root])
+      await t.pg.query(
+        `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode,
+                               source_link_consumes, source_link_cursor)
+         VALUES ($1, 'Upstream', 1, $2, 'live', 'source', 0)`,
+        [upstream, root],
+      )
       await emit(t, upstream, "file.create", { fileId: file, payload: { name: "Ep", fileType: "codex" } })
       await emit(t, upstream, "source.cell.create", {
         fileId: file,
@@ -368,6 +378,7 @@ describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
         [downstream, upstream, frenchId],
       )
       await mirrorSync(t.db, downstream)
+      const downFile = deterministicDownstreamFileId(downstream, file)
 
       await emit(t, upstream, "target.cell.commit", {
         fileId: file,
@@ -375,7 +386,7 @@ describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
         payload: { value: "lane A text, revised", targetLang: "Zulu" },
       })
 
-      const afterA = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, [cell])
+      const afterA = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, downFile, [cell])
       expect(afterA.upstreamStaleCellIds).toEqual([])
       expect(afterA.ancestorBehind).toBe(false)
 
@@ -415,7 +426,7 @@ describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
         cellId: cell,
         payload: { value: "lane B text, revised", targetLang: "French" },
       })
-      const afterB = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, [cell])
+      const afterB = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, downFile, [cell])
       expect(afterB.upstreamStaleCellIds).toEqual([cell])
     } finally {
       await t.close()

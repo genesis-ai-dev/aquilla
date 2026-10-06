@@ -7,7 +7,7 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
   clearUserProviderOverride,
@@ -386,6 +386,103 @@ describe("resolveProvider", () => {
     const partial = { systemPrompt: "x" } as unknown as CompletionSettings
     expect(() => resolveProvider(partial)).not.toThrow()
     expect(resolveProvider(partial)).toBe("frontier")
+  })
+})
+
+// AQU-1671: call sites whose project may never have customized AI settings
+// need "does a provider resolve", not "is there a settings object". Treating an
+// absent object as unconfigured told every fresh project on the Frontier
+// platform default that no provider was configured.
+describe("resolveCompletionTarget", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+    clearUserProviderOverride()
+  })
+  afterEach(() => {
+    clearUserProviderOverride()
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+  })
+
+  it("resolves undefined settings to the Frontier platform default, configured", () => {
+    const target = resolveCompletionTarget(undefined)
+    expect(target.configured).toBe(true)
+    expect(target.gap).toBeNull()
+    expect(resolveProvider(target.settings)).toBe("frontier")
+  })
+
+  it("does not require a session JWT — the platform default is configured by the platform", () => {
+    // isCompletionConfigured gates Frontier on a JWT, which makes a
+    // still-hydrating session look like "nothing configured". This resolver
+    // must not, so a slow session cannot produce a false negative.
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, null)).toBe(false)
+    expect(resolveCompletionTarget({ ...BASE, provider: "frontier" }).configured).toBe(true)
+  })
+
+  it("reports the endpoint gap for a custom provider with no endpoint", () => {
+    const target = resolveCompletionTarget({ ...BASE, provider: "custom", endpoint: "" })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("endpoint")
+  })
+
+  it("reports the apiKey gap for a hosted custom endpoint with no key", () => {
+    const target = resolveCompletionTarget({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("apiKey")
+  })
+
+  it("treats a local custom endpoint as configured without a key", () => {
+    const target = resolveCompletionTarget({
+      ...BASE,
+      provider: "custom",
+      endpoint: "http://localhost:8000",
+    })
+    expect(target.configured).toBe(true)
+    expect(target.settings.endpoint).toBe("http://localhost:8000")
+  })
+
+  it("applies a personal device override to an otherwise uncustomized project", () => {
+    const target = resolveCompletionTarget(undefined, {
+      endpoint: "http://localhost:1234",
+      model: "local",
+    })
+    expect(target.configured).toBe(true)
+    expect(target.settings.endpoint).toBe("http://localhost:1234")
+  })
+
+  it("attributes the gap to the project when the project's own provider is incomplete", () => {
+    const target = resolveCompletionTarget({ ...BASE, provider: "custom", endpoint: "" })
+    expect(target.source).toBe("project")
+  })
+
+  it("attributes the gap to the personal override when the override supplied the provider", () => {
+    // The hint must point at user Settings, not Project Settings, or it sends
+    // the user to a screen that does not own the broken provider.
+    const target = resolveCompletionTarget(undefined, {
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    })
+    expect(target.configured).toBe(false)
+    expect(target.gap).toBe("apiKey")
+    expect(target.source).toBe("personal-override")
+  })
+
+  it("keeps a project's own provider ahead of a personal override", () => {
+    const target = resolveCompletionTarget(
+      { ...BASE, provider: "custom", endpoint: "http://localhost:8000" },
+      { endpoint: "http://localhost:9999" },
+    )
+    expect(target.settings.endpoint).toBe("http://localhost:8000")
+    expect(target.source).toBe("project")
+  })
+
+  it("keeps DEFAULT_COMPLETION_SETTINGS on the frontier provider", () => {
+    expect(resolveProvider(DEFAULT_COMPLETION_SETTINGS)).toBe("frontier")
+    expect(DEFAULT_COMPLETION_SETTINGS.endpoint).toBe("")
   })
 })
 
@@ -1569,6 +1666,22 @@ describe("buildParagraphPrompt", () => {
     // Preceding context appears BEFORE the live source paragraph
     expect(c.indexOf("PREV_TGT")).toBeGreaterThan(-1)
     expect(c.indexOf("PREV_SRC")).toBeLessThan(c.indexOf("LIVE_SRC"))
+  })
+
+  it("labels an unreviewed preceding draft so the model weighs it below approved work", () => {
+    const [, user] = buildParagraphPrompt({
+      sourceLanguage: "Greek", targetLanguage: "English",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "LIVE_SRC" }],
+      examples: [],
+      precedingContext: [
+        { source: "OK_SRC", target: "OK_TGT" },
+        { source: "DRAFT_SRC", target: "DRAFT_TGT", draft: true },
+      ],
+    })
+    expect(user.content).toContain("Translation: OK_TGT")
+    expect(user.content).toContain("Translation (unreviewed draft): DRAFT_TGT")
+    expect(user.content).not.toContain("Translation: DRAFT_TGT")
   })
 
   it("renders a blank-target preceding cell as source-only fallback, not a Translation pair (D4)", () => {

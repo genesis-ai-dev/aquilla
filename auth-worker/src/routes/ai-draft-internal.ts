@@ -36,6 +36,7 @@ import {
   MAX_COMPLETION_BATCH_SIZE,
   completionBatchSizeFromSettings,
 } from "../../../db/shared/completion-batch"
+import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -126,27 +127,25 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   try {
     const settings = await db
       .prepare(
-        `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
-                settings::jsonb ->> 'targetLanguage' AS target_language,
-                settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
+        `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
                 settings AS raw
            FROM project_settings WHERE project_id = ?`,
       )
       .bind(body.projectId)
       .first<{
-        source_language: string | null
-        target_language: string | null
         brief_summary: string | null
         raw: unknown
       }>()
     if (settings) {
-      sourceLanguage = settings.source_language ?? undefined
-      targetLanguage = settings.target_language ?? undefined
       briefSummary = settings.brief_summary ?? undefined
       const raw = typeof settings.raw === "string" ? JSON.parse(settings.raw) : settings.raw
-      batchCap = completionBatchSizeFromSettings(
-        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null,
-      )
+      const parsed =
+        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+      batchCap = completionBatchSizeFromSettings(parsed)
+      const lanes = await loadLaneRows(db, body.projectId)
+      const languages = languagesForLanes(lanes, parsed, body.laneId ?? "")
+      sourceLanguage = languages.sourceLanguage
+      targetLanguage = languages.targetLanguage
     }
   } catch {
     /* grounding is best-effort — drafting proceeds with the defaults */

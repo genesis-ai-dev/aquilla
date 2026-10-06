@@ -551,7 +551,10 @@ export async function commitChangesetCore(
   // AQU-1532: a changeset staged before prepare canonicalized lane ids can
   // still name the primary language; stamp it as the default lane.
   const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    ? await (async () => {
+        const loaded = await loadProjectSettings(db, projectId)
+        return settingsTargetLanguage(loaded.settings, loaded.lanes)
+      })()
     : null
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
@@ -826,7 +829,10 @@ export async function applyPlanImport(
   // AQU-1532: a variant naming the primary language writes the default lane.
   const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
   const targetLanguage = namesALane
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    ? await (async () => {
+        const loaded = await loadProjectSettings(db, projectId)
+        return settingsTargetLanguage(loaded.settings, loaded.lanes)
+      })()
     : null
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {

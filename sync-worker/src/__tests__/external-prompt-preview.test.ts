@@ -696,9 +696,26 @@ describe("external prompt preview", () => {
       expect(body.targetLanguage).toBe("Yoruba (Oyo)")
     })
 
-    it("falls back to the project target when no lane row carries the tag", async () => {
+    it("does not treat an unknown 8-hex tag as a language or as the project target (AQU-1593)", async () => {
       const { body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
-      expect(body.targetLanguage).toBe("French")
+      expect(body.targetLang).toBe("b0b0b0b0")
+      expect(body.targetLanguage).toBe("")
+      expect(body.messages[0].content).not.toContain("b0b0b0b0")
+    })
+
+    it("uses settings for an unbackfilled source lane and not for a typed one (AQU-1593)", async () => {
+      // Project creation already inserts the one source lane.
+      await testDb.pg.query(
+        `UPDATE lanes SET language = NULL, name = 'Source', lang_code = NULL
+          WHERE project_id = 'proj-a' AND role = 'source'`,
+      )
+      const unbackfilled = await preview(testDb, token, "cell-live")
+      expect(unbackfilled.body.sourceLanguage).toBe("English")
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'Koine Greek' WHERE project_id = 'proj-a' AND role = 'source'`,
+      )
+      const typed = await preview(testDb, token, "cell-live")
+      expect(typed.body.sourceLanguage).toBe("Koine Greek")
     })
 
     it("still inherits the project target for the default lane", async () => {

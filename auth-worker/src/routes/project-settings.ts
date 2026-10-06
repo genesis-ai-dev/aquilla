@@ -77,6 +77,7 @@ import {
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -531,8 +532,15 @@ projectSettings.post(
     if (denied) return c.json(denied, 403)
     const body = c.req.valid("json")
     const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-    const targetLanguage =
-      typeof current.settings.targetLanguage === "string" ? current.settings.targetLanguage : null
+    const defaultLane = (current.lanes ?? []).find(
+      (lane) => lane.role === "target" && (lane.legacyTag ?? "") === "",
+    )
+    const resolvedDefault = laneLanguage(defaultLane ?? { role: "target" }, {
+      settings: current.settings,
+      role: "target",
+      legacyTag: defaultLane?.legacyTag ?? "",
+    })
+    const targetLanguage = resolvedDefault || null
     let created: Awaited<ReturnType<typeof createTargetLane>>
     try {
       created = await createTargetLane(c.env.AQUILLA_PG, projectId, {

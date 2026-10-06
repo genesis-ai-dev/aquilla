@@ -43,7 +43,8 @@
 // assembled. It performs no writes and mints no drafts.
 
 import { externalError } from "./errors"
-import { laneLanguage } from "./lane-language"
+import { laneLanguage } from "../../../src/lib/lanes/lane-display"
+import { laneLanguageForTag } from "../../../src/lib/lanes/lane-language"
 import { stripTrailingBareMarkers } from "../../../src/lib/completion/strip-trailing-usfm-markers"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
 import { branchingSearch } from "../lib/branching-search/algorithm"
@@ -269,20 +270,22 @@ export async function buildPromptPreview(
   const sourceText = effectiveSource(cell)
 
   // ── settings ─────────────────────────────────────────────────────────────
-  const { settings } = await loadProjectSettings(db, projectId)
+  const { settings, lanes } = await loadProjectSettings(db, projectId)
   const completion = objectSetting(settings, "completionSettings")
   const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 
-  const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // Every lane's language lives on the row, including the default lane whose
-  // tag is '' (AQU-1592). `targetLang` is that tag — an event key `planNewTargetLane`
-  // sets to the opaque lane id when a sibling already holds the language — so
-  // using it directly told the model to translate "into a3f09c1e". The project
-  // setting is only the fallback when the row records no language.
-  const targetLanguage =
-    (await laneLanguage(db, projectId, targetLang)) ||
-    stringSetting(settings, "targetLanguage")
+  // AQU-1593: both languages come from the lane row. `targetLang` is the
+  // lane's legacy_tag — an event key, and an 8-hex id when the language
+  // string was already taken. Settings are passed through for the migration
+  // fallback inside laneLanguage; this function does not read the keys.
+  const sourceLane = (lanes ?? []).find((lane) => lane.role === "source")
+  const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
+    settings,
+    role: "source",
+    legacyTag: sourceLane?.legacyTag ?? null,
+  })
+  const targetLanguage = laneLanguageForTag(targetLang, lanes, settings) ?? ""
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;

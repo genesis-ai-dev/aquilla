@@ -53,7 +53,7 @@ import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
-import { loadProjectContext, type ProjectContext } from "./project-context"
+import { loadProjectContext, targetLanguageForTag, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
 import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
@@ -1002,6 +1002,11 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  const spanTargetLanguage = targetLanguageForTag(
+    run.targetLang,
+    shared.ctx.lanes,
+    shared.ctx.targetLanguage,
+  )
   try {
     report = await runSpan({
       seed,
@@ -1019,9 +1024,7 @@ async function processSpan(
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(run.targetLang || shared.ctx.targetLanguage
-        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
-        : {}),
+      ...(spanTargetLanguage ? { targetLanguage: spanTargetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.

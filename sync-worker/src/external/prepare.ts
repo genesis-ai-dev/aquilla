@@ -70,6 +70,8 @@ import { loadProjectSettings } from '../../../db/shared/projects'
 import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
 import type { ProjectLaneRecord } from '../../../db/shared/lanes'
 import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
+import { laneLanguageForTag } from '../../../src/lib/lanes/lane-language'
+import { languagesEqual } from '../../../src/lib/language-normalize'
 import {
   archivedLaneReason,
   archivedTagsFromSettings,
@@ -625,7 +627,7 @@ export async function prepareChangesetCore(
     // AQU-1532: a lane id naming the primary language is the default lane.
     // Canonicalize before the registry check, the de-dupe and the
     // precondition keys, so "bla" in a "bla" project writes the default row.
-    const targetLanguage = settingsTargetLanguage(projectSettings.settings)
+    const targetLanguage = settingsTargetLanguage(projectSettings.settings, projectSettings.lanes)
     setCommands = setCommands.map((c) => withCanonicalLaneId(c, targetLanguage))
     const registeredLanes = new Set(
       Array.isArray(projectSettings.settings.targetLanes)
@@ -774,7 +776,7 @@ async function expandDraftCells(
   const projectSettings = await loadProjectSettings(db, projectId)
   assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
   // AQU-1532: a lane id naming the primary drafts (and later writes) the default lane.
-  const laneId = withCanonicalLaneId(cmd, settingsTargetLanguage(projectSettings.settings)).laneId
+  const laneId = withCanonicalLaneId(cmd, settingsTargetLanguage(projectSettings.settings, projectSettings.lanes)).laneId
 
   const { drafts } = await requestDrafts(env, {
     projectId,
@@ -921,7 +923,7 @@ async function preparePlanImport(
     : null
   // AQU-1532: a variant naming the primary language writes the default lane.
   // Commit applies the same mapping when it stamps targetLang.
-  const targetLanguage = settingsTargetLanguage(projectSettings.settings)
+  const targetLanguage = settingsTargetLanguage(projectSettings.settings, projectSettings.lanes)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
@@ -953,8 +955,12 @@ async function preparePlanImport(
           )
         }
       }
-      const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
-      if (variant.languageTag && variant.languageTag !== effectiveLanguage) {
+      // AQU-1593: the variant's language is the lane's, never its tag. An
+      // id-tagged lane must not be compared as "a3f09c1e". Same language is
+      // languagesEqual; the request shape is unchanged.
+      const effectiveLanguage =
+        laneLanguageForTag(lane, projectSettings.lanes, projectSettings.settings) ?? ""
+      if (variant.languageTag && !languagesEqual(variant.languageTag, effectiveLanguage)) {
         return errorResponse(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}].languageTag must match its lane language`,

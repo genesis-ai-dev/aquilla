@@ -451,6 +451,20 @@ describe("label language", () => {
     act(() => setBibleDataViewPrefs({ labelMode: "english" }))
     expect(chipText(cellIdFor("4:7"))).toBe("Narrator·Jesus→Samaritan woman")
   })
+
+  // AQU-1693: a concept linked to Jesus names him where no headword can match
+  // (the pack has no Greek label), and the popover says the name is the project's.
+  it("names a linked entity from its concept, even with a Greek source, and says so", async () => {
+    const linked: Concept[] = [{ ...terminology[0], sourceTerm: "Ἰησοῦς", externalIds: { acai: "person:Jesus.2" } }]
+    renderTable(makeProject({ terminology: linked, sourceLanguage: "grc" }))
+    await voicesLoaded()
+    expect(chipText(cellIdFor("4:7"))).toBe("Narrator·Yesus→Samaritan woman")
+
+    const chip = chipIn(cellIdFor("4:7"))
+    if (!chip) throw new Error("no chip")
+    act(() => chip.focus())
+    expect(visible((await screen.findByTestId("voice-details")).textContent)).toContain("YesusFrom your terminology")
+  })
 })
 
 describe("off means off", () => {

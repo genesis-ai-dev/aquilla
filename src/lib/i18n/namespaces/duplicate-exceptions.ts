@@ -444,6 +444,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Share dialog. nav.report.copied is the equivalent confirmation for the " +
     "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
     "confirmations that happen to share the same short exclamation.",
+  "projectSettings.section.bibleResources":
+    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
+    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
+    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
+    "vs a tooltip naming a search filter mode for the same underlying dataset.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +

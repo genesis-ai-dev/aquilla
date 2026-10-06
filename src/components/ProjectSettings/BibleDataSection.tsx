@@ -5,6 +5,10 @@
 // are edits in the page's deferred Save bar: this component holds no state of
 // its own beyond the Data sources dialog, and the parent persists on Save.
 //
+// AQU-1685: the enrichments are an experiment. Until this device switches on
+// "Bible data enrichments" in Settings → Experimental, the card is the old
+// "Bible resources" card: the master switch and its hints, nothing else.
+//
 // Rows are disabled, never hidden, and always say why (the spec forbids
 // disabling silently):
 //   • Bible data off → every row, with one visible reason above the list;
@@ -50,6 +54,8 @@ export interface BibleDataSectionProps {
   autopilotOn: boolean
   /** Opens Rules → Built-in checks. Omit when there is no project to link to. */
   onOpenBuiltinChecks?: () => void
+  /** Is the device-local Bible data experiment on? Off → the old Bible resources card. */
+  experimentOn: boolean
 }
 
 export function BibleDataSection({
@@ -62,6 +68,7 @@ export function BibleDataSection({
   lockedTooltip,
   autopilotOn,
   onOpenBuiltinChecks,
+  experimentOn,
 }: BibleDataSectionProps) {
   const t = useT()
   const format = useFormat()
@@ -69,6 +76,7 @@ export function BibleDataSection({
   const switchOffReasonId = useId()
   const autopilotReasonId = useId()
   const switchOn = resolveBibleResourcesEnabled(switchValue, hasScriptureFiles)
+  const enableLabelKey = experimentOn ? "bibleData.card.enableLabel" : "projectSettings.bible.enableLabel"
 
   const sourceChip = (id: BibleEnrichmentId) => {
     const { sources, license } = BIBLE_ENRICHMENTS[id]
@@ -80,12 +88,12 @@ export function BibleDataSection({
 
   return (
     <>
-      <SettingsGroup label={t("projectSettings.section.bibleResources")}>
+      <SettingsGroup label={t(experimentOn ? "bibleData.card.title" : "projectSettings.section.bibleResources")}>
         <SettingsRow
-          label={<label htmlFor="bible-resources-enabled">{t("projectSettings.bible.enableLabel")}</label>}
+          label={<label htmlFor="bible-resources-enabled">{t(enableLabelKey)}</label>}
           description={
             <>
-              {t("projectSettings.bible.description")}
+              {t(experimentOn ? "bibleData.card.description" : "projectSettings.bible.description")}
               {switchValue === undefined && hasScriptureFiles ? (
                 <span className="mt-1 block">{t("projectSettings.bible.scriptureDefaultHint")}</span>
               ) : null}
@@ -104,19 +112,19 @@ export function BibleDataSection({
                 checked={switchOn}
                 onCheckedChange={(checked) => onSwitchChange(checked)}
                 disabled={!canEdit}
-                aria-label={t("projectSettings.bible.enableLabel")}
+                aria-label={t(enableLabelKey)}
               />
             </DisabledFieldTooltip>
           }
         />
-        {!switchOn ? (
+        {experimentOn && !switchOn ? (
           <SettingsBlock>
             <p id={switchOffReasonId} className="text-xs text-muted-foreground">
               {t("bibleData.enrichment.switchOffReason")}
             </p>
           </SettingsBlock>
         ) : null}
-        {BIBLE_ENRICHMENT_IDS.map((id) => {
+        {experimentOn && BIBLE_ENRICHMENT_IDS.map((id) => {
           const autopilotBlocked = id === "autopilot" && !autopilotOn
           const disabled = !canEdit || !switchOn || autopilotBlocked
           const describedBy = [
@@ -174,19 +182,21 @@ export function BibleDataSection({
             />
           )
         })}
-        <SettingsBlock>
-          <Button
-            type="button"
-            variant="link"
-            size="xs"
-            className="h-auto p-0"
-            onClick={() => setSourcesOpen(true)}
-          >
-            {t("bibleData.sources.open")}
-          </Button>
-        </SettingsBlock>
+        {experimentOn ? (
+          <SettingsBlock>
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto p-0"
+              onClick={() => setSourcesOpen(true)}
+            >
+              {t("bibleData.sources.open")}
+            </Button>
+          </SettingsBlock>
+        ) : null}
       </SettingsGroup>
-      <BibleDataSourcesDialog open={sourcesOpen} onOpenChange={setSourcesOpen} />
+      {experimentOn ? <BibleDataSourcesDialog open={sourcesOpen} onOpenChange={setSourcesOpen} /> : null}
     </>
   )
 }

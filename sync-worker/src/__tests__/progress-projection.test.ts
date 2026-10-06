@@ -589,14 +589,18 @@ describe('structural aggregates (AQU-1083)', () => {
     })
   }
 
+  // AQU-1599: the source lane's row also carries target_lang ''. These
+  // numbers (fills, histograms, takes) belong to the lane people translate
+  // in; the source row's fills and takes are 0 on purpose.
   const read = async (db: AquillaDb, scope: string) =>
     db.prepare(
-      `SELECT total_count, filled_count, validator_histogram,
-              structural_count, structural_filled_count, structural_validator_histogram,
-              audio_count, audio_validated_count,
-              structural_audio_count, structural_audio_validated_count
-         FROM file_section_progress
-        WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
+      `SELECT p.total_count, p.filled_count, p.validator_histogram,
+              p.structural_count, p.structural_filled_count, p.structural_validator_histogram,
+              p.audio_count, p.audio_validated_count,
+              p.structural_audio_count, p.structural_audio_validated_count
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+        WHERE p.project_id = ? AND p.file_id = ? AND p.scope = ?`,
     ).bind(P, F, scope).first<Record<string, unknown>>()
 
   // The predicate that EXCLUDES structural cells on read is the negation of the
@@ -674,10 +678,11 @@ describe('structural aggregates (AQU-1083)', () => {
     await sectionsProgressRecomputeStmt(db, P, F, 10).run()
     const scoped = async (scope: string, key: string) =>
       db.prepare(
-        `SELECT audio_count, audio_validated_count,
-                structural_audio_count, structural_audio_validated_count
-           FROM file_section_progress
-          WHERE project_id = ? AND scope = ? AND section_key = ? AND target_lang = ''`,
+        `SELECT p.audio_count, p.audio_validated_count,
+                p.structural_audio_count, p.structural_audio_validated_count
+           FROM file_section_progress p
+           JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+          WHERE p.project_id = ? AND p.scope = ? AND p.section_key = ?`,
       ).bind(P, scope, key).first<Record<string, unknown>>()
     // The book branch is a POSITIONAL UNION arm with no column aliases, so it
     // is the one that silently shifts if the new columns land anywhere but the
@@ -694,9 +699,10 @@ describe('structural aggregates (AQU-1083)', () => {
     const { db } = await fixture()
     await sectionsProgressRecomputeStmt(db, P, F, 10).run()
     const row = await db.prepare(
-      `SELECT structural_count, structural_filled_count, structural_validator_histogram
-         FROM file_section_progress
-        WHERE project_id = ? AND scope = 'section' AND section_key = 'GEN 1'`,
+      `SELECT p.structural_count, p.structural_filled_count, p.structural_validator_histogram
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+        WHERE p.project_id = ? AND p.scope = 'section' AND p.section_key = 'GEN 1'`,
     ).bind(P).first<Record<string, unknown>>()
     // Heading refs split to the same chapter prefix as verses, so they land in
     // GEN 1's bucket — which is exactly why the chapter never read 100%.

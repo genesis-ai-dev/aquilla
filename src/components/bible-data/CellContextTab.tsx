@@ -15,9 +15,9 @@
 //      words that carry a term (Key terms on).
 // The notes and terms layers load when this tab first opens for a book.
 //
-// Not here yet: the M1 rhetorical-question hook (a figs-rquestion note next
-// to its check) and the tab's attention dot from Bible checks. Both need
-// AQU-1688's check evaluator, which is on another PR stack (#1189).
+// Not here yet: the M1 rhetorical-question hook and the tab's attention dot
+// from Bible checks. Both need AQU-1688's check evaluator, which is on
+// another PR stack (#1189).
 
 import { useContext } from "react"
 import { termsOfWord } from "@/lib/bible-data/helps-index"

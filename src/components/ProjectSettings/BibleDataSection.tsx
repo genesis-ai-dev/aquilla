@@ -132,7 +132,12 @@ export function BibleDataSection({
                 <>
                   <span className="block">{t(BIBLE_ENRICHMENT_DESCRIPTION_KEYS[id])}</span>
                   <span className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <Badge variant="soft" data-testid={`bible-enrichment-source-${id}`}>
+                    {/* Wraps instead of clipping: four sources do not fit one line on a phone. */}
+                    <Badge
+                      variant="soft"
+                      className="h-auto max-w-full whitespace-normal"
+                      data-testid={`bible-enrichment-source-${id}`}
+                    >
                       {sourceChip(id)}
                     </Badge>
                     {id === "checks" && onOpenBuiltinChecks ? (

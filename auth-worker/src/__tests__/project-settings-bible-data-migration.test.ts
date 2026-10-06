@@ -1,4 +1,4 @@
-// AQU-1686 — migration 0141 projects the Bible data switches out of the
+// AQU-1686 — migration 0150 projects the Bible data switches out of the
 // project_settings blob.
 //
 // WHY: the aquifer gate now answers from these columns alone, so the
@@ -11,7 +11,7 @@ import { PGlite } from "@electric-sql/pglite"
 import { expect, it } from "vitest"
 
 const MIGRATION = readFileSync(
-  new URL("../../../db/postgres/migrations/0141_project_settings_bible_data.sql", import.meta.url),
+  new URL("../../../db/postgres/migrations/0150_project_settings_bible_data.sql", import.meta.url),
   "utf8",
 )
 

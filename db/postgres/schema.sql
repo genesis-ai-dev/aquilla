@@ -303,7 +303,7 @@ CREATE TABLE project_settings (
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
       GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
-    -- 0141 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- 0150 (AQU-1686): the Bible data switches the server reads — the aquifer
     -- gate on every Bible request and agent run, and autopilot per run. NULL
     -- means no explicit choice, which the gate derives from scripture files
     -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
@@ -1132,7 +1132,7 @@ CREATE TABLE cell_word_morph (
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
 );
 
--- Migration 0143: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- Migration 0152: Bridge 1 of the Bible data layer (AQU-1694). One row per
 -- link between a Bible Knowledge Pack word (Macula id) and a token of a
 -- gateway-language source cell, computed in the browser and uploaded through
 -- the sync-worker's source-word-alignment route. Derived data: rows are valid

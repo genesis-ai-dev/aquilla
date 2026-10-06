@@ -1,4 +1,4 @@
--- Migration 0143: source_word_alignment, Bridge 1 of the Bible data layer
+-- Migration 0152: source_word_alignment, Bridge 1 of the Bible data layer
 -- (AQU-1694).
 --
 -- Who's Who (AQU-1689) knows its participant facts word by word, by Macula

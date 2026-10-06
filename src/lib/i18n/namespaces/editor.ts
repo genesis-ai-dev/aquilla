@@ -931,7 +931,11 @@ export const editor = defineNamespace({
     "editor.timeline.audioTrackFilmAudio": "Film audio",
     // AQU-1565 follow-up: which sound plays under a YouTube picture.
     "editor.timeline.soundSourceTrigger": "Sound: {source}",
-    "editor.timeline.soundSourceHeading": "Sound",
+    // Sam, Oct 5: the trigger is a text pill naming the choice, not a speaker
+    // icon (which read as mute/unmute), and the menu says what it chooses.
+    "editor.timeline.soundSourcePillVideo": "Sound: Video",
+    "editor.timeline.soundSourcePillRecording": "Sound: Recording",
+    "editor.timeline.soundSourceHeading": "Playback sound",
     "editor.timeline.soundSourceVideo": "The video's own sound",
     // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
     "editor.timeline.noCaptionsYet": "No captions yet",
@@ -2844,7 +2848,7 @@ export const editor = defineNamespace({
           "different timing than the video would put the rows out of step with it. " +
           "The last sentence says the video keeps its own sound after the upload; " +
           "'Sound menu' is the 'Sound: …' button in the video's bottom-right " +
-          "corner (editor.timeline.soundSourcePillLabel).",
+          "corner (editor.timeline.soundSourcePillVideo).",
       },
       "editor.media.linkedVideoUploadHintGeneric": {
         description:
@@ -2923,20 +2927,33 @@ export const editor = defineNamespace({
       },
       "editor.timeline.soundSourceTrigger": {
         description:
-          "Tooltip and accessible name of the speaker icon in a YouTube video's " +
-          "bottom-right corner, on a file that also has an uploaded recording. " +
-          "Says which sound is playing under the picture now.",
+          "Tooltip and accessible name of the 'Sound: …' button in a YouTube " +
+          "video's bottom-right corner, on a file that also has an uploaded " +
+          "recording. Says which sound is playing under the picture now.",
         placeholders: {
           source:
             "The current choice, exactly as listed in the menu: " +
             "editor.timeline.soundSourceVideo or editor.timeline.soundSourceRecording.",
         },
       },
+      "editor.timeline.soundSourcePillVideo": {
+        description:
+          "Text of that button when the video plays with its own sound (the " +
+          "default). Short: it sits over a small video picture, with a down arrow " +
+          "after it that opens the menu. 'Sound' is a noun, as in audio.",
+        maxLength: 18,
+      },
+      "editor.timeline.soundSourcePillRecording": {
+        description:
+          "Text of the same button when the uploaded recording plays instead and " +
+          "the video is silent. Short, like editor.timeline.soundSourcePillVideo.",
+        maxLength: 18,
+      },
       "editor.timeline.soundSourceHeading": {
         description:
-          "Heading of that menu: which sound plays with the video. A noun, as in " +
-          "audio, not a verb.",
-        maxLength: 20,
+          "Heading of that menu: which sound plays with the video. A noun phrase, " +
+          "as in the audio you hear during playback, not a verb.",
+        maxLength: 24,
       },
       "editor.timeline.soundSourceVideo": {
         description:

@@ -8,11 +8,15 @@
 // (see lib/audio/playback-source.ts), like mute and the caption mode.
 //
 // It sits beside the film-language globe in the picture's bottom-right corner
-// and has the same look, for the same reasons: an icon keeps clear of the
-// burned-in caption, and the corner controls fade with the pointer.
+// and has the same dark-glass look, and fades with the pointer like it.
+//
+// Sam, Oct 5: a speaker icon read as mute/unmute, so the trigger is a short
+// text pill that names the current choice ("Sound: Video ▾" / "Sound:
+// Recording ▾") and opens the menu, headed "Playback sound". The full choice
+// ("Sound: The video's own sound") stays as its tooltip and accessible name.
 
 import { useState } from "react"
-import { Check, Volume2 } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -46,6 +50,7 @@ export function VideoSoundSourcePicker({ value, recordingName, onChange, onOpenC
   ]
   const active = options.find((o) => o.source === value) ?? options[0]
   const label = t("editor.timeline.soundSourceTrigger", { source: active.label })
+  const pill = t(active.source === "recording" ? "editor.timeline.soundSourcePillRecording" : "editor.timeline.soundSourcePillVideo")
 
   return (
     <Popover open={open} onOpenChange={setOpenState}>
@@ -55,11 +60,12 @@ export function VideoSoundSourcePicker({ value, recordingName, onChange, onOpenC
           data-sound-source={value}
           aria-label={label}
           className={cn(
-            "flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white/70 backdrop-blur-sm",
+            "flex h-7 items-center gap-1 whitespace-nowrap rounded-md bg-black/55 pl-2 pr-1.5 text-xs font-medium text-white/80 backdrop-blur-sm",
             "transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/60",
           )}
         >
-          <Volume2 className="size-4" />
+          <span data-testid="video-sound-source-pill">{pill}</span>
+          <ChevronDown className="size-3.5 shrink-0" aria-hidden />
         </PopoverTrigger>
       </AppTooltip>
       <PopoverContent

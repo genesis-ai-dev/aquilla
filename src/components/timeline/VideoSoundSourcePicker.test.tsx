@@ -14,6 +14,17 @@ describe("VideoSoundSourcePicker", () => {
       .toHaveAttribute("aria-label", "Sound: The video's own sound")
   })
 
+  // Sam, Oct 5: a speaker icon read as a mute button. The trigger says, in
+  // words, which sound is on, and the menu says what it chooses.
+  it("is a text pill naming the choice, and its menu is headed Playback sound", async () => {
+    const { rerender } = render(<VideoSoundSourcePicker value="video" recordingName="episode.wav" onChange={() => {}} />)
+    expect(screen.getByTestId("video-sound-source-picker")).toHaveTextContent(/^Sound: Video$/)
+    rerender(<VideoSoundSourcePicker value="recording" recordingName="episode.wav" onChange={() => {}} />)
+    expect(screen.getByTestId("video-sound-source-picker")).toHaveTextContent(/^Sound: Recording$/)
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    expect(await screen.findByRole("radiogroup", { name: "Playback sound" })).toBeInTheDocument()
+  })
+
   it("offers both sounds, checks the current one, and reports a new pick", async () => {
     const onChange = vi.fn()
     render(<VideoSoundSourcePicker value="video" recordingName="episode.wav" onChange={onChange} />)

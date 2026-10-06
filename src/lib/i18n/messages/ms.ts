@@ -3270,7 +3270,6 @@ export const ms: Catalog = {
   "org.projectOverview.plan.targetMaintainerOnly": "Hanya penyelenggara boleh menetapkan tarikh sasaran.",
   "org.projectOverview.plan.completion": "Penyiapan",
   "org.projectOverview.plan.markDone": "Tanda selesai",
-  "org.projectOverview.plan.markDoneHint": "Boleh diundur.",
   "org.projectOverview.plan.markDoneAnyway": "Tanda selesai juga",
   "org.projectOverview.plan.unmarkDone": "Nyahtanda",
   "org.projectOverview.plan.notMarkedDone": "Belum ditanda selesai.",

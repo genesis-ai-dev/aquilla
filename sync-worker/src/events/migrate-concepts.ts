@@ -123,7 +123,9 @@ const MIGRATION_CHUNK = 200
  * Read-only. Used by the concepts read route as a fallback while a project is
  * still unmigrated, so nobody ever sees an empty termbase — see the long note
  * at that call site for why a fallback exists at all and why it does not
- * reopen the concurrent-add bug (the blob is never WRITTEN any more).
+ * reopen the concurrent-add bug (the blob is never WRITTEN any more). The
+ * in-app agent's term search (auth-worker/src/lib/agent/tools/search.ts)
+ * imports it for the same fallback, so the agent sees what the editor shows.
  *
  * Shares `loadBlobConcepts` with the migration itself, so what a user sees
  * before migration and what lands after it cannot drift apart.

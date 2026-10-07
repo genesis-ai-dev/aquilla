@@ -156,6 +156,7 @@ import {
   runReconnectResync,
   runAfterPushedLinkSync,
   workspaceTerminology,
+  timelinePlayReady,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -3249,9 +3250,24 @@ export function ProjectWorkspace() {
   // the file row, so refresh the project (not just cells). `file.video.set`
   // needs contributor access and the emit THROWS on refusal, so surface that
   // rather than letting the dialog close on a write that never happened.
+  //
+  // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
+  // mode as a side effect (a subtitle import with a video is always Original
+  // timing; clearing it brings back the file's own mode). Register that as our
+  // own write, or useTimingModeAck reads it as a collaborator's change and
+  // blames "someone with settings access" for the user's own click. `timingAck`
+  // is declared far below this callback, so it is reached through a ref that
+  // is assigned right after the hook runs.
+  const timingAckOwnWriteRef = useRef<{ note(mode: AudioTimingMode): void; clear(): void } | null>(null)
   const applyLinkVideo = useCallback(
     async (url: string | null) => {
       if (!project?.id || !activeFileId) return
+      const nextMode = resolveFileTimingMode(
+        activeFile ? { ...activeFile, coreMediaUrl: url } : null,
+        project,
+      )
+      const modeWillChange = nextMode !== resolveFileTimingMode(activeFile, project)
+      if (modeWillChange) timingAckOwnWriteRef.current?.note(nextMode)
       try {
         await emitFileVideoSet({
           projectId: project.id,
@@ -3262,6 +3278,8 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         refresh()
       } catch (e) {
+        // The write never landed: withdraw the intent, as applyTimingMode does.
+        if (modeWillChange) timingAckOwnWriteRef.current?.clear()
         const level = project.syncRole?.level ?? null
         toast.add({ type: "error", title: canPerform("file.video.set", level)
             ? e instanceof Error
@@ -3270,7 +3288,7 @@ export function ProjectWorkspace() {
             : denialMessage(t, ROLE.CONTRIBUTOR, level) })
       }
     },
-    [project, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane],
+    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -5724,7 +5742,7 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
-  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -9874,7 +9892,7 @@ export function ProjectWorkspace() {
   // selected clip's take from this read. Gated on timeline visibility so no
   // read fires outside the Media lens; the playback bar keeps its own
   // independent read (same file bus dedupes them).
-  const { byCellId: timelineAudioByCellId } = useFileAudioAttachments(
+  const { byCellId: timelineAudioByCellId, hasLoaded: timelineAudioLoaded } = useFileAudioAttachments(
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
     activeLane, // AQU-1591: takes belong to a lane.
@@ -10831,6 +10849,8 @@ export function ProjectWorkspace() {
     videoIsTransport,
     audioMergedCells.some((c) => queueClockIsFileTime(c)),
     timelineDurationSec,
+    // AQU-1704: the same answer the playback bar gets through `freeTiming`.
+    timingMode === "audioFirst",
   )
   useEffect(() => {
     if (!virtualIsTransport) {
@@ -10895,6 +10915,7 @@ export function ProjectWorkspace() {
       lens === "audio" &&
       recordingCellId === null,
   })
+  timingAckOwnWriteRef.current = { note: timingAck.noteOwnWrite, clear: timingAck.clearOwnWrite }
   // Apply THIS FILE's mode: register the change as our own first (so the
   // changer never gets the "timing mode changed" modal for their own click),
   // then emit + flush + refresh — the same shape as applyLinkVideo, and the
@@ -10928,11 +10949,12 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646: a subtitle import has no Free timing to switch to, and the
-      // picker that could have asked for it is not rendered for one. Silent
-      // because it is unreachable from the UI — this exists so no future
+      // AQU-646, rescoped by AQU-1704: a subtitle import with its video linked
+      // has no Free timing to switch to, and the picker is not rendered for
+      // one. Silent because it is unreachable from the UI; this exists so no
       // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && isSubtitleFile) return
+      // A video-less subtitle file DOES get the picker, so it must get through.
+      if (mode === "audioFirst" && timingModeFixedByFootage) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -10953,7 +10975,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, isSubtitleFile, applyTimingMode],
+    [activeFileId, activeFile?.coreMediaUrl, timingModeFixedByFootage, applyTimingMode],
   )
   /**
    * Persist a dragged (or Alt+Arrow'd) track order: overlay first so the row
@@ -11696,13 +11718,22 @@ export function ProjectWorkspace() {
    *  with the start riding along on the stamp so the film begins at the cue
    *  rather than at wherever it was paused. */
   const handleTimelinePlayFromTime = useCallback((sec: number) => {
+    // AQU-1752: same gate as VoicePlaybackBar (#1167). A press before the
+    // timeline's audio read lands starts the picture or the virtual clock,
+    // which can lose the file when the source clip arrives. Drop it. The
+    // next press, after the read, goes to the engine that owns the file.
+    if (!timelinePlayReady(timelineAudioLoaded)) return
     handleTimelineSeekToTime(sec, { play: true })
-  }, [handleTimelineSeekToTime])
+  }, [handleTimelineSeekToTime, timelineAudioLoaded])
 
   // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
   // cued-at-zero-then-play (so Space from cold plays from the beginning).
   const handleTimelineTogglePlay = useCallback(() => {
+    // AQU-1752: same gate as VoicePlaybackBar (#1167). Until the timeline's
+    // audio read has settled, Space must not start the picture or the virtual
+    // clock. Drop the press; do not hand a running clock to the queue later.
+    if (!timelinePlayReady(timelineAudioLoaded)) return
     // AQU-646: a subtitle file timed against footage has no audio attachments,
     // so the queue can never start and Space did nothing at all. There the
     // PICTURE is the transport — hand it the press. Gated on the same test the
@@ -11749,7 +11780,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -13816,7 +13847,7 @@ export function ProjectWorkspace() {
             examples={examples} errors={errors} previews={previews}
             exampleOriginFor={exampleOriginFor}
             onClearCellErrors={clearCellErrors}
-            onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
+            onCompleteSingle={handleCompleteSingle} onPrefetchCompletion={prefetchSingleEvidence} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
@@ -14233,6 +14264,7 @@ export function ProjectWorkspace() {
                   // arrangement and leaves the bar exactly as it was.
                   timelineDurationSec={timelineDurationSec}
                   virtualSoundingCellId={virtualSoundingCellId}
+                  freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
                   below={
                     <>

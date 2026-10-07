@@ -83,6 +83,11 @@ export function termToRegexSource(term: string): string | null {
 function compileRulePattern(rule: LintRule, pattern: string): RegExp | null {
   const caseFlag = rule.check.caseSensitive === true ? "" : "i"
   const unicodeFlag = rule.id.startsWith("term:") ? "u" : ""
+  // ReDoS guard: this runs in the worker request path. Skip oversized patterns
+  // and the classic nested-quantifier shape `(a+)+` / `(a*)*` / `(a|b+){2,}`.
+  if (!unicodeFlag && (pattern.length > 1000 || /\([^()]*[+*][^()]*\)\s*(?:[+*]|\{\d+,\d*\})/.test(pattern))) {
+    return null
+  }
   try {
     return new RegExp(pattern, `g${caseFlag}${unicodeFlag}`)
   } catch {

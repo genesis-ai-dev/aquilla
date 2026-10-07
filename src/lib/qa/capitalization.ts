@@ -121,10 +121,12 @@ function tokenBefore(text: string, index: number): string {
   return (m?.[1] ?? "").toLowerCase()
 }
 
-/** An ellipsis trails off; it does not end a sentence. */
+/**
+ * An ellipsis trails off; it does not end a sentence. A single `…` never
+ * matches in the first place (it is not in `TERMINATORS`), so this only has to
+ * recognize a run of dots — where the match always anchors on the last one.
+ */
 function isEllipsis(text: string, terminatorIndex: number): boolean {
-  if (text[terminatorIndex] === "…") return true
-  // Any dot belonging to a run of dots — the match only ever anchors on the last.
   return text[terminatorIndex] === "." && text[terminatorIndex - 1] === "."
 }
 

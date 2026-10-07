@@ -36,6 +36,7 @@ interface PreviewBody {
   fileId: string
   cellId: string
   targetLang: string
+  laneId?: string
   sourceLanguage: string
   targetLanguage: string
   sourceText: string
@@ -179,6 +180,10 @@ async function seedBase(testDb: TestDb) {
     sourceLanguage: "English",
     targetLanguage: "French",
   })
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
 }
 
 async function preview(
@@ -187,8 +192,11 @@ async function preview(
   cellId = "cell-live",
   qs = "",
 ): Promise<{ status: number; body: PreviewBody }> {
+  const query = qs.includes("targetLang=")
+    ? qs
+    : `${qs}${qs.includes("?") ? "&" : "?"}targetLang=deflane1`
   const res = await handleExternalReadRequest(
-    req(`/api/v1/external/projects/proj-a/cells/${cellId}/prompt-preview${qs}`, token),
+    req(`/api/v1/external/projects/proj-a/cells/${cellId}/prompt-preview${query}`, token),
     env(testDb),
   )
   expect(res).not.toBeNull()
@@ -722,17 +730,17 @@ describe("external prompt preview", () => {
         `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
          VALUES ('frc00002', 'proj-a', 'target', 'fr-CA', 'French (Canada)', 'fra', 'fr-CA', 1)`,
       )
-      const { body } = await preview(testDb, token, "cell-live", "?targetLang=fr-CA")
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=frc00002")
       expect(body.targetLanguage).toBe("fr-CA")
     })
 
     it("sends the default lane's stored language, not the project setting", async () => {
       await testDb.pg.query(
-        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-         VALUES ('defa0001', 'proj-a', 'target', 'French', NULL, NULL, '', 0)`,
+        `UPDATE lanes SET language = 'French' WHERE project_id = 'proj-a' AND id = 'deflane1'`,
       )
       await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "Spanish" })
       const { body } = await preview(testDb, token, "cell-live")
+      expect(body.laneId).toBe("deflane1")
       expect(body.targetLang).toBe("")
       expect(body.targetLanguage).toBe("French")
     })
@@ -745,15 +753,16 @@ describe("external prompt preview", () => {
       await testDb.pg.query(
         `UPDATE lanes SET language = 'Yoruba (Oyo)' WHERE project_id = 'proj-a' AND id = 'c0ffee01'`,
       )
-      const { body } = await preview(testDb, token, "cell-live", "?targetLang=Yoruba")
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
       expect(body.targetLanguage).toBe("Yoruba (Oyo)")
     })
 
-    it("does not treat an unknown 8-hex tag as a language or as the project target (AQU-1593)", async () => {
-      const { body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
-      expect(body.targetLang).toBe("b0b0b0b0")
-      expect(body.targetLanguage).toBe("")
-      expect(body.messages[0].content).not.toContain("b0b0b0b0")
+    it("does not treat an unknown id as a language or as the project target (AQU-1615)", async () => {
+      const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
+      expect(status).toBe(400)
+      const error = body as unknown as { error: { message: string } }
+      expect(error.error.message).toContain("lane does not exist")
+      expect(error.error.message).not.toContain("b0b0b0b0")
     })
 
     it("uses settings for an unbackfilled source lane and not for a typed one (AQU-1593)", async () => {
@@ -773,6 +782,7 @@ describe("external prompt preview", () => {
 
     it("still inherits the project target for the default lane", async () => {
       const { body } = await preview(testDb, token, "cell-live")
+      expect(body.laneId).toBe("deflane1")
       expect(body.targetLang).toBe("")
       expect(body.targetLanguage).toBe("French")
     })

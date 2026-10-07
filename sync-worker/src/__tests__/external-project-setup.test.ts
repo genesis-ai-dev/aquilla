@@ -110,6 +110,9 @@ afterEach(() => {
 
 /** USFM with a footnote, a character marker and a non-breaking space — the
  *  markers AQU-1283 strips. `cellsWithMarkup` must come back 0. */
+/** Two-column CSV from csv-bilingual.test.ts ("parses 2-column CSV without header"). */
+const BILINGUAL_CSV = "Hello world,Bonjour monde\nGoodbye,Au revoir"
+
 const USFM_ACTS = [
   '\\id ACT Test Bible',
   '\\h Acts',
@@ -276,7 +279,11 @@ describe('ProjectSetup — one plan, one approval', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'ru', targetLanguage: 'sty', contributeToGlobalTm: false },
+        lanes: [
+          { role: 'source', language: 'ru' },
+          { role: 'target', language: 'sty' },
+        ],
+        settings: { contributeToGlobalTm: false },
         brief: { parameters: { audience: 'Rural youth, 15–25' }, freeformNotes: 'Keep verse numbers.' },
         members: [
           { username: 'gulsifa', role: 600 },
@@ -289,12 +296,13 @@ describe('ProjectSetup — one plan, one approval', () => {
 
     // The approval page reads these four; none may be empty for a real plan.
     expect(body.summary.command).toBe('ProjectSetup')
-    expect(body.summary.settingsChanges).toMatchObject({
-      sourceLanguage: 'ru',
-      targetLanguage: 'sty',
+    const settingsChanges = body.summary.settingsChanges as Record<string, unknown>
+    expect(settingsChanges).toMatchObject({
       contributeToGlobalTm: 'false',
       'translationBrief.audience': 'Rural youth, 15–25',
     })
+    expect(settingsChanges.sourceLanguage).toBeUndefined()
+    expect(settingsChanges.targetLanguage).toBeUndefined()
     expect(body.summary.membershipChanges).toEqual([
       `Add gulsifa to ${PROJECT} as maintainer (600)`,
       `Add terciman to ${PROJECT} as contributor (400)`,
@@ -321,7 +329,7 @@ describe('ProjectSetup — one plan, one approval', () => {
     expect(receipt.command).toBe('ProjectSetup')
     expect(receipt.failedStep).toBeNull()
     expect(receipt.completedSteps.map((s) => s.kind)).toEqual([
-      'settings', 'policy', 'brief', 'members', 'import',
+      'policy', 'brief', 'members', 'import',
     ])
     expect(receipt.completedSteps.every((s) => s.status === 'applied')).toBe(true)
 
@@ -369,7 +377,7 @@ describe('ProjectSetup — one plan, one approval', () => {
     const env = makeEnv(tdb.db, bucket)
     const caller = await memberToken(700, 'act')
 
-    const { body } = await prepare(env, caller.token, setupCommand({ settings: { targetLanguage: 'fr' } }))
+    const { body } = await prepare(env, caller.token, setupCommand({ lanes: [{ role: 'target', language: 'fr' }] }))
     expect(body.changeset.autonomyMode).toBe('ask')
 
     // …and an unapproved commit is refused.
@@ -447,7 +455,7 @@ describe('ProjectSetup — the brief reaches the copilot (AQU-1323)', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'tt' },
+        lanes: [{ role: 'target', language: 'tt' }],
         brief: { parameters: { keyTerms: 'God → Алла; Holy Spirit → Иске Рух' } },
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
@@ -565,7 +573,11 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'en', targetLanguage: 'Journey Arabic', targetTextDirection: 'rtl' },
+        lanes: [
+          { role: 'source', language: 'en' },
+          { role: 'target', language: 'Journey Arabic' },
+        ],
+        settings: { targetTextDirection: 'rtl' },
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
     )
@@ -581,7 +593,10 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'en', targetLanguage: 'ar' },
+        lanes: [
+          { role: 'source', language: 'en' },
+          { role: 'target', language: 'ar' },
+        ],
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
     )
@@ -597,7 +612,7 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'ar' },
+        lanes: [{ role: 'target', language: 'ar' }],
         imports: [
           { artifactId: a, fileName: 'Acts', fileType: 'usfm' },
           // The odd file that runs against its project.
@@ -643,7 +658,7 @@ describe('ProjectSetup — prepare rejections name the field', () => {
     const { res, body } = await prepare(
       env,
       caller.token,
-      setupCommand({ project: { id: 'new-proj', name: 'New' }, settings: { targetLanguage: 'fr' } }),
+      setupCommand({ project: { id: 'new-proj', name: 'New' }, lanes: [{ role: 'target', language: 'fr' }] }),
     )
     expect(res.status).toBe(400)
     expect(body.error?.code).toBe('validation_failed')
@@ -749,7 +764,7 @@ describe('ProjectSetup — prepare rejections name the field', () => {
   it('refuses a caller below the plan floor', async () => {
     const env = makeEnv(tdb.db, bucket)
     const lead = await memberToken(500)
-    const { res, body } = await prepare(env, lead.token, setupCommand({ settings: { targetLanguage: 'fr' } }))
+    const { res, body } = await prepare(env, lead.token, setupCommand({ lanes: [{ role: 'target', language: 'fr' }] }))
     expect(res.status).toBe(403)
     expect(body.error?.code).toBe('permission_denied')
     expect(body.error?.details?.requiredRole).toBe(600)
@@ -767,7 +782,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'sty' },
+        lanes: [{ role: 'target', language: 'sty' }],
         brief: { parameters: { audience: 'Rural youth' } },
         members: [{ username: 'gulsifa', role: 600 }],
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
@@ -791,7 +806,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     expect(partial.failedStep.kind).toBe('import')
     expect(
       partial.completedSteps.filter((s) => s.status === 'applied').map((s) => s.kind),
-    ).toEqual(['settings', 'brief', 'members'])
+    ).toEqual(['brief', 'members'])
     // The earlier steps STAY applied — rolling them back is worse than leaving them.
     const afterFailure = await storedSettings()
     expect(afterFailure.settings.targetLanguage).toBeUndefined()
@@ -828,7 +843,10 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const { body } = await prepare(
       env,
       caller.token,
-      setupCommand({ settings: { targetLanguage: 'sty', validationCount: 3 } }),
+      setupCommand({
+        lanes: [{ role: 'target', language: 'sty' }],
+        settings: { validationCount: 3 },
+      }),
     )
     await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
 
@@ -863,7 +881,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const caller = await memberToken(700)
     await patchProjectSettingsShared(tdb.db, {
       projectId: PROJECT,
-      ops: [{ key: 'targetLanguage', value: 'sty' }],
+      ops: [{ key: 'systemPrompt', value: 'Be plain.' }],
       ifMatchVersion: 1,
       updatedBy: 99,
     })
@@ -871,7 +889,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const { body } = await prepare(
       env,
       caller.token,
-      setupCommand({ settings: { targetLanguage: 'sty' }, brief: { parameters: { audience: 'Youth' } } }),
+      setupCommand({ settings: { systemPrompt: 'Be plain.' }, brief: { parameters: { audience: 'Youth' } } }),
     )
     const warnings = body.summary.warnings as { code: string; message: string }[]
     expect(warnings.some((w) => w.code === 'superseded_step' && w.message.includes('settings'))).toBe(true)
@@ -884,5 +902,99 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
       { index: 0, kind: 'settings', status: 'superseded' },
       { index: 1, kind: 'brief', status: 'applied' },
     ])
+  })
+})
+
+describe('ProjectSetup bilingual import lane id', () => {
+  async function storedPlan(changesetId: string): Promise<{
+    summary: {
+      plannedIds?: {
+        projectSetup?: { steps?: { kind: string; laneId?: string }[] }
+      }
+    }
+    commands: { plannedLanes?: { id?: string; role: string; legacyTag?: string; language?: string }[] }[]
+  }> {
+    const stored = await tdb.pg.query<{ summary: unknown; commands: unknown }>(
+      `SELECT summary, commands FROM changesets WHERE id = $1`,
+      [changesetId],
+    )
+    const row = stored.rows[0]
+    const summary = typeof row.summary === 'string' ? JSON.parse(row.summary) : row.summary
+    const commands = typeof row.commands === 'string' ? JSON.parse(row.commands) : row.commands
+    return { summary, commands }
+  }
+
+  it('stamps the one new target lane onto a bilingual import that omits laneId', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv' }],
+      }),
+    )
+    expect(res.status).toBe(200)
+    const plan = await storedPlan(body.changeset.id)
+    const planned = plan.commands[0].plannedLanes?.find((lane) => lane.role === 'target')
+    expect(planned?.legacyTag).toBe('fr')
+    expect(planned?.language).toBe('fr')
+    const importStep = plan.summary.plannedIds?.projectSetup?.steps?.find((step) => step.kind === 'import')
+    expect(importStep?.laneId).toBe(planned?.id)
+
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const committed = await commit(env, caller.token, body.changeset.id)
+    expect(committed.res.status).toBe(200)
+
+    const lanes = await tdb.pg.query<{ id: string; legacy_tag: string; language: string }>(
+      `SELECT id, legacy_tag, language FROM lanes WHERE project_id = $1 AND role = 'target' ORDER BY legacy_tag`,
+      [PROJECT],
+    )
+    expect(lanes.rows).toEqual([{ id: planned?.id, legacy_tag: 'fr', language: 'fr' }])
+    const cells = await tdb.pg.query<{ side: string; value: string; lane_id: string; target_lang: string }>(
+      `SELECT side, value, lane_id, target_lang FROM cells WHERE project_id = $1 AND side = 'target' ORDER BY value`,
+      [PROJECT],
+    )
+    expect(cells.rows).toEqual([
+      { side: 'target', value: 'Au revoir', lane_id: planned?.id, target_lang: 'fr' },
+      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id, target_lang: 'fr' },
+    ])
+  })
+
+  it('requires a lane id when a bilingual import could land on two target lanes', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [
+          { role: 'target', language: 'fr' },
+          { role: 'target', language: 'sw' },
+        ],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv' }],
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error?.message).toContain('GET /api/v1/external')
+  })
+
+  it('rejects a language tag used as a bilingual import laneId', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv', laneId: 'fr' }],
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error?.message).toContain('lane does not exist')
   })
 })

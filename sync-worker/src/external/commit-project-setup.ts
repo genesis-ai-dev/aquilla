@@ -38,7 +38,7 @@ import {
 import { briefPatchOfSetup, splitSettingsOps, type ProjectSetupCommand } from './commands-project-setup'
 import { projectSetupFloor } from './prepare-project-setup'
 import type { PatchSettingsOp } from './commands-patch-settings'
-import { ensureProjectLanes } from '../../../db/shared/lanes'
+import { ensureProjectLanes, listProjectLanes } from '../../../db/shared/lanes'
 import type { PlanImportCommand } from './commands'
 import type {
   ExternalEnv,
@@ -137,6 +137,19 @@ export async function commitProjectSetup(
     return errorResponse('job_failed', 'ProjectSetup changeset is missing its step ledger')
   }
 
+  if (cmd.plannedLanes && cmd.plannedLanes.length > 0) {
+    try {
+      const existing = await listProjectLanes(db, projectId)
+      await ensureProjectLanes(db, projectId, {
+        lanes: cmd.plannedLanes,
+        existingLanes: existing,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'could not create the project lanes'
+      return errorResponse('validation_failed', message)
+    }
+  }
+
   const gate = await receiptOnlyGates(db, cs)
   if (gate instanceof Response) return gate
 
@@ -213,6 +226,7 @@ async function writeSettingsOps(
       ops: [...ops],
       ifMatchVersion: live.version,
       updatedBy,
+      registerLanes: false,
     })
     if (result.status === 'ok') return { ok: true, version: result.settings.version }
     if (result.status === 'error') return { ok: false, error: result.message }
@@ -220,34 +234,13 @@ async function writeSettingsOps(
   return { ok: false, error: 'the project settings were being written concurrently — retry the commit' }
 }
 
-const PROJECT_LANGUAGE_KEYS = new Set(["sourceLanguage", "targetLanguage", "targetLanes"])
-
 /**
- * AQU-1594: a setup's languages become lane rows. They are not written into
- * the settings blob. Every other settings op is unchanged.
+ * Settings ops other than the retired language keys. Lanes are created from
+ * `cmd.plannedLanes` before this step, not from settings.
  */
 async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
-  const languageOps = ops.filter((op) => PROJECT_LANGUAGE_KEYS.has(op.key))
-  const rest = ops.filter((op) => !PROJECT_LANGUAGE_KEYS.has(op.key))
-  if (languageOps.length > 0) {
-    const source = languageOps.find((op) => op.key === "sourceLanguage")
-    const target = languageOps.find((op) => op.key === "targetLanguage")
-    const registry = languageOps.find((op) => op.key === "targetLanes")
-    try {
-      await ensureProjectLanes(step.db, step.cs.projectId, {
-        settings: {
-          ...(typeof source?.value === "string" ? { sourceLanguage: source.value } : {}),
-          ...(typeof target?.value === "string" ? { targetLanguage: target.value } : {}),
-          ...(Array.isArray(registry?.value) ? { targetLanes: registry.value } : {}),
-        },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return { ok: false, error: `could not create the project's lanes: ${message}` }
-    }
-  }
-  if (rest.length === 0) return { ok: true }
-  const written = await writeSettingsOps(step.db, step.cs.projectId, rest, step.cred.userId)
+  if (ops.length === 0) return { ok: true }
+  const written = await writeSettingsOps(step.db, step.cs.projectId, ops, step.cred.userId)
   return written.ok ? { ok: true } : { ok: false, error: written.error }
 }
 
@@ -396,6 +389,7 @@ async function applyImportStep(
   const parsed = await parseArtifactToCells(step.env, projectId, current.artifactId, {
     fileType: current.fileType,
     ...(current.resultIndex !== undefined ? { resultIndex: current.resultIndex } : {}),
+    ...(current.laneId !== undefined ? { laneId: current.laneId } : {}),
     requireSingleResult: true,
   })
   if (!parsed.ok) {

@@ -79,6 +79,13 @@ async function seedProject(): Promise<TestDb> {
       },
     ],
     files: [{ id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'evt-file-1' }],
+  }).then(async (tdb) => {
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+       VALUES ('deflane1', $1, 'target', '', 1)`,
+      [PROJECT],
+    )
+    return tdb
   })
 }
 
@@ -98,7 +105,7 @@ function commitReq(token: string, id: string): Request {
 }
 
 const SET_TRANSLATION = [
-  { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello', valueHtml: '<p>hello</p>' },
+  { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hello', valueHtml: '<p>hello</p>' },
 ]
 
 let tdb: TestDb
@@ -242,7 +249,7 @@ describe('read-only credential — read surfaces still work', () => {
     const read = async (token: string) => {
       const res = (await handleExternalReadRequest(
         new Request(
-          `https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/cells`,
+          `https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/cells?lane=deflane1`,
           { headers: { Authorization: `Bearer ${token}` } },
         ),
         env,

@@ -10,6 +10,7 @@
 // emit-events-engine.ts.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import { laneIdRequiredMessage } from './external-lane'
 
 /**
  * Event kinds an EmitEvents changeset may stage (registry §2 v1). Everything
@@ -226,6 +227,14 @@ const LANE_KINDS = new Set([
   'assignment.reassign',
 ])
 
+/** These address one target lane. Omitting laneId is not the former default lane. */
+const LANE_REQUIRED_KINDS = new Set([
+  'cell.validate',
+  'cell.unvalidate',
+  'cell.backtranslation.set',
+  'target.cell.repin',
+])
+
 /** Payload fields the server resolves from the live projection at prepare. A
  *  caller-supplied value would either be silently ignored or fork the plan
  *  from what commit re-checks — reject with a teaching message instead. */
@@ -286,6 +295,10 @@ export function validateEmitEventsCommand(
     }
     if (rawEvent.laneId !== undefined && !LANE_KINDS.has(kind)) {
       issues.push({ index, message: `${where}.laneId is not applicable to ${kind}` })
+      return null
+    }
+    if (LANE_REQUIRED_KINDS.has(kind) && rawEvent.laneId === undefined) {
+      issues.push({ index, message: laneIdRequiredMessage(`${where}.laneId`) })
       return null
     }
     if (CELL_KINDS.has(kind) && (!isNonEmptyString(rawEvent.fileId) || !isNonEmptyString(rawEvent.cellId))) {

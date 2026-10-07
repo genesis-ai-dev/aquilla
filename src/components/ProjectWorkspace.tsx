@@ -177,6 +177,7 @@ import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
+import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
@@ -10893,6 +10894,24 @@ export function ProjectWorkspace() {
     () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
     [virtualIsTransport, virtualSec, dubDriverCells],
   )
+  // AQU-1118: which row is playing right now, so its "Play from this cue"
+  // button can turn into Pause. The bottom bar's own answer, from the same hook
+  // and the same inputs, so the row and the bar can never disagree about it.
+  const fileCellIds = useMemo(() => new Set(audioMergedCells.map((c) => c.id)), [audioMergedCells])
+  const anyFileCellClockIsFileTime = useMemo(
+    () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    [audioMergedCells],
+  )
+  const fileTransport = useTransportForFile({
+    cellIds: fileCellIds,
+    coreMediaUrl: activeFile?.coreMediaUrl ?? null,
+    anyCellClockIsFileTime: anyFileCellClockIsFileTime,
+    paneOnScreen: showVideoPane,
+    timelineDurationSec,
+    virtualSoundingCellId,
+    freeTiming: timingMode === "audioFirst",
+  })
+  const playingCueCellId = fileTransport.running ? fileTransport.cellId : null
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -13871,6 +13890,8 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
+            playingCueCellId={isSubtitleFile && timelineStacked ? playingCueCellId : null}
+            onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
             cellLabelsEnabled={cellLabelsEnabled}

@@ -929,7 +929,9 @@ export const agent = defineNamespace({
           "Line on a staged changeset naming the person it has been routed to for " +
           "review. Routing is an expectation, not a decision: the changeset is still " +
           "waiting for a human to approve or reject it.",
-        placeholders: { user: "Display name of the assigned reviewer, or their user id when no name is known." },
+        placeholders: {
+          user: "The person chip for the assigned reviewer: their username, or the anonymous label when they have none. Not a raw user id.",
+        },
       },
       "agent.changeset.heldCount": {
         description:

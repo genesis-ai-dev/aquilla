@@ -214,7 +214,7 @@ export function OrgMembersTable({
                   if (!expanded.has(m.userId)) toggleExpand(m.userId)
                 }}
               >
-                <UsernameWithAvatar username={m.username} size="xs" nameClassName="font-normal" />
+                <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="font-normal" />
               </MemberInspectorTrigger>
             </div>
           )

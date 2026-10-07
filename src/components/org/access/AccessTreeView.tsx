@@ -1,4 +1,5 @@
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
+import { UserChip } from "@/components/UserChip"
 import { roleLabel } from "@/components/access/labels"
 import type { ScopePath } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -28,7 +29,7 @@ function TreeNode({ node, path }: { node: AccessTreeNode; path: ScopePath }) {
           ) : node.directGrantees.map((g) => (
             <span key={g.userId} className="inline-flex items-baseline gap-1">
               <MemberInspectorTrigger userId={g.userId} username={g.displayName} from={from} herePath={here}>
-                {g.displayName}
+                <UserChip userId={g.userId} username={g.displayName} size="xs" nameClassName="text-sm font-normal" />
               </MemberInspectorTrigger>
               <span className="text-xs text-muted-foreground">{roleLabel(t, g.roleLevel)}</span>
             </span>

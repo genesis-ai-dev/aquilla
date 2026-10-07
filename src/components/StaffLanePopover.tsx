@@ -340,7 +340,7 @@ export function StaffLanePopover({
                       className="flex w-full items-center gap-2 px-2 py-1.5 text-start text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
-                      <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
+                      <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="text-xs" />
                     </button>
                   </li>
                 ))
@@ -368,7 +368,7 @@ export function StaffLanePopover({
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <UsernameWithAvatar username={selected.username} size="xs" nameClassName="text-xs" />
+              <UsernameWithAvatar userId={selected.userId} username={selected.username} size="xs" nameClassName="text-xs" />
               <Button
                 variant="ghost"
                 className="h-6 px-1.5 text-[11px]"

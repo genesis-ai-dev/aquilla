@@ -71,13 +71,6 @@ export interface StageRecheck {
   residual: boolean
 }
 
-/**
- * Re-check a cell's final text just before it is staged. The evaluator's
- * codes recorded during the run described an earlier text, so they are
- * replaced by what the final text gets. A recorded `bkp:` code the evaluator
- * cannot produce with this profile (its check is dormant) came from an
- * active Jev question, and is kept.
- */
 /** AQU-1699: what the project's decisions and terminology switch on, as the file's expectations carry it. */
 function gateReadiness(gate: BibleGate): BibleCheckReadiness | undefined {
   for (const expectation of gate.expectations.values()) {
@@ -86,6 +79,13 @@ function gateReadiness(gate: BibleGate): BibleCheckReadiness | undefined {
   return undefined
 }
 
+/**
+ * Re-check a cell's final text just before it is staged. The evaluator's
+ * codes recorded during the run described an earlier text, so they are
+ * replaced by what the final text gets. A recorded `bkp:` code the evaluator
+ * cannot produce with this profile (its check is dormant) came from an
+ * active Jev question, and is kept.
+ */
 export function recheckForStage(
   gate: BibleGate,
   cellId: string,

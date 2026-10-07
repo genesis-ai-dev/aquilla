@@ -57,11 +57,11 @@
 // services/org-permissions.ts. Enforced by the terminology-scoped carve-out
 // in routes/project-settings.ts; this route only stores/validates it.
 //
-// AQU-1086: languageEditMinRole (who may change a project's source/target
-// language and its extra target lanes) is the second write-gating role-ladder
-// policy key, on the same OWNER-only write gate. Unlike termbaseEditMinRole
-// its default is MAINTAINER (600) — today's behaviour — so an org opts in by
-// lowering it to PROJECT_LEAD. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
+// AQU-1086 / AQU-984: languageEditMinRole (who may change a project's
+// source/target language and its extra target lanes) is a role-ladder policy
+// key, on the same OWNER-only write gate. Absent, the floor is PROJECT_LEAD.
+// A stored value — including an explicit MAINTAINER — is that org's choice
+// and is kept. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
 // services/org-permissions.ts and the language-scoped carve-out in
 // routes/project-settings.ts; this route only stores/validates it.
 

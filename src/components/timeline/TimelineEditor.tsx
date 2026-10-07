@@ -116,7 +116,7 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { useQueueForFile, useMissingClipCells, queueClockIsFileTime, queueClockIsProgrammeTime } from "@/lib/audio/play-queue"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -1508,7 +1508,13 @@ export function TimelineEditor({
     () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
     [cells, queue.cellId],
   )
-  const queueClockIsFile = queueClockIsFileTime(queueSoundingCell)
+  // AQU-1747: a video-less subtitle file in Free timing has no source
+  // recording, but its queue clock is the programme clock this timeline draws.
+  // The queue says so itself; the timing mode alone would not do, because a
+  // take played from a row's rail is a one-line snapshot on a per-take clock.
+  // Read at render: the flag flips with the queue state, which re-renders here.
+  const queueClockIsFile =
+    queueClockIsFileTime(queueSoundingCell) || (queueActive && queueClockIsProgrammeTime())
   /**
    * AQU-646 stage 5: where the hand is, while the playhead is being dragged.
    *

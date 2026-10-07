@@ -21,6 +21,9 @@ let mockOutputLatencySec = 0
 vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatencySec }))
 
 let mockQueueState: QueueState = { kind: "idle" }
+// AQU-1747: whether the real queue would report its clock as the programme
+// clock (audio-first, full-file context, not a single-line snapshot).
+const mockProgrammeClock = vi.hoisted(() => ({ value: false }))
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
 // Round 5: the speaker buttons push audibility straight into the queue.
 let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
@@ -76,6 +79,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
     // file position cannot be allowed to drift from the real rule.
     queueClockIsFileTime: (cell: CellData | undefined | null) =>
       cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
+    queueClockIsProgrammeTime: () => mockProgrammeClock.value,
     setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
       lastAudibility = a
       audibilityStore.set(a)
@@ -439,6 +443,56 @@ describe("TimelineEditor", () => {
       mockQueueState = { kind: "idle" }
       mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
     }
+  })
+
+  // AQU-1747. A video-less subtitle file has only takes on text cues, so no
+  // source recording is the master and the file-position test is false. In
+  // Free timing the queue's clock is still the programme clock the timeline
+  // draws, and the queue says so; a rail take on the same file does not.
+  describe("video-less subtitle file in Free timing", () => {
+    const cues = [
+      cell({ id: "c1", original: "One", startTime: 0, endTime: 4 }),
+      cell({ id: "c2", original: "Two", startTime: 4, endTime: 8 }),
+    ]
+    const reset = () => {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgrammeClock.value = false
+    }
+    const head = () => parseFloat(screen.getByTestId("tl-playhead").style.left)
+    const ui = () => (
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={cues} onRetimeSubtitle={() => {}} />
+    )
+
+    it("the playhead follows the programme clock", () => {
+      mockProgrammeClock.value = true
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "c2" }
+      mockProgress = { currentTime: 7, duration: 8, rate: 1, volume: 1 }
+      try {
+        const { rerender } = render(ui())
+        expect(head()).toBeCloseTo(7 * 38, 0)
+        // A seek while paused moves it to the matching position too.
+        mockQueueState = { kind: "paused", cellIndex: 0, cellId: "c1" }
+        mockProgress = { currentTime: 2, duration: 8, rate: 1, volume: 1 }
+        rerender(ui())
+        expect(head()).toBeCloseTo(2 * 38, 0)
+      } finally {
+        reset()
+      }
+    })
+
+    it("a take played from a row's rail leaves the playhead where it was", () => {
+      // The queue reports no programme clock for a one-line snapshot.
+      mockProgrammeClock.value = false
+      mockQueueState = { kind: "playing", cellIndex: 0, cellId: "c2" }
+      mockProgress = { currentTime: 3, duration: 5, rate: 1, volume: 1 }
+      try {
+        render(ui())
+        expect(head()).toBe(0)
+      } finally {
+        reset()
+      }
+    })
   })
 
   it("a queue playing ANOTHER file's cells does not move this playhead", () => {

@@ -563,6 +563,27 @@ export function queueClockIsFileTime(cell: CellData | undefined | null): boolean
   return cell?.medium === "media" && sourceClipAudioForCell(cell) != null
 }
 
+/**
+ * True while the audio-first programme is the engaged transport for the full
+ * file, i.e. `progress.currentTime` is a position on the programme clock the
+ * timeline draws (`progRebuild` sets `duration: programme.totalSec`). A video-
+ * less subtitle file has no source recording, so `queueClockIsFileTime` is
+ * false for it even though the clock is a real timeline position. (AQU-1747)
+ *
+ * A single-cell snapshot ("play just this line" from a row's rail) is
+ * excluded: it engages a one-slot programme whose clock restarts at 0, which
+ * is exactly the per-take clock no timeline consumer may treat as a position.
+ * Callers still need to check the queue is active for their file.
+ */
+export function queueClockIsProgrammeTime(): boolean {
+  return (
+    timingMode === "audioFirst" &&
+    programme !== null &&
+    progIndex >= 0 &&
+    !activeContext?.snapshot
+  )
+}
+
 interface ResolvedAudioSrc {
   src: string
   /** Object URL to revoke on dispose (blob playback only). */

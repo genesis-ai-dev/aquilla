@@ -9,6 +9,8 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import * as capitalization from "./check-functions/capitalization"
+import * as footnoteQuoteMismatch from "./check-functions/footnote-quote-mismatch"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -140,6 +142,27 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  "capitalization": {
+    id: "capitalization",
+    name: "Capitalization",
+    description: "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: capitalization.runCheck,
+    message: capitalization.MESSAGE,
+  },
+  "footnote-quote-mismatch": {
+    id: "footnote-quote-mismatch",
+    name: "Footnote quote",
+    description:
+      "Text a footnote or cross-reference quotes from the verse (\\fq, \\fk, \\xq, \\xk) must appear in that verse's translation.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: footnoteQuoteMismatch.runCheck,
+    message: footnoteQuoteMismatch.MESSAGE,
+  },
 }
 
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
@@ -153,4 +176,6 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
+  "capitalization",
+  "footnote-quote-mismatch",
 ]

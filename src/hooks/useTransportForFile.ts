@@ -49,6 +49,8 @@ export interface UseTransportForFileArgs {
   timelineDurationSec?: number
   /** The line the playhead is on, over the cells that actually hold takes. */
   virtualSoundingCellId?: string | null
+  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`. */
+  freeTiming?: boolean
 }
 
 /**
@@ -65,6 +67,7 @@ export function useTransportForFile({
   paneOnScreen,
   timelineDurationSec = 0,
   virtualSoundingCellId = null,
+  freeTiming = false,
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -84,7 +87,7 @@ export function useTransportForFile({
   const virtualVolume = useVirtualClockVolume()
   // Reads `ownedByVideo`, not `coreMediaUrl`: a film whose pane is off screen
   // has nothing to drive, so the virtual clock is correct there.
-  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec)
+  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec, freeTiming)
 
   return useMemo(
     () =>

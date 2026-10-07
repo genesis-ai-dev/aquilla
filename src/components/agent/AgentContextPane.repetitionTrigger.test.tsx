@@ -174,7 +174,7 @@ describe("AgentContextPane — AQU-1497 a typed, auto-validated workbench edit f
     act(() => { pm.editor!.commands.setContent("half-typ") })
     // The editor's own idle window elapses with focus still in the cell: the
     // text is committed and auto-validated, exactly as before…
-    await waitFor(() => expect(h.onCommitTarget).toHaveBeenCalledTimes(1), { timeout: 5_000 })
+    await waitFor(() => expect(h.onCommitTarget).toHaveBeenCalledTimes(1))
     expect(vi.mocked(h.onCommitTarget).mock.calls[0][1]).toMatchObject({ value: "half-typ" })
     await act(async () => { await vi.mocked(h.onCommitTarget).mock.results[0].value })
     // …but the repetitions are not touched yet.

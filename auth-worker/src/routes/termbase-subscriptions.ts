@@ -51,11 +51,13 @@
 //
 // 8. GET /api/v2/projects/:termbaseProjectId/termbase/concepts?subscriberProjectId=...
 //    The upstream published termbase's ACTIVE concepts, for a subscriber's
-//    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts).
+//    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts, which
+//    no editor surface calls yet — AQU-1715).
 //    Access is the Q19 implicit grant — canReadTermbase, NOT a role check on
-//    the upstream. Concepts are read from project_settings.settings.terminology
-//    (AD-3 thin-client: project terminology is synced as a top-level settings
-//    key, see src/lib/sync/project-settings.ts).
+//    the upstream. Concepts are read as the editor reads a project's own
+//    (lib/concepts-read.ts): the live rows of the `concepts` table, and the
+//    legacy settings.terminology blob only while the table has none. Autopilot
+//    reads subscribed termbases through the same function.
 //    → 200 { concepts: Concept[] }   // status === "active" only
 //    → 400 { error: "subscriberProjectId required" }
 //    → 403 { error: "no termbase read access" }  (non-member / no subscription /
@@ -75,6 +77,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole, canReadTermbase } from "../services/org-permissions"
+import { readProjectConcepts } from "../lib/concepts-read"
 
 const termbase = new Hono<AuthHonoEnv>()
 
@@ -362,17 +365,6 @@ termbase.patch(
 // read via the Q19 implicit subscription grant (canReadTermbase).
 // ──────────────────────────────────────────────────────────────────────────
 
-interface Concept {
-  id: string
-  sourceTerm: string
-  renderings: Array<{ rendering: string; status: string }>
-  notes?: string
-  status: "active" | "draft" | "deprecated"
-  createdAt: string
-  createdBy?: string
-  updatedAt?: string
-}
-
 termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) => {
   const user = c.get("user")
   const termbaseProjectId = c.req.param("termbaseProjectId") as string
@@ -388,28 +380,14 @@ termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) 
   })
   if (!allowed) return c.json({ error: "no termbase read access" }, 403)
 
-  // Project terminology is persisted as a top-level key in the upstream's
-  // project_settings JSON (AD-3 thin-client; src/lib/sync/project-settings.ts).
-  // Read it directly here rather than round-tripping the settings route, which
-  // would require a role on the upstream we deliberately don't grant.
-  const row = await c.env.AQUILLA_PG.prepare(
-    "SELECT settings FROM project_settings WHERE project_id = ?",
+  // Read the upstream's termbase directly rather than round-tripping its
+  // settings or concepts routes, which would require a role on the upstream we
+  // deliberately don't grant. Since the concepts migration deletes the
+  // settings.terminology key, reading only that key returned nothing for every
+  // migrated termbase (AQU-1715).
+  const concepts = (await readProjectConcepts(c.env.AQUILLA_PG, termbaseProjectId)).filter(
+    (concept) => concept.status === "active",
   )
-    .bind(termbaseProjectId)
-    .first<{ settings: string }>()
-
-  let concepts: Concept[] = []
-  if (row?.settings) {
-    try {
-      const parsed = JSON.parse(row.settings) as { terminology?: Concept[] }
-      const all = Array.isArray(parsed.terminology) ? parsed.terminology : []
-      concepts = all.filter((c) => c.status === "active")
-    } catch {
-      // Corrupt settings JSON — return no concepts rather than 500ing the
-      // subscriber's enforcement merge.
-      concepts = []
-    }
-  }
 
   return c.json({ concepts })
 })

@@ -213,6 +213,8 @@ routes = [
   # RFC 8414 discovery for the MCP OAuth issuer (api.aquilla.app/identity): the
   # spec's path-issuer location sits at the host root. Only this one prefix.
   "api.aquilla.app/.well-known/oauth-authorization-server/*",
+  # OpenAI plugin portal domain verification (secret OPENAI_APPS_CHALLENGE).
+  "api.aquilla.app/.well-known/openai-apps-challenge",
 ]
 
 [env.production.build]
@@ -321,6 +323,8 @@ routes = [
   # RFC 8414 discovery for the MCP OAuth issuer (api.dev.aquilla.app/identity): the
   # spec's path-issuer location sits at the host root. Only this one prefix.
   "api.dev.aquilla.app/.well-known/oauth-authorization-server/*",
+  # OpenAI plugin portal domain verification (secret OPENAI_APPS_CHALLENGE).
+  "api.dev.aquilla.app/.well-known/openai-apps-challenge",
 ]
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).

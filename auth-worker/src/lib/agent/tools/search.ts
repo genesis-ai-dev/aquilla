@@ -1,9 +1,11 @@
 // search — project-wide full-text search, as one call.
 //
 // Sides: source/target cells (tsvector via websearch_to_tsquery — safe for
-// arbitrary user text), comments (ILIKE), terms (the project_settings
-// terminology JSON, matched in JS). Default searches both cell sides.
+// arbitrary user text), comments (ILIKE), terms (the project's live concepts,
+// read as the editor reads them, matched in JS). Default searches both cell
+// sides.
 
+import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
 import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
@@ -113,26 +115,46 @@ async function searchComments(
   }))
 }
 
+/** Only an active concept compiles to rules (the editor's checks, autopilot's
+ *  lint), so a draft or deprecated hit says that it is not enforced. */
+const TERM_STATUS_LABEL: Record<StoredConcept["status"], string> = {
+  active: "active",
+  draft: "draft, not enforced",
+  deprecated: "deprecated, not enforced",
+}
+
+/** "[active] grace → gracia (preferred), suerte (forbidden) — notes". The
+ *  status comes first, so a clipped line always keeps it. */
+function termSnippet(t: StoredConcept): string {
+  const renderings = t.renderings.map((r) => `${r.rendering} (${r.status})`).join(", ")
+  return `[${TERM_STATUS_LABEL[t.status]}] ${t.sourceTerm}` +
+    (renderings ? ` → ${renderings}` : "") +
+    (t.notes ? ` — ${t.notes}` : "")
+}
+
+// AQU-1714: every live concept is searchable, drafts and deprecated terms
+// included. Search is not enforcement. The editor's checks and autopilot's lint
+// use active concepts only, but the agent searches the termbase to learn what
+// the team has decided or proposed. Without drafts, it would report that the
+// team has not addressed a term that is waiting for review. Without deprecated
+// terms, it would lose the record that a rendering was retired on purpose, and
+// it could suggest that rendering again. Each hit carries its status, so a
+// proposal or a retired term never reads as binding. Matching uses the text
+// the team wrote (source term, renderings, notes), not ids or status labels.
+//
+// The terms are read as the editor reads them, through the same function as
+// autopilot and the termbase subscription route (readProjectConcepts): the
+// live `concepts` rows, and the legacy settings key only while there are none.
+// The concepts migration deletes that key, so a key left behind never adds
+// terms next to the table's or brings a deleted term back.
 async function searchTerms(db: AquillaDb, q: string, ctx: SearchContext, limit: number): Promise<SearchHit[]> {
-  const row = await db
-    .prepare("SELECT settings FROM project_settings WHERE project_id = ?")
-    .bind(ctx.projectId)
-    .first<{ settings: string }>()
-  if (!row) return []
-  let concepts: unknown[] = []
-  try {
-    const settings = JSON.parse(row.settings) as { terminology?: { concepts?: unknown[] } }
-    concepts = settings.terminology?.concepts ?? []
-  } catch {
-    return []
-  }
   const needle = q.toLowerCase()
   const hits: SearchHit[] = []
-  for (const raw of concepts) {
+  for (const term of await readProjectConcepts(db, ctx.projectId)) {
     if (hits.length >= limit) break
-    const text = JSON.stringify(raw)
-    if (text.toLowerCase().includes(needle)) {
-      hits.push({ cellId: "", side: "terms", snippet: text.slice(0, 200) })
+    const text = [term.sourceTerm, ...term.renderings.map((r) => r.rendering), term.notes ?? ""]
+    if (text.some((s) => s.toLowerCase().includes(needle))) {
+      hits.push({ cellId: "", side: "terms", snippet: termSnippet(term).slice(0, 200) })
     }
   }
   return hits

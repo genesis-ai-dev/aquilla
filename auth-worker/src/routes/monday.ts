@@ -744,6 +744,8 @@ monday.post("/projects/:projectId/sync", authMiddleware, async (c) => {
   if (guard instanceof Response) return guard
   const link = await getLink(c.env, guard.projectId)
   if (!link) return c.json({ error: "project has no Monday link" }, 404)
+  // The Sync switch is off: nothing writes to the board, a manual push included.
+  if (!link.enabled) return c.json({ error: "sync is paused for this project" }, 409)
   const result = await pushBoardLink(c.env, link)
   return c.json(result)
 })

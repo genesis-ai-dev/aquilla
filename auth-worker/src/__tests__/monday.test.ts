@@ -432,6 +432,18 @@ describe("POST /api/v2/monday/internal/push", () => {
   })
 })
 
+describe("POST /api/v2/monday/projects/:projectId/sync (Sync now)", () => {
+  it("refuses while the Sync switch is off, and writes nothing to the board", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET enabled = FALSE WHERE id = 'link-1'").run()
+    const fetchFn = mockFetch(() => null)
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/sync")
+    expect(res.status).toBe(409)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+})
+
 describe("re-linking a board Aquilla has written to before", () => {
   it("reuses the item carrying this project's Aquilla ID instead of creating a second one", async () => {
     await seedOrgProject()

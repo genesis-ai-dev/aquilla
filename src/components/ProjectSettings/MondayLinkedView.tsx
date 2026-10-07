@@ -9,6 +9,7 @@ import { FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { SparkleButton } from "@/components/SparkleButton"
 import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
@@ -119,10 +120,14 @@ export function MondayLinkedView({
               disabled={!canManage || toggling}
             />
           </span>
-          <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing}>
-            {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
-            {t("projectSettings.monday.syncNowButton")}
-          </Button>
+          {/* "Sync now" is a push too: while the Sync switch is off, nothing
+              may write to the board, so it waits for the switch. */}
+          <AppTooltip content={link.enabled ? null : t("projectSettings.monday.syncNowPausedTooltip")}>
+            <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing || !link.enabled}>
+              {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
+              {t("projectSettings.monday.syncNowButton")}
+            </Button>
+          </AppTooltip>
           <Button
             variant="ghost"
             size="icon"

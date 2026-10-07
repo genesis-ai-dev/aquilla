@@ -1216,6 +1216,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
+    "projectSettings.monday.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Monday.",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
     "projectSettings.monday.columnMappingLabel": "Column mapping",
     "projectSettings.monday.reconfigureWithAiLabel": "Reconfigure with AI",
@@ -2068,6 +2069,12 @@ export const projectSettings = defineNamespace({
           "Accessible name of the Monday-board picker select, in both the manual link " +
           "flow and the AI setup wizard's board-change control. No separate visible " +
           "label — only a placeholder inside the closed select.",
+      },
+      "projectSettings.monday.syncNowPausedTooltip": {
+        description:
+          "Tooltip on the disabled \"Sync now\" button in a project's Monday.com settings " +
+          "while the Sync switch beside it is off. \"Sync\" is that switch's label " +
+          "(projectSettings.monday.syncToggleLabel).",
       },
       "projectSettings.monday.removeBoardLinkAriaLabel": {
         description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",

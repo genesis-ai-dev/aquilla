@@ -193,6 +193,19 @@ describe("MondayIntegrationSection", () => {
     expect(screen.queryByText(/board structure changed/i)).toBeNull()
   })
 
+  it("Sync now waits for the Sync switch: disabled while paused, with the reason on hover", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ enabled: false }) })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+
+    renderSection()
+
+    const syncBtn = (await screen.findByRole("button", { name: /sync now/i })) as HTMLButtonElement
+    expect(syncBtn.disabled).toBe(true)
+    // A disabled button gets no pointer events in a real browser, so the
+    // tooltip must hang on a wrapper (see AppTooltip, AQU-959).
+    expect(syncBtn.closest('[data-slot="tooltip-disabled-trigger"]')).not.toBeNull()
+  })
+
   it("linked, below maintainer: read-only mapping table, no editor or sync controls", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })

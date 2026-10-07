@@ -174,6 +174,11 @@ export function parseJsonColumn<T>(raw: unknown, fallback: T): T {
   return raw as T
 }
 
+/** "Aquilla ID", "Aquilla id", "aquilla_id", "AquillaID" … */
+function isAquillaIdTitle(title: string | undefined): boolean {
+  return (title ?? "").toLowerCase().replace(/[^a-z]/g, "") === "aquillaid"
+}
+
 export interface SanitizeResult {
   mapping: MondayMapping | null
   warnings: string[]
@@ -271,6 +276,25 @@ export function sanitizeMapping(
       matchExisting = { byName: true }
     }
   }
+
+  // Re-linking a board Aquilla has written to before must reuse its items, not
+  // add a second copy of each. The Aquilla ID column is what identifies them,
+  // so whenever the board has one it is mapped and matched on, whatever the
+  // AI or the user proposed.
+  let idColumn = columns.find((c) => c.metric === "external_id")
+  if (!idColumn && byId) {
+    const named = [...byId.values()].find(
+      (c) =>
+        isAquillaIdTitle(c.title) &&
+        (c.type === "text" || c.type === "long_text") &&
+        !columns.some((m) => m.columnId === c.id),
+    )
+    if (named) {
+      idColumn = { columnId: named.id, columnType: named.type, metric: "external_id" }
+      columns.push(idColumn)
+    }
+  }
+  if (idColumn) matchExisting = { columnId: idColumn.columnId }
 
   return {
     mapping: {

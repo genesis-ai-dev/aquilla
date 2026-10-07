@@ -338,6 +338,18 @@ export function MondaySetupWizard({
 
   const boardUrl = linkedBoardUrl ?? structure?.url ?? analysis?.boardUrl ?? null
   const mappedCount = rows.filter((r) => r.columnId).length
+  // Whether a later setup on this board reuses these items or adds copies.
+  // The server always matches on an Aquilla ID column when the board has one.
+  const matchExisting = analysis?.proposal.matchExisting
+  const matchLine = !matchExisting
+    ? t("projectSettings.monday.wizardMatchNone")
+    : "columnId" in matchExisting
+      ? t("projectSettings.monday.wizardMatchByColumn", {
+          column:
+            structure?.columns.find((c) => c.id === matchExisting.columnId)?.title ??
+            matchExisting.columnId,
+        })
+      : t("projectSettings.monday.wizardMatchByName")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -455,6 +467,7 @@ export function MondaySetupWizard({
 
             <div className="flex flex-col gap-2 text-sm">
               <p>{t("projectSettings.monday.wizardRecommendation", { granularity, mappedCount })}</p>
+              <p className="text-muted-foreground" data-testid="monday-wizard-match-existing">{matchLine}</p>
               {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">{t("projectSettings.monday.wizardPreviewBoardLink")}</a>}
               <Button variant="outline" onClick={() => setCustomizing(!customizing)}>
                 {customizing ? t("projectSettings.monday.wizardHideCustomization") : t("projectSettings.monday.wizardShowCustomization")}

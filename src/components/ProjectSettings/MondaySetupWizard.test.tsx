@@ -197,6 +197,34 @@ describe("MondaySetupWizard", () => {
     expect(screen.queryByTestId("monday-wizard-link-warnings")).toBeNull()
   })
 
+  it("says on the review screen that items already on the board are reused, by the Aquilla ID column", async () => {
+    mocked.analyzeMondayMapping.mockResolvedValue(
+      analysis({ proposal: { ...PROPOSAL, matchExisting: { columnId: "text_aq" } } }),
+    )
+    mocked.fetchMondayBoardStructure.mockResolvedValue({
+      columns: [
+        { id: "numbers_1", title: "Progress", type: "numbers" },
+        { id: "text_aq", title: "Aquilla ID", type: "text" },
+      ],
+      groups: [],
+    })
+    renderWizard()
+    await scanToReview()
+    expect(screen.getByTestId("monday-wizard-match-existing").textContent).toMatch(
+      /reused, found by their Aquilla ID column/,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
+    await waitFor(() => expect(mocked.putMondayLink).toHaveBeenCalled())
+    expect(mocked.putMondayLink.mock.calls[0][2].config.matchExisting).toEqual({ columnId: "text_aq" })
+  })
+
+  it("warns on the review screen when a later setup would add copies", async () => {
+    renderWizard()
+    await scanToReview()
+    expect(screen.getByTestId("monday-wizard-match-existing").textContent).toMatch(/Aquilla ID/)
+    expect(screen.getByTestId("monday-wizard-match-existing").textContent).toMatch(/adds new items/)
+  })
+
   it("undo removes the link the wizard just created", async () => {
     mocked.deleteMondayLink.mockResolvedValue(undefined)
     const { onUnlinked } = renderWizard()

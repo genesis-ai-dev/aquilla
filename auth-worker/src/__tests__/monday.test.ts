@@ -432,6 +432,91 @@ describe("POST /api/v2/monday/internal/push", () => {
   })
 })
 
+describe("re-linking a board Aquilla has written to before", () => {
+  it("reuses the item carrying this project's Aquilla ID instead of creating a second one", async () => {
+    await seedOrgProject()
+    // A link saved without a matchExisting rule (the AI didn't add one), but
+    // with the Aquilla ID column mapped. The board still has the item from
+    // before the disconnect; no integration_item_links row remembers it.
+    await seedLink({
+      lastPushedAt: null,
+      config: {
+        ...baseConfig,
+        columns: [...baseConfig.columns, { columnId: "text_aq", columnType: "text", metric: "external_id" }],
+      },
+    })
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      calls.push(body)
+      if (body.includes("items_page_by_column_values")) {
+        expect(body).toContain("text_aq")
+        expect(body).toContain("proj-1")
+        return jsonResponse({ data: { items_page_by_column_values: { items: [{ id: 555 }] } } })
+      }
+      if (body.includes("change_multiple_column_values")) {
+        return jsonResponse({ data: { u0: { id: "555" } } })
+      }
+      return null
+    })
+
+    const res = await app.request(
+      "/api/v2/monday/internal/push",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SYNC_SECRET_KEY}` },
+        body: JSON.stringify({ projectId: "proj-1" }),
+      },
+      menv,
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true)
+    expect(calls.some((b) => b.includes("create_item"))).toBe(false)
+    const itemLink = await env.AQUILLA_PG.prepare(
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = 'link-1' AND entity_id = 'proj-1'",
+    ).first<{ external_item_id: string }>()
+    expect(itemLink!.external_item_id).toBe("555")
+  })
+
+  it("saving a link to a board with an Aquilla ID column always adds the match rule and maps the column", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: {
+            boards: [{
+              name: "Ruth Board",
+              columns: [
+                { id: "numbers_1", title: "Progress", type: "numbers" },
+                { id: "text_aq", title: "Aquilla ID", type: "text" },
+              ],
+              groups: [],
+            }],
+          },
+        })
+      }
+      if (body.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      return null
+    })
+
+    // The proposal matched by name and left the Aquilla ID column unmapped.
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, matchExisting: { byName: true } },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { config: { matchExisting?: unknown; columns: Array<{ columnId: string; metric: string }> } }
+    }
+    expect(body.link.config.matchExisting).toEqual({ columnId: "text_aq" })
+    expect(body.link.config.columns).toContainEqual(
+      expect.objectContaining({ columnId: "text_aq", metric: "external_id" }),
+    )
+  })
+})
+
 // ── Config validation (PUT link) ───────────────────────────────────────────
 
 describe("PUT /api/v2/monday/projects/:projectId/link", () => {

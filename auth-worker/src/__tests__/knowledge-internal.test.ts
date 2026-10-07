@@ -179,6 +179,50 @@ describe("POST /api/v2/internal/projects/:projectId/knowledge", () => {
   })
 })
 
+// The two halves of this feature live in separate worker packages with separate
+// runtimes, so no unit test can run sync-worker's bridge against this route for
+// real — that composition is only reachable from the e2e stack, and a PR preview
+// cannot even do that (a preview sync-worker cannot call a preview auth-worker;
+// see docs/DEPLOYMENT-ENVIRONMENTS.md "Preview limitations"). What CAN be pinned
+// here is the wire contract itself: the exact request
+// sync-worker/src/external/knowledge-bridge.ts builds. If either side renames a
+// header or drops the encoding, this fails instead of the feature failing
+// silently in production.
+describe("the wire contract sync-worker's knowledge bridge sends", () => {
+  it("accepts the bridge's exact request and stores the decoded name", async () => {
+    stubIndexingFetch()
+    // Arabic name — the case that motivated AQU-1762. Headers are ByteString-only,
+    // so the bridge percent-encodes; this route must decode it back.
+    const name = "فان دايك.txt"
+    const res = await app.request(
+      `/api/v2/internal/projects/${PROJECT}/knowledge`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SECRET}`,
+          "x-acting-user-id": String(LEAD_ID),
+          "x-doc-name": encodeURIComponent(name),
+          "Content-Type": "application/octet-stream",
+        },
+        body: new TextEncoder().encode("في البدء خلق الله السماوات والأرض"),
+      },
+      testEnv(),
+    )
+
+    expect(res.status).toBe(201)
+    const { doc } = (await res.json()) as { doc: { id: string; name: string; contentType: string } }
+    expect(doc.name).toBe(name)
+    // Stored content type comes from the validated extension, never from the
+    // octet-stream header the bridge sends.
+    expect(doc.contentType).toBe("text/plain")
+
+    const row = await env.AQUILLA_PG.prepare("SELECT name FROM knowledge_docs WHERE id = ?")
+      .bind(doc.id)
+      .first<{ name: string }>()
+    expect(row?.name).toBe(name)
+  })
+})
+
 describe("GET /api/v2/internal/projects/:projectId/knowledge", () => {
   it("refuses a wrong secret", async () => {
     expect((await internalList(LEAD_ID, "not-it")).status).toBe(401)

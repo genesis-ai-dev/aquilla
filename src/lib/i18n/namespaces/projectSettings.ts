@@ -69,11 +69,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.openFailed": "Could not open this link.",
     "projectSettings.checking.syncing": "Feedback saved on this device. Syncing…",
     "projectSettings.checking.saveFailed": "Could not save feedback.",
+    "projectSettings.checking.pendingFeedback": "Feedback stays on this device until it can sync. {reason}",
     "projectSettings.checking.playFailed": "This recording could not play. Please try another passage.",
     "projectSettings.checking.playRetry": "The recording could not play. Please try again.",
     "projectSettings.checking.selectionSummary": "{count} units selected. New units are not added to existing links. This sample supports up to 2,000 units per link.",
     "projectSettings.checking.urlLabel": "Checking URL for {title}",
-    "projectSettings.checking.expires": "Expires {date}",
     "projectSettings.checking.feedbackOn": "Feedback on {label}",
     "projectSettings.checking.allSection": "All {section}",
 
@@ -2361,6 +2361,30 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
           "when matching terms, absent a per-concept override.",
+      },
+      "projectSettings.checking.position": {
+        description: "Progress line on the community checking guest page, showing which passage is open out of all passages in the link.",
+        placeholders: { current: "1-based number of the open passage.", total: "Number of passages in the link." },
+      },
+      "projectSettings.checking.pendingFeedback": {
+        description: "Notice on the guest page when feedback could not reach the project yet; it is kept on the guest's device and retried.",
+        placeholders: { reason: "The server's own error sentence, already localized or in English; may be empty." },
+      },
+      "projectSettings.checking.selectionSummary": {
+        description: "Summary under the passage picker when a project lead builds a community checking link.",
+        placeholders: { count: "Number of selected units (verses or lines)." },
+      },
+      "projectSettings.checking.urlLabel": {
+        description: "Accessible name of the read-only field holding a checking link's URL.",
+        placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.feedbackOn": {
+        description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
+      "projectSettings.checking.allSection": {
+        description: "Checkbox in the passage picker that selects every unit in one chapter or section.",
+        placeholders: { section: "The chapter or section name, e.g. 'MRK 1' (data, not translated)." },
       },
       "projectSettings.termMatching.loadPreset": {
         description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",

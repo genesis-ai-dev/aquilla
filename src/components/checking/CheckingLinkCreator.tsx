@@ -84,7 +84,7 @@ export function CheckingLinkCreator({ projectId }: { projectId: string }) {
       <p className="text-sm font-medium">{link.title} · {link.role}</p>
       {link.revokedAt ? <p className="text-sm text-muted-foreground">{t("projectSettings.checking.revoked")}</p> : <>
         <Input aria-label={t("projectSettings.checking.urlLabel", { title: link.title })} readOnly value={checkingUrl(link.token)} />
-        <p className="text-xs text-muted-foreground">{t("projectSettings.checking.expires", { date: new Date(Number(link.expiresAt)).toLocaleDateString() })}</p>
+        <p className="text-xs text-muted-foreground">{t("common.expiresOn", { date: new Date(Number(link.expiresAt)).toLocaleDateString() })}</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => { void navigator.clipboard.writeText(checkingUrl(link.token)).then(() => setCopied(link.token)).catch(() => setError(t("projectSettings.checking.copyFailed"))) }}>{copied === link.token ? t("projectSettings.checking.copied") : t("projectSettings.checking.copyLink")}</Button>
           <Button variant="outline" nativeButton={false} render={<a href={checkingUrl(link.token)} target="_blank" rel="noreferrer" />}>{t("projectSettings.checking.openGuest")}</Button>

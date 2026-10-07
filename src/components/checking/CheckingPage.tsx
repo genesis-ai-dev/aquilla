@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Badge } from "@/components/ui/badge"
-import { checkingRequest, type CheckingSession, type CheckingContent, type CheckingRow } from "@/lib/checking/api"
+import { checkingRequest, type CheckingAudio, type CheckingSession, type CheckingContent, type CheckingRow } from "@/lib/checking/api"
 import { checkingLabel, checkingUnitKey } from "@/lib/checking/scope"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { flushCheckingFeedback, queueCheckingFeedback } from "@/lib/checking/feedback"
@@ -58,7 +58,7 @@ function CheckingVisit({ token }: { token: string }) {
       const count = await flushCheckingFeedback(token, guest)
       if (count) setNotice(t("projectSettings.checking.saved"))
     } catch (error) {
-      setNotice(`Feedback stays on this device until it can sync. ${error instanceof Error ? error.message : "Please retry."}`)
+      setNotice(t("projectSettings.checking.pendingFeedback", { reason: error instanceof Error ? error.message : "" }))
     }
   }, [token, guest, t])
   useEffect(() => {
@@ -71,28 +71,51 @@ function CheckingVisit({ token }: { token: string }) {
     window.addEventListener("online", retry)
     return () => { current = false; window.removeEventListener("online", retry) }
   }, [guest, token, retry])
+  // Clips are fetched once and shared, so the next passage's recording can
+  // download while this one plays and continuous listening has no fetch gap.
+  const clips = useRef(new Map<string, Promise<Blob>>())
+  const loadClip = useCallback((audio: CheckingAudio) => {
+    let clip = clips.current.get(audio.audioId)
+    if (!clip) {
+      const params = new URLSearchParams({ fileId: audio.fileId, cellId: audio.cellId, audioId: audio.audioId })
+      clip = fetch(`${syncWorkerHttpOrigin()}/checking/${token}/audio?${params}`, {
+        headers: { Authorization: `Bearer ${guest?.session ?? ""}` },
+      }).then(response => {
+        if (!response.ok) throw new Error(t("projectSettings.checking.recordingUnavailable"))
+        return response.blob()
+      })
+      // A failed fetch is retried the next time the passage is opened.
+      clip.catch(() => clips.current.delete(audio.audioId))
+      clips.current.set(audio.audioId, clip)
+    }
+    return clip
+  }, [token, guest, t])
+  const upcoming = useMemo(() => {
+    const index = rows.findIndex((row, position) => position > active && content?.audio.some(audio => checkingUnitKey(audio) === checkingUnitKey(row)))
+    return index < 0 ? undefined : content?.audio.find(audio => checkingUnitKey(audio) === checkingUnitKey(rows[index]))
+  }, [rows, active, content])
   useEffect(() => {
     const element = audioRef.current
     if (!element || !guest || !current || !attachment) { setPlaying(false); return }
-    const controller = new AbortController()
+    let cancelled = false
     let objectUrl: string | null = null
     element.pause(); element.removeAttribute("src"); element.load(); setPlaying(false)
-    const params = new URLSearchParams({ fileId: current.fileId, cellId: current.cellId, audioId: attachment.audioId })
-    void fetch(`${syncWorkerHttpOrigin()}/checking/${token}/audio?${params}`, {
-      headers: { Authorization: `Bearer ${guest.session}` }, signal: controller.signal,
-    }).then(async response => {
-      if (!response.ok) throw new Error(t("projectSettings.checking.recordingUnavailable"))
-      const blob = await response.blob()
-      if (controller.signal.aborted) return
+    // Keep only this clip and the next one; earlier clips are released.
+    for (const audioId of clips.current.keys()) {
+      if (audioId !== attachment.audioId && audioId !== upcoming?.audioId) clips.current.delete(audioId)
+    }
+    void loadClip(attachment).then(blob => {
+      if (cancelled) return
       objectUrl = URL.createObjectURL(blob)
       element.src = objectUrl
       element.onloadedmetadata = () => {
         element.currentTime = Math.max(0, Number(attachment.trimStartMs ?? 0) / 1000)
         if (playIntent.current) void element.play().catch(() => { setPlaying(false); setError(t("projectSettings.checking.pressPlay")) })
       }
-    }).catch(error => { if (!controller.signal.aborted) { playIntent.current = false; setError(String(error.message ?? error)) } })
-    return () => { controller.abort(); element.pause(); element.onloadedmetadata = null; element.removeAttribute("src"); element.load(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [token, guest, current, attachment, t])
+      if (upcoming) void loadClip(upcoming).catch(() => undefined)
+    }).catch(error => { if (!cancelled) { playIntent.current = false; setError(String(error.message ?? error)) } })
+    return () => { cancelled = true; element.pause(); element.onloadedmetadata = null; element.removeAttribute("src"); element.load(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [guest, current, attachment, upcoming, loadClip, t])
   function nextRecording() {
     const next = rows.findIndex((row, index) => index > active && content?.audio.some(audio => checkingUnitKey(audio) === checkingUnitKey(row)))
     if (next < 0) { playIntent.current = false; audioRef.current?.pause(); setPlaying(false); setNotice(t("projectSettings.checking.end")) }

@@ -86,6 +86,24 @@ describe("checking capabilities", () => {
       .bind(Math.floor(Date.now() / (15 * 60_000)), link).run()
     expect((await request(`/${link}/join`, undefined, { name: "Kathryn" })).status).toBe(429)
   })
+  it("lets a commenting link's guests through an org comment floor the lead's link already granted", async () => {
+    // AQU-1002 lets an org reserve comments to contributors. A lead who shares
+    // a commenting link has granted it anyway; without this, every guest note
+    // in such an org would be refused after it was queued on the guest's device.
+    await data.db.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (91, 'Floor org', 1)").run()
+    await data.db.prepare(`INSERT INTO org_settings (org_id, settings) VALUES (91, '{"commentCreateMinRole":400}')`).run()
+    await data.db.prepare("UPDATE projects SET org_id = 91 WHERE id = 'p'").run()
+    try {
+      const link = await create()
+      const session = await join(link)
+      const feedback = event()
+      const saved = await request(`/${link}/events`, session, feedback)
+      expect(await saved.json()).toMatchObject({ accepted: [{ id: feedback.id }], rejected: [] })
+      expect((await request(`/${link}/events`, session, { ...event(), kind: "comment.resolve" })).status).toBe(400)
+    } finally {
+      await data.db.prepare("UPDATE projects SET org_id = NULL WHERE id = 'p'").run()
+    }
+  })
   it("enforces viewer access, PIN, expiry, and revocation against existing sessions", async () => {
     const link = await create("viewer", "1234")
     expect((await request(`/${link}/join`, undefined, { name: "Kathryn", pin: "9999" })).status).toBe(401)

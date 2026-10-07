@@ -12,12 +12,12 @@ beforeEach(() => {
   request.mockReset()
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
-function mount(role: string) {
+function mount(role: string, audio: Array<{ cellId: string; audioId: string }> = []) {
   localStorage.setItem("aquilla:checking:link", JSON.stringify({ session: "s", guestId: "g", name: "Kathryn", title: "Listen", role, projectId: "p" }))
   request.mockResolvedValue({ rows: [
     { fileId: "f", cellId: "1", fileName: "Mark", label: "MRK 1:1", text: "First passage", side: "source" },
     { fileId: "f", cellId: "2", fileName: "Mark", label: "MRK 1:2", text: "Second passage", side: "source" },
-  ], audio: [] })
+  ], audio: audio.map(clip => ({ fileId: "f", url: "frontier-audio://x", trimStartMs: null, trimEndMs: null, ...clip })) })
   render(<MemoryRouter initialEntries={["/check/link"]}><Routes><Route path="/check/:token" element={<CheckingPage />} /></Routes></MemoryRouter>)
 }
 describe("checking guest page", () => {
@@ -34,5 +34,23 @@ describe("checking guest page", () => {
     mount("viewer")
     await waitFor(() => expect(screen.getByText("First passage")).toBeVisible())
     expect(screen.queryByRole("button", { name: "Send feedback" })).not.toBeInTheDocument()
+  })
+  it("downloads the next passage's recording while the current one plays, so listening does not stall between verses", async () => {
+    // Kathryn's teams listen straight through. Fetching each clip only after
+    // the previous one ends leaves a network-length silence at every verse.
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:clip", revokeObjectURL: () => {} }))
+    const fetched: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      fetched.push(new URL(url).searchParams.get("audioId") ?? "")
+      return new Response(new Blob(["clip"]))
+    }))
+    mount("viewer", [{ cellId: "1", audioId: "a1" }, { cellId: "2", audioId: "a2" }])
+    await waitFor(() => expect(fetched).toEqual(["a1", "a2"]))
+    fireEvent.ended(screen.getByLabelText("Passage recording"))
+    expect(await screen.findByRole("heading", { name: "MRK 1:2" })).toBeVisible()
+    // The second clip is served from the prefetch, not downloaded again.
+    await waitFor(() => expect(screen.getByLabelText("Passage recording")).toHaveAttribute("src", "blob:clip"))
+    expect(fetched).toEqual(["a1", "a2"])
+    vi.unstubAllGlobals()
   })
 })

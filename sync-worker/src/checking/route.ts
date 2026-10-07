@@ -6,6 +6,7 @@ import { sign, verify } from "hono/jwt"
 import { verifyTokenForProject } from "../auth"
 import { handleAudioRequest, type AudioEnv } from "../audio"
 import { handleEventsWriteRequest, type EventsRouteEnv } from "../events/route"
+import { resolveCommentFloors } from "../events/comment-floors"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../../../auth-worker/src/utils/password"
 import { createCheckingSchema, joinCheckingSchema, feedbackSchema, inCheckingScope, type CheckingUnit } from "./policy"
 
@@ -44,10 +45,10 @@ async function takeBudget(db: AquillaDb, token: string, kind: "join" | "feedback
     RETURNING token`).bind(window, window, token, window, max).first()
   return !!row
 }
-async function internalToken(env: CheckingEnv, link: Link, fileId: string, username: string) {
+async function internalToken(env: CheckingEnv, link: Link, fileId: string, username: string, role = 100) {
   const now = Math.floor(Date.now() / 1000)
   return sign({ aud: "sync", userId: Number(link.created_by), username,
-    projectId: link.project_id, fileId, role: link.role === "viewer" ? 100 : 200,
+    projectId: link.project_id, fileId, role,
     iat: now, exp: now + 60 }, env.SYNC_SECRET_KEY!, "HS256")
 }
 
@@ -193,7 +194,12 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
       // Preserve the client event ID for idempotent outbox retries. Stamp
       // identity and scope on the server; never trust the submitted author.
       event.author = username
-      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await internalToken(env, link, scope.fileId, username)}` }
+      // The lead granted commenting explicitly, so clear the org's AQU-1002
+      // comment floor. feedbackSchema still admits only comment.create on a
+      // linked passage, and the live re-check still caps at the creator's role.
+      const { createMinRole } = await resolveCommentFloors(db, link.project_id)
+      const role = Math.max(200, createMinRole)
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await internalToken(env, link, scope.fileId, username, role)}` }
       return await handleEventsWriteRequest(new Request(`${url.origin}/events`, { method: "POST", headers,
         body: JSON.stringify({ events: [event] }) }), env, ctx)
     }

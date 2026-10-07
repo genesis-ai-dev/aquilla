@@ -289,6 +289,10 @@ CREATE TABLE project_settings (
     -- near the blob.
     validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED,
     target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
+    -- AQU-1458 (0139): the legacy archived-lane tag list, for the org
+    -- dashboard's lane chips. It was the one portfolio column still read by
+    -- parsing the blob per project, and by itself cost that request 4 seconds.
+    archived_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'archivedLanes') STORED,
     -- AQU-1083: do structural cells count toward progress? NULL = unset, which
     -- falls through to the org's value and then to "yes" (0083).
     count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,

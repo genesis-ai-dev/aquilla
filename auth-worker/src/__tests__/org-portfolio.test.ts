@@ -203,6 +203,106 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
   })
 
+  // The settings-only archive is read from project_settings.archived_lanes, a
+  // STORED generated column (migration 0139), instead of by parsing the blob
+  // per project. A generated column cannot drift from the JSON, and these hold
+  // it to that: what the dashboard shows must follow each settings write.
+  it("AQU-1458: a settings-only archive follows the settings as they change", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Acts', 1, 1), ('pb', 'Bare', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('deflane1', 'pa', 'target', 'English', '', 0),
+        ('swlane01', 'pa', 'target', 'Swahili', 'sw', 1),
+        ('frlane01', 'pa', 'target', 'French', 'fr', 2),
+        ('deflane2', 'pb', 'target', 'English', '', 0),
+        ('swlane02', 'pb', 'target', 'Swahili', 'sw', 1)`,
+    ).run()
+    const saveSettings = (settings: unknown) =>
+      env.AQUILLA_PG.prepare(
+        `INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)
+         ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings, version = project_settings.version + 1`,
+      ).bind(JSON.stringify(settings)).run()
+    const archived = async (projectId = "pa") => {
+      const rows = await getOrgPortfolios(env as unknown as Env, [1], { userId: 1, isAdmin: false })
+      const project = rows.find((row) => row.id === projectId)!
+      return project.lanes.filter((lane) => lane.archived).map((lane) => lane.lane)
+    }
+
+    // No settings row at all: nothing is archived, and nothing breaks.
+    expect(await archived()).toEqual([])
+    expect(await archived("pb")).toEqual([])
+
+    await saveSettings({ targetLanguage: "English", targetLanes: ["sw", "fr"], archivedLanes: ["sw"] })
+    expect(await archived()).toEqual(["sw"])
+    // Only the project that recorded it. The sibling has the same lane tag.
+    expect(await archived("pb")).toEqual([])
+
+    // Tags are matched without regard to case, as before.
+    await saveSettings({ targetLanguage: "English", targetLanes: ["sw", "fr"], archivedLanes: ["SW", "fr"] })
+    expect(await archived()).toEqual(["sw", "fr"])
+
+    // Restoring a lane is a settings write too, and the flag goes with it.
+    await saveSettings({ targetLanguage: "English", targetLanes: ["sw", "fr"], archivedLanes: [] })
+    expect(await archived()).toEqual([])
+
+    // The key is hand-editable JSON. Anything that is not a list of tags
+    // archives nothing rather than failing the whole dashboard.
+    for (const malformed of ["sw", { sw: true }, 7, null, [7, null, ""]]) {
+      await saveSettings({ targetLanguage: "English", targetLanes: ["sw", "fr"], archivedLanes: malformed })
+      expect(await archived()).toEqual([])
+    }
+    await saveSettings({ targetLanguage: "English", targetLanes: ["sw", "fr"] })
+    expect(await archived()).toEqual([])
+  })
+
+  // 2026-10-05: with the rollup beside it fixed, parsing each project's blob
+  // for this one key was most of the all-organizations dashboard's time (4s
+  // warm, 10s cold, for 433 projects). Blobs run to several MB. No statement
+  // on this page may fetch one, whoever is asking.
+  it.each([
+    ["an org owner", 1, false],
+    ["a member behind the lane read wall", 2, false],
+    ["a platform admin", 1, true],
+  ] as const)("never reads a project's settings blob for %s", async (_who, userId, isAdmin) => {
+    await seedUser(1, "wendi")
+    await seedUser(2, "translator")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Acts', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('pa', 2, 400)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"targetLanes":["sw"],"archivedLanes":["sw"]}')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES ('swlane01', 'pa', 'target', 'Swahili', 'sw', 1)",
+    ).run()
+
+    const statements: string[] = []
+    const db = {
+      prepare(query: string) {
+        statements.push(query)
+        return env.AQUILLA_PG.prepare(query)
+      },
+    }
+    const rows = await getOrgPortfolios(
+      { ...env, AQUILLA_PG: db, LANE_READ_WALL: "1" } as unknown as Env,
+      [1],
+      { userId, isAdmin },
+    )
+
+    expect(rows.map((row) => row.id)).toEqual(["pa"])
+    expect(statements.length).toBeGreaterThan(3)
+    const readsBlob = statements.filter((query) => /\bsettings\s*::\s*jsonb|\b(ps|os|project_settings|org_settings)\.settings\b/.test(query))
+    expect(readsBlob).toEqual([])
+  })
+
   it("AQU-1473: the primary language stored in targetLanes is the default lane, not a second one", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
@@ -529,9 +629,13 @@ describe("POST /api/v2/orgs/portfolio", () => {
     const settingsQuery = preparedQueries.find((query) => query.includes("ps.target_lanes"))
     expect(settingsQuery).toContain("ps.validation_count")
     expect(settingsQuery).toContain("ps.target_lanes")
+    expect(settingsQuery).toContain("ps.archived_lanes")
     expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
-    // Still reads the generated columns rather than parsing the blob.
-    expect(settingsQuery).not.toContain("ps.settings AS settings")
+    // Still reads the generated columns rather than parsing the blob. The
+    // archived-lane list was the one that slipped: read as
+    // (ps.settings::jsonb)->'archivedLanes', it cost this request 4 seconds.
+    expect(settingsQuery).not.toMatch(/ps\.settings\b/)
+    expect(settingsQuery).not.toContain("::jsonb")
   })
 
   // The all-organizations dashboard timed out at the SPA's 15s abort on

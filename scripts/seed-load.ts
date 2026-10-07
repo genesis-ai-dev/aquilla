@@ -32,6 +32,7 @@ const GENERATED_COLS = new Set([
   "target_language",
   "validation_count",
   "target_lanes",
+  "archived_lanes",
   "value_tsv",
 ])
 const INSERT_CHUNK = 800

@@ -151,7 +151,8 @@ describe('GET cells dual-read', () => {
     expect(body.cells.map((c) => c.value).sort()).toEqual(['by-id', 'src'])
     const target = body.cells.find((c) => c.value === 'by-id')!
     expect(target.laneId).toBe(ES_LANE)
-    expect(target.targetLang).toBe('xx')
+    // The wire tag is the lane's legacy_tag, not the stale projection column.
+    expect(target.targetLang).toBe('es')
   })
 })
 

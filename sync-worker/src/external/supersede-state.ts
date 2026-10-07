@@ -12,6 +12,7 @@ import { cellKey, laneCellKey } from './cell-keys'
 import type { Command } from './commands'
 import type { LiveTargetValue, SupersedeLiveState } from './supersede'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 interface CellPair {
   fileId: string
@@ -89,7 +90,7 @@ async function readTargetValues(
   const { placeholders, binds } = pairBinds(pairs)
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, target_lang, lane_id, value, value_html FROM cells
+      `SELECT file_id, cell_id, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, value, value_html FROM cells
         WHERE project_id = ? AND side = 'target'
           AND (file_id, cell_id) IN (${placeholders})`,
     )
@@ -149,7 +150,7 @@ async function readValidators(
   const { placeholders, binds } = pairBinds(pairs)
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, target_lang, lane_id, username FROM cell_validators
+      `SELECT file_id, cell_id, ${wireLegacyTagSql("cell_validators")} AS target_lang, lane_id, username FROM cell_validators
         WHERE project_id = ? AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(projectId, ...binds)

@@ -682,15 +682,17 @@ export function buildEventProjectionStmts(
   // are emitted BEFORE the `cells` DELETE — they run in batch order, so the row
   // whose head they are testing is still there when they ask.
   const HEAD_EXISTS =
-    'EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ? AND event_id = ?)'
+    `EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND event_id = ?
+       AND (side = 'source' OR ${targetLaneDualReadSql()}))`
   const dependentGateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_EXISTS}` : ''
-  /** Binds for `dependentGateAnd`. The side and lane are the caller's, so the
-   *  subquery tests the SAME row the accompanying `cells` write does. */
+  /** Binds for `dependentGateAnd`. Source rows match on `side` alone. A target
+   *  row matches the lane whose legacy_tag is the event's tag. */
   const dependentGateBindsFor = (side: string, lane: string): unknown[] =>
     gate
       ? [
           gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id,
-          gate.projectId, gate.fileId, gate.cellId, side, lane, event.parentId,
+          gate.projectId, gate.fileId, gate.cellId, side, event.parentId,
+          ...targetLaneDualReadBinds(gate.projectId, lane),
         ]
       : []
 
@@ -838,7 +840,7 @@ export function buildEventProjectionStmts(
                metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
                value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(
             metadataJson,
@@ -855,9 +857,15 @@ export function buildEventProjectionStmts(
             .prepare(
               `UPDATE cells SET value_html = ?
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                 AND side = 'target' AND target_lang = ''`,
+                 AND side = 'target' AND ${targetLaneDualReadSql()}`,
             )
-            .bind(p.targetHtml, event.projectId, event.fileId, event.cellId),
+            .bind(
+              p.targetHtml,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, ''),
+            ),
         )
       }
       return ['cells']
@@ -881,7 +889,7 @@ export function buildEventProjectionStmts(
           .prepare(
             `UPDATE cells SET anchor_cell_id = ?
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(p.anchorCellId ?? null, event.projectId, event.fileId, event.cellId),
       )
@@ -913,7 +921,7 @@ export function buildEventProjectionStmts(
           .prepare(
             `UPDATE cells SET hidden_at = ?
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(
             p.hidden ? event.serverTs : null,
@@ -1339,9 +1347,14 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_validators
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${targetLaneDualReadSql()}${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, lane, ...dependentGateBinds),
+            .bind(
+              ...dependentBinds,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
         )
         stmts.push(
           db
@@ -1364,9 +1377,17 @@ export function buildEventProjectionStmts(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+               AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            side,
+            ...targetLaneDualReadBinds(event.projectId, lane),
+            ...gateBinds,
+          ),
       )
 
       if (!opts?.deferFileCounters)
@@ -1404,7 +1425,8 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+              AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -1415,7 +1437,7 @@ export function buildEventProjectionStmts(
             event.fileId,
             event.cellId,
             side,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             ...gateBinds,
           ),
       )
@@ -1490,9 +1512,15 @@ export function buildEventProjectionStmts(
             .prepare(
               `DELETE FROM cell_validators
                 WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                  AND target_lang = ? AND username = ?`,
+                  AND ${targetLaneDualReadSql()} AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, lane, targetUsername),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+              targetUsername,
+            ),
         )
       }
 
@@ -1507,9 +1535,14 @@ export function buildEventProjectionStmts(
             .prepare(
               `UPDATE cells SET ai_drafted = 0, ai_draft = NULL
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                 AND side = 'target' AND target_lang = ?`,
+                 AND side = 'target' AND ${targetLaneDualReadSql()}`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, lane),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+            ),
         )
       }
 
@@ -1531,22 +1564,22 @@ export function buildEventProjectionStmts(
               WHERE project_id  = ?
                 AND file_id     = ?
                 AND cell_id     = ?
-                AND target_lang = ?
+                AND ${targetLaneDualReadSql()}
                 AND event_id    = cells.event_id
             )
             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-              AND side = 'target' AND target_lang = ?`,
+              AND side = 'target' AND ${targetLaneDualReadSql()}`,
           )
           .bind(
             validationThreshold,
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
           ),
       )
 
@@ -1584,21 +1617,21 @@ export function buildEventProjectionStmts(
               WHERE project_id  = ?
                 AND file_id     = ?
                 AND cell_id     = ?
-                AND target_lang = ?
+                AND ${targetLaneDualReadSql()}
                 AND event_id    = cells.event_id
             )
             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-              AND side = 'target' AND target_lang = ?`,
+              AND side = 'target' AND ${targetLaneDualReadSql()}`,
           )
           .bind(
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
           ),
       )
       if (!opts?.deferFileCounters)

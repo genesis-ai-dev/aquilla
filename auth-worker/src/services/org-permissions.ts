@@ -1939,9 +1939,10 @@ async function aiDraftedByLane(
         WHERE p.id IN (${placeholders})
      ), ${uncountedFilesCteSql('SELECT project_id FROM pol')}
      SELECT c.project_id AS project_id,
-            COALESCE(c.target_lang, '') AS target_lang,
+            COALESCE(l.legacy_tag, '') AS target_lang,
             COUNT(*)::int AS n
        FROM cells c
+       JOIN public.lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
        JOIN pol ON pol.project_id = c.project_id
       WHERE c.project_id = ANY(ARRAY(SELECT project_id FROM pol))
         -- These two literals are idx_cells_ai_drafted's predicate. Postgres
@@ -1963,7 +1964,7 @@ async function aiDraftedByLane(
                AND src.type IN ('heading', 'paratext')
           )
         )
-      GROUP BY c.project_id, COALESCE(c.target_lang, '')`,
+      GROUP BY c.project_id, l.id, COALESCE(l.legacy_tag, '')`,
   ).bind(...projectIds).all<{ project_id: string; target_lang: string; n: number }>()
   for (const row of results ?? []) {
     let lanes = byProject.get(row.project_id)

@@ -1462,7 +1462,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   let changed = false
   db.prepare = (sql: string) => {
     const statement = prepare(sql)
-    if (!sql.startsWith("SELECT cell_id, side, target_lang, anchor_cell_id, event_id FROM cells")) return statement
+    if (!sql.startsWith("SELECT cells.cell_id, cells.side, cells.lane_id, COALESCE(wl.legacy_tag, '') AS target_lang, cells.anchor_cell_id, cells.event_id FROM cells")) return statement
     const bind = statement.bind.bind(statement)
     statement.bind = (...args: unknown[]) => {
       const bound = bind(...args)
@@ -1487,7 +1487,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   const response = (await handleCellsReadRequest(request("side=target&limit=1"), envWith(db)))!
   const page = await response.json() as { cells: { cellId: string; value: string }[]; maxServerSeq: number }
   expect(orderingRows).toHaveLength(4)
-  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "side", "target_lang"])
+  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "lane_id", "side", "target_lang"])
   expect(page.cells).toHaveLength(1)
   expect(page.cells[0].value).toBe("edited during read")
   expect(page.maxServerSeq).toBe(1)

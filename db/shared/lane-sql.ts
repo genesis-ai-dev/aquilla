@@ -47,6 +47,19 @@ export function targetLaneIdSql(projectCol: string, tagCol = "?"): string {
 }
 
 /**
+ * The legacy tag a row's lane still echoes on the wire as `targetLang`.
+ *
+ * Source lanes store NULL and read back as ''. This does not read the
+ * projection `target_lang` column — that column stays until AQU-1611c, and a
+ * reader that echoed it would keep answering "which lane?" with a tag that
+ * can drift from the lane row. `alias` is the row's table or alias
+ * (`cells`, `a`, `t`); both `project_id` and `lane_id` must be in scope on it.
+ */
+export function wireLegacyTagSql(alias: string): string {
+  return `COALESCE((SELECT l.legacy_tag FROM public.lanes l WHERE l.project_id = ${alias}.project_id AND l.id = ${alias}.lane_id), '')`
+}
+
+/**
  * The progress row carrying a unit's LANE-INDEPENDENT numbers: the source-cell
  * denominator and its structural share, the file's shared audio rollup, and the
  * newest edit anywhere on it.

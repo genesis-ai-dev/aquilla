@@ -248,7 +248,7 @@ function validationProjectionStmts(
              WHERE v.project_id = c.project_id
                AND v.file_id = c.file_id
                AND v.cell_id = c.cell_id
-               AND v.target_lang = c.target_lang
+               AND v.lane_id = c.lane_id
                AND v.event_id = c.event_id
           ) >= ? THEN 1 ELSE 0 END
         WHERE c.project_id = ? AND c.side = 'target' AND ${guard}`,

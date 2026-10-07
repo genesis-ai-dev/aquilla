@@ -19,6 +19,7 @@
 // the source pin; the target head is cells.event_id where side='target').
 
 import { cellKey, laneCellKey } from './commands'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 export interface CellPrecondition {
   fileId: string
@@ -85,7 +86,7 @@ export async function resolveCellStates(
 
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, side, target_lang, event_id, ai_drafted, value, hidden_at FROM cells
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, event_id, ai_drafted, value, hidden_at FROM cells
        WHERE project_id = ?
          AND side IN ('source', 'target')
          AND (file_id, cell_id) IN (${placeholders})`,

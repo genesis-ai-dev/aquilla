@@ -12,10 +12,8 @@
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
-//                         dual-read to the lane whose legacy_tag is <tag>
-//                         (prefer lane_id once backfill has populated it;
-//                         fall back to target_lang while lane_id is NULL);
-//                         source rows are ALWAYS included regardless. Applies
+//                         the lane whose legacy_tag is <tag>, matched on
+//                         lane_id. Source rows are ALWAYS included. Applies
 //                         to the full read, the delta (`?since=`) read, and
 //                         the cellIds fast path alike. Absent = all lanes
 //                         (unchanged). Max 64 chars; longer values are
@@ -253,7 +251,27 @@ export interface AnchorChainRow {
  * (AQU-1160): enough to walk and to key the per-side/lane page lookup, so a
  * cold isolate never reads a file's full row values just to order it.
  */
-type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "anchor_cell_id" | "event_id">
+type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "lane_id" | "anchor_cell_id" | "event_id">
+
+/** Default-lane tag ('') first, then other tags, lane id as the tiebreak.
+ *  Identity is lane_id: two lanes are never one walk just because their tags agree. */
+function targetLanesInWalkOrder(rows: OrderRow[]): OrderRow[][] {
+  const byLane = new Map<string, OrderRow[]>()
+  for (const r of rows) {
+    const id = r.lane_id ?? ""
+    const bucket = byLane.get(id)
+    if (bucket) bucket.push(r)
+    else byLane.set(id, [r])
+  }
+  return [...byLane.entries()]
+    .sort((a, b) => {
+      const ta = a[1][0]?.target_lang ?? ""
+      const tb = b[1][0]?.target_lang ?? ""
+      if (ta !== tb) return ta < tb ? -1 : 1
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+    })
+    .map(([, group]) => group)
+}
 
 export function walkAnchorChain<T extends AnchorChainRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
@@ -365,7 +383,7 @@ interface Cursor {
 // ORDERED LIST OF IDS (not the row data — cheap, ~40 bytes/id) so every
 // subsequent page for the same version is a single bounded
 // side/lane-scoped `cell_id = ANY(...)` point lookup sized to the page,
-// served by idx_cells_file_scan (0083_cells_scan_index.sql).
+// served by idx_cells_file_scan (project, file, side, lane_id, cell_id).
 //
 // Keyed by the response ETag: that string is already the exact "identity of
 // current full state" value this route computes for conditional reads
@@ -379,10 +397,14 @@ interface Cursor {
 // cold isolate or eviction falls back to a narrow ordering read and full walk — see the
 // SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
 // page of a newly-opened file.
+/** The page lookup's lane predicate. Exported so the plan test explains the
+ *  same shape the route runs (AQU-1611). */
+export const CELLS_PAGE_LANE_PREDICATE = "(side = ? AND lane_id = ? AND cell_id = ANY(?::text[]))"
+
 interface ChainCacheItem {
   cellId: string
   side: "source" | "target"
-  targetLang: string
+  laneId: string
 }
 
 async function readPageValues(db: AquillaDb, columns: string, projectId: string, fileId: string, items: ChainCacheItem[]): Promise<CellRowOut[]> {
@@ -391,8 +413,8 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
   // one array parameter, rather than thousands of OR-expanded tuples.
   const groups = new Map<string, { side: string; lane: string; ids: string[] }>()
   for (const item of items) {
-    const key = JSON.stringify([item.side, item.targetLang])
-    const group = groups.get(key) ?? { side: item.side, lane: item.targetLang, ids: [] }
+    const key = JSON.stringify([item.side, item.laneId])
+    const group = groups.get(key) ?? { side: item.side, lane: item.laneId, ids: [] }
     group.ids.push(item.cellId)
     groups.set(key, group)
   }
@@ -402,12 +424,13 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
     // explicitly escaped array literal; cell IDs remain parameter values.
     const ids = `{${group.ids.map(id => `"${id.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`
     pageBinds.push(group.side, group.lane, ids)
-    return "(side = ? AND target_lang = ? AND cell_id = ANY(?::text[]))"
+    return CELLS_PAGE_LANE_PREDICATE
   })
   const pageParts = [
     `SELECT ${columns}`,
     "FROM cells",
-    "WHERE project_id = ? AND file_id = ?",
+    "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+    "WHERE cells.project_id = ? AND cells.file_id = ?",
     `AND (${predicates.join(" OR ")})`,
   ]
   const pageRes = await db
@@ -415,10 +438,10 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
     .bind(...pageBinds)
     .all<CellRowRaw>()
   const bySlot = new Map<string, CellRowRaw>()
-  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
+  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.lane_id ?? ""} ${r.cell_id}`, r)
   const cells: CellRowOut[] = []
   for (const item of items) {
-    const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
+    const row = bySlot.get(`${item.side} ${item.laneId} ${item.cellId}`)
     if (row) cells.push(mapRow(row))
   }
   return cells
@@ -737,10 +760,10 @@ export async function handleCellsReadRequest(
   // but the v1 SLO target is "open a project, render cells" and the chain
   // walk dominates only at >10x current file sizes.
   const columns =
-    "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
-    "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"
+    `cells.cell_id, cells.side, COALESCE(wl.legacy_tag, '') AS target_lang, cells.value, cells.value_html, cells.type, cells.canonical_ref, cells.anchor_cell_id, ` +
+    "cells.event_id, cells.source_event_id, cells.last_editor, cells.last_edit_at, cells.validated, cells.ai_drafted, cells.ai_draft, cells.word_count, " +
+    "cells.endorsement_count, cells.start_ms, cells.end_ms, " +
+    "cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, cells.metadata, cells.lane_id, cells.hidden_at"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell
@@ -847,7 +870,8 @@ export async function handleCellsReadRequest(
         const deltaParts = [
           `SELECT ${columns}`,
           "FROM cells",
-          `WHERE project_id = ? AND file_id = ? AND cell_id IN (${placeholders})`,
+          "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+          `WHERE cells.project_id = ? AND cells.file_id = ? AND cells.cell_id IN (${placeholders})`,
         ]
         const deltaBinds: unknown[] = [projectId, fileId, ...changedCellIds]
         if (sideFilter !== null) {
@@ -905,7 +929,7 @@ export async function handleCellsReadRequest(
     let cells: CellRowOut[] = []
     if (pageItems.length > 0) {
       // Bounded point lookup: exactly the page's rows, served by
-      // idx_cells_file_scan (project_id, file_id, side, target_lang, cell_id)
+      // idx_cells_file_scan (project_id, file_id, side, lane_id, cell_id)
       // — independent of file size (AQU-1160 AC1).
       cells = await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, pageItems)
       console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length}`)
@@ -928,9 +952,10 @@ export async function handleCellsReadRequest(
   // and value hydration must remain eligible for the client's next delta.
   // Do not refresh that watermark after hydration.
   const parts: string[] = [
-    `SELECT ${useChainCache ? "cell_id, side, target_lang, anchor_cell_id, event_id" : columns}`,
+    `SELECT ${useChainCache ? "cells.cell_id, cells.side, cells.lane_id, COALESCE(wl.legacy_tag, '') AS target_lang, cells.anchor_cell_id, cells.event_id" : columns}`,
     "FROM cells",
-    "WHERE project_id = ? AND file_id = ?",
+    "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+    "WHERE cells.project_id = ? AND cells.file_id = ?",
   ]
   const binds: unknown[] = [projectId, fileId]
   if (sideFilter !== null) {
@@ -993,38 +1018,19 @@ export async function handleCellsReadRequest(
     // Default lane ('') first, then added lanes in name order — for N=1
     // (only '' exists) the output is byte-identical to the pre-lane walk.
     const sourceRows: OrderRow[] = []
-    const targetByLane = new Map<string, OrderRow[]>()
+    const targetRows: OrderRow[] = []
     for (const r of allRows) {
       if (r.side === "source") sourceRows.push(r)
-      else if (r.side === "target") {
-        const lane = r.target_lang ?? ""
-        let bucket = targetByLane.get(lane)
-        if (!bucket) {
-          bucket = []
-          targetByLane.set(lane, bucket)
-        }
-        bucket.push(r)
-      }
+      else if (r.side === "target") targetRows.push(r)
     }
     ordered = walkAnchorChain(sourceRows)
-    for (const lane of [...targetByLane.keys()].sort()) {
-      ordered = [...ordered, ...walkAnchorChain(targetByLane.get(lane)!)]
+    for (const laneRows of targetLanesInWalkOrder(targetRows)) {
+      ordered = [...ordered, ...walkAnchorChain(laneRows)]
     }
   } else if (sideFilter === "target") {
-    // Same per-lane walk for target-only reads.
-    const byLane = new Map<string, OrderRow[]>()
-    for (const r of allRows) {
-      const lane = r.target_lang ?? ""
-      let bucket = byLane.get(lane)
-      if (!bucket) {
-        bucket = []
-        byLane.set(lane, bucket)
-      }
-      bucket.push(r)
-    }
     ordered = []
-    for (const lane of [...byLane.keys()].sort()) {
-      ordered = [...ordered, ...walkAnchorChain(byLane.get(lane)!)]
+    for (const laneRows of targetLanesInWalkOrder(allRows)) {
+      ordered = [...ordered, ...walkAnchorChain(laneRows)]
     }
   } else {
     ordered = walkAnchorChain(allRows)
@@ -1045,7 +1051,7 @@ export async function handleCellsReadRequest(
 
   if (cacheKey) {
     chainCacheSet(cacheKey, {
-      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
+      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" })),
       cachedAt: Date.now(),
     })
   }
@@ -1058,7 +1064,7 @@ export async function handleCellsReadRequest(
   return Response.json(
     {
       cells: useChainCache
-        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })))
+        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" })))
         // Targeted reads selected all columns above.
         : (slice as CellRowRaw[]).map(mapRow),
       nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,

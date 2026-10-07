@@ -153,13 +153,10 @@ export async function resolveConsumedTargetLane(
   return { id: row.id, tag: row.legacy_tag }
 }
 
-/** Prefer `lane_id`. Rows that have none still match the legacy tag. */
+/** A target row belongs to the lane id the caller resolved. */
 function targetLaneSql(alias: string): string {
   const p = alias ? `${alias}.` : ""
-  return `(
-    (${p}lane_id IS NOT NULL AND ${p}lane_id <> '' AND ${p}lane_id = ?)
-    OR ((${p}lane_id IS NULL OR ${p}lane_id = '') AND ${p}target_lang = ?)
-  )`
+  return `${p}lane_id = ?`
 }
 
 /**
@@ -246,7 +243,7 @@ async function loadAncestorLaneHead(
   const placeholders = cellIds.map(() => "?").join(", ")
   const laneSql = side === "target" && lane ? ` AND ${targetLaneSql("")}` : ""
   const binds: unknown[] = [ancestorProjectId, ancestorFileId, side, ...cellIds]
-  if (side === "target" && lane) binds.push(lane.id, lane.tag)
+  if (side === "target" && lane) binds.push(lane.id)
   const { results } = await db
     .prepare(
       `SELECT cell_id, event_id, content_hash, validated FROM cells
@@ -339,7 +336,7 @@ async function loadAncestorTargetsStaleAgainstOwnSource(
                 )
          )`,
     )
-    .bind(ancestorProjectId, ancestorFileId, ...cellIds, lane.id, lane.tag)
+    .bind(ancestorProjectId, ancestorFileId, ...cellIds, lane.id)
     .all<{ cell_id: string }>()
   for (const r of results) out.add(r.cell_id)
   return out

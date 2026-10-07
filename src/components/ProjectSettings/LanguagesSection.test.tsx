@@ -96,6 +96,15 @@ describe("LanguagesSection", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ targetLanes: ["fr-CA", "fr-BE"] }))
   })
 
+  it("creates a lane row for a cloud project that has none yet", async () => {
+    const onCreateLane = vi.fn(async () => "ok" as const)
+    const { patch } = renderSection({ targetLanes: [], laneRecords: [], onCreateLane })
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "es" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() => expect(onCreateLane).toHaveBeenCalledWith({ name: "es", language: "es" }))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it("saves a valid new lane via patch with the appended array", async () => {
     const { patch } = renderSection({ targetLanes: ["fr-CA"] })
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "fr-BE" } })

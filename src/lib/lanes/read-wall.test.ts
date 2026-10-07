@@ -9,6 +9,7 @@ import {
   legacyTagsForVisibleLanes,
   portfolioTextFromVisibleLanes,
   visibilityCacheToken,
+  scopedTargetVisibilityClause,
   visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "./read-wall"
@@ -148,5 +149,33 @@ describe("lane read wall", () => {
     // A response without rows, and an unrestricted caller, are left alone.
     expect(filterSettingsToVisibleLanes({ settings: {}, lanes: undefined }, new Set(["es"]), lanes).lanes).toBeUndefined()
     expect(filterSettingsToVisibleLanes({ settings: {}, lanes: rows }, null, lanes).lanes).toBe(rows)
+  })
+})
+
+describe("scoped target visibility", () => {
+  it("matches a lane id or a target_lang, including the former default lane", () => {
+    const clause = scopedTargetVisibilityClause({
+      ids: ["lane-es"],
+      tags: ["es", ""],
+      sideExpr: "side",
+      laneIdExpr: "lane_id",
+      targetLangExpr: "target_lang",
+    })
+    expect(clause.sql).toBe(
+      "AND (side = 'source' OR lane_id IN (?) OR target_lang IN (?, ?))",
+    )
+    expect(clause.binds).toEqual(["lane-es", "es", ""])
+  })
+
+  it("hides every target row when the scope named nothing", () => {
+    expect(
+      scopedTargetVisibilityClause({
+        ids: [],
+        tags: [],
+        sideExpr: "side",
+        laneIdExpr: "lane_id",
+        targetLangExpr: "target_lang",
+      }),
+    ).toEqual({ sql: "AND side = 'source'", binds: [] })
   })
 })

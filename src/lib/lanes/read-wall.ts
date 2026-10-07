@@ -205,3 +205,39 @@ export function visibleDefaultLaneLanguage(
   if (allowedTags === null) return targetLanguage
   return allowedTags.has("") ? targetLanguage : null
 }
+
+/**
+ * AND-clause for a member limited by lane scopes while the read wall is off.
+ *
+ * Matches a target row by lane id OR by `target_lang`. The tag match is what
+ * keeps a translation visible before the backfill has stamped `lane_id`
+ * (NULL on the former default lane, and on any row written before its lane
+ * existed). Source rows stay. An empty id list and an empty tag list hide
+ * every target row — a scope that named nothing is not "see everything".
+ */
+export function scopedTargetVisibilityClause(args: {
+  ids: readonly string[]
+  tags: readonly string[]
+  sideExpr?: string
+  laneIdExpr: string
+  targetLangExpr: string
+}): { sql: string; binds: unknown[] } {
+  const parts: string[] = []
+  const binds: unknown[] = []
+  if (args.ids.length > 0) {
+    parts.push(`${args.laneIdExpr} IN (${args.ids.map(() => "?").join(", ")})`)
+    binds.push(...args.ids)
+  }
+  if (args.tags.length > 0) {
+    parts.push(`${args.targetLangExpr} IN (${args.tags.map(() => "?").join(", ")})`)
+    binds.push(...args.tags)
+  }
+  if (parts.length === 0) {
+    return args.sideExpr
+      ? { sql: `AND ${args.sideExpr} = 'source'`, binds: [] }
+      : { sql: "AND FALSE", binds: [] }
+  }
+  const match = parts.join(" OR ")
+  if (!args.sideExpr) return { sql: `AND (${match})`, binds }
+  return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds }
+}

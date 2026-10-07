@@ -327,10 +327,11 @@ export async function buildPromptPreview(
 
   // This project's OWN concepts, from the sync-worker projection (the
   // `terminology` settings key is gone — see useRules' localConcepts note).
-  // Termbase SUBSCRIPTIONS are intentionally not compiled in: the client
-  // passes `subscribedConcepts: undefined` today because the upstream
-  // termbase-read route does not exist yet (useSubscribedConcepts' SWARM-TODO),
-  // so including them here would make the preview diverge from the real call.
+  // Termbase SUBSCRIPTIONS are intentionally not compiled in: both useRules
+  // callers pass `subscribedConcepts: undefined`. The upstream read route
+  // exists (auth-worker GET /api/v2/projects/:id/termbase/concepts), but
+  // useSubscribedConcepts has no caller (AQU-1715). Including them here would
+  // make the preview diverge from the real call.
   const conceptRows = await db
     .prepare(
       "SELECT concept_id, source_term, renderings, status, case_sensitive " +

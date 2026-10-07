@@ -46,6 +46,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.usfmStructure": "Unrecognized or unclosed USFM marker in translation",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -78,6 +79,9 @@ export const rules = defineNamespace({
     "rules.builtin.unpairedSymbols.name": "Unpaired brackets",
     "rules.builtin.unpairedSymbols.description":
       "Mismatched parentheses, brackets, or braces in translation.",
+    "rules.builtin.usfmStructure.name": "USFM markers",
+    "rules.builtin.usfmStructure.description":
+      "Markers in the translation must be ones USFM defines, and paired markers must be closed.",
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",

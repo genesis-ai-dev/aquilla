@@ -13,6 +13,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { ImportResult } from "@/lib/import"
+import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
 
 const MB = 1024 * 1024
 
@@ -264,5 +265,51 @@ describe("PreviewPanel — AI-assisted imports (AQU-635)", () => {
 
     expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("Review before importing")
     expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("AI review was unavailable")
+  })
+})
+
+/**
+ * AQU-1731 — the import half of the Paratext-parity USFM structure checks.
+ *
+ * This drives the REAL parser (`parseTextFormat`) into the real preview panel
+ * rather than hand-building findings, so it covers the composition the ticket
+ * actually promises: a broken file reported, with refs, before anyone
+ * translates it. A synthetic findings array would pass even if
+ * `parse-text-formats.ts` never attached them.
+ */
+describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
+  const BROKEN_USFM =
+    `\\id GEN\n\\h Genesis\n\\c 1\n\\p\n` +
+    `\\v 1 In the beginning.\\f + \\ft An unclosed note.\n` +
+    `\\v 3 And the earth.\n` +
+    `\\v 3 Repeated verse.\n`
+
+  const parsedBrokenBook = (): ImportResult[] =>
+    parseTextFormat({ fileType: "usfm", text: BROKEN_USFM, name: "GEN.usfm" }) as unknown as ImportResult[]
+
+  it("reports the missing verse, the duplicate verse and the unclosed \\f with their refs", () => {
+    render(<PreviewPanel results={parsedBrokenBook()} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+
+    const panel = screen.getByTestId("usfm-structure-findings")
+    expect(panel).toHaveTextContent("Structure problems found in this file")
+    // The gap, with the ref it is missing from.
+    expect(panel).toHaveTextContent("GEN 1:2")
+    expect(panel).toHaveTextContent("No verse with this number in the chapter")
+    // The repeat, with its ref.
+    expect(panel).toHaveTextContent("GEN 1:3")
+    expect(panel).toHaveTextContent("This verse number appears more than once")
+    // The unclosed footnote, reported at the verse it was opened on.
+    expect(panel).toHaveTextContent("GEN 1:1")
+    expect(panel).toHaveTextContent("Marker \\f is never closed")
+  })
+
+  it("shows no structure panel for a clean file", () => {
+    const clean = parseTextFormat({
+      fileType: "usfm",
+      text: `\\id GEN\n\\h Genesis\n\\c 1\n\\p\n\\v 1 One.\n\\v 2 Two.\n`,
+      name: "GEN.usfm",
+    }) as unknown as ImportResult[]
+    render(<PreviewPanel results={clean} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId("usfm-structure-findings")).toBeNull()
   })
 })

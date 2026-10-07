@@ -8,6 +8,7 @@
 // are unaffected. Do NOT add imports here that reach outside shared/.
 
 import type { ImportMilestone, ImportSourceLocator, SourceArtifactFormat } from "../../../shared/import-contract"
+import type { UsfmStructureFinding } from "./usfm-structure-check"
 
 /**
  * What one imported cell is (AQU-1720).
@@ -103,6 +104,11 @@ export interface ParsedTextFileResult {
   /** Raw source text for round-trip-fidelity formats (USFM today). */
   rawSource?: string
   rawSourceFormat?: SourceArtifactFormat
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Codes and refs, never sentences — the preview translates at the render
+   *  site, the same way `rule-engine.ts` reason codes are handled. Absent when
+   *  the file is clean. */
+  structureFindings?: UsfmStructureFinding[]
 }
 
 /**

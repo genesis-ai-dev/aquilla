@@ -2974,7 +2974,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 gets the switcher over only the lanes the read wall left them,
                 including when that list has one lane (AQU-1601), and no "Add
                 lane". The pill uses the same lane name as the switcher. */}
-            {showLaneSwitcher && switchableLanes ? (
+            {showLaneSwitcher && switchableLanes && onLaneChange ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)

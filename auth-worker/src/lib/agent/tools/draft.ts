@@ -10,6 +10,7 @@
 // tells the orchestrator how much work remains.
 
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
@@ -42,7 +43,9 @@ export interface DraftModelConfig {
 export interface DraftGenerationContext {
   projectId: string
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
   sourceLanguage?: string
@@ -256,7 +259,7 @@ export async function generateDrafts(
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]

@@ -240,6 +240,19 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
     expect(flagged.text).toContain("rule-es-only")
     expect(flagged.text).not.toContain("rule-fr-only")
+
+    // Production passes lanes.id. The rule stays pinned to the tag "es".
+    const laneRow = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = 'es'`,
+    )
+      .bind(PROJECT)
+      .first<{ id: string }>()
+    expect(laneRow?.id).toBeTruthy()
+    expect(laneRow!.id).not.toBe("es")
+    const byId = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx(laneRow!.id))
+    expect(byId.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    expect(byId.text).toContain("rule-es-only")
+    expect(byId.text).not.toContain("rule-fr-only")
   })
 })
 
@@ -1198,7 +1211,7 @@ describe("Lane plumbing (AQU-1447)", () => {
 
   it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
     await seedWorld()
-    // @ts-expect-error targetLang is required: no caller may leave the lane out
+    // @ts-expect-error a lane is required: no caller may leave it out (AQU-1610)
     const untyped = selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
     await untyped.catch(() => undefined)
     const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "no-such-lane" })

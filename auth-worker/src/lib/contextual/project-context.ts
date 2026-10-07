@@ -365,8 +365,39 @@ function stringList(raw: unknown): string[] {
     : []
 }
 
-/** Empty string is always the project-default lane. Named lanes must be
- *  registered in settings.targetLanes and not archived. */
+/**
+ * Is this lane one the project may draft into?
+ *
+ * AQU-1610: a lane id is checked against the `lanes` table — the lane's own
+ * row, archived or not — which is the only identity that cannot name two
+ * lanes at once. A legacy TAG still falls back to the settings rule
+ * (`settings.targetLanes` minus `archivedLanes`, with `''` the project-default
+ * lane) because older clients send tags and the project-level lists are
+ * AQU-1595's to remove, not this ticket's.
+ */
+export async function isRegisteredLaneId(
+  db: SettingsDb,
+  projectId: string,
+  laneId: string,
+): Promise<boolean> {
+  if (!laneId) return false
+  try {
+    const row = await db
+      .prepare(
+        `SELECT 1 AS ok FROM lanes
+          WHERE project_id = ? AND id = ? AND role = 'target' AND archived_at IS NULL`,
+      )
+      .bind(projectId, laneId)
+      .first<{ ok: number }>()
+    return row != null
+  } catch {
+    return false
+  }
+}
+
+/** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
+ *  project-default lane; named lanes must be in settings.targetLanes and not
+ *  archived. Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,

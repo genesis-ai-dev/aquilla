@@ -110,6 +110,7 @@ function renderTable(
     lanes = ["", "es"],
     scopedLanes = null as string[] | null,
     laneLabels = undefined as Record<string, string> | undefined,
+    onAddLane = undefined as (() => void) | undefined,
   } = {},
 ) {
   const qc = new QueryClient()
@@ -124,6 +125,7 @@ function renderTable(
           lanes={lanes}
           scopedLanes={scopedLanes}
           onLaneChange={() => {}}
+          onAddLane={onAddLane}
           defaultLaneLabel="fr"
           laneLabels={laneLabels}
           isCompletionConfigured={false}
@@ -189,10 +191,22 @@ describe("EditorTable — a lane-limited member switches among their own lanes",
     expect(options).toEqual(["es", "de"])
   })
 
-  it("gives a contributor limited to one lane no switcher — there is nothing to switch to", async () => {
-    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"] })
-    await screen.findByText("bonjour")
-    expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
+  it("offers a contributor limited to one lane a switcher with only that lane, and no Add lane", async () => {
+    const onAddLane = vi.fn()
+    renderTable(ROLE.CONTRIBUTOR, "fr", { lanes: ["", "es", "de"], scopedLanes: ["es"], onAddLane })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent)
+    expect(options).toEqual(["es"])
+    expect(screen.queryByTestId("add-lane")).not.toBeInTheDocument()
+    expect(onAddLane).not.toHaveBeenCalled()
+  })
+
+  it("shows a one-lane maintainer the switcher and Add lane", async () => {
+    const onAddLane = vi.fn()
+    renderTable(ROLE.MAINTAINER, "fr", { lanes: [""], onAddLane })
+    fireEvent.click(await screen.findByTestId("lane-switcher"))
+    fireEvent.click(screen.getByTestId("add-lane"))
+    expect(onAddLane).toHaveBeenCalledTimes(1)
   })
 
   it("keeps every lane for a maintainer, whatever the scopes say", async () => {

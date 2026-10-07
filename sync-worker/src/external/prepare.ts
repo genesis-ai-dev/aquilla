@@ -69,6 +69,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
 import type { ProjectLaneRecord } from '../../../db/shared/lanes'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import {
   archivedLaneReason,
   archivedTagsFromSettings,
@@ -89,7 +90,10 @@ function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
     .filter((lane) => lane.role === 'target')
     .map((lane) => ({
       id: lane.id,
-      name: lane.name,
+      // AQU-1592: a lane stores only what the user typed, so the name an
+      // external caller sees is the DISPLAY name — the name when one was set,
+      // else the language, else the placeholder.
+      name: laneDisplayName(lane),
       legacyTag: lane.legacyTag,
       archivedAt: lane.archivedAt,
     }))

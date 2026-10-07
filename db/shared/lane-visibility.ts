@@ -9,16 +9,18 @@ import {
   filterSettingsToVisibleLanes,
   labelsForGrantedLanes,
   laneReadWallEnabled,
+  lanesForRequestedTag,
   visibleLaneTags,
   type LaneGrant,
   type LaneIdentity,
   type VisibleLaneTags,
 } from "../../src/lib/lanes/read-wall"
+import { laneDisplayNameSql } from "./lanes"
 
 export async function loadTargetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)
@@ -35,7 +37,7 @@ export async function loadTargetLaneIdentitiesForProjects(
   const placeholders = projectIds.map(() => "?").join(", ")
   const { results } = await db
     .prepare(
-      `SELECT project_id, id, name, legacy_tag FROM lanes
+      `SELECT project_id, id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE role = 'target' AND project_id IN (${placeholders})`,
     )
     .bind(...projectIds)
@@ -130,4 +132,29 @@ export async function echoableLaneLabels(
   const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
   if (visible === null) return null
   return labelsForGrantedLanes(lanes, visible)
+}
+
+/**
+ * Whether this caller may see the lane a request named.
+ *
+ * Same rule as sync-worker's `canReadRequestedLane`: the wall flag off, or a
+ * Maintainer, sees every lane. Below that, a lane id must be one of the
+ * granted ids. A legacy tag must name exactly one target lane, and that
+ * lane's id must be granted — a tag that matches two lanes matches neither.
+ */
+export async function callerMayReadLane(
+  db: AquillaDb,
+  flag: string | undefined,
+  projectId: string,
+  userId: number,
+  role: number,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<boolean> {
+  const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
+  if (visible === null) return true
+  const laneId = (ref.laneId ?? "").trim()
+  if (laneId) return visible.has(laneId)
+  const matches = lanesForRequestedTag(lanes, ref.targetLang ?? "")
+  if (matches.length !== 1) return false
+  return visible.has(matches[0]!.id)
 }

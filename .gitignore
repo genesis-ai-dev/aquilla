@@ -114,3 +114,4 @@ i18n-todo/
 
 # Google OAuth credential downloads — never commit
 client_secret*.json
+.harmonizer-eval-cache/

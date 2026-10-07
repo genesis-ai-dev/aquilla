@@ -35,7 +35,7 @@ async function loadOrgGrants(env: Env, orgId: number): Promise<(NamedGrant & { u
   // org-scoped predicate pushdown if this shows up in Hyperdrive timings.
   const { results } = await env.AQUILLA_PG.prepare(
     `SELECT x.*, o.name AS org_name,
-            COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS user_name FROM (
+            u.username AS user_name FROM (
        SELECT g.user_id, g.scope_type, g.scope_id, g.role_level, g.source, g.via_team_id,
               g.granted_by, g.granted_at,
               COALESCE(CASE WHEN g.scope_type = 'org' THEN g.scope_id::BIGINT END,

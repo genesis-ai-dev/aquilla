@@ -9,10 +9,15 @@ import type { SyncTokenClaims } from "../auth"
 import {
   laneReadWallEnabled,
   lanesForRequestedTag,
+  READ_WALL_MAINTAINER,
+  scopedTargetVisibilityClause,
+  visibilityCacheToken,
   visibleLaneTags,
   type LaneIdentity,
   type VisibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+import { laneScopeIds, laneScopeTags } from "../../../src/lib/lanes/scope-ids"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
 
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
@@ -20,7 +25,7 @@ export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
 export async function loadTargetLanes(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)
@@ -69,6 +74,37 @@ export function visibleLanesForRead(
     src: claims.src,
     laneGrants: claims.laneGrants,
   })
+}
+
+/**
+ * AQU-1039: while the read wall is off, a member who has lane scopes still
+ * only reads those lanes. The wall's grant list stays the authority when it
+ * is on (`wallLaneIds !== null`). Maintainer and platform are unrestricted.
+ * Returns null when this caller is not limited. `token` folds into the cells
+ * ETag so two members do not share a cached body.
+ */
+export async function scopeReadClause(
+  db: AquillaDb,
+  projectId: string,
+  claims: Pick<SyncTokenClaims, "role" | "src" | "scopes">,
+  wallLaneIds: readonly string[] | null,
+): Promise<{ sql: string; binds: unknown[]; token: string } | null> {
+  if (wallLaneIds !== null) return null
+  if (claims.src === "platform") return null
+  if (claims.role >= READ_WALL_MAINTAINER) return null
+  const values = (claims.scopes ?? []).filter((scope) => scope.kind === "lane").map((scope) => scope.value)
+  if (values.length === 0) return null
+  const lanes = await loadTargetLanes(db, projectId)
+  const ids = [...laneScopeIds(values, lanes).ids]
+  const tags = [...laneScopeTags(values, lanes)]
+  const clause = scopedTargetVisibilityClause({
+    ids,
+    tags,
+    sideExpr: "side",
+    laneIdExpr: "lane_id",
+    targetLangExpr: "target_lang",
+  })
+  return { ...clause, token: visibilityCacheToken(new Set([...ids, ...tags])) }
 }
 
 /**

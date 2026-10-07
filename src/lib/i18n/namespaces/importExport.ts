@@ -20,7 +20,7 @@ export const importExport = defineNamespace({
     "importExport.captionTrack.new": "New caption track",
     "importExport.captionTrack.name": "Track name",
     "importExport.captionTrack.overwrite": plural({
-      one: "{count} segment currently in this track will be overwritten.",
+      one: "{count} segment in this track will be overwritten.",
       other: "{count} segments in this track will be overwritten.",
     }),
     "importExport.captionTrack.consent": "Overwrite the existing content in this track",
@@ -265,6 +265,58 @@ export const importExport = defineNamespace({
       one: "{count} scripture paragraph skipped.",
       other: "{count} scripture paragraphs skipped.",
     }),
+
+    // — Bible Swap (Biblica Study Bible / Treasure Hunt export) —
+    "importExport.bibleSwap.legend": "Bible Swap (optional)",
+    "importExport.bibleSwap.intro":
+      "Round-trip exports your translated notes into the original Biblica IDML. " +
+      "Optionally add a translated Bible file to also replace English verse text with matching " +
+      "scripture, so notes and Bible text ship in one file. Leave the mode on notes only to export notes only.",
+    "importExport.bibleSwap.modeLegend": "Replacement mode",
+    "importExport.bibleSwap.modeGroupAriaLabel": "Bible Swap replacement mode",
+    "importExport.bibleSwap.modeNone": "No swap (notes only)",
+    "importExport.bibleSwap.modeSurgical": "Surgical",
+    "importExport.bibleSwap.modeSurgicalDescription":
+      "Use when compatibility analysis is very high (nearly 100%). Replaces verse text only and keeps " +
+      "the Study Bible's paragraph styles, character styles, and layout.",
+    "importExport.bibleSwap.modeStructure": "Structure",
+    "importExport.bibleSwap.modeStructureDescription":
+      "Use when compatibility analysis is lower. Replaces chapter text blocks with the Bible file's " +
+      "paragraph XML so poetry tabs, indents, and line breaks follow the target language.",
+    "importExport.bibleSwap.languageLegend": "Bible language",
+    "importExport.bibleSwap.languageAriaLabel": "Bible Swap language",
+    "importExport.bibleSwap.fileLegend": "Translated Bible file",
+    "importExport.bibleSwap.chooseBible": "Select Bible IDML…",
+    "importExport.bibleSwap.fileHint":
+      "Select a Bible-only IDML file that matches the Biblica file you are exporting.",
+    "importExport.bibleSwap.removeBible": "Remove Bible file",
+    "importExport.bibleSwap.missingBible": "Choose a Bible IDML file, or set the mode to notes only.",
+    "importExport.bibleSwap.whatGetsSwapped": "What gets swapped?",
+    "importExport.bibleSwap.swappedItem": "Swapped: numbered Bible verse text inside each chapter.",
+    "importExport.bibleSwap.notSwappedItem":
+      "Not swapped: book introductions, study notes, footnotes, section headings, chapter labels, and the table of contents.",
+    "importExport.bibleSwap.psalmsItem":
+      "Psalms: English superscriptions are kept; verse text is swapped from verse 1. Surgical mode can " +
+      "insert extra verses when the Bible has a subheader offset (e.g. French).",
+    "importExport.bibleSwap.analyzing": "Analyzing Bible file compatibility…",
+    "importExport.bibleSwap.analyzingPercent": "{percent}%",
+    "importExport.bibleSwap.analyzeFailed": "Compatibility analysis failed: {reason}",
+    "importExport.bibleSwap.compatibilityLegend": "Compatibility",
+    "importExport.bibleSwap.booksMatched": "{found} of {expected} books",
+    "importExport.bibleSwap.chaptersMatched": "{found} of {expected} chapters",
+    "importExport.bibleSwap.versesMatched": "{found} of {expected} verses",
+    "importExport.bibleSwap.projectedMatch": "Projected verse match: {percent}%",
+    "importExport.bibleSwap.planSummary":
+      "Plan: {mapped} mapped, {removed} removed, {inserted} inserted.",
+    "importExport.bibleSwap.psalmsNote":
+      "This export includes Psalms — verse numbering may shift where the Bible sets the superscription as verse 1.",
+    "importExport.bibleSwap.worstBooks": "Largest mismatches",
+    "importExport.bibleSwap.bookMismatch": "{book}: {missing} missing, {extra} extra",
+    "importExport.bibleSwap.status.swapping": "Replacing Bible verse text…",
+    "importExport.bibleSwap.status.done":
+      "Downloaded {fileName} — replaced {count} verses across {stories} story file(s).",
+    "importExport.bibleSwap.status.failed":
+      "Bible Swap failed; exported notes-only IDML instead. Reason: {reason}",
 
     // — Door43 (DCS) panel —
     "importExport.dcs.importingResource": "Importing {resource}{ref}…",
@@ -1268,6 +1320,8 @@ export const importExport = defineNamespace({
     }),
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
+    "importExport.declaredLanguage.laneMismatch":
+      "This file says {declared} — you imported into the {lane} lane.",
     // AQU-1365: the Import dialog's "What are you importing?" choice and its
     // translation path.
     "importExport.intent.groupLabel": "What are you importing?",
@@ -1635,6 +1689,83 @@ export const importExport = defineNamespace({
       "importExport.biblica.paragraphsSkipped": {
         description: "Notice on the Biblica panel: how many scripture (non-note) paragraphs were intentionally skipped.",
         placeholders: { count: "Number of scripture paragraphs skipped, already locale-formatted." },
+      },
+      "importExport.bibleSwap.modeGroupAriaLabel": {
+        description:
+          "Accessible name for the Bible Swap replacement-mode radio group on the Export dialog, offering notes-only, Surgical, or Structure replacement.",
+      },
+      "importExport.bibleSwap.languageAriaLabel": {
+        description:
+          "Accessible name for the select that chooses which language's versification mapping the Bible Swap uses.",
+      },
+      "importExport.bibleSwap.analyzingPercent": {
+        description:
+          "Percentage shown beside the spinner in the Bible Swap compatibility card while the chosen Bible file is being scored.",
+        placeholders: { percent: "Analysis progress from 0 to 100, already locale-formatted." },
+      },
+      "importExport.bibleSwap.analyzeFailed": {
+        description:
+          "Error line replacing the Bible Swap compatibility report when the chosen Bible IDML could not be analysed. The reason is an untranslated technical message from the analyser.",
+        placeholders: { reason: "Untranslated technical failure message from the analyser." },
+      },
+      "importExport.bibleSwap.booksMatched": {
+        description:
+          "Bible Swap compatibility report row: how many books of the Biblica file were found in the chosen Bible file.",
+        placeholders: {
+          found: "Number of books found in the Bible file, already locale-formatted.",
+          expected: "Number of books the Biblica file contains, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.chaptersMatched": {
+        description: "Bible Swap compatibility report row: chapter coverage of the chosen Bible file.",
+        placeholders: {
+          found: "Number of chapters found in the Bible file, already locale-formatted.",
+          expected: "Number of chapters the Biblica file contains, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.versesMatched": {
+        description: "Bible Swap compatibility report row: verse coverage of the chosen Bible file.",
+        placeholders: {
+          found: "Number of verses found in the Bible file, already locale-formatted.",
+          expected: "Number of verses the Biblica file contains, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.projectedMatch": {
+        description:
+          "Headline of the Bible Swap compatibility report: the share of verses the chosen Bible file is expected to replace. The literal % sign follows the placeholder in the English string.",
+        placeholders: { percent: "Projected match as a whole number, already locale-formatted." },
+      },
+      "importExport.bibleSwap.planSummary": {
+        description:
+          "Bible Swap compatibility report line describing the versification plan: verses mapped straight across, dropped because the Bible file lacks them, or inserted because the Bible file splits them.",
+        placeholders: {
+          mapped: "Count of verses mapped one-to-one, already locale-formatted.",
+          removed: "Count of verses with no counterpart in the Bible file, already locale-formatted.",
+          inserted: "Count of verses the Bible file adds, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.bookMismatch": {
+        description:
+          "One row of the Bible Swap 'Largest mismatches' list, naming a book and how far its verse count diverges.",
+        placeholders: {
+          book: "Book code as it appears in the IDML (e.g. 'GEN') — not translated.",
+          missing: "Verses the Biblica file has that the Bible file lacks, already locale-formatted.",
+          extra: "Verses the Bible file has that the Biblica file lacks, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.status.done": {
+        description:
+          "Success line after an export that included a Bible Swap, reporting the downloaded file and how much verse text was replaced.",
+        placeholders: {
+          fileName: "Name of the downloaded IDML file — not translated.",
+          count: "Number of verses whose text was replaced, already locale-formatted.",
+          stories: "Number of IDML story files touched, already locale-formatted.",
+        },
+      },
+      "importExport.bibleSwap.status.failed": {
+        description:
+          "Shown when the Bible Swap step failed but the notes-only export still succeeded and downloaded. The reason is an untranslated technical message.",
+        placeholders: { reason: "Untranslated technical failure message from the swap engine." },
       },
       "importExport.dcs.importingResource": {
         description:
@@ -3862,6 +3993,17 @@ export const importExport = defineNamespace({
           "Heading at the top of the spreadsheet import panel, shown when the user " +
           "has chosen to import a comma- or tab-separated file or an Excel " +
           "workbook. Short noun phrase naming the panel, not an instruction.",
+      },
+      "importExport.declaredLanguage.laneMismatch": {
+        description:
+          "Warning toast after an import whose file declares a target language " +
+          "different from the lane the rows were imported into. The import has " +
+          "already succeeded; this only tells the user the two disagree. Not a " +
+          "question and not a block.",
+        placeholders: {
+          declared: "The target language the file itself declared, verbatim.",
+          lane: "The language of the lane the user imported into, verbatim.",
+        },
       },
       // AQU-1365: the Import dialog's "What are you importing?" choice and its
       // translation path (choose the file a translation belongs to, open it, review).

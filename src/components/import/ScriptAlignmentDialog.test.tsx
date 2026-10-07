@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { alignScriptParagraphs } from "@/lib/audio/script-alignment"
+import { t } from "@/lib/i18n/standalone"
 import { ScriptAlignmentDialog, type ScriptAlignmentConfirmation } from "./ScriptAlignmentDialog"
 
 describe("script alignment review", () => {
@@ -110,16 +111,18 @@ describe("script alignment review", () => {
       target: { value: "existing" },
     })
     expect(save).toBeDisabled()
-    fireEvent.click(screen.getByRole("checkbox", {
-      name: "8 segments currently in this track will be overwritten.",
-    }))
+    const consent = screen.getByRole("checkbox", {
+      name: t("importExport.scriptAlignment.overwrite", { count: 8 }),
+    })
+    expect(consent).toHaveAccessibleName(/\b8\b/)
+    fireEvent.click(consent)
     expect(save).toBeEnabled()
     rerender(<ScriptAlignmentDialog mediaName="Film" tracks={[
       { ...tracks[0], segmentCount: 9 },
     ]} align={align} onConfirm={confirm} onCancel={() => {}} />)
     expect(save).toBeDisabled()
     fireEvent.click(screen.getByRole("checkbox", {
-      name: "9 segments currently in this track will be overwritten.",
+      name: t("importExport.scriptAlignment.overwrite", { count: 9 }),
     }))
     fireEvent.click(save)
     await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))

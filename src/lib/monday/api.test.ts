@@ -181,7 +181,8 @@ describe("patchMondayLink", () => {
   it("PATCHes enabled and unwraps a { link } envelope", async () => {
     fetchMock().mockResolvedValueOnce(ok({ link: { id: "l1", enabled: false } }))
     const res = await patchMondayLink("jwt", "p1", { enabled: false })
-    expect(res.enabled).toBe(false)
+    expect(res.link.enabled).toBe(false)
+    expect(res.warnings).toEqual([])
     const [, init] = fetchMock().mock.calls[0]
     expect(init.method).toBe("PATCH")
     expect(JSON.parse(init.body as string)).toEqual({ enabled: false })
@@ -190,7 +191,13 @@ describe("patchMondayLink", () => {
   it("accepts a bare link object response", async () => {
     fetchMock().mockResolvedValueOnce(ok({ id: "l1", enabled: true, config: CONFIG }))
     const res = await patchMondayLink("jwt", "p1", { config: CONFIG })
-    expect(res.id).toBe("l1")
+    expect(res.link.id).toBe("l1")
+  })
+
+  it("passes on the warnings a mapping change came back with", async () => {
+    fetchMock().mockResolvedValueOnce(ok({ link: { id: "l1" }, warnings: ["column x not found on the board"] }))
+    const res = await patchMondayLink("jwt", "p1", { config: CONFIG })
+    expect(res.warnings).toEqual(["column x not found on the board"])
   })
 })
 

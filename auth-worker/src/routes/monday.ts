@@ -563,10 +563,34 @@ monday.patch(
 
     const warnings: string[] = []
     let configJson: string | null = null
+    // Set only when the board was re-read just now: replaces the link-time
+    // snapshot and clears the "Board structure changed" flag.
+    let freshStructureJson: string | null = null
     if (body.config !== undefined) {
-      const cached = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
-      const result = sanitizeMapping(body.config, cached)
-      if (!result.mapping) return c.json({ error: "invalid config", warnings: result.warnings }, 400)
+      // Check against the board's CURRENT columns. The snapshot taken at link
+      // time doesn't know columns added since, so validating against it drops
+      // every new column as "not found on the board".
+      let structure = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+      try {
+        const token = await loadLinkToken(c.env, link)
+        if (!token) throw new Error("no Monday token for this link")
+        const live = await fetchBoardStructure(token, link.external_id)
+        structure = {
+          fetchedAt: new Date().toISOString(),
+          url: live.url ?? structure?.url ?? null,
+          name: live.name ?? null,
+          columns: live.columns,
+          groups: live.groups,
+        }
+        freshStructureJson = JSON.stringify(structure)
+      } catch (err) {
+        console.warn("[monday] board re-read on mapping change failed; using the saved structure:", err)
+        warnings.push(
+          "could not read the board's current columns from Monday; the mapping was checked against the columns saved when the board was linked",
+        )
+      }
+      const result = sanitizeMapping(body.config, structure)
+      if (!result.mapping) return c.json({ error: "invalid config", warnings: [...warnings, ...result.warnings] }, 400)
       warnings.push(...result.warnings)
       configJson = JSON.stringify(result.mapping)
     }
@@ -575,10 +599,12 @@ monday.patch(
       `UPDATE integration_links
           SET enabled = COALESCE(?, enabled),
               config = COALESCE(?::jsonb, config),
+              remote_state = COALESCE(?::jsonb, remote_state),
+              remote_state_stale = CASE WHEN ?::jsonb IS NULL THEN remote_state_stale ELSE FALSE END,
               updated_at = now()
         WHERE id = ?`,
     )
-      .bind(body.enabled ?? null, configJson, link.id)
+      .bind(body.enabled ?? null, configJson, freshStructureJson, freshStructureJson, link.id)
       .run()
 
     const fresh = await getLink(c.env, guard.projectId)

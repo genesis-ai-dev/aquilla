@@ -174,6 +174,25 @@ describe("MondayIntegrationSection", () => {
     )
   })
 
+  it("saving the mapping shows what the server dropped, and the stale banner clears once the board is re-read", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+    const dropped = 'column "ghost_col" not found on the board; dropped'
+    mocked.patchMondayLink.mockResolvedValue({
+      link: makeLink({ structureStale: false, config: { version: 1, itemGranularity: "project", columns: [] } }),
+      warnings: [dropped],
+    })
+
+    renderSection()
+    await waitFor(() => expect(screen.getByText(/board structure changed/i)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: /remove mapping row/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save mapping/i }))
+
+    await waitFor(() => expect(screen.getByText(dropped)).toBeTruthy())
+    expect(screen.queryByText(/board structure changed/i)).toBeNull()
+  })
+
   it("linked, below maintainer: read-only mapping table, no editor or sync controls", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })

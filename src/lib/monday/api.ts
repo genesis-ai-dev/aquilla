@@ -237,22 +237,28 @@ export async function putMondayLink(
   return { link: out.link, warnings: out.warnings ?? [] }
 }
 
-/** PATCH /api/v2/monday/projects/:projectId/link (maintainer+). */
+/**
+ * PATCH /api/v2/monday/projects/:projectId/link (maintainer+). A config change
+ * is checked against the board's current columns; `warnings` names anything
+ * the server dropped, as PUT's do.
+ */
 export async function patchMondayLink(
   jwt: string,
   projectId: string,
   body: { enabled?: boolean; config?: MondayMapping },
-): Promise<MondayBoardLink> {
+): Promise<{ link: MondayBoardLink; warnings: string[] }> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/link`, {
     method: "PATCH",
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
   if (!res.ok) await readError(res, "error.monday.updateLink")
-  // Accept both `{ link }` (PUT-style envelope) and a bare link object.
-  const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink }
+  // Accept both `{ link, warnings }` (PUT-style envelope) and a bare link object.
+  const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink; warnings?: string[] }
   notifyMondayLinkChanged(projectId)
-  return "link" in out && typeof out.link === "object" ? out.link : (out as MondayBoardLink)
+  return "link" in out && typeof out.link === "object"
+    ? { link: out.link, warnings: out.warnings ?? [] }
+    : { link: out as MondayBoardLink, warnings: [] }
 }
 
 /** DELETE /api/v2/monday/projects/:projectId/link (maintainer+). */

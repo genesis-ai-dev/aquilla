@@ -229,8 +229,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         // Reconfigure of an existing link — config-only PATCH.
         const next = await patchMondayLink(jwt, projectId, { config: proposal.proposal })
         if (!aliveRef.current) return
-        setLink(next)
-        setWarnings([])
+        setLink(next.link)
+        setWarnings(next.warnings)
       } else {
         const boardId = selectedBoardId
         const boardName = boards?.find((b) => b.id === boardId)?.name
@@ -260,7 +260,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       setError(null)
       try {
         const next = await patchMondayLink(jwt, projectId, { enabled })
-        if (aliveRef.current) setLink(next)
+        if (aliveRef.current) setLink(next.link)
       } catch (e) {
         if (aliveRef.current) setError(errMsg(e))
       } finally {
@@ -279,7 +279,10 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         const next = await patchMondayLink(jwt, projectId, {
           config: { ...link.config, columns },
         })
-        if (aliveRef.current) setLink(next)
+        if (!aliveRef.current) return
+        setLink(next.link)
+        // Columns the board doesn't have are dropped server-side; say which.
+        setWarnings(next.warnings)
       } catch (e) {
         if (aliveRef.current) setError(errMsg(e))
       } finally {

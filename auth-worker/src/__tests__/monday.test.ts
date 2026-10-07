@@ -561,6 +561,101 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
   })
 })
 
+describe("PATCH /api/v2/monday/projects/:projectId/link (mapping change)", () => {
+  // A link made before "Audio validated %" existed, flagged stale since.
+  async function seedStaleLink() {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      `UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = TRUE WHERE id = 'link-1'`,
+    )
+      .bind(JSON.stringify({
+        fetchedAt: "2026-09-01T00:00:00.000Z",
+        url: "https://acme.monday.com/boards/board-9",
+        name: "Ruth Board",
+        columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }],
+        groups: [],
+      }))
+      .run()
+  }
+
+  const withNewColumn = {
+    ...baseConfig,
+    columns: [
+      ...baseConfig.columns,
+      { columnId: "numbers_new", columnType: "numbers", metric: "audio_validated_pct" },
+    ],
+  }
+
+  it("checks the mapping against the board's current columns, and clears the stale banner", async () => {
+    await seedStaleLink()
+    let structureReads = 0
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2") || !body.includes("settings_str")) return null
+      structureReads++
+      return jsonResponse({
+        data: {
+          boards: [{
+            name: "Ruth Board",
+            url: "https://acme.monday.com/boards/board-9",
+            columns: [
+              { id: "numbers_1", title: "Progress", type: "numbers" },
+              { id: "numbers_new", title: "Audio validated %", type: "numbers" },
+            ],
+            groups: [],
+          }],
+        },
+      })
+    })
+
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: withNewColumn })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { structureStale: boolean; config: { columns: Array<{ columnId: string }> } }
+      warnings: string[]
+    }
+    expect(structureReads).toBe(1)
+    expect(body.warnings).toEqual([])
+    expect(body.link.config.columns.map((col) => col.columnId)).toEqual(["numbers_1", "numbers_new"])
+    expect(body.link.structureStale).toBe(false)
+
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT remote_state, remote_state_stale FROM integration_links WHERE id = 'link-1'",
+    ).first<{ remote_state: unknown; remote_state_stale: boolean }>()
+    const saved = (typeof row?.remote_state === "string" ? JSON.parse(row.remote_state) : row?.remote_state) as {
+      columns: Array<{ id: string }>
+    }
+    expect(saved.columns.map((col) => col.id)).toContain("numbers_new")
+    expect(row?.remote_state_stale).toBe(false)
+  })
+
+  it("when Monday can't be read, falls back to the saved columns, says so, and keeps the banner", async () => {
+    await seedStaleLink()
+    mockFetch((url) =>
+      url.startsWith("https://api.monday.com/v2") ? jsonResponse({ error_message: "down" }, 500) : null,
+    )
+
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: withNewColumn })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { structureStale: boolean; config: { columns: Array<{ columnId: string }> } }
+      warnings: string[]
+    }
+    expect(body.link.config.columns.map((col) => col.columnId)).toEqual(["numbers_1"])
+    expect(body.warnings.some((w) => w.includes("could not read the board's current columns"))).toBe(true)
+    expect(body.link.structureStale).toBe(true)
+  })
+
+  it("an enable/disable toggle alone doesn't call Monday or touch the stale flag", async () => {
+    await seedStaleLink()
+    const fetchFn = mockFetch(() => null)
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled: false })
+    expect(res.status).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(((await res.json()) as { link: { structureStale: boolean } }).link.structureStale).toBe(true)
+  })
+})
+
 // ── AI analyze clamping ────────────────────────────────────────────────────
 
 describe("POST /api/v2/monday/projects/:projectId/analyze", () => {

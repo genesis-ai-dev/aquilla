@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom"
 import { MembersTab, InviteLinkTab } from "./ProjectMembersPage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
+import { t } from "@/lib/i18n/standalone"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
@@ -232,9 +233,7 @@ describe("MembersTab", () => {
     // the direct roster is headed "Project members" and the scope copy spells
     // out that the list covers access to THIS project.
     expect(screen.getByText("Project members")).toBeInTheDocument()
-    expect(
-      screen.getByText(/everyone who currently has access to this project/i),
-    ).toBeInTheDocument()
+    expect(screen.getByText(t("org.membersPage.rosterHint"))).toHaveTextContent(/this project/i)
   })
 
   // AQU-488: every row must indicate how that person has access — direct

@@ -65,17 +65,15 @@ import {
 } from "../../../db/shared/projects"
 import {
   createTargetLane,
-  laneDisplayNameSql,
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
-  type LaneIdentity,
-  laneReadWallEnabled,
-  visibleLaneTags,
+  restoreHiddenLaneSettings,
 } from "../../../src/lib/lanes/read-wall"
+import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { AquillaDb } from "../../../db/shim/postgres"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -212,43 +210,11 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  const wallOn = laneReadWallEnabled(c.env.LANE_READ_WALL)
-  const visible = visibleLaneTags({
-    enabled: wallOn,
-    role: role.level,
-    laneGrants: wallOn && role.level < ROLE.MAINTAINER
-      ? await laneGrantsFor(c.env.AQUILLA_PG, projectId, user.id)
-      : null,
-  })
-  const lanes = visible === null ? [] : await targetLaneIdentities(c.env.AQUILLA_PG, projectId)
+  const { visible, lanes } = await visibleTagsForMember(
+    c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
+  )
   return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible, lanes)))
 })
-
-async function targetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
-  const rows = await db
-    .prepare(
-      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
-        WHERE project_id = ? AND role = 'target'`,
-    )
-    .bind(projectId)
-    .all<{ id: string; name: string; legacy_tag: string | null }>()
-  return (rows.results ?? []).map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
-}
-
-async function laneGrantsFor(
-  db: AquillaDb,
-  projectId: string,
-  userId: number,
-): Promise<Array<{ lane: string; level: number }>> {
-  const rows = await db
-    .prepare(
-      `SELECT lane, role_level FROM project_member_lane_roles
-        WHERE project_id = ? AND user_id = ?`,
-    )
-    .bind(projectId, userId)
-    .all<{ lane: string; role_level: number }>()
-  return (rows.results ?? []).map((row) => ({ lane: row.lane, level: row.role_level }))
-}
 
 // ──────────────────────────────────────────────────────────────────────────
 // PUT/PATCH /api/v2/projects/:projectId/settings
@@ -288,6 +254,12 @@ projectSettings.on(
 
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
+    // AQU-1750: the caller's read-wall view, the same one its GET used. It
+    // decides what the write may change and what every response may show.
+    const { visible, lanes } = await visibleTagsForMember(
+      c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
+    )
+    let settings = body.settings
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
       // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
       // allowed are a terminology-only one (gated by the org's configured
@@ -300,7 +272,16 @@ projectSettings.on(
       // changed) satisfies both vacuously; keeping terminology first preserves
       // the pre-AQU-1086 behaviour for that case exactly.
       const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-      const changed = changedSettingsKeys(stored.settings, body.settings)
+      // AQU-1750: behind the read wall this caller's body is an echo of a
+      // filtered GET. Put back the lanes and primary language it could not
+      // see before diffing, so the echo neither deletes them nor turns a
+      // one-key carve-out write into a language write. A client's
+      // ifMatchVersion comes from an earlier read, so it is never newer than
+      // `stored`: the version guard below saves onto this row or answers 409.
+      const restored = restoreHiddenLaneSettings(stored.settings, settings, visible, lanes)
+      if (!restored.ok) return c.json({ error: restored.error }, 403)
+      settings = restored.settings
+      const changed = changedSettingsKeys(stored.settings, settings)
       // Each carve-out is key-exact and carries its own floor. A write that
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
@@ -414,16 +395,21 @@ projectSettings.on(
     // ifMatchVersion extraction, status mapping, and the best-effort notify.
     const result = await updateProjectSettingsShared(c.env.AQUILLA_PG, {
       projectId,
-      settings: body.settings,
+      settings,
       ifMatchVersion,
       updatedBy: user.id,
     })
 
+    // AQU-1750: both bodies are filtered exactly like the GET. The client
+    // keeps either one as server truth, so an unfiltered row would show a
+    // caller behind the wall the lanes and primary language its GET hides.
     if (result.status === "conflict") {
       return c.json(
         {
           error: "version mismatch",
-          current: await withOrgDefaults(c.env, projectId, result.current),
+          current: await withOrgDefaults(
+            c.env, projectId, filterSettingsToVisibleLanes(result.current, visible, lanes),
+          ),
         },
         409,
       )
@@ -444,7 +430,11 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
-    return c.json(await withOrgDefaults(c.env, projectId, fresh))
+    // `lanes` predates the write. A lane the write minted carries no grant,
+    // so the newer list would hide exactly the same labels.
+    return c.json(
+      await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(fresh, visible, lanes)),
+    )
   },
 )
 

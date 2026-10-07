@@ -418,6 +418,15 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",
@@ -1047,6 +1056,29 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
+    "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardRecommendation": plural({
+      one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
+      other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
+    }, "mappedCount"),
+    "projectSettings.monday.wizardPreviewBoardLink": "Preview board in Monday",
+    "projectSettings.monday.wizardHideCustomization": "Hide customization",
+    "projectSettings.monday.wizardShowCustomization": "Customize data and columns",
+    "projectSettings.monday.wizardFindBoardManually": "Find {name} in Monday. The direct board link is unavailable.",
+    "projectSettings.monday.connectionCheckFailed": "Could not check the Monday connection. Try again.",
+    "projectSettings.monday.retryAction": "Retry",
+    "projectSettings.monday.orgNextLinkProjectsTitle": "Next: link your projects",
+    "projectSettings.monday.orgNextLinkProjectsDescription": "Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.",
+    "projectSettings.monday.orgProjectsLoading": "Loading projects…",
+    "projectSettings.monday.orgProjectsRetry": "Retry projects",
+    "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
+    "projectSettings.monday.orgSetUpOrManageBoard": "Set up or manage board",
+    "projectSettings.monday.orgViewIntegration": "View Monday integration",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -1810,6 +1842,19 @@ export const projectSettings = defineNamespace({
         description: "Body text of the confirmation dialog before unlinking the project's Monday board.",
         placeholders: {
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
+        },
+      },
+      "projectSettings.monday.wizardRecommendation": {
+        description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+          mappedCount: "How many progress columns are mapped to project metrics.",
+        },
+      },
+      "projectSettings.monday.wizardFindBoardManually": {
+        description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
+        placeholders: {
+          name: "The linked board's name (data, not translated), or the board id if no name is known.",
         },
       },
       "projectSettings.monday.oneItemPerLabel": {

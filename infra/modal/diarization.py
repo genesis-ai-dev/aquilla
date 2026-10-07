@@ -233,7 +233,12 @@ def start(payload: dict):
     inside the body so this file stays importable wherever `modal deploy` runs."""
     from fastapi import HTTPException
 
-    if not hmac.compare_digest(str(payload.get("secret") or ""), os.environ["DIARIZATION_SHARED_SECRET"]):
+    # Compare bytes: compare_digest raises TypeError on non-ASCII str,
+    # which would surface as a 500 instead of a 401.
+    if not hmac.compare_digest(
+        str(payload.get("secret") or "").encode(),
+        os.environ["DIARIZATION_SHARED_SECRET"].encode(),
+    ):
         raise HTTPException(status_code=401, detail="bad shared secret")
 
     for k in ("jobId", "audioUrl", "callbackUrl"):

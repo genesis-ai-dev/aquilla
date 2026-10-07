@@ -76,6 +76,7 @@ import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompl
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
+  CellUnit,
   CompletionProvider,
   CompletionSettings,
   ContextSize,
@@ -193,6 +194,19 @@ const CELL_EDITING_FLOOR_OPTIONS: readonly {
 ]
 
 /**
+ * AQU-1720: what one cell is when a docx/txt/md file is imported. A dubbing
+ * project generates one voice clip per cell, so a cell cut at a comma is an
+ * unusable clip — "paragraph" makes the transcript paragraph the cell.
+ */
+const IMPORT_CELL_UNIT_OPTIONS: readonly {
+  value: CellUnit
+  labelKey: MessageKey
+}[] = [
+  { value: "sentence", labelKey: "projectSettings.import.cellUnitOptionSentence" },
+  { value: "paragraph", labelKey: "projectSettings.import.cellUnitOptionParagraph" },
+]
+
+/**
  * Re-wraps already-known literal substrings of a translated sentence in inline
  * styling — `t()` only ever returns a plain string, so a template whose English
  * source embeds a `<code>`/`<strong>` fragment (a domain name, a translated
@@ -272,6 +286,8 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. */
+  importCellUnit: CellUnit
   /** Curly quotes as you type in the cell editor. Absent/false is off. */
   smartQuotes: boolean
   termMatching: TermMatchingSettings
@@ -329,6 +345,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    importCellUnit: project.importCellUnit ?? "sentence",
     smartQuotes: project.smartQuotes ?? false,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
@@ -354,6 +371,7 @@ const BLOB_BACKED_KEYS = [
   "bibleResourcesEnabled",
   "precedingTargetCells",
   "importExcludeFrontMatter",
+  "importCellUnit",
   "smartQuotes",
   "termMatching",
 ] as const satisfies readonly (keyof Baseline)[]
@@ -675,6 +693,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  // AQU-1720: paragraph-vs-sentence cell unit for docx/txt/md imports.
+  const [importCellUnit, setImportCellUnit] = useState<CellUnit>("sentence")
   const [smartQuotes, setSmartQuotes] = useState(false)
   // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
   const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
@@ -698,6 +718,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const lastModelFetchKeyRef = useRef<string | null>(null)
 
   const seededRef = useRef(false)
+  // Snapshot of the first seed. Late blob adoption compares against this, not
+  // against a baseline a save may already have replaced (AQU-1744).
+  const seedBaselineRef = useRef<Baseline | null>(null)
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
@@ -739,6 +762,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setImportCellUnit(b.importCellUnit)
     setSmartQuotes(b.smartQuotes)
     setTermMatching(b.termMatching)
   }, [])
@@ -756,6 +780,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const b = buildBaseline(
       sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
     )
+    seedBaselineRef.current = b
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
@@ -772,19 +797,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   //
   // Once this page's own settings GET has resolved, rebuild the baseline
   // through the same overlay the rest of the app reads with, and adopt it for
-  // these keys. Once only, matching the "seed once" contract above. A field the
-  // user has already moved off the (stale) seed keeps their edit; the baseline
-  // still moves, so settling to the server value never reads as an edit.
-  // `hasFetched` fails closed (stays false on a failed GET), so a settings
-  // outage leaves the seeded values rather than blanking anything.
+  // these keys. Once only, matching the "seed once" contract above.
+  //
+  // Adoption is against the original seed, not the baseline in this closure.
+  // A field the user has already moved off that seed keeps their edit; the
+  // baseline still moves when it is still the seed, so settling an untouched
+  // field never reads as an edit. A successful save moves the saved keys off
+  // the seed on both sides. Comparing to the closed-over baseline instead
+  // treated that saved value as the thing to replace, so a GET that landed
+  // after the save snapped the draft and the baseline back to the stale blob
+  // (AQU-1744). `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the seeded values rather than blanking anything.
   const blobResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
     if (blobResyncedRef.current) return
+    const seed = seedBaselineRef.current
+    if (!seed) return
     blobResyncedRef.current = true
     if (!sharedSettingsBlob) return
     const hydrated = buildBaseline(overlaySettings(project, sharedSettingsBlob))
-    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
+    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
       sourceLanguage: setSourceLanguage,
@@ -804,18 +837,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       bibleResourcesEnabled: setBibleResourcesEnabled,
       precedingTargetCells: setPrecedingTargetCells,
       importExcludeFrontMatter: setImportExcludeFrontMatter,
+      importCellUnit: setImportCellUnit,
       smartQuotes: setSmartQuotes,
       termMatching: setTermMatching,
     }
     setBaseline((prev) => {
       if (!prev) return prev
+      let moved = false
       const next = { ...prev }
-      for (const key of changed) adoptKey(next, hydrated, key)
-      return next
+      for (const key of changed) {
+        // A save may already have replaced this key. Leave it: `prev` can be
+        // the saved baseline even when this effect closed over the seed.
+        if (!sameSetting(prev[key], seed[key])) continue
+        adoptKey(next, hydrated, key)
+        moved = true
+      }
+      return moved ? next : prev
     })
     const adoptDraft = <K extends BlobBackedKey>(key: K) => {
       const setter = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
-      setter((prev) => (sameSetting(prev, baseline[key]) ? hydrated[key] : prev))
+      setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
@@ -918,6 +959,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
       importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      importCellUnit !== baseline.importCellUnit ||
       smartQuotes !== baseline.smartQuotes ||
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
@@ -932,7 +974,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching,
+    precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -1151,6 +1193,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push("import cell unit") }
       if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
@@ -1197,6 +1240,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // AQU-765: re-baseline (and reflect in the input) with the trimmed name
       // we actually persisted, so the canonical value doesn't read back dirty.
       if (trimmedName !== name) setName(trimmedName)
+      // Built from this callback's closure — the draft at click time, not a
+      // settings GET that resolved while the PATCH was in flight. That GET
+      // may already have moved untouched blob keys onto the baseline and the
+      // draft. Replacing the baseline wholesale would put those keys back to
+      // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
         sourceLanguage,
@@ -1236,10 +1284,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        importCellUnit,
         smartQuotes,
         termMatching,
       }
-      setBaseline(newBaseline)
+      setBaseline((prev) => {
+        const next: Baseline = { ...newBaseline }
+        if (!prev) return next
+        for (const key of BLOB_BACKED_KEYS) {
+          if (sameSetting(newBaseline[key], baseline[key]) && !sameSetting(prev[key], newBaseline[key])) {
+            adoptKey(next, prev, key)
+          }
+        }
+        return next
+      })
       // Refresh `useProject` in the background so other components see the
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
@@ -1289,7 +1347,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, smartQuotes, termMatching, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -2090,6 +2148,38 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   </DisabledFieldTooltip>
                 }
               />
+              {/* AQU-1720: a dubbing project generates one voice clip per cell,
+                  so the cell has to be able to BE the paragraph. */}
+              <SettingsRow
+                label={<label htmlFor="import-cell-unit">{t("projectSettings.import.cellUnitLabel")}</label>}
+                description={t("projectSettings.import.cellUnitDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={IMPORT_CELL_UNIT_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                      disabled={!canEditShared}
+                      value={importCellUnit}
+                      onValueChange={(value) => setImportCellUnit((value ?? importCellUnit) as CellUnit)}
+                    >
+                      <SelectTrigger
+                        id="import-cell-unit"
+                        data-testid="settings-import-cell-unit"
+                        aria-label={t("projectSettings.import.cellUnitLabel")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {IMPORT_CELL_UNIT_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
             </SettingsGroup>
           </div>
         )}
@@ -2872,7 +2962,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {id && sectionsToRender.some((s) => s.id === "section-monday") && (
           <MondayIntegrationSection
             projectId={id}
-            orgId={org?.id ?? null}
+            orgId={project?.orgId ?? null}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}

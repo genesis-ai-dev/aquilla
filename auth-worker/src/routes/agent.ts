@@ -451,6 +451,11 @@ function buildTools(bibleResourcesEnabled: boolean) {
   return tools
 }
 
+/** Exposed for tests: the tool schemas exactly as the model sees them, so a
+ *  contract test can run every `read` filter the schema offers. Production
+ *  code never reads this. */
+export const _test = { buildTools }
+
 // ── Request body ────────────────────────────────────────────────────────────
 
 // Translator profile: all fields optional free-text. The zod `.max` is a

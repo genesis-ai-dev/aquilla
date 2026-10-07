@@ -2522,10 +2522,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // per row would re-render every rendered row on every store bump,
           // which is the whole-file churn round 6 went into removing.
           const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore, isTimeOrdered && hasTiming(cell))
+          // AQU-1118 (Sam, Oct 7): the line that is playing is marked on the
+          // row itself, and the mark moves from row to row with playback. The
+          // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
+          const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
+        data-cue-playing={cuePlayingRow ? "true" : undefined}
+        aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
@@ -2538,6 +2544,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
+          // A bar drawn OVER the row's start edge rather than a border, so the
+          // row's content never shifts as the mark moves from row to row.
+          cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
         {isScriptureRow && (

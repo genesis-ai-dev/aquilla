@@ -178,4 +178,21 @@ describe("EditorTable — the row's Play from this cue button (AQU-1118)", () =>
     menu = await screen.findByRole("dialog")
     expect(within(menu).getByRole("button", { name: "Play from this cue" })).toBeInTheDocument()
   })
+
+  // Sam, Oct 7: the Pause icon sits in a closed menu, so the playing line is
+  // also marked on the row itself, and the mark moves with playback.
+  it("marks the playing row itself, and the mark moves from row to row", () => {
+    const props = { onSeekToCue: vi.fn(), onPauseCue: vi.fn() }
+    const store = rows()
+    const row = (id: string) => document.querySelector(`[data-cell-id="${id}"][data-index]`) as HTMLElement
+    const { rerender } = render(table(store, { ...props, playingCueCellId: "c1" }))
+    expect(row("c1")).toHaveAttribute("data-cue-playing", "true")
+    expect(row("c1")).toHaveAttribute("aria-current", "time")
+    expect(row("c2")).not.toHaveAttribute("data-cue-playing")
+    rerender(table(store, { ...props, playingCueCellId: "c2" }))
+    expect(row("c1")).not.toHaveAttribute("data-cue-playing")
+    expect(row("c2")).toHaveAttribute("data-cue-playing", "true")
+    rerender(table(store, { ...props, playingCueCellId: null }))
+    expect(document.querySelector("[data-cue-playing]")).toBeNull()
+  })
 })

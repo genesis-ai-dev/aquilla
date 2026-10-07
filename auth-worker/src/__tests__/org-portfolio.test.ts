@@ -304,6 +304,27 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
   })
 
+  it("archives a lane by its id, including the former default, and not a same-language sibling", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at) VALUES
+        ('deflane1', 'pa', 'target', 'English', '', 0, '2026-10-03T00:00:00Z'),
+        ('spnsh001', 'pa', 'target', 'Spanish', 'Spanish', 1, '2026-09-01T00:00:00Z'),
+        ('spnsh002', 'pa', 'target', 'spanish team', 'spanish', 2, NULL)`,
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; archived?: boolean }> }> }
+    const byLane = Object.fromEntries(body.projects.find((p) => p.id === "pa")!.lanes.map((l) => [l.lane, l]))
+    expect(byLane[""].archived).toBe(true)
+    expect(byLane.Spanish.archived).toBe(true)
+    expect(byLane.spanish.archived).toBeUndefined()
+  })
+
   it("AQU-1473: the primary language stored in targetLanes is the default lane, not a second one", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

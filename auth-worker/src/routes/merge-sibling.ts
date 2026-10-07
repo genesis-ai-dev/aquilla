@@ -180,7 +180,8 @@ mergeSibling.post(
       )
     }
 
-    // Lane must not already be registered on the host.
+    // Exact tag only. A second lane of the same language is legal; a display
+    // name another lane already shows is refused just below.
     const hostSettings = await loadProjectSettings(c.env, hostId)
     const existingLanes = readTargetLanes(hostSettings.settings)
     if (existingLanes.includes(lane)) {

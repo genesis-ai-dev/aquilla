@@ -125,6 +125,14 @@ vi.mock("@/lib/store/project-index", () => ({
   updateProject: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return {
+    ...actual,
+    renameProject: vi.fn(async (_jwt: string, id: string, name: string) => ({ id, name })),
+  }
+})
+
 vi.mock("@/lib/store/user-api-keys", () => ({
   setUserApiKey: vi.fn(),
   useUserApiKey: vi.fn(() => null),
@@ -156,6 +164,7 @@ function renderSettings(pane: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  patchSpy.mockResolvedValue({ kind: "ok" })
   currentProject = makeProject()
   currentSettings = {}
   currentHasFetched = true
@@ -291,5 +300,63 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
     await user.click(screen.getByRole("button", { name: /save changes/i }))
     expect(patchSpy).toHaveBeenCalledTimes(1)
     expect(patchSpy.mock.calls[0][0]).toEqual({ validationCount: 2 })
+  })
+})
+
+describe("ProjectSettings — a settings GET that lands after a successful save", () => {
+  it("does not mark the form dirty or revert the saved source language (AQU-1744)", async () => {
+    const user = userEvent.setup()
+    currentHasFetched = false
+    const view = renderSettings("general")
+
+    const renamed = "Blob Readback Test Project renamed"
+    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: renamed } })
+    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+
+    await user.click(screen.getByRole("button", { name: /save changes/i }))
+    expect(await screen.findByText(/Saved: project title, source language/i)).toBeInTheDocument()
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+
+    // The GET resolves after the save, with a stale blob: source language is
+    // still the pre-edit empty value, and another blob-backed field differs
+    // from the seeded default.
+    currentSettings = { sourceLanguage: "", smartQuotes: true }
+    currentHasFetched = true
+    view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
+
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    expect(screen.getByText(/Saved: project title, source language/i)).toBeInTheDocument()
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    // The untouched field still adopts the server value, and that is not an edit.
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
+  })
+
+  it("keeps the saved source language when the stale GET resolves during the save (AQU-1744)", async () => {
+    const user = userEvent.setup()
+    currentHasFetched = false
+    const view = renderSettings("general")
+
+    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: "Blob Readback Test Project renamed" } })
+    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+
+    let resolvePatch: (value: { kind: "ok" }) => void = () => {}
+    patchSpy.mockImplementation(() => new Promise((resolve) => { resolvePatch = resolve }))
+    const clickDone = user.click(screen.getByRole("button", { name: /save changes/i }))
+    await vi.waitFor(() => expect(patchSpy).toHaveBeenCalled())
+
+    // The GET was in flight before the PATCH. It still has the pre-edit
+    // source language, plus a blob field the user never touched.
+    currentSettings = { sourceLanguage: "", smartQuotes: true }
+    currentHasFetched = true
+    view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
+
+    resolvePatch({ kind: "ok" })
+    await clickDone
+
+    expect(await screen.findByText(/Saved: project title, source language/i)).toBeInTheDocument()
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 })

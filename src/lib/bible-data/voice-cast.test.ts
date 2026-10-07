@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest"
 import { rutVoices } from "./__fixtures__/ot-pack12"
 import { buildVoiceIndex, sharedVerseRefs, type Voice } from "./voice-index"
-import { planVoiceCast, type VoiceCastCell } from "./voice-cast"
+import { existingNarratorName, narratorInCast, planVoiceCast, type VoiceCastCell } from "./voice-cast"
 
 const index = buildVoiceIndex(rutVoices())
 const NAMES: Record<string, string> = { "person:Naomi": "Naomi", "person:Ruth": "Ruth", "person:Boaz": "Boaz" }
@@ -62,5 +62,33 @@ describe("planVoiceCast", () => {
     const unnamed = planVoiceCast(index, [cell("RUT 1:12")], NONE, { kind: "file" }, () => null)
     expect(unnamed.unnamed.map((line) => line.ref)).toEqual(["RUT 1:12"])
     expect(unnamed.assign).toEqual([])
+  })
+})
+
+// Sam, Oct 7: a project has one narrator character, whoever adopts and in
+// whatever interface language, so adopting reuses the one it already has.
+describe("the project's existing narrator", () => {
+  it("is the cast name on a line only the narrator reads, even after a rename", () => {
+    const cells = [cell("RUT 1:1", "Storyteller"), cell("RUT 1:2"), cell("RUT 1:12", "Naomi")]
+    expect(existingNarratorName(index, cells, NONE)).toBe("Storyteller")
+  })
+
+  it("ignores a line the narrator shares with a speaker, and a speaker's line", () => {
+    const cells = [cell("RUT 1:16", "Ruth"), cell("RUT 1:12", "Naomi")]
+    expect(existingNarratorName(index, cells, NONE)).toBeNull()
+  })
+
+  it("takes the most common name when lines disagree", () => {
+    const cells = [cell("RUT 1:1", "Narrator"), cell("RUT 1:2", "Narrador"), cell("RUT 1:3", "Narrador")]
+    expect(existingNarratorName(index, cells, NONE)).toBe("Narrador")
+  })
+
+  it("is null when no narrator line has a cast name yet", () => {
+    expect(existingNarratorName(index, ruth, NONE)).toBeNull()
+  })
+
+  it("is found in the cast by its name in any interface language", () => {
+    expect(narratorInCast(["Ruth", " narrador "], ["Narrator", "Narrador", ""])).toBe(" narrador ")
+    expect(narratorInCast(["Ruth", "Boaz"], ["Narrator", "Narrador"])).toBeNull()
   })
 })

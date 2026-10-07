@@ -6,6 +6,11 @@
 // out and why, so they can be assigned by hand (see
 // src/lib/bible-data/voice-cast.ts for the rules). Names are the speakers'
 // labels as this maintainer sees them, and stay as written afterwards.
+//
+// The narrator is the exception (Sam, Oct 7): a project has one narrator
+// character, so adopting reuses the one it already has, found by the lines it
+// already reads or by its name in any interface language, and only the first
+// adoption names it.
 
 import { useMemo, useState } from "react"
 import {
@@ -20,10 +25,11 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { planVoiceCast, type VoiceCastCell, type VoiceCastLine } from "@/lib/bible-data/voice-cast"
+import { existingNarratorName, narratorInCast, planVoiceCast, type VoiceCastCell, type VoiceCastLine } from "@/lib/bible-data/voice-cast"
 import type { Voice } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import { CATALOGS } from "@/lib/i18n/messages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { BibleVoicesContextValue } from "./voices-context"
 import { narratorKey } from "./voice-text"
@@ -39,11 +45,19 @@ interface AdoptCastDialogProps {
   chapter: string
   voices: BibleVoicesContextValue
   cells: () => VoiceCastCell[]
+  /** The project's cast (its voice library's names), to find a narrator
+   *  adopted in another file. */
+  castNames?: readonly string[]
   onAdopt: (assignments: readonly VoiceCastAssignment[]) => void
   onClose: () => void
 }
 
-export function AdoptCastDialog({ chapter, voices, cells, onAdopt, onClose }: AdoptCastDialogProps) {
+/** The narrator's (or author's) label in every interface language. */
+function narratorLabels(key: MessageKey): string[] {
+  return Object.values(CATALOGS).map((catalog) => (catalog as Record<string, string | undefined>)[key] ?? "")
+}
+
+export function AdoptCastDialog({ chapter, voices, cells, castNames, onAdopt, onClose }: AdoptCastDialogProps) {
   const t = useT()
   const fmt = useFormat()
   const [scope, setScope] = useState<"chapter" | "file">("chapter")
@@ -51,12 +65,15 @@ export function AdoptCastDialog({ chapter, voices, cells, onAdopt, onClose }: Ad
   const [snapshot] = useState(cells)
   const { index, labelFor, shared } = voices
   const plan = useMemo(() => {
+    const key = narratorKey(index.narrator.kind)
+    const narrator =
+      existingNarratorName(index, snapshot, shared) ?? narratorInCast(castNames ?? [], narratorLabels(key)) ?? t(key)
     const nameOf = (voice: Voice): string | null =>
       voice.kind === "narrator"
-        ? t(narratorKey(index.narrator.kind))
+        ? narrator
         : ((voice.speech.speaker ? labelFor(voice.speech.speaker)?.label : undefined) ?? null)
     return planVoiceCast(index, snapshot, shared, scope === "chapter" ? { kind: "chapter", chapter } : { kind: "file" }, nameOf)
-  }, [index, labelFor, snapshot, shared, scope, chapter, t])
+  }, [index, labelFor, snapshot, shared, scope, chapter, castNames, t])
 
   const unknown = t("bibleData.voices.unknownSpeaker")
   const skipped: { key: MessageKey; lines: (VoiceCastLine & { detail?: string })[] }[] = [

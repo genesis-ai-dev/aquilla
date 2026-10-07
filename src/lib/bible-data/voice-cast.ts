@@ -82,3 +82,41 @@ export function planVoiceCast(
   }
   return plan
 }
+
+/**
+ * What the project already calls the narrator. (Sam, Oct 7)
+ *
+ * A project has ONE narrator character, whoever adopts and in whatever
+ * interface language, so a second adoption must reuse it rather than mint
+ * "Narrador" beside "Narrator". A line only the narrator reads that already has
+ * a cast name says what the narrator is called here, even after a rename; the
+ * most common such name wins (the first seen, on a tie). Null when no line says.
+ */
+export function existingNarratorName(
+  index: VoiceIndex,
+  cells: readonly VoiceCastCell[],
+  shared: ReadonlySet<BkpRef>,
+): string | null {
+  const counts = new Map<string, number>()
+  for (const cell of cells) {
+    if (!cell.castName) continue
+    const voices = cellVoicesFor(index, cell, shared)
+    if (!voices || voices.approximate) continue
+    const distinct = distinctVoices(voiceSequence(index, voices))
+    if (distinct.length !== 1 || distinct[0].kind !== "narrator") continue
+    counts.set(cell.castName, (counts.get(cell.castName) ?? 0) + 1)
+  }
+  let best: string | null = null
+  for (const [name, count] of counts) if (best === null || count > counts.get(best)!) best = name
+  return best
+}
+
+/**
+ * The project's cast member that is the narrator by name, in any interface
+ * language: for a narrator adopted in another file, whose lines this file
+ * cannot see. Compared trimmed and case-insensitively; null when none matches.
+ */
+export function narratorInCast(castNames: readonly string[], labels: readonly string[]): string | null {
+  const wanted = new Set(labels.map((label) => label.trim().toLocaleLowerCase()).filter(Boolean))
+  return castNames.find((name) => wanted.has(name.trim().toLocaleLowerCase())) ?? null
+}

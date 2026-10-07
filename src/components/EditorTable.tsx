@@ -3129,6 +3129,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           chapter={bibleData.adoptingCast}
           voices={bibleData.voices}
           cells={bibleData.voiceCastCells}
+          castNames={getVoiceLibrary(project.ttsSettings).map((voice) => voice.name)}
           onAdopt={onAdoptVoicesAsCast}
           onClose={bibleData.closeAdoptCast}
         />

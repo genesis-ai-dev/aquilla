@@ -25,6 +25,7 @@ import {
 } from "@/lib/bible-data/voice-index"
 import { projectHasScriptureFiles, type ProjectRecord } from "@/lib/parsers/types"
 import { ownCastName } from "@/lib/timeline/cue-character"
+import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
 import {
@@ -181,13 +182,19 @@ export function useBibleData({
       adoptCast: canAdoptVoiceCast ? (chapter: string) => setDialog({ fileId, adoptCast: chapter }) : null,
     }
   }, [canCorrectVoices, canAdoptVoiceCast, fileId])
+  // A line whose voice was picked by hand already has a character: the row
+  // shows that voice's name in the cast slot (EditorTable's castHoldsSlot),
+  // ahead of any `cast_name`. Adopting must keep it, or the line silently
+  // loses the voice someone chose for it (castAssignments is keyed by line).
+  const ttsSettings = project.ttsSettings
   const voiceCastCells = useCallback(
     (): VoiceCastCell[] =>
       cellIds.map((cellId, position) => {
         const view = cellStore.getCellView(cellId)
-        return { ...cells[position], cellId, castName: view ? ownCastName(view) : null }
+        const pickedVoice = findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cellId))?.name ?? null
+        return { ...cells[position], cellId, castName: pickedVoice ?? (view ? ownCastName(view) : null) }
       }),
-    [cellIds, cells, cellStore],
+    [cellIds, cells, cellStore, ttsSettings],
   )
 
   const { context: voices, failure: voicesFailure } = useBibleVoices({

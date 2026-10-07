@@ -334,6 +334,31 @@ describe("adopting the voices as the cast", () => {
     expect(adopt).toHaveBeenCalledWith([{ cellId: rut("1:17"), castName: "Ruth" }])
   })
 
+  // A voice picked for a line by hand (castAssignments, no cast_name) is that
+  // line's character: the row shows its name in the cast slot. Adopting keeps it.
+  it("keeps a voice picked for the line by hand, and does not replace it", async () => {
+    const adopt = vi.fn<(assignments: readonly VoiceCastAssignment[]) => void>()
+    renderRuth({
+      project: makeProject({
+        syncRole: MAINTAINER,
+        ttsSettings: {
+          voices: [{ id: "v-ruth", name: "Ruth (Grace)", color: "#2563eb" }],
+          castAssignments: { [rut("1:17")]: "v-ruth" },
+        } as ProjectRecord["ttsSettings"],
+      }),
+      onAdoptVoicesAsCast: adopt,
+    })
+    fireEvent.click(within(await openDetails(rut("1:16"))).getByRole("button", { name: "Adopt voices as cast" }))
+
+    const dialog = await screen.findByTestId("adopt-cast-dialog")
+    expect(within(dialog).getByTestId("adopt-cast-count").textContent).toBe("0 lines get a character.")
+    expect(visible(within(dialog).getByTestId("bibleVoices.cast.keptExisting").textContent)).toContain(
+      "RUT 1:17: Ruth (Grace)",
+    )
+    expect(within(dialog).getByRole("button", { name: "Adopt 0 lines" })).toBeDisabled()
+    expect(adopt).not.toHaveBeenCalled()
+  })
+
   it("is not offered below maintainer, the floor of a cast assignment", async () => {
     renderRuth({ project: makeProject({ syncRole: CONTRIBUTOR }), onAdoptVoicesAsCast: vi.fn() })
     expect(within(await openDetails(rut("1:17"))).queryByRole("button", { name: "Adopt voices as cast" })).toBeNull()

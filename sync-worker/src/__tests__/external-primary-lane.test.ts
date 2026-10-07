@@ -1,16 +1,16 @@
 // AQU-1532 regression: an Agent API write whose laneId names the project's
 // primary target language returned 500 "DB batch failed".
 //
-// The primary is the default lane (legacy_tag ''), so no lane row carries its
-// name. The projection looked up lane_id by the literal tag, got NULL, and the
-// cells.lane_id NOT NULL constraint failed. A regional lane beside its base
-// primary ("fr-CA" next to "French") failed the same way, because the lane
-// planner stripped the region and never created its row.
+// AQU-1594: CreateProject writes a target lane tagged with the language. It does
+// not write `legacy_tag ''`. PatchSettings of sourceLanguage / targetLanguage /
+// targetLanes creates the rows that are not already there, in the same batch,
+// and a second insert of the same tags must not duplicate them. A write that
+// names that tag lands on the lane. A write that omits laneId still addresses
+// `''` (canonicalLaneId) and fails on a new project — AQU-1615.
 //
-// CI missed it because the PGlite harness installs a test-only trigger that
-// mints any missing lane (db/shared/test-lane-fill.ts). Every test here turns
-// that trigger OFF, and drives the real agent sequence end to end:
-// CreateProject → PatchSettings targetLanes → PlanImport → SetTranslation.
+// CI missed the original 500 because the PGlite harness installs a test-only
+// trigger that mints any missing lane (db/shared/test-lane-fill.ts). Every test
+// here turns that trigger OFF.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -143,7 +143,7 @@ async function setUpProject(
       kind: 'PatchSettings',
       projectId: PROJECT,
       ops: [{ key: 'targetLanes', value: targetLanes }],
-      ifMatchVersion: rows[0].version,
+      ifMatchVersion: rows[0]?.version ?? 0,
     },
   ])
   const imported = await apply([
@@ -186,25 +186,27 @@ async function setTranslation(fileId: string, cellId: string, value: string, lan
 }
 
 describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-fill trigger off)', () => {
-  it('laneId equal to the primary writes the default lane row', async () => {
+  it('laneId equal to the primary writes the lane tagged with that language', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
+    const lanes = await tdb.pg.query<{ legacy_tag: string }>(
+      `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    expect(lanes.rows.map((lane) => lane.legacy_tag)).toEqual(['bla'])
     const r = await setTranslation(fileId, cellId, 'primary text', 'bla')
     expect(r.prepareStatus).toBe(200)
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(r.commit?.body.receipt.appliedCount).toBe(1)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary text', legacy_tag: '' }),
+      expect.objectContaining({ target_lang: 'bla', value: 'primary text', legacy_tag: 'bla' }),
     ])
   })
 
-  it('a differently-cased primary ("BLA") also writes the default lane row', async () => {
+  it('a differently-cased primary ("BLA") is not the tagged lane until AQU-1615', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
     const r = await setTranslation(fileId, cellId, 'upper', 'BLA')
-    expect(r.prepareStatus).toBe(200)
-    expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'upper', legacy_tag: '' }),
-    ])
+    expect(r.prepareStatus).toBe(400)
+    expect(r.prep.error.message).toContain('unregistered lane "BLA"')
   })
 
   it('an unregistered lane is still refused at prepare', async () => {
@@ -215,16 +217,15 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     expect(r.prep.error.message).toContain('unregistered lane "bla-x"')
   })
 
-  it('omitting laneId writes the default lane row', async () => {
+  it('omitting laneId still addresses legacy_tag "" and does not land (AQU-1615)', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
     const r = await setTranslation(fileId, cellId, 'no lane')
-    expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'no lane', legacy_tag: '' }),
-    ])
+    expect(r.prepareStatus).toBe(200)
+    expect(r.commit?.status).toBe(500)
+    expect(await targetRows()).toEqual([])
   })
 
-  it('omitting laneId and naming the primary address the same slot', async () => {
+  it('omitting laneId does not share a slot with the tagged primary (AQU-1615)', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
     const prep = await prepare([
       { kind: 'SetTranslation', fileId, cellId, value: 'first' },
@@ -232,10 +233,8 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     ])
     expect(prep.status).toBe(200)
     const done = await commit(prep.body)
-    expect(done.status, JSON.stringify(done.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'second' }),
-    ])
+    expect(done.status).toBe(500)
+    expect(await targetRows()).toEqual([])
   })
 
   it('a registered non-primary lane writes its own row', async () => {
@@ -253,7 +252,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
       `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target' ORDER BY legacy_tag`,
       [PROJECT],
     )
-    expect(lanes.rows.map((l) => l.legacy_tag)).toEqual(['', 'fr-CA'])
+    expect(lanes.rows.map((l) => l.legacy_tag)).toEqual(['French', 'fr-CA'])
 
     const r = await setTranslation(fileId, cellId, 'icitte', 'fr-CA')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
@@ -296,14 +295,14 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
       { laneId: 'es', content: 'variante' },
     ])
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: '' }),
+      expect.objectContaining({ target_lang: 'bla', value: 'primary variant', legacy_tag: 'bla' }),
       expect.objectContaining({ target_lang: 'es', value: 'variante', legacy_tag: 'es' }),
     ])
   })
 
   it('an EmitEvents cell.validate naming the primary validates the default lane', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
-    const written = await setTranslation(fileId, cellId, 'to validate')
+    const written = await setTranslation(fileId, cellId, 'to validate', 'bla')
     expect(written.commit?.status).toBe(200)
 
     const done = await apply([
@@ -316,6 +315,6 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
         WHERE v.project_id = $1 AND v.cell_id = $2`,
       [PROJECT, cellId],
     )
-    expect(validators.rows).toEqual([{ target_lang: '', legacy_tag: '' }])
+    expect(validators.rows).toEqual([{ target_lang: 'bla', legacy_tag: 'bla' }])
   })
 })

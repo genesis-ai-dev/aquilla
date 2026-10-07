@@ -4891,7 +4891,6 @@ export const fr: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"one":"Ce projet a déjà un fichier du même nom :","many":"Ce projet a déjà des fichiers portant ces noms :","other":"Ce projet a déjà des fichiers portant ces noms :"},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"one":"Votre fichier existant est conservé tel quel, avec ses traductions. La copie reflétée arrive à côté, avec des traductions vides ; ce nom apparaîtra donc deux fois dans la liste des fichiers.","many":"Vos fichiers existants sont conservés tels quels, avec leurs traductions. Les copies reflétées arrivent à côté, avec des traductions vides ; chacun de ces noms apparaîtra donc deux fois dans la liste des fichiers.","other":"Vos fichiers existants sont conservés tels quels, avec leurs traductions. Les copies reflétées arrivent à côté, avec des traductions vides ; chacun de ces noms apparaîtra donc deux fois dans la liste des fichiers."},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "Langue cible par défaut",
-  "projectSettings.languages.defaultTargetNote": "La piste par défaut (sans nom). Modifiez-la dans Informations du projet, ci-dessus.",
   "projectSettings.languages.additionalLanesLabel": "Pistes cibles supplémentaires",
   "projectSettings.languages.additionalLanesDescription": "Pistes de langue cible supplémentaires pour ce projet — p. ex. des variantes dialectales ou des brouillons parallèles de la même source.",
   "projectSettings.languages.laneNameLabel": "Nom de la piste",

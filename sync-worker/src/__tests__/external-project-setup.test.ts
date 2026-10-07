@@ -341,8 +341,19 @@ describe('ProjectSetup — one plan, one approval', () => {
 
     // …and the world actually moved.
     const { settings } = await storedSettings()
-    expect(settings.sourceLanguage).toBe('ru')
+    expect(settings.sourceLanguage).toBeUndefined()
+    expect(settings.targetLanguage).toBeUndefined()
     expect(settings.contributeToGlobalTm).toBe(false)
+    const lanes = await tdb.pg.query<{ role: string; language: string; legacy_tag: string | null }>(
+      `SELECT role, language, legacy_tag FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
+      [PROJECT],
+    )
+    expect(lanes.rows).toEqual(
+      expect.arrayContaining([
+        { role: "source", language: "ru", legacy_tag: null },
+        { role: "target", language: "sty", legacy_tag: "sty" },
+      ]),
+    )
     const brief = settings[BRIEF_SETTINGS_KEY] as TranslationBriefRecord
     expect(brief.parameters.audience).toBe('Rural youth, 15–25')
     expect(brief.l1Summary).toContain('meaning-based')
@@ -783,7 +794,12 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     ).toEqual(['settings', 'brief', 'members'])
     // The earlier steps STAY applied — rolling them back is worse than leaving them.
     const afterFailure = await storedSettings()
-    expect(afterFailure.settings.targetLanguage).toBe('sty')
+    expect(afterFailure.settings.targetLanguage).toBeUndefined()
+    const lanesAfterFailure = await tdb.pg.query<{ language: string; legacy_tag: string }>(
+      `SELECT language, legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    expect(lanesAfterFailure.rows).toEqual([{ language: "sty", legacy_tag: "sty" }])
     expect(await tdb.rows('files')).toHaveLength(0)
 
     // Fix the cause, commit again: the plan resumes at the import.
@@ -834,7 +850,12 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
 
     const after = await storedSettings()
     expect(after.settings.validationCount).toBe(5) // the human's value survives
-    expect(after.settings.targetLanguage).toBe('sty') // the rest of the plan applied
+    expect(after.settings.targetLanguage).toBeUndefined()
+    const sty = await tdb.pg.query<{ legacy_tag: string }>(
+      `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    expect(sty.rows).toEqual([{ legacy_tag: "sty" }])
   })
 
   it('marks a step whose end-state already exists as superseded and skips it', async () => {

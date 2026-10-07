@@ -150,13 +150,20 @@ export function LanguagesSection({
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
 
-  const targetRows = (laneRecords ?? []).filter((lane) => lane.role === "target")
-  const rowMode = targetRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
-  const defaultRow = targetRows.find((lane) => (lane.legacyTag ?? "") === "")
-  // The former default lane is listed in its own block above (it is still the
-  // project's default-language row until AQU-1594 moves language editing onto
-  // the lane), so it is kept out of the "additional lanes" list — but it is no
-  // longer kept out of ARCHIVING — it carries its own archive control.
+  const laneRows = laneRecords ?? []
+  const targetRows = laneRows.filter((lane) => lane.role === "target")
+  const sourceRow = laneRows.find((lane) => lane.role === "source")
+  // A new project has a source lane and no target row. Row mode is on as soon
+  // as any lane row exists and the lane callbacks are wired, so the first
+  // target is created with onCreateLane. The settings-blob path stays only
+  // for a project that has no lane rows at all (pre-backfill).
+  const rowMode =
+    laneRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
+  const defaultRow = targetRows.find((lane) => lane.legacyTag === "")
+  // A legacy_tag '' row, when one exists, is listed in its own block and kept
+  // out of the additional-lanes list. It still archives like any other target.
+  // A new project's first target has no '' row; it is created through
+  // onCreateLane and listed with the other targets.
   const activeRows = targetRows
     .filter((lane) => (lane.legacyTag ?? "") !== "" && !lane.archivedAt)
     .slice()
@@ -310,22 +317,34 @@ export function LanguagesSection({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div>
-          <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
-          <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
-          {rowMode && defaultRow && onRenameLane && (
+        {sourceRow && onRenameLane && (
+          <div>
+            <FieldLabel htmlFor={`lane-language-${sourceRow.id}`}>
+              {t("projectSettings.info.sourceLanguageLabel")}
+            </FieldLabel>
             <div className="mt-2 max-w-sm">
-              <FieldLabel htmlFor={`lane-language-${defaultRow.id}`}>
-                {t("projectSettings.languages.laneNameLabel")}
-              </FieldLabel>
+              <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                <LaneIdentityFields
+                  lane={sourceRow}
+                  canEdit={canEdit}
+                  onEdit={onRenameLane}
+                  languageAriaLabel={t("projectSettings.info.sourceLanguageLabel")}
+                />
+              </DisabledFieldTooltip>
+            </div>
+          </div>
+        )}
+        {rowMode && defaultRow && onRenameLane && (
+          <div>
+            <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
+            <div className="mt-2 max-w-sm">
               <LaneIdentityFields lane={defaultRow} canEdit={canEdit} onEdit={onRenameLane} />
             </div>
-          )}
           {/* AQU-1600: the former default lane is ordinary — it archives from
               here like any extra lane does from the list below, and reappears
               with a Restore control in the archived list. Only the
               last-active-lane rule still refuses. */}
-          {rowMode && defaultRow && !defaultRow.archivedAt && (
+          {defaultRow && !defaultRow.archivedAt && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {pendingArchive === defaultRow.id ? (
                 <>
@@ -379,10 +398,14 @@ export function LanguagesSection({
               )}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            {t("projectSettings.languages.defaultTargetNote")}
-          </p>
-        </div>
+          </div>
+        )}
+        {!rowMode && (
+          <div>
+            <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
+            <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
+          </div>
+        )}
 
         <div>
           <FieldLabel>{t("projectSettings.languages.additionalLanesLabel")}</FieldLabel>
@@ -684,6 +707,7 @@ function LaneIdentityFields({
   lane,
   canEdit,
   onEdit,
+  languageAriaLabel,
 }: {
   lane: ProjectLaneView
   canEdit: boolean
@@ -691,6 +715,8 @@ function LaneIdentityFields({
     laneId: string,
     edit: { name?: string | null; language?: string; code?: string | null },
   ) => Promise<"ok" | "duplicate" | "invalid" | "malformed_code">
+  /** Overrides the generic "Lane language" name when a section label names this field. */
+  languageAriaLabel?: string
 }) {
   const t = useT()
   const storedLanguage = laneLanguage(lane)
@@ -764,10 +790,11 @@ function LaneIdentityFields({
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <input
+          id={`lane-language-${lane.id}`}
           value={language}
           disabled={!canEdit}
           required
-          aria-label={t("projectSettings.languages.laneLanguageLabel")}
+          aria-label={languageAriaLabel ?? t("projectSettings.languages.laneLanguageLabel")}
           data-testid={`lane-language-${lane.id}`}
           placeholder={t("projectSettings.languages.laneLanguagePlaceholder")}
           className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm"

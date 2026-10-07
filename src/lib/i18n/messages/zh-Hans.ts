@@ -4857,7 +4857,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"本项目已有以下名称的文件："},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"你现有的文件及其译文将原样保留。镜像的副本会与它们并存，译文为空，因此这些名称在文件列表中会各出现两次。"},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "默认目标语言",
-  "projectSettings.languages.defaultTargetNote": "默认的（未命名）语言轨。请在上方的「项目信息」中变更。",
   "projectSettings.languages.additionalLanesLabel": "其他目标语言轨",
   "projectSettings.languages.additionalLanesDescription": "这个项目的额外目标语言轨 — 例如方言变体，或同一份来源的平行草稿。",
   "projectSettings.languages.laneNameLabel": "轨道名称",

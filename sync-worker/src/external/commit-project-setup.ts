@@ -38,6 +38,7 @@ import {
 import { briefPatchOfSetup, splitSettingsOps, type ProjectSetupCommand } from './commands-project-setup'
 import { projectSetupFloor } from './prepare-project-setup'
 import type { PatchSettingsOp } from './commands-patch-settings'
+import { ensureProjectLanes } from '../../../db/shared/lanes'
 import type { PlanImportCommand } from './commands'
 import type {
   ExternalEnv,
@@ -219,8 +220,34 @@ async function writeSettingsOps(
   return { ok: false, error: 'the project settings were being written concurrently — retry the commit' }
 }
 
+const PROJECT_LANGUAGE_KEYS = new Set(["sourceLanguage", "targetLanguage", "targetLanes"])
+
+/**
+ * AQU-1594: a setup's languages become lane rows. They are not written into
+ * the settings blob. Every other settings op is unchanged.
+ */
 async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
-  const written = await writeSettingsOps(step.db, step.cs.projectId, ops, step.cred.userId)
+  const languageOps = ops.filter((op) => PROJECT_LANGUAGE_KEYS.has(op.key))
+  const rest = ops.filter((op) => !PROJECT_LANGUAGE_KEYS.has(op.key))
+  if (languageOps.length > 0) {
+    const source = languageOps.find((op) => op.key === "sourceLanguage")
+    const target = languageOps.find((op) => op.key === "targetLanguage")
+    const registry = languageOps.find((op) => op.key === "targetLanes")
+    try {
+      await ensureProjectLanes(step.db, step.cs.projectId, {
+        settings: {
+          ...(typeof source?.value === "string" ? { sourceLanguage: source.value } : {}),
+          ...(typeof target?.value === "string" ? { targetLanguage: target.value } : {}),
+          ...(Array.isArray(registry?.value) ? { targetLanes: registry.value } : {}),
+        },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: `could not create the project's lanes: ${message}` }
+    }
+  }
+  if (rest.length === 0) return { ok: true }
+  const written = await writeSettingsOps(step.db, step.cs.projectId, rest, step.cred.userId)
   return written.ok ? { ok: true } : { ok: false, error: written.error }
 }
 
